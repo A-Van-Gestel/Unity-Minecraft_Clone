@@ -1,6 +1,8 @@
+using Audio;
 using Data;
+using Data.Enums;
+using Helpers;
 using Jobs.BurstData;
-using MyBox;
 using Physics;
 using Placement;
 using Unity.Mathematics;
@@ -22,6 +24,21 @@ public class PlayerInteraction : MonoBehaviour
     public Transform placeBlock;
     private Transform _highlightBlocksParent;
 
+    /// <summary>Mesh child of <see cref="highlightBlock"/>, shaped to the targeted block's collision volume.</summary>
+    private Transform _highlightCube;
+
+    /// <summary>Mesh child of <see cref="placeBlock"/>, shaped to the held block's collision volume.</summary>
+    private Transform _placeCube;
+
+    /// <summary>Authored scale of <see cref="_highlightCube"/>, preserved as a multiplier (see <c>CacheHighlightCube</c>).</summary>
+    private Vector3 _highlightCubeBias;
+
+    /// <summary>Authored scale of <see cref="_placeCube"/>, preserved as a multiplier (see <c>CacheHighlightCube</c>).</summary>
+    private Vector3 _placeCubeBias;
+
+    /// <summary>A whole cell, in cell-local space — the outline's shape when the targeted block cannot be resolved.</summary>
+    private static readonly Bounds s_fullCellBounds = new Bounds(new Vector3(0.5f, 0.5f, 0.5f), Vector3.one);
+
     /// <summary>
     /// Is current placeable block not inside the player, other solid block, outside the world and current itemSlot is not empty.
     /// </summary>
@@ -30,8 +47,12 @@ public class PlayerInteraction : MonoBehaviour
     private PlacementController _placement;
     private PlacementProbe _lastProbe;
 
-    [Tooltip("Distance between each ray-cast check, lower value means better accuracy")]
-    public float checkIncrement = 0.05f;
+    /// <summary>
+    /// The floating origin <see cref="_lastProbe"/> was resolved under. Kept beside the probe so a block
+    /// modification is addressed in the same coordinate frame its cells were found in, rather than re-reading a
+    /// global that may have re-anchored since.
+    /// </summary>
+    private Vector3Int _lastProbeOrigin;
 
     [Tooltip("Maximum distance the player can interact with blocks.")]
     public float reach = 8f;
@@ -51,6 +72,25 @@ public class PlayerInteraction : MonoBehaviour
         _input = InputManager.Instance;
         _highlightBlocksParent = GameObject.Find("HighlightBlocks").GetComponent<Transform>();
         _placement = new PlacementController(_world);
+
+        CacheHighlightCube(highlightBlock, out _highlightCube, out _highlightCubeBias);
+        CacheHighlightCube(placeBlock, out _placeCube, out _placeCubeBias);
+    }
+
+    /// <summary>
+    /// Caches a highlight box's mesh child and its authored scale. The parent sits on the targeted cell's minimum
+    /// corner and the child carries the centring offset, so shaping a highlight to a sub-voxel block drives the
+    /// child. Its authored scale is kept as a per-box multiplier rather than assumed: the two boxes ship with
+    /// different values (the block outline is inflated slightly to beat z-fighting against the surface it hugs, the
+    /// placement preview is not, since it is drawn in open air).
+    /// </summary>
+    /// <param name="box">The highlight box root, positioned on the cell corner.</param>
+    /// <param name="cube">The mesh child to shape, or null when the box has none.</param>
+    /// <param name="bias">The child's authored scale, applied on top of the block's size.</param>
+    private static void CacheHighlightCube(Transform box, out Transform cube, out Vector3 bias)
+    {
+        cube = box != null && box.childCount > 0 ? box.GetChild(0) : null;
+        bias = cube != null ? cube.localScale : Vector3.one;
     }
 
     private void Update()
@@ -72,10 +112,29 @@ public class PlayerInteraction : MonoBehaviour
             // Destroy block.
             if (_input.AttackPressed)
             {
-                _world.AddModification(new VoxelMod(highlightBlock.position.ToVector3Int(), blockId: BlockIDs.Air)
+                // VoxelMod.GlobalPosition is voxel space (it is persisted), so the probe's Unity-space cell converts.
+                // Read from the probe rather than the highlight transform: the cell is already exact there, with no
+                // float round-trip to re-derive it from.
+                Vector3Int breakVoxel = ToVoxelMod(_lastProbe.HitCell);
+
+                // TF-14: the fence gates edits, not aiming — a block reached through the wall highlights but
+                // cannot be broken. (Placement is gated inside the probe via PlacementController.CanPlaceAt.)
+                if (_world.IsVoxelInsideBorder(breakVoxel))
                 {
-                    ImmediateUpdate = true,
-                });
+                    // Sampled before the modification: the sound belongs to the block being removed, and one
+                    // frame later the cell holds Air.
+                    ushort brokenBlockId = _world.TryGetVoxel(breakVoxel.x, breakVoxel.y, breakVoxel.z,
+                        out VoxelState brokenState)
+                        ? brokenState.ID
+                        : BlockIDs.Air;
+
+                    _world.AddModification(new VoxelMod(breakVoxel, blockId: BlockIDs.Air)
+                    {
+                        ImmediateUpdate = true,
+                    });
+
+                    PlayBlockSound(brokenBlockId, BlockSoundEvent.Break, _lastProbe.HitCell);
+                }
             }
 
             // Place block.
@@ -90,16 +149,44 @@ public class PlayerInteraction : MonoBehaviour
 
                 byte meta = ComputePlacementMeta(placedBlockType, _lastProbe.HitNormal);
 
-                _world.AddModification(new VoxelMod(placeBlock.position.ToVector3Int(), placedBlockId)
+                _world.AddModification(new VoxelMod(ToVoxelMod(_lastProbe.PlaceCell), placedBlockId)
                 {
                     Meta = meta,
                     ImmediateUpdate = true,
                 });
                 itemSlot.ItemSlot.Take(1);
+
+                PlayBlockSound(placedBlockId, BlockSoundEvent.Place, _lastProbe.PlaceCell);
             }
         }
     }
 
+
+    /// <summary>
+    /// Plays a block's break or place one-shot at the center of the affected cell.
+    /// </summary>
+    /// <param name="blockId">The block whose sound material should sound.</param>
+    /// <param name="evt">Which one-shot to play.</param>
+    /// <param name="unityCell">The affected cell in Unity/render space — the probe's own space.</param>
+    private void PlayBlockSound(ushort blockId, BlockSoundEvent evt, Vector3Int unityCell)
+    {
+        SoundManager sound = SoundManager.Instance;
+        if (sound == null) return;
+
+        // Unity space, not voxel space: the listener lives in render space, and the probe cell is already there.
+        sound.PlayBlockSound(_world.BlockTypes, blockId, evt, unityCell + new Vector3(0.5f, 0.5f, 0.5f));
+    }
+
+    /// <summary>
+    /// Converts a Unity-space cell from the placement probe into the absolute voxel cell a
+    /// <see cref="VoxelMod"/> is addressed in — <c>VoxelMod.GlobalPosition</c> is persisted, so it must never
+    /// carry a Unity-space value.
+    /// </summary>
+    /// <param name="unityCell">The Unity-space cell resolved by the probe.</param>
+    /// <returns>The absolute voxel cell to modify.</returns>
+    // Uses the probe's own origin, not a fresh global read: the cell and the offset must come from the same frame,
+    // or a re-anchor between the probe and the click would address the edit to the wrong voxel.
+    private Vector3Int ToVoxelMod(Vector3Int unityCell) => unityCell + _lastProbeOrigin;
 
     /// <summary>
     /// Computes the metadata byte for a freshly-placed block based on its
@@ -167,7 +254,8 @@ public class PlayerInteraction : MonoBehaviour
 
     /// <summary>
     /// Centralized method to cast a ray from the player's camera to find a voxel.
-    /// Uses mathematical fractional offsets to accurately determine the placed block face.
+    /// The reported face is the one the traversal crossed to enter the hit cell, not a derivation from the hit
+    /// point — so it stays exact on corner hits, where the placed block's orientation metadata depends on it.
     /// </summary>
     /// <param name="overrideInteractWithFluids">If set, overrides the component's interactWithFluids toggle.</param>
     /// <param name="skipTags">Block tags the ray should pass through (derived from the held block's canReplaceTags).</param>
@@ -178,7 +266,9 @@ public class PlayerInteraction : MonoBehaviour
         // Use the override if provided, otherwise fall back to the player's current setting.
         bool checkFluids = overrideInteractWithFluids ?? interactWithFluids;
 
-        if (_placement.MarchRay(_playerCamera.position, _playerCamera.forward, checkFluids, skipTags, reach, checkIncrement,
+        // Read the origin fresh — never cached — so a re-anchor takes effect on the very next raycast.
+        if (_placement.MarchRay(_playerCamera.position, _playerCamera.forward, checkFluids, skipTags, reach,
+                WorldOrigin.OriginVoxel,
                 out Vector3Int hitCell, out int3 hitNormal, out Vector3Int adjacentCell))
         {
             return new VoxelRaycastResult
@@ -204,7 +294,10 @@ public class PlayerInteraction : MonoBehaviour
             ? _world.BlockTypes[heldSlot.ItemSlot.Stack.ID]
             : null;
 
-        PlacementProbe probe = _placement.Probe(_playerCamera.position, _playerCamera.forward, heldBlock, interactWithFluids, reach, checkIncrement);
+        // Read the origin fresh each frame — never cached at construction — so a re-anchor takes effect immediately.
+        _lastProbeOrigin = WorldOrigin.OriginVoxel;
+        PlacementProbe probe = _placement.Probe(_playerCamera.position, _playerCamera.forward, heldBlock,
+            interactWithFluids, reach, _lastProbeOrigin);
         _lastProbe = probe;
 
         if (!probe.DidHit)
@@ -218,6 +311,24 @@ public class PlayerInteraction : MonoBehaviour
         highlightBlock.position = probe.HitCell;
         placeBlock.position = probe.PlaceCell;
 
+        // VQ-3: both boxes hug the block's real volume, not its cell — targeting a half-slab is exact, so a
+        // full-cube outline around it would read as a bug. The place preview uses the metadata the block would
+        // actually be placed with, so a slab previews as a slab on the correct half.
+        // The outline is shaped on every path, including the one where the block cannot be resolved: it is shown
+        // unconditionally below, so a skipped update would leave the previous block's silhouette on screen.
+        Vector3Int hitVoxel = ToVoxelMod(probe.HitCell);
+        Bounds hitBounds = _world.TryGetVoxel(hitVoxel.x, hitVoxel.y, hitVoxel.z, out VoxelState hitVoxelState)
+            ? BlockCollisionBoundsUtility.GetBounds(_world.BlockTypes[hitVoxelState.ID], hitVoxelState.Meta,
+                Vector3.zero)
+            : s_fullCellBounds;
+        ShapeHighlight(_highlightCube, _highlightCubeBias, hitBounds);
+
+        // The preview needs no such fallback: an empty hand leaves heldBlock null, which also clears
+        // _blockPlaceable below and hides the box entirely, so its shape is never seen while stale.
+        if (heldBlock != null)
+            ShapeHighlight(_placeCube, _placeCubeBias, BlockCollisionBoundsUtility.GetBounds(
+                heldBlock, ComputePlacementMeta(heldBlock, probe.HitNormal), Vector3.zero));
+
         // The controller already decided world placeability (bounds + occupancy + support). The player-AABB overlap
         // is player-entity state, so it stays here as a final veto: the placed block must not intersect the player.
         _blockPlaceable =
@@ -229,6 +340,22 @@ public class PlayerInteraction : MonoBehaviour
         _highlightBlocksParent.gameObject.SetActive(showHighlightBlocks);
         highlightBlock.gameObject.SetActive(true);
         placeBlock.gameObject.SetActive(_blockPlaceable);
+    }
+
+    /// <summary>
+    /// Shapes a highlight box's mesh child to a block volume expressed in cell-local space — the parent already
+    /// sits on the cell corner, so a full-cube block reproduces the authored center and scale exactly and only
+    /// sub-voxel blocks move.
+    /// </summary>
+    /// <param name="cube">The mesh child to shape; ignored when null.</param>
+    /// <param name="bias">The child's authored scale, applied on top of the block's size.</param>
+    /// <param name="localBounds">The volume to hug, in cell-local space.</param>
+    private static void ShapeHighlight(Transform cube, Vector3 bias, Bounds localBounds)
+    {
+        if (cube == null) return;
+
+        cube.localPosition = localBounds.center;
+        cube.localScale = Vector3.Scale(localBounds.size, bias);
     }
 
     /// <summary>

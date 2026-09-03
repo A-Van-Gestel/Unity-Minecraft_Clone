@@ -13,6 +13,8 @@ MonoBehaviour:
   m_Name: LegacyGrasslands
   m_EditorClassIdentifier: 
   biomeName: Grasslands
+  ambientTracks: []
+  musicTracks: []
   offset: 250
   scale: 0.042
   terrainHeight: 42

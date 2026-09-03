@@ -128,6 +128,18 @@ namespace Editor.Validation.Meshing.Framework
         public bool IsActive => Renderer.GameObject.activeSelf;
 
         /// <summary>
+        /// The renderer's <see cref="Renderer.forceRenderingOff"/> — the occlusion axis of the GS-5 §7.3
+        /// ownership split. Settable so B28 can stamp the flag <b>externally</b> (as the future
+        /// <c>VisibilityManager</c> would) and then assert that the apply path left it alone; read through
+        /// the public <see cref="MeshRenderer"/> component, never the private <c>_meshRenderer</c> field.
+        /// </summary>
+        public bool OcclusionCulled
+        {
+            get => Renderer.GameObject.GetComponent<MeshRenderer>().forceRenderingOff;
+            set => Renderer.GameObject.GetComponent<MeshRenderer>().forceRenderingOff = value;
+        }
+
+        /// <summary>
         /// Drives the real <see cref="SectionRenderer.UpdateMeshNative"/> with synthetic inputs. The
         /// vertex streams are sized to <paramref name="verts"/>; each present submesh gets a same-length
         /// index run of all-zero indices (validation is skipped via <c>DontValidateIndices</c>, so the

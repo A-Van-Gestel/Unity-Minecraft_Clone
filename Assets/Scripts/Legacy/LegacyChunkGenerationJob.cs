@@ -84,7 +84,7 @@ namespace Legacy
 
                 if (!highestBlockFound)
                 {
-                    if (BlockTypes[voxelID].IsLightObstructing)
+                    if (LightAttenuation.ObstructsSkyColumn(in voxelProps, packedMeta))
                     {
                         int heightmapIndex = x + VoxelData.ChunkWidth * z;
                         OutputHeightMap[heightmapIndex] = (byte)y;

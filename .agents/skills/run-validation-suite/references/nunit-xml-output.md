@@ -82,4 +82,3 @@ baseline failure, a suite that ran nothing, an unknown `-validationSuites` name,
   then use the `validation-driven-bugfix` skill.
 - NUnit3 is currently round-trip-checked in-memory only, not yet against a live CI parser (deferred
   with CI itself); validate against the target consumer once a real pipeline exists.
-```

@@ -1,8 +1,45 @@
-# Design Document: Chunk Palette Mapping (Draft)
+# Design Document: Chunk Palette Mapping
 
-**Version:** 1.1 (Draft)  
-**Target:** Unity 6.4 (Mono for dev; IL2CPP for production, Burst/DOTS Compatible)  
+**Version:** 1.2  
+**Date:** 2026-07-26  
+**Status:** **Draft — unscheduled.** Nothing here is built: `BlockType` has no `uniqueId` field anywhere
+in the codebase, and chunks still store raw global `ushort` IDs. Before implementation starts, re-verify
+the items listed under *Re-verify first* below — the serialization layer has moved since this was
+drafted.  
+**Target:** Unity 6.6 (Mono for dev; IL2CPP for production, Burst/DOTS Compatible)  
 **Context:** Voxel Engine Serialization & Data Architecture
+
+> Decouple save files from `BlockDatabase` array order by giving each chunk a **local palette** mapping
+> local indices → globally unique string IDs (`core:grass`), with a runtime string→index table built at
+> boot. **The pivotal consequence: inserting or reordering blocks in the database stops corrupting
+> existing saves** — today a block inserted mid-array silently reinterprets every stored voxel after it.
+> Costs a chunk-format version bump plus an AOT migration, and `pending_mods.bin` must migrate too since
+> it also stores raw `ushort` IDs.
+
+**Audited:** 2026-07-26, at commit `3f579e44` (branch `feat/world-scaling`). Status verified in code,
+not assumed: `uniqueId` returns **zero** matches across `Assets/`, so neither the field nor its editor
+validation exists; block identity is still the `BlockDatabase.blockTypes` array index, surfaced through
+the generated `BlockIDs` constants.
+
+**Re-verify first (drafted 2026-07-06; the storage layer has since changed):**
+
+- The chunk codec is now pinned by the **NS-5 equivalence suite** (`ChunkMathValidationSuite.RegionCodec.cs`,
+  CP-2 close-out) — a palette format bump must land against those pins, and note the suite's own caveat
+  that round-trip pins are blind to *matched* encoder/decoder bugs.
+- CP-3 gave the load path an explicit failure contract (split null/throw storage semantics); §6's
+  hydration step must respect it rather than the older best-effort behavior.
+- Confirm the current chunk format version and the live migration-step chain before writing §5 step 3/4.
+
+**Relationship to other documents:**
+
+- [`../Architecture/AOT_WORLD_MIGRATION_SYSTEM.md`](../Architecture/AOT_WORLD_MIGRATION_SYSTEM.md) — the
+  migration protocol the format bump in §5 must follow (frozen-DTO rule).
+- [`../Architecture/INFINITE_WORLD_STORAGE_AND_SERIALIZATION_ARCHITECTURE.md`](../Architecture/INFINITE_WORLD_STORAGE_AND_SERIALIZATION_ARCHITECTURE.md)
+  — the region/chunk storage layer a palette header changes.
+- [`../Architecture/DATA_STRUCTURES.md`](../Architecture/DATA_STRUCTURES.md) — the packed-`uint` voxel
+  whose ID field this re-interprets on disk (runtime packing is unchanged).
+- [`CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md`](CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md) — CP-2/CP-3
+  reshaped the codec pins and the load-failure contract this design lands on.
 
 ---
 
@@ -62,7 +99,7 @@ This guarantees that **the Burst Compiler `[BurstCompile]` and Job System retain
 > the third seam, as §"pending_mods" below describes.
 
 ### AOT Migration Step (Required)
-Introducing palettes is a **chunk format version bump** that requires a `WorldMigrationStep` (see `Documentation/Design/AOT_WORLD_MIGRATION_SYSTEM.md`). Existing saves store raw global IDs with no palette header. The migration step must:
+Introducing palettes is a **chunk format version bump** that requires a `WorldMigrationStep` (see `Documentation/Architecture/AOT_WORLD_MIGRATION_SYSTEM.md`). Existing saves store raw global IDs with no palette header. The migration step must:
 1. Read the old format (raw `ushort` IDs with no palette).
 2. Build a palette from a **frozen snapshot** of the `BlockDatabase` at migration time (embedded in the migration file as a historical DTO, per the AOT authoring guidelines).
 3. Rewrite chunks in the new palette format.
@@ -93,3 +130,34 @@ A new `string uniqueId` field must be added to `BlockType` (e.g., `"core:grass"`
 ## 6. Future Enhancements (Out of Scope)
 
 - **Variable Bit-Width Packing**: For chunks with very few unique blocks (e.g., mostly air, stone, and dirt), the Local IDs could be bit-packed down to 2 or 4 bits per voxel instead of a full 16-bit ushort, massively increasing Region File compression ratios (similar to modern Minecraft's chunk format). This would require a second format version bump and is a separate feature.
+
+---
+
+## Document History
+
+*Entries before v1.2 are reconstructed from git history — this document predates the project's
+Document History convention, so they record what the commits changed, not contemporaneous notes. The
+v1.0/v1.1 split recorded in the old header could not be mapped to specific commits with confidence, so
+the changes below are dated rather than versioned.*
+
+* **v1.2** - Mandatory header added (2026-07-26): `Date`/`Status`/summary blockquote/`Audited` line and
+  the relationship list; "(Draft)" dropped from the title and version now that `Status` carries it.
+  Status set to **Draft — unscheduled** after verifying in code that `uniqueId` has zero matches across
+  `Assets/`. Added the **Re-verify first** block — the storage layer moved under this design while it
+  sat idle (CP-2's NS-5 codec pins, CP-3's load-failure contract), and those are the traps an
+  implementer would otherwise hit. No design content was changed.
+* *(2026-07-06, `2a5ce398`)* - Cross-linked from the CP-* chunk-lifecycle refactor plan, which named
+  the palette seam as one of the layers its census deliberately left alone.
+* *(2026-04-17, `537b67a2`)* - Target line updated for the IL2CPP production-build shift.
+* *(2026-04-16, `cb787249`)* - Moved into the restructured `Documentation/` tree.
+* *(2026-03-12, `ae9824d7`)* - Initial draft, authored alongside the `BlockIDs` generator extraction
+  that closed this design's "magic numbers" sub-problem — which is why §1 marks that bullet as handled
+  separately while the save-fragility and modding problems stayed open.
+
+---
+
+**Last Updated:** 2026-07-26 (header added; "not implemented" re-verified in code)  
+**Next Review:** before implementation — work the **Re-verify first** list above, then re-confirm the
+current chunk format version and migration-step chain. Also revisit whether the §6 variable-bit-width
+packing should land in the *same* format bump rather than a second one, since both rewrite the voxel
+array encoding.

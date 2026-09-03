@@ -48,8 +48,116 @@ namespace Editor.Validation.Meshing.Framework
         /// </summary>
         public const ushort WaterSource = 4;
 
+        /// <summary>
+        /// Non-solid cross-mesh flora (grass-blades-like): <see cref="RenderShape.CrossMesh"/> routes
+        /// through <c>GenerateCrossMesh</c> — the FL-1 sway-channel path (UV ZW weight/phase) that
+        /// baseline B22 guards. Opacity 0, never culls or occludes neighbors.
+        /// </summary>
+        public const ushort CrossFlora = 5;
+
+        /// <summary>
+        /// Transparent leaf-like cube with an authored <c>swayStrength</c> (<see cref="SwayStrength"/>) —
+        /// routes through the FL-2 sway post-pass (uniform UV ZW on every emitted vert) that baseline
+        /// B23 guards. Solid + <c>renderNeighborFaces</c>, like production OakLeaves.
+        /// </summary>
+        public const ushort SwayingLeafCube = 6;
+
+        /// <summary>The authored sway strength of <see cref="SwayingLeafCube"/> (0.25 — exact in half precision).</summary>
+        public const float SwayStrength = 0.25f;
+
+        /// <summary>
+        /// Half-slab custom mesh (<see cref="RenderShape.CustomMesh"/>) on the
+        /// <see cref="MetadataSchema.Facing6Roll2"/> schema, so its meta byte selects one of 24 orientations
+        /// and its geometry is physically rotated by <c>BurstCustomMeshRotationUtility</c>. Geometry comes
+        /// from <see cref="TestCustomMeshLibrary.HalfSlabMeshIndex"/>; its Top face sits at the block
+        /// mid-plane, which is the sub-block case `MESHING_BUGS.md` Bug M01 is about.
+        /// <para>
+        /// Authored with the <b>production</b> Stone Half Slab's lighting properties
+        /// (<c>opacity = 15</c>, <c>renderNeighborFaces = true</c>) so the fixture reproduces the real
+        /// block's behavior rather than a corrected one. See <see cref="PartialOpaque"/> for the contrast case.
+        /// </para>
+        /// </summary>
+        public const ushort HalfSlab = 7;
+
+        /// <summary>
+        /// Same half-slab geometry and schema as <see cref="HalfSlab"/>, but with a sub-15 opacity — the
+        /// partial-block lighting model of `_FIXED_BUGS.md` Lighting #26. Lets a scenario contrast
+        /// "treated as a full blocker" against "treated as a partial block" without editing the fixture
+        /// the other scenarios share.
+        /// </summary>
+        public const ushort PartialOpaque = 8;
+
+        /// <summary>The authored opacity of <see cref="PartialOpaque"/> — below the <c>IsOpaque</c> threshold of 15.</summary>
+        public const byte PartialOpacity = 7;
+
+        /// <summary>
+        /// SS-0: fence-post custom mesh — a quarter-cell column standing on the cell floor
+        /// (<see cref="TestCustomMeshLibrary.PostBounds"/>), full cell height, touching neither side wall.
+        /// Same schema and lighting properties as <see cref="HalfSlab"/>.
+        /// <para>
+        /// The palette's other custom meshes are full-width boxes, so their occlusion of a neighboring
+        /// face varies monotonically across the cell and a two-corner blend reproduces it closely. The
+        /// post's does not — see baseline <b>B50</b>, which measures that and is the reason this fixture
+        /// exists at all.
+        /// </para>
+        /// </summary>
+        public const ushort Post = 9;
+
+        /// <summary>
+        /// An opaque cube that emits light, for the RF-3 emissive-strength channel (B61). Identical to
+        /// <see cref="SolidOpaque"/> apart from its emission, so a comparison against that block isolates
+        /// the emissive stamp from every other property.
+        /// <para>
+        /// Appended last on purpose: every palette ID below it keeps its value, so no pre-existing
+        /// baseline sees a different world.
+        /// </para>
+        /// </summary>
+        public const ushort EmissiveOpaque = 10;
+
+        /// <summary>Light emission authored on <see cref="EmissiveOpaque"/>, on the engine's 0-15 scale.</summary>
+        public const byte EmissiveLevel = 12;
+
+        /// <summary>
+        /// A second cross-mesh flora type whose FL-4b envelope is deliberately the opposite of
+        /// <see cref="CrossFlora"/>'s: no positional nudge, scale locked to 1, mirroring off — a
+        /// sapling-like plant that must sit exactly on its unit-cell corners. Baseline B63 uses the
+        /// contrast between the two to prove the envelope is read per block rather than globally.
+        /// </summary>
+        public const ushort RigidFlora = 11;
+
+        /// <summary>The authored FL-4b envelope of <see cref="RigidFlora"/> — no variation at all.</summary>
+        public static CrossMeshVariationSettings RigidFloraVariation => new CrossMeshVariationSettings
+        {
+            offset = 0f,
+            scaleMin = 1f,
+            scaleMax = 1f,
+            allowMirror = false,
+        };
+
+        /// <summary>
+        /// A cross-mesh flora type authored past every engine limit (offset and scale at the
+        /// attribute ceilings). Baseline B63 places it in a section's top row to prove
+        /// <c>SanitizeEnvelope</c> reins it back inside the padded section bounds — the vertical
+        /// direction being the one that binds, since scaling is anchored at the plant's base.
+        /// </summary>
+        public const ushort ExtremeFlora = 12;
+
+        /// <summary>
+        /// The deliberately over-authored FL-4b envelope of <see cref="ExtremeFlora"/>. Min and max
+        /// are both pinned to the ceiling on purpose: with a range, the per-cell hash picks somewhere
+        /// inside it and the clamp may never be exercised — a degenerate range makes every cell
+        /// land on the extreme, so the assertion tests the limit rather than a lucky sample.
+        /// </summary>
+        public static CrossMeshVariationSettings ExtremeFloraVariation => new CrossMeshVariationSettings
+        {
+            offset = CrossMeshVariation.MaxCellEscape,
+            scaleMin = CrossMeshVariationSettings.MaxAuthoredScale,
+            scaleMax = CrossMeshVariationSettings.MaxAuthoredScale,
+            allowMirror = true,
+        };
+
         /// <summary>Total number of block types in the palette.</summary>
-        public const int Count = 5;
+        public const int Count = 13;
 
         /// <summary>
         /// Builds the palette as managed <see cref="BlockType"/> instances and converts them to the
@@ -70,6 +178,29 @@ namespace Editor.Validation.Meshing.Framework
                 MakeCube("TestOrientedOpaque", isSolid: true, opacity: 15, renderNeighborFaces: false, MetadataSchema.HorizontalOnly));
             jobData[WaterSource] = new BlockTypeJobData(
                 MakeFluid("TestWaterSource", FluidType.WaterLike, fluidShaderID: 0, fluidLevel: 0, flowLevels: 8));
+            jobData[CrossFlora] = new BlockTypeJobData(MakeCrossFlora("TestCrossFlora"));
+            BlockType rigidFlora = MakeCrossFlora("TestRigidFlora");
+            rigidFlora.crossMeshVariation = RigidFloraVariation;
+            jobData[RigidFlora] = new BlockTypeJobData(rigidFlora);
+            BlockType extremeFlora = MakeCrossFlora("TestExtremeFlora");
+            extremeFlora.crossMeshVariation = ExtremeFloraVariation;
+            jobData[ExtremeFlora] = new BlockTypeJobData(extremeFlora);
+            BlockType swayingLeaf = MakeCube("TestSwayingLeafCube", isSolid: true, opacity: 1, renderNeighborFaces: true, MetadataSchema.None);
+            swayingLeaf.swayStrength = SwayStrength;
+            jobData[SwayingLeafCube] = new BlockTypeJobData(swayingLeaf);
+            // Custom meshes carry their geometry index out-of-band, exactly as JobDataManagerFactory does.
+            jobData[HalfSlab] = new BlockTypeJobData(
+                MakeCustomBox("TestHalfSlab", opacity: 15, TestCustomMeshLibrary.HalfSlabBounds),
+                TestCustomMeshLibrary.HalfSlabMeshIndex);
+            jobData[PartialOpaque] = new BlockTypeJobData(
+                MakeCustomBox("TestPartialOpaqueSlab", PartialOpacity, TestCustomMeshLibrary.HalfSlabBounds),
+                TestCustomMeshLibrary.HalfSlabMeshIndex);
+            jobData[Post] = new BlockTypeJobData(
+                MakeCustomBox("TestPost", opacity: 15, TestCustomMeshLibrary.PostBounds),
+                TestCustomMeshLibrary.PostMeshIndex);
+            BlockType emissive = MakeCube("TestEmissiveOpaque", isSolid: true, opacity: 15, renderNeighborFaces: false, MetadataSchema.None);
+            emissive.lightEmission = EmissiveLevel;
+            jobData[EmissiveOpaque] = new BlockTypeJobData(emissive);
             return jobData;
         }
 
@@ -117,6 +248,48 @@ namespace Editor.Validation.Meshing.Framework
             block.opacity = opacity;
             block.renderNeighborFaces = renderNeighborFaces;
             block.metadataSchema = schema;
+            return block;
+        }
+
+        /// <summary>
+        /// Constructs a non-solid cross-mesh flora <see cref="BlockType"/> that routes through the
+        /// <c>GenerateCrossMesh</c> path (two intersecting diagonal planes, transparent submesh).
+        /// </summary>
+        private static BlockType MakeCrossFlora(string name)
+        {
+            BlockType block = MakeBaseBlock(name);
+            block.isSolid = false;
+            block.opacity = 0;
+            block.renderNeighborFaces = false;
+            block.renderShape = RenderShape.CrossMesh;
+            return block;
+        }
+
+        /// <summary>
+        /// Constructs a box-shaped custom-mesh <see cref="BlockType"/> that routes through the
+        /// schema-aware custom-mesh path (<c>GenerateCustomBlockMesh_SchemaAware</c>). Solid +
+        /// <c>renderNeighborFaces</c> like the production Stone Half Slab, so it never culls its
+        /// neighbor's faces (it does not fill its cell).
+        /// </summary>
+        /// <param name="name">Block name.</param>
+        /// <param name="opacity">Light entry cost; 15 makes it <c>IsOpaque</c>, below 15 makes it partial.</param>
+        /// <param name="bounds">The volume, which MUST be the same value
+        /// <see cref="TestCustomMeshLibrary"/> built this block's geometry from — pass one of its
+        /// exposed constants, never a fresh literal.</param>
+        private static BlockType MakeCustomBox(string name, byte opacity, BlockCollisionBounds bounds)
+        {
+            BlockType block = MakeBaseBlock(name);
+            block.isSolid = true;
+            block.opacity = opacity;
+            block.renderNeighborFaces = true;
+            block.renderShape = RenderShape.CustomMesh;
+            block.metadataSchema = MetadataSchema.Facing6Roll2;
+
+            // VO-5 / F13: the authored volume must match the geometry, or the fixture is one shape to the
+            // mesher and another to every shape query (BurstOcclusionUtility reads these bounds, not the
+            // custom mesh) — a divergence that stays invisible until some phase first asks. SS-0 removed
+            // the second source of truth: the caller passes the very value the mesh was built from.
+            block.collisionBounds = bounds;
             return block;
         }
 

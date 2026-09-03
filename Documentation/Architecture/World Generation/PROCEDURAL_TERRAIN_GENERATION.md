@@ -21,8 +21,8 @@
 The legacy procedural terrain system uses a strict 2D heightmap ($y = f(x,z)$). This prevents the generation of complex overhangs, floating islands, and organic cave systems. By integrating modern techniques, we transition to a **Volumetric Density** model while maintaining strict Burst performance:
 
 1. **Multi-Noise 2D Base (Minecraft C&C):** Terrain height is decoupled from a single noise map. Instead, we evaluate three independent noises (Continentalness, Erosion, Peaks & Valleys) mapped through **Data-Driven Splines** to determine a base terrain shape.
-2. **3D Density Fields (GPU Gems 3):** The final surface is defined by a 3D density function: $Density = BaseHeight(x,z) - y + 3DNoise(x,y,z)$.
-3. **Domain Warping (Iñigo Quílez):** The input coordinates of the 3D density noise (and optionally cave noises) are distorted using a secondary noise field ($p' = p + Warp(p)$), breaking up artificial grid-like patterns and simulating geological folding.
+2. **3D Density Fields (GPU Gems 3 — see [§7.2](#72-generating-complex-procedural-terrains-using-the-gpu--ryan-geiss-nvidia-gpu-gems-3-chapter-1)):** The final surface is defined by a 3D density function: $Density = BaseHeight(x,z) - y + 3DNoise(x,y,z)$.
+3. **Domain Warping (Iñigo Quílez — see [§7.1](#71-domain-warping--iñigo-quílez-2002)):** The input coordinates of the 3D density noise (and optionally cave noises) are distorted using a secondary noise field ($p' = p + Warp(p)$), breaking up artificial grid-like patterns and simulating geological folding.
 4. **Cave System:** Caves are carved into the volumetric terrain by a dedicated subsystem (Cheese, Spaghetti2D/3D, Noodle noise modes plus a two-tier trunk/local worm carver). That system has grown well beyond this document's scope and has its own authoritative doc — see **[CAVE_GENERATION.md](CAVE_GENERATION.md)**. This document covers only how the cave pass slots into the generation job (§4) and the cave isolation filter (§4.1).
 
 ---
@@ -486,3 +486,50 @@ Zero new allocations inside the main execution job (`StandardChunkGenerationJob`
 1. **True Overhangs & Arches:** Bypassing the strict $y = f(x,z)$ mapping permits gravity-defying terrain features naturally.
 2. **Organic River Valleys & Canyons:** Applying Domain Warp to Ridged noise generates winding, non-repetitive ravines that mimic natural hydraulic erosion.
 3. **No Overdraw in Generation:** Because we track `previousDensity` natively in the top-down loop, we easily assign grass to floating islands and overhangs without running complex secondary pass algorithms.
+
+---
+
+## 7. External References
+
+The two techniques this pipeline is built on are prior art, credited inline in §1. The citations
+live here, along with what each contributed and — more usefully — where this implementation
+deliberately departs from the source.
+
+### 7.1. Domain Warping — Iñigo Quílez (2002)
+
+<https://iquilezles.org/articles/warp/>
+
+Establishes the technique this document calls domain warping in §2.4: rather than changing a noise
+function, you distort its *input domain*, evaluating `f(g(p))` where `g(p) = p + h(p)` and `h` is
+itself a noise field. The article's canonical form is recursive — `f(p) = fbm(p + fbm(p + fbm(p)))`
+— and it is the source of the "warp" terminology used throughout §2.4, §3.1 and the per-cave-layer
+warp in [CAVE_GENERATION.md](CAVE_GENERATION.md).
+
+**How this project differs:** we do not nest recursively. Each warp source is a single
+`FastNoiseLite.DomainWarp()` call driven by its own dedicated noise instance (see the §2.4 note),
+which costs one warp evaluation instead of three and keeps the warp parameters authorable per biome
+as a `FastNoiseConfig`. The visual payoff the article describes — breaking up grid-aligned noise
+structure, and the winding valleys noted in §6.4 — is retained at a single level of warping.
+
+### 7.2. Generating Complex Procedural Terrains Using the GPU — Ryan Geiss, NVIDIA (*GPU Gems 3*, Chapter 1)
+
+<https://developer.nvidia.com/gpugems/gpugems3/part-i-geometry/chapter-1-generating-complex-procedural-terrains-using-gpu>
+
+The origin of the density-function model in §2.3 and §4: terrain is defined not as `y = f(x,z)` but
+as a 3D scalar field where positive density is solid, negative is air, and the zero-crossing is the
+surface. This is precisely what frees the generator from the 2D heightmap limitation named in §1,
+and it is why overhangs, arches and floating islands (§6.4) fall out of the model rather than
+needing a secondary pass.
+
+**How this project differs in two ways that matter:**
+
+- **CPU, not GPU.** The chapter evaluates the density field in shaders and builds geometry with
+  the geometry shader / transform feedback. Here the same field is evaluated in a Burst
+  `IJobFor` on worker threads (§4), because the voxel grid — not a marching-cubes isosurface — is
+  the authoritative game state and must be readable by lighting, meshing, physics and
+  serialization.
+- **Banded, not full-volume.** The chapter evaluates density across the whole volume; §2.3's
+  Dynamic Density Band restricts evaluation to `[BaseHeight ± DensityAmplitude]` and treats
+  everything outside as strictly solid or strictly air. That is what makes the CPU port
+  affordable — it skips roughly 95% of Y-levels (§6.1) — and it is only sound because the noise
+  term is bounded, as §2.3 sets out.

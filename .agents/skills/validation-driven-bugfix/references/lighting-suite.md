@@ -12,12 +12,13 @@ Everything lives under `Assets/Editor/Validation/Lighting/`. Menu item: **`Minec
 | `LightingValidationSuite.Bug05Canopy.cs`              | Dense-canopy generation fuzz baseline (`B42`) + its standalone menu item                                                                                             |
 | `LightingValidationSuite.Bug09Fuzz.cs`                | Cross-chunk geometry fuzz baseline (`B40`)                                                                                                                           |
 | `Baselines/LightingValidationSuite.Baseline.Bug12.cs` | Bug-12 family baselines (`B50`–`B53`), self-registered via `AddBug12BaselineScenarios` — the first of the `Baselines/` group split                                   |
+| `Baselines/LightingValidationSuite.Baseline.C14ChannelMirrors.cs` | Fidelity **C14** mixed-channel mirrors (`B108`–`B114`), self-registered via `AddC14ChannelMirrorBaselineScenarios` — one per previously channel-blind family, sourced from `TorchMixed`/`LampMixed` |
 | `LightingValidationSuite.KnownBugs.cs`                | `K`-scenarios reproducing open bugs from `LIGHTING_BUGS.md` (expected red); currently none open (Bug 12 promoted to `B53`)                                           |
 | `Framework/LightingTestWorld.cs`                      | Harness core: N×N grid of chunk buffers, runs the real `NeighborhoodLightingJob`, applies cross-chunk mods via the shared `CrossChunkLightModApplier`                |
 | `Framework/LightingTestWorld.Builder.cs`              | Authoring + queries (two write paths, see below)                                                                                                                     |
 | `Framework/LightingOracle.cs`                         | Borderless global flood-fill — the spec                                                                                                                              |
 | `Framework/LightingAssert.cs`                         | `MatchesOracle`, `FieldsEqual`, `Converged`, `NoBlocklightInVolume`, `IsTrue` — all with bounded diffs                                                               |
-| `Framework/TestBlockPalette.cs`                       | Synthetic fixtures: Air(0), Stone, Glass, Leaves, DimGlass(op.5), LampWhite/Red/Green/Blue (opaque emissive 15), Torch (transparent emissive 14)                     |
+| `Framework/TestBlockPalette.cs`                       | Synthetic fixtures: Air(0), Stone, Glass, Leaves, DimGlass(op.5), LampWhite/Red/Green/Blue (opaque emissive 15), Torch (transparent emissive 14), TorchMixed (14,8,3) + LampMixed (15,9,3) — the asymmetric-channel sources the C14 mirrors need (three distinct non-zero channels make a per-channel transposition observable) |
 
 Namespace: suite = `Editor.Validation.Lighting`, framework = `Editor.Validation.Lighting.Framework`.
 
@@ -41,11 +42,11 @@ Each group file owns **its scenarios, its private constants/builders, AND its ow
   {
       static partial void AddBug12BaselineScenarios(List<Scenario> scenarios)
       {
-          scenarios.Add(new Scenario("B53: …", Baseline_CrossSeamSunlightLoopClearsOnSourceRemoval));
+          scenarios.Add(new Scenario("B53: …", Baseline_CrossSeamSkylightLoopClearsOnSourceRemoval));
           // … B50/B51/B52 …
       }
       private const int SEAM_LOOP_SLAB_MIN_Y = 58; // SCREAMING_CASE per CLAUDE.md
-      private static bool Baseline_CrossSeamSunlightLoopClearsOnSourceRemoval() { … }
+      private static bool Baseline_CrossSeamSkylightLoopClearsOnSourceRemoval() { … }
   }
   ```
 
@@ -91,7 +92,7 @@ world.RunWaveToConvergence(maxRounds);   // Begin-all → Complete-all per round
 var flight = world.BeginLightingJob(coord);   // snapshot inputs, drain queues
 /* ... mutate live state: edits, other jobs ... */
 world.CompleteLightingJob(flight);            // run + stale merge + mod application
-// Queries: GetBlockId, GetLightData, GetSkyLight, GetBlocklightRGB, SnapshotLightField
+// Queries: GetBlockId, GetLightData, GetSkylight, GetBlocklightRGB, SnapshotLightField
 ```
 
 ## Worked examples to copy from
@@ -107,7 +108,7 @@ world.CompleteLightingJob(flight);            // run + stale merge + mod applica
 
 ## Lighting-specific gotchas
 
-- **`0xFFFF` light values are legitimate** (sky 15 + RGB 15,15,15 — white lamp on a sunlit surface). Never reintroduce `ushort.MaxValue` sentinel checks on light reads; bounds-check via `GetPackedData`'s `uint.MaxValue` instead. (Fixed engine-wide June 2026.)
+- **`0xFFFF` light values are legitimate** (sky 15 + RGB 15,15,15 — white lamp on a skylit surface). Never reintroduce `ushort.MaxValue` sentinel checks on light reads; bounds-check via `GetPackedData`'s `uint.MaxValue` instead. (Fixed engine-wide June 2026.)
 - **Opaque sources propagate only their own emission** — never received surface light. Rule exists in BOTH `PropagateLightRGB` and the oracle's `SolveBlocklight`; keep them in sync.
 - **Out-of-grid neighbors must be zero-length arrays, not `default`** — Unity's job scheduler rejects unconstructed containers; the job treats `Length == 0` as void space.
 - **`LightQueueNode` is serialized in chunk save data** (`ChunkData.cs` ~384) — changing it is a save-format change requiring AOT migration. `LightModification` is job-output only and safe to extend (e.g. the `IsRemoval` flag).

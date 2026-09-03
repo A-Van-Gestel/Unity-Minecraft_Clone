@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Globalization;
 using Data;
 using Data.Enums;
+using Helpers;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using Debug = UnityEngine.Debug;
@@ -14,12 +15,13 @@ namespace Benchmarks
     /// Controls the player during a benchmark profiling run.
     /// Drives the player through a two-pass waypoint system to stress-test the
     /// chunk generation, lighting, meshing, and disk loading pipelines.
-    /// <para><b>Pass 1 — Generation:</b> A zigzag sweep across a configurable
-    /// benchmark region (see <see cref="Settings.benchmarkRegionSize"/>) that
-    /// maximizes unique chunk coverage. Row spacing and margins are derived
-    /// from the current <see cref="Settings.LoadDistance"/> to ensure optimal chunk throughput.
-    /// The pass completes when all generation waypoints have been visited, with speed
-    /// escalating on a timer within the pass.</para>
+    /// <para><b>Pass 1 — Generation:</b> A zigzag sweep whose geometry is <b>derived</b> by
+    /// <see cref="BenchmarkRouteGeometry"/> from the configured speeds and
+    /// <see cref="Settings.benchmarkPhaseSeconds"/> — rows sit <c>2 × LoadDistance</c> apart so each sweeps
+    /// virgin terrain. Every speed phase runs exactly one phase duration, at every view distance, which is
+    /// what makes two captures comparable (FP-9b).</para>
+    /// <para><b>Ensure Generated:</b> the loading tour is flown once slowly so its terrain is on disk before
+    /// the transition saves it. Not a measurement — it carries no regime verdict.</para>
     /// <para><b>Transition:</b> All active jobs are drained, world data is saved to disk,
     /// and chunks are force-unloaded from memory via <see cref="World.ForceUnloadAllChunks"/>.
     /// This ensures the loading pass exercises the deserialization pipeline.</para>
@@ -44,9 +46,10 @@ namespace Benchmarks
         private const float FLIGHT_HEIGHT = VoxelData.ChunkHeight * FLIGHT_HEIGHT_RATIO;
 
         /// <summary>
-        /// Duration of each speed phase in seconds.
+        /// Fallback duration of each speed phase in seconds, used when the configured
+        /// <see cref="Settings.benchmarkPhaseSeconds"/> is out of range.
         /// </summary>
-        private const float TIME_PER_PHASE = 30f;
+        private const float DEFAULT_TIME_PER_PHASE = 30f;
 
         /// <summary>
         /// Number of frames to wait after the chunk pipeline drains before starting
@@ -58,6 +61,7 @@ namespace Benchmarks
         // ── Phase Group Names ────────────────────────────────────────────
 
         private const string GROUP_GENERATION = "Generation Pass";
+        private const string GROUP_ENSURE = "Ensure Generated";
         private const string GROUP_TRANSITION = "Transition";
         private const string GROUP_LOADING = "Loading Pass";
 
@@ -75,10 +79,17 @@ namespace Benchmarks
         private int _activeWaypointIndex;
         private Transform _playerCamera;
         private BenchmarkMetricsCollector _metricsCollector;
-        private int _regionChunks;
-        private int _configuredRegionChunks;
+        private float _phaseSeconds = DEFAULT_TIME_PER_PHASE;
+        private BenchmarkRouteGeometry _routeGeometry;
         private Stopwatch _totalStopwatch;
         private Material _blurMaterial;
+
+        /// <summary>
+        /// Pipeline tuning captured at run start (FP-6) — the geometry input to the FP trace-capacity
+        /// estimate, and the values the report must state so its stop-reason tallies are interpretable.
+        /// Snapshotted rather than re-read at report time: settings are editable mid-session.
+        /// </summary>
+        private PipelineSettingsSnapshot _pipelineSettingsForCapture;
 
         // ── Frame Rate Overrides ─────────────────────────────────────────
 
@@ -147,6 +158,9 @@ namespace Benchmarks
             Settings settings = SettingsManager.LoadSettings();
             _generationSpeeds = ParseSpeedString(settings.benchmarkGenerationSpeeds, s_defaultGenerationSpeeds, "Generation");
             _loadingSpeeds = ParseSpeedString(settings.benchmarkLoadingSpeeds, s_defaultLoadingSpeeds, "Loading");
+            _phaseSeconds = settings.benchmarkPhaseSeconds > 0f
+                ? settings.benchmarkPhaseSeconds
+                : DEFAULT_TIME_PER_PHASE;
 
             // Force VSync off and uncap framerate for accurate throughput measurement
             _savedVSyncCount = QualitySettings.vSyncCount;
@@ -179,11 +193,35 @@ namespace Benchmarks
             CurrentGroupName = "Initializing";
             yield return WaitForChunkPipelineToSettle();
 
-            _totalPhaseCount = _generationSpeeds.Length + 1 + _loadingSpeeds.Length;
+            // Generation speeds + ensure-generated + transition + loading speeds (FP-9b added the first of
+            // those two singles; progress would otherwise never reach 100 %).
+            _totalPhaseCount = _generationSpeeds.Length + 2 + _loadingSpeeds.Length;
             _currentOverallPhaseIndex = 0;
 
             _metricsCollector = new BenchmarkMetricsCollector(_totalPhaseCount);
             _metricsCollector.StartRecording();
+
+            // FP: pipeline-internal telemetry rides the same phase boundaries as the frame-health collector,
+            // so the two report the same phases. Enabled only for the duration of this run and cleared in
+            // OnDestroy — the WorldFrameProfiler/FluidStressController pattern.
+            _pipelineSettingsForCapture = new PipelineSettingsSnapshot(settings);
+
+            // Pairs with the freshly-constructed collector above: both recorders must start a run empty, or
+            // a second run in one process reports the first run's phases as its own (FP-5).
+            PipelineTelemetry.BeginRun();
+            PipelineTelemetry.Enabled = true;
+
+            // P9-0: the flight capture now drives the sub-phase profiler too, which it never did before — the
+            // reason no capture could say where the pipeline's main-thread milliseconds went. Cost is one
+            // Stopwatch pair per timed region (single digits per frame), against phases whose frames run
+            // 6-30 ms; cleared in OnDestroy so an aborted run cannot leave it on for ordinary play.
+            WorldFrameProfiler.Enabled = true;
+
+            // FP-11a: start crediting tour coverage HERE rather than at the ensure pass, so terrain the
+            // generation phases already produced counts — it is on disk by the time the loading pass asks
+            // for it, which is the only property the ensure sweep exists to guarantee.
+            BenchmarkTourCoverage.Arm(_routeGeometry, settings.LoadDistance);
+
             _totalStopwatch = Stopwatch.StartNew();
             IsRunning = true;
 
@@ -196,28 +234,41 @@ namespace Benchmarks
             // === Pass 1: Generation ===
             yield return RunGenerationPass();
 
+            // === Ensure Generated: guarantee the loading tour's terrain exists on disk ===
+            yield return RunEnsureGeneratedPass();
+
             // === Transition: Drain Jobs → Save → Force Unload ===
             yield return TransitionToLoadingPass();
+
+            // FP-11a: the tour's terrain is now all on disk and nothing is resident, so this is the instant
+            // the coverage question is actually asked — will the loading pass load, or generate? Freezing
+            // any later would let that pass credit itself.
+            BenchmarkTourCoverage.Freeze();
+            ReportTourCoverage();
 
             // === Pass 2: Loading ===
             yield return RunLoadingPass();
 
             _totalStopwatch.Stop();
             _metricsCollector.StopRecording();
+
+            // Close the final telemetry phase BEFORE the report reads CompletedPhases — an open phase is
+            // never in that list, so the last (fastest, most interesting) speed tier would be missing.
+            PipelineTelemetry.EndPhase();
             IsRunning = false;
 
             BenchmarkReportResult reportResult = BenchmarkReportGenerator.GenerateAndWriteReport(
                 _metricsCollector,
                 _generationSpeeds,
                 _loadingSpeeds,
-                TIME_PER_PHASE,
-                _regionChunks,
-                _configuredRegionChunks,
+                _phaseSeconds,
+                _routeGeometry,
                 _generationWaypoints.Count,
                 _loadingWaypoints.Count,
                 _totalStopwatch.Elapsed,
                 _savedVSyncCount,
-                _savedTargetFrameRate);
+                _savedTargetFrameRate,
+                _pipelineSettingsForCapture);
 
             ShowResults(reportResult);
         }
@@ -225,6 +276,17 @@ namespace Benchmarks
         private void OnDestroy()
         {
             _metricsCollector?.StopRecording();
+
+            // Close any phase still open (an aborted run) and switch the layer off. The domain reset covers
+            // a play-mode restart, but not returning to the main menu within one session.
+            PipelineTelemetry.EndPhase();
+            PipelineTelemetry.Enabled = false;
+            WorldFrameProfiler.Enabled = false;
+
+            // Same reasoning for the coverage tracker: a run aborted before the freeze would otherwise stay
+            // armed for the rest of the session, charging every ordinary world session a lookup per populated
+            // chunk and accruing into a footprint no report will read.
+            BenchmarkTourCoverage.Reset();
 
             if (_frameRateOverridden)
             {
@@ -240,19 +302,53 @@ namespace Benchmarks
                 Destroy(_blurMaterial);
         }
 
+        /// <summary>
+        /// Opens a phase on <b>both</b> recorders at once. Routed through one helper so the frame-health
+        /// collector and the FP pipeline telemetry can never disagree about which phase a sample belongs
+        /// to — the report prints them side by side, and a one-sided <c>BeginPhase</c> would silently
+        /// attribute pipeline data to the wrong speed tier.
+        /// </summary>
+        /// <param name="phaseName">Display name (e.g. "200 m/s").</param>
+        /// <param name="groupName">Logical group (e.g. "Generation Pass").</param>
+        /// <param name="speedMetersPerSecond">The phase's flight speed, sizing the trace table (§8 Q1).</param>
+        /// <param name="regimeBearing">
+        /// <c>false</c> for the transition, which drains and unloads by design rather than measuring a
+        /// pipeline state (FP-9a). Defaults true so the generation and loading phases are unaffected.
+        /// </param>
+        private void BeginPhaseBoth(string phaseName, string groupName, float speedMetersPerSecond,
+            bool regimeBearing = true, float phaseSecondsOverride = 0f)
+        {
+            float seconds = phaseSecondsOverride > 0f ? phaseSecondsOverride : _phaseSeconds;
+            _metricsCollector.BeginPhase(phaseName, groupName);
+            PipelineTelemetry.BeginPhase(phaseName, groupName,
+                PipelineTelemetry.EstimateTraceCapacity(_pipelineSettingsForCapture.LoadDistance,
+                    speedMetersPerSecond, seconds),
+                regimeBearing);
+        }
+
+        /// <summary>Closes the current phase on both recorders (both are no-ops when none is open).</summary>
+        private void EndPhaseBoth()
+        {
+            _metricsCollector.EndPhase();
+            PipelineTelemetry.EndPhase();
+        }
+
         // ── Pass Execution ───────────────────────────────────────────────
 
         /// <summary>
-        /// Runs the generation pass: visits every generation waypoint exactly once.
-        /// Speed escalates every <see cref="TIME_PER_PHASE"/> seconds, clamping
-        /// at the highest generation speed if all phases are exhausted before
-        /// all waypoints are visited.
+        /// Runs the generation pass: every configured speed phase for exactly
+        /// <see cref="_phaseSeconds"/> seconds, at every view distance (FP-9b).
+        /// <para>
+        /// The pass ends on <b>time</b>, not on waypoint exhaustion — the route is sized with headroom over
+        /// the distance the phases travel, so it deliberately stops partway along. Covering the loading
+        /// tour's terrain is <see cref="RunEnsureGeneratedPass"/>'s job, not this one's.
+        /// </para>
         /// </summary>
         private IEnumerator RunGenerationPass()
         {
-            transform.position = _generationWaypoints[0];
+            transform.position = WorldOrigin.VoxelToUnity(_generationWaypoints[0]);
             _activeWaypointIndex = 1;
-            FaceWaypoint(_generationWaypoints[1]);
+            FaceWaypoint(WorldOrigin.VoxelToUnity(_generationWaypoints[1]));
 
             CurrentGroupName = GROUP_GENERATION;
             TotalWaypointsInActivePass = _generationWaypoints.Count;
@@ -264,36 +360,158 @@ namespace Benchmarks
             float phaseTimer = 0f;
 
             CurrentPhaseName = $"{_generationSpeeds[0]} m/s";
-            _metricsCollector.BeginPhase(CurrentPhaseName, GROUP_GENERATION);
+            BeginPhaseBoth(CurrentPhaseName, GROUP_GENERATION, _generationSpeeds[0]);
             Debug.Log($"[Benchmark] Generation Pass — Phase 0: {_generationSpeeds[0]}m/s");
 
-            while (_activeWaypointIndex < _generationWaypoints.Count)
+            // TIME-bounded, not waypoint-bounded (FP-9b). Ending on waypoint exhaustion made every phase's
+            // duration a function of route length, so at vd >= 10 the highest generation speed never ran at
+            // all and the rest were cut short — durations of 19.7 / 3.2 / 19.8 / 2.2 / 0.7 s across the FP-8
+            // sweep. Every phase now runs exactly _phaseSeconds at every view distance, which is what makes
+            // two captures comparable. Coverage is no longer this loop's job: the route is sized so the
+            // timed distance covers the loading tour, and the ensure-generated pass closes the remainder.
+            while (speedIndex < _generationSpeeds.Length)
             {
                 phaseTimer += Time.deltaTime;
-                if (phaseTimer >= TIME_PER_PHASE && speedIndex < _generationSpeeds.Length - 1)
+                if (phaseTimer >= _phaseSeconds)
                 {
                     phaseTimer = 0f;
                     speedIndex++;
+                    if (speedIndex >= _generationSpeeds.Length) break;
+
                     _currentOverallPhaseIndex++;
                     CurrentPhaseName = $"{_generationSpeeds[speedIndex]} m/s";
-                    _metricsCollector.BeginPhase(CurrentPhaseName, GROUP_GENERATION);
+                    BeginPhaseBoth(CurrentPhaseName, GROUP_GENERATION, _generationSpeeds[speedIndex]);
                     Debug.Log($"[Benchmark] Generation Pass — Phase {speedIndex}: " +
                               $"{_generationSpeeds[speedIndex]}m/s");
                 }
 
-                // Phase progress: elapsed time within current speed phase relative to TIME_PER_PHASE.
-                // Clamped because the last speed phase can run past TIME_PER_PHASE while waypoints remain.
-                Progress = Mathf.Clamp01(phaseTimer / TIME_PER_PHASE);
+                Progress = Mathf.Clamp01(phaseTimer / _phaseSeconds);
                 OverallProgress = Mathf.Clamp01((_currentOverallPhaseIndex + Progress) / _totalPhaseCount);
 
-                StepTowardWaypoint(_generationWaypoints, _generationSpeeds[speedIndex], loop: false);
+                // Loop as a safety net: the route is sized with headroom over the timed distance, so this
+                // should never wrap — but a wrap is survivable, whereas standing still at the last waypoint
+                // would silently turn the remaining phases into a stationary hover.
+                StepTowardWaypoint(_generationWaypoints, _generationSpeeds[speedIndex], loop: true);
                 yield return null;
             }
 
             Progress = 1f;
             _currentOverallPhaseIndex = _generationSpeeds.Length;
-            _metricsCollector.EndPhase();
+            EndPhaseBoth();
             Debug.Log("[Benchmark] === Generation Pass Complete ===");
+        }
+
+        /// <summary>
+        /// Flies the loading tour once at <see cref="BenchmarkRouteGeometry.EnsureGeneratedSpeed"/> so every
+        /// chunk the loading pass will visit exists on disk before the transition saves and unloads.
+        /// </summary>
+        /// <returns>The coroutine enumerator.</returns>
+        /// <remarks>
+        /// <b>Not a measurement</b> — begun with <c>regimeBearing: false</c> (FP-9a) so a deliberately slow
+        /// sweep cannot contribute a regime verdict. Its purpose is correctness, not data: without it any
+        /// chunk the fast generation phases failed to populate would be <i>generated</i> by the loading pass,
+        /// which would then be measuring generation while labeled loading.
+        /// <para>
+        /// It flies the tour <b>legs</b> rather than the whole swept region deliberately: the loading pass
+        /// only ever visits those legs, so this is the smallest sufficient sweep — and its cost stays
+        /// constant (~211 s) no matter how many speed phases are configured, whereas a full-region sweep
+        /// would grow with them (~2 684 s once 300/500 m/s are added).
+        /// </para>
+        /// </remarks>
+        private IEnumerator RunEnsureGeneratedPass()
+        {
+            if (_loadingWaypoints.Count < 2) yield break;
+
+            CurrentGroupName = GROUP_ENSURE;
+            CurrentPhaseName = "Ensure Generated";
+            TotalWaypointsInActivePass = _loadingWaypoints.Count;
+            Progress = -1f;
+
+            transform.position = WorldOrigin.VoxelToUnity(_loadingWaypoints[0]);
+            _activeWaypointIndex = 1;
+            FaceWaypoint(WorldOrigin.VoxelToUnity(_loadingWaypoints[1]));
+
+            yield return WaitForChunkPipelineToSettle();
+
+            // Sized from THIS pass's duration, not _phaseSeconds: the sweep runs ~7x a speed phase, and a
+            // capacity hint short by that factor makes the trace table rehash mid-run — the incremental
+            // growth design §6 pre-sizes to avoid, landing inside the benchmark process.
+            BeginPhaseBoth(CurrentPhaseName, GROUP_ENSURE, BenchmarkRouteGeometry.EnsureGeneratedSpeed,
+                regimeBearing: false, phaseSecondsOverride: _routeGeometry.EnsureGeneratedSeconds);
+            Debug.Log("[Benchmark] === Ensure Generated: covering the loading tour at " +
+                      $"{BenchmarkRouteGeometry.EnsureGeneratedSpeed} m/s ===");
+
+            // Leg-bounded, unlike the timed passes: this one exists to COVER the tour, so it walks the whole
+            // circuit exactly once. Looping beyond that would repeat work; stopping early would defeat the
+            // purpose — and stopping at the LAST WAYPOINT is stopping early, because the loading pass loops
+            // its waypoints and therefore also flies the return leg back to the first. That leg went
+            // ungenerated until FP-11a, and at low view distance the load radius does not reach across it.
+            int legsToFly = _loadingWaypoints.Count;
+            int legsFlown = 0;
+            int previousWaypointIndex = _activeWaypointIndex;
+
+            while (legsFlown < legsToFly)
+            {
+                Progress = (float)legsFlown / legsToFly;
+                OverallProgress = Mathf.Clamp01((_currentOverallPhaseIndex + Progress) / _totalPhaseCount);
+                StepTowardWaypoint(_loadingWaypoints, BenchmarkRouteGeometry.EnsureGeneratedSpeed, loop: true);
+
+                // An arrival ALWAYS increments the index by exactly one; the wrap back to 0 happens on a
+                // later call and completes no leg, so testing for the increment cannot double-count it.
+                if (_activeWaypointIndex == previousWaypointIndex + 1) legsFlown++;
+                previousWaypointIndex = _activeWaypointIndex;
+
+                yield return null;
+            }
+
+            EndPhaseBoth();
+
+            // Snapshot only — accrual continues through the transition, which drains and saves the backlog
+            // the gate deferred out of this sweep. Freezing here would count that terrain as missing even
+            // though the loading pass genuinely loads it.
+            BenchmarkTourCoverage.SnapshotEnsurePass();
+
+            _currentOverallPhaseIndex++;
+            Progress = 1f;
+            Debug.Log("[Benchmark] === Ensure Generated Complete ===");
+        }
+
+        /// <summary>
+        /// Logs how much of the loading tour exists on disk as the loading pass begins (FP-11a), alongside
+        /// what the ensure sweep alone achieved.
+        /// </summary>
+        /// <remarks>
+        /// Only the final figure gates admissibility, and it is loud below
+        /// <see cref="BenchmarkTourCoverage.MinimumCoverage"/> on the same grounds as the shrunken-tour
+        /// banner: the loading pass is then partly generating terrain while labeled loading, and its numbers
+        /// look entirely plausible anyway. The ensure figure is informational — a sweep the gate throttled is
+        /// not a problem if the transition drain finished the job. An unmeasurable result is reported as such
+        /// and never as 100 %.
+        /// </remarks>
+        private static void ReportTourCoverage()
+        {
+            if (!BenchmarkTourCoverage.HasMeasurement)
+            {
+                Debug.LogError("[Benchmark] Loading-tour coverage NOT MEASURED — the footprint came out " +
+                               "empty. The loading pass's numbers cannot be attributed to loading.");
+                return;
+            }
+
+            int required = BenchmarkTourCoverage.RequiredChunks;
+
+            string message = $"[Benchmark] Loading-tour coverage: {BenchmarkTourCoverage.CoveredChunks.ToString()} / " +
+                             $"{required.ToString()} chunks on disk when the loading pass starts " +
+                             $"({BenchmarkTourCoverage.CoverageFraction * 100f:F1} %); the ensure sweep alone " +
+                             $"reached {BenchmarkTourCoverage.EnsurePassCoveredChunks.ToString()} " +
+                             $"({BenchmarkTourCoverage.EnsurePassCoverageFraction * 100f:F1} %).";
+
+            if (BenchmarkTourCoverage.IsSufficient) Debug.Log(message);
+            else
+                Debug.LogError(message + " Below " +
+                               (BenchmarkTourCoverage.MinimumCoverage * 100f).ToString("F0") +
+                               " % — the panic gate throttled the sweep and the transition did not finish the " +
+                               "job, so the loading pass will GENERATE part of its terrain rather than load " +
+                               "it. Treat its numbers as inadmissible at this view distance.");
         }
 
         /// <summary>
@@ -306,13 +524,13 @@ namespace Benchmarks
             CurrentGroupName = GROUP_TRANSITION;
             CurrentPhaseName = "Drain + Save + Unload";
             Progress = -1f;
-            OverallProgress = (float)_currentOverallPhaseIndex / _totalPhaseCount;
+            OverallProgress = Mathf.Clamp01((float)_currentOverallPhaseIndex / _totalPhaseCount);
             TotalWaypointsInActivePass = 0;
 
-            _metricsCollector.BeginPhase(CurrentPhaseName, GROUP_TRANSITION);
+            BeginPhaseBoth(CurrentPhaseName, GROUP_TRANSITION, 0f, regimeBearing: false);
             Debug.Log("[Benchmark] === Transition: Force-unloading all chunks... ===");
             yield return World.Instance.ForceUnloadAllChunks();
-            _metricsCollector.EndPhase();
+            EndPhaseBoth();
             Debug.Log("[Benchmark] === Transition Complete ===");
         }
 
@@ -329,9 +547,9 @@ namespace Benchmarks
                 yield break;
             }
 
-            transform.position = _loadingWaypoints[0];
+            transform.position = WorldOrigin.VoxelToUnity(_loadingWaypoints[0]);
             _activeWaypointIndex = 1;
-            FaceWaypoint(_loadingWaypoints[1]);
+            FaceWaypoint(WorldOrigin.VoxelToUnity(_loadingWaypoints[1]));
 
             CurrentGroupName = GROUP_LOADING;
             TotalWaypointsInActivePass = _loadingWaypoints.Count;
@@ -339,26 +557,27 @@ namespace Benchmarks
 
             yield return WaitForChunkPipelineToSettle();
 
-            int loadingPhaseBase = _generationSpeeds.Length + 1;
+            // +2, not +1: the ensure-generated sweep and the transition both precede the loading phases.
+            int loadingPhaseBase = _generationSpeeds.Length + 2;
             for (int i = 0; i < _loadingSpeeds.Length; i++)
             {
                 float phaseTimer = 0f;
                 _currentOverallPhaseIndex = loadingPhaseBase + i;
 
                 CurrentPhaseName = $"{_loadingSpeeds[i]} m/s";
-                _metricsCollector.BeginPhase(CurrentPhaseName, GROUP_LOADING);
+                BeginPhaseBoth(CurrentPhaseName, GROUP_LOADING, _loadingSpeeds[i]);
                 Debug.Log($"[Benchmark] Loading Pass — Phase {i}: {_loadingSpeeds[i]}m/s");
 
-                while (phaseTimer < TIME_PER_PHASE)
+                while (phaseTimer < _phaseSeconds)
                 {
                     phaseTimer += Time.deltaTime;
-                    Progress = phaseTimer / TIME_PER_PHASE;
+                    Progress = phaseTimer / _phaseSeconds;
                     OverallProgress = (_currentOverallPhaseIndex + Progress) / _totalPhaseCount;
                     StepTowardWaypoint(_loadingWaypoints, _loadingSpeeds[i], loop: true);
                     yield return null;
                 }
 
-                _metricsCollector.EndPhase();
+                EndPhaseBoth();
             }
 
             Progress = 1f;
@@ -404,7 +623,8 @@ namespace Benchmarks
                 Debug.Log("[Benchmark] Looping loading waypoints.");
             }
 
-            Vector3 target = waypoints[_activeWaypointIndex];
+            // Waypoints are authored in voxel space; from here down everything is Unity space (the transform).
+            Vector3 target = WorldOrigin.VoxelToUnity(waypoints[_activeWaypointIndex]);
             float step = speed * Time.deltaTime;
 
             Vector3 currentPos = transform.position;
@@ -419,7 +639,7 @@ namespace Benchmarks
                 int nextIndex = _activeWaypointIndex < waypoints.Count
                     ? _activeWaypointIndex
                     : (loop ? 0 : _activeWaypointIndex - 1);
-                FaceWaypoint(waypoints[nextIndex]);
+                FaceWaypoint(WorldOrigin.VoxelToUnity(waypoints[nextIndex]));
             }
             else
             {
@@ -492,12 +712,12 @@ namespace Benchmarks
         // ── Waypoint Building ────────────────────────────────────────────
 
         /// <summary>
-        /// Builds the complete waypoint sequences for both passes.
-        /// The benchmark region is derived from <see cref="Settings.benchmarkRegionSize"/>,
-        /// auto-scaled upward if needed to sustain all generation speed phases, and
-        /// clamped to the actual world size. Row spacing and margins are derived from
-        /// the current <see cref="Settings.LoadDistance"/> to ensure chunk generation
-        /// throughput is optimal for the configured view distance.
+        /// Builds the waypoint sequences for all three passes from <see cref="BenchmarkRouteGeometry"/>.
+        /// <para>
+        /// The region is <b>derived</b> from the distance the configured speed phases travel, not
+        /// configured — inverting the pre-FP-9b relationship in which waypoint count fell out of a region
+        /// the user guessed at, and silently collapsed to four waypoints at high view distances.
+        /// </para>
         /// </summary>
         /// <param name="settings">The active settings instance.</param>
         private void BuildWaypoints(Settings settings)
@@ -505,81 +725,52 @@ namespace Benchmarks
             _generationWaypoints.Clear();
             _loadingWaypoints.Clear();
 
-            int loadDistance = settings.LoadDistance;
+            _routeGeometry = new BenchmarkRouteGeometry(settings.LoadDistance, _generationSpeeds,
+                _phaseSeconds, settings.benchmarkGenerationWaypoints);
 
-            const int chunkWidth = VoxelData.ChunkWidth;
-            const int worldChunks = VoxelData.WorldSizeInChunks;
+            BenchmarkRouteGeometry geometry = _routeGeometry;
 
-            _configuredRegionChunks = Mathf.Min(settings.benchmarkRegionSize, worldChunks);
-            int configuredRegion = _configuredRegionChunks;
-
-            int marginChunks = loadDistance;
-            int rowStrideChunks = loadDistance * 2;
-            float rowStride = rowStrideChunks * chunkWidth;
-
-            int minimumRegion = CalculateMinimumRegionChunks(_generationSpeeds, marginChunks, rowStride, chunkWidth);
-            int regionChunks = configuredRegion;
-
-            if (regionChunks < minimumRegion)
+            // A shrunken tour means the timed phases cannot cover the loading route, so the loading pass
+            // would generate terrain instead of loading it — the confound FP-9b removes. Loud, because the
+            // capture is not comparable to any other and the numbers would look plausible anyway.
+            if (geometry.TourWasShrunk)
             {
-                int scaledRegion = Mathf.Min(minimumRegion, worldChunks);
-                Debug.LogWarning($"[Benchmark] Configured region ({configuredRegion} chunks) is too small " +
-                                 $"for the generation speed phases. Auto-increasing to {scaledRegion} chunks " +
-                                 $"(minimum required: {minimumRegion}).");
-                regionChunks = scaledRegion;
+                Debug.LogError("[Benchmark] Loading tour shrunk to " +
+                               $"{geometry.TourChunks} chunks (wanted {BenchmarkRouteGeometry.LoadingTourChunks}) — " +
+                               "the configured speeds travel too little distance for the generation phases to " +
+                               "cover it. The loading pass will GENERATE terrain, not load it. Raise the " +
+                               "generation speeds or the phase duration before trusting this capture.");
             }
 
-            _regionChunks = regionChunks;
+            BuildGenerationWaypoints(geometry);
+            BuildLoadingWaypoints(geometry);
 
-            int regionStartChunk = (worldChunks - regionChunks) / 2;
-
-            float minEdge = (regionStartChunk + marginChunks) * chunkWidth;
-            float maxEdge = (regionStartChunk + regionChunks - marginChunks) * chunkWidth;
-
-            if (maxEdge <= minEdge)
-            {
-                Debug.LogError($"[Benchmark] Region too small for margin. " +
-                               $"RegionChunks={regionChunks}, Margin={marginChunks}. " +
-                               $"Increase benchmarkRegionSize or decrease viewDistance.");
-                return;
-            }
-
-            BuildGenerationWaypoints(minEdge, maxEdge, rowStride);
-            BuildLoadingWaypoints(minEdge, maxEdge);
-
-            Debug.Log($"[Benchmark] Built {_generationWaypoints.Count + _loadingWaypoints.Count} waypoints " +
-                      $"({_generationWaypoints.Count} generation, {_loadingWaypoints.Count} loading). " +
-                      $"Region={regionChunks} chunks{(regionChunks != configuredRegion ? $" (configured: {configuredRegion})" : "")}, " +
-                      $"LoadDistance={loadDistance}, Margin={marginChunks}, RowStride={rowStrideChunks}");
+            Debug.Log($"[Benchmark] Built {_generationWaypoints.Count} generation + " +
+                      $"{_loadingWaypoints.Count} loading waypoints. " +
+                      $"Region={geometry.RegionChunks} chunks (derived), rows={geometry.Rows}, " +
+                      $"route={geometry.RouteLengthMeters:F0} m, timed={geometry.TimedTravelMeters:F0} m, " +
+                      $"tour={geometry.TourChunks} chunks, LoadDistance={settings.LoadDistance}, " +
+                      $"RowStride={geometry.RowStrideChunks}");
         }
 
         /// <summary>
-        /// Calculates the minimum benchmark region size (in chunks) needed to produce
-        /// enough zigzag waypoint distance to sustain all generation speed phases.
+        /// Generates zigzag sweep waypoints across the benchmark region — two per row, alternating
+        /// direction, with rows <c>2 × LoadDistance</c> apart so each sweeps virgin terrain.
         /// </summary>
-        private static int CalculateMinimumRegionChunks(float[] generationSpeeds, int marginChunks, float rowStride, int chunkWidth)
+        /// <param name="geometry">The derived route geometry.</param>
+        private void BuildGenerationWaypoints(BenchmarkRouteGeometry geometry)
         {
-            float totalTravelDistance = 0f;
-            foreach (float generationSpeed in generationSpeeds)
-            {
-                totalTravelDistance += generationSpeed * TIME_PER_PHASE;
-            }
-
-            float minSweepWidth = Mathf.Sqrt(totalTravelDistance * rowStride);
-            int minUsableChunks = Mathf.CeilToInt(minSweepWidth / chunkWidth);
-
-            return minUsableChunks + 2 * marginChunks;
-        }
-
-        /// <summary>
-        /// Generates zigzag sweep waypoints across the benchmark region.
-        /// </summary>
-        private void BuildGenerationWaypoints(float minEdge, float maxEdge, float rowStride)
-        {
+            float minEdge = geometry.MinEdge;
+            float maxEdge = geometry.MaxEdge;
+            float rowStride = geometry.RowStrideChunks * VoxelData.ChunkWidth;
             bool leftToRight = true;
 
-            for (float z = minEdge; z <= maxEdge; z += rowStride)
+            // Row count comes from the geometry rather than a float loop bound: accumulating rowStride to a
+            // computed maxEdge made the count depend on float rounding at the last row.
+            for (int row = 0; row < geometry.Rows; row++)
             {
+                float z = geometry.MinEdgeZ + row * rowStride;
+
                 if (leftToRight)
                 {
                     _generationWaypoints.Add(new Vector3(minEdge, FLIGHT_HEIGHT, z));
@@ -596,25 +787,19 @@ namespace Benchmarks
         }
 
         /// <summary>
-        /// Generates diagonal cross-cut waypoints through previously generated territory.
+        /// Generates diagonal cross-cut waypoints through previously generated territory, over a
+        /// <b>fixed-size</b> square centred on the swept rectangle.
         /// </summary>
-        private void BuildLoadingWaypoints(float minEdge, float maxEdge)
+        /// <param name="geometry">The derived route geometry.</param>
+        /// <remarks>
+        /// The 12-point shape is unchanged; only its extent is. It used to span the region minus a
+        /// <c>LoadDistance</c> margin, so the tour shrank as view distance rose — 84 chunks at vd 5 down to
+        /// 54 at vd 20 in FP-8 — meaning the "same" loading pass measured a 36 % smaller route at the high
+        /// end. A fixed extent is what makes loading numbers comparable across a view-distance sweep.
+        /// </remarks>
+        private void BuildLoadingWaypoints(BenchmarkRouteGeometry geometry)
         {
-            float midX = (minEdge + maxEdge) * 0.5f;
-            float midZ = (minEdge + maxEdge) * 0.5f;
-
-            _loadingWaypoints.Add(new Vector3(minEdge, FLIGHT_HEIGHT, minEdge));
-            _loadingWaypoints.Add(new Vector3(maxEdge, FLIGHT_HEIGHT, maxEdge));
-            _loadingWaypoints.Add(new Vector3(maxEdge, FLIGHT_HEIGHT, minEdge));
-            _loadingWaypoints.Add(new Vector3(minEdge, FLIGHT_HEIGHT, maxEdge));
-            _loadingWaypoints.Add(new Vector3(minEdge, FLIGHT_HEIGHT, midZ));
-            _loadingWaypoints.Add(new Vector3(maxEdge, FLIGHT_HEIGHT, midZ));
-            _loadingWaypoints.Add(new Vector3(midX, FLIGHT_HEIGHT, maxEdge));
-            _loadingWaypoints.Add(new Vector3(midX, FLIGHT_HEIGHT, minEdge));
-            _loadingWaypoints.Add(new Vector3(midX, FLIGHT_HEIGHT, minEdge));
-            _loadingWaypoints.Add(new Vector3(maxEdge, FLIGHT_HEIGHT, midZ));
-            _loadingWaypoints.Add(new Vector3(midX, FLIGHT_HEIGHT, maxEdge));
-            _loadingWaypoints.Add(new Vector3(minEdge, FLIGHT_HEIGHT, midZ));
+            geometry.BuildTourPoints(FLIGHT_HEIGHT, _loadingWaypoints);
         }
 
         // ── Benchmark End ────────────────────────────────────────────────

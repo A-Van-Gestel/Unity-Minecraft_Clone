@@ -1,4 +1,6 @@
+using System;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Data;
 using Data.Enums;
 using Helpers;
@@ -49,57 +51,57 @@ namespace Jobs
         // --- NEIGHBOR MAPS ---
         // 4 Cardinal Neighbors (Used for face culling)
         [ReadOnly]
-        public NativeArray<uint> NeighborBack; // South (-Z)
+        public NativeArray<uint> NeighborS; // South (-Z)
 
         [ReadOnly]
-        public NativeArray<uint> NeighborFront; // North (+Z)
+        public NativeArray<uint> NeighborN; // North (+Z)
 
         [ReadOnly]
-        public NativeArray<uint> NeighborLeft; // West  (-X)
+        public NativeArray<uint> NeighborW; // West  (-X)
 
         [ReadOnly]
-        public NativeArray<uint> NeighborRight; // East  (+X)
+        public NativeArray<uint> NeighborE; // East  (+X)
 
         // 4 Diagonal Neighbors (Used for fluid corner smoothing)
         [ReadOnly]
-        public NativeArray<uint> NeighborFrontRight; // North-East
+        public NativeArray<uint> NeighborNE; // North-East
 
         [ReadOnly]
-        public NativeArray<uint> NeighborBackRight; // South-East
+        public NativeArray<uint> NeighborSE; // South-East
 
         [ReadOnly]
-        public NativeArray<uint> NeighborBackLeft; // South-West
+        public NativeArray<uint> NeighborSW; // South-West
 
         [ReadOnly]
-        public NativeArray<uint> NeighborFrontLeft; // North-West
+        public NativeArray<uint> NeighborNW; // North-West
 
         // --- LIGHT MAPS (Phase 2 RGB) ---
         [ReadOnly]
         public NativeArray<ushort> LightMap;
 
         [ReadOnly]
-        public NativeArray<ushort> LightBack;
+        public NativeArray<ushort> LightS;
 
         [ReadOnly]
-        public NativeArray<ushort> LightFront;
+        public NativeArray<ushort> LightN;
 
         [ReadOnly]
-        public NativeArray<ushort> LightLeft;
+        public NativeArray<ushort> LightW;
 
         [ReadOnly]
-        public NativeArray<ushort> LightRight;
+        public NativeArray<ushort> LightE;
 
         [ReadOnly]
-        public NativeArray<ushort> LightFrontRight;
+        public NativeArray<ushort> LightNE;
 
         [ReadOnly]
-        public NativeArray<ushort> LightBackRight;
+        public NativeArray<ushort> LightSE;
 
         [ReadOnly]
-        public NativeArray<ushort> LightBackLeft;
+        public NativeArray<ushort> LightSW;
 
         [ReadOnly]
-        public NativeArray<ushort> LightFrontLeft;
+        public NativeArray<ushort> LightNW;
 
         // --- FLUID TEMPLATES ---
         [ReadOnly]
@@ -110,6 +112,19 @@ namespace Jobs
 
         // --- SETTINGS ---
         public SmoothLightingQuality SmoothLighting;
+
+        /// <summary>
+        /// SS-3: when set, faces reached by ordinary <b>full cubes</b> are subdivided too, so a wall's
+        /// shadow resolves as a band hugging it instead of a ramp across the whole adjoining cell.
+        /// Partial occluders (slabs, posts) are subdivided regardless — that is SS-2 and not gated here.
+        /// <para>
+        /// Off by default: it is the one shading change in this arc that moves the world's vertex count
+        /// (1.4×–1.7× measured), so it stays behind a setting until a capture says what it costs on the
+        /// target build.
+        /// </para>
+        /// </summary>
+        [MarshalAs(UnmanagedType.U1)]
+        public bool FullCubeContactShadows;
 
         // --- OUTPUT ---
         public MeshDataJobOutput Output;
@@ -309,6 +324,49 @@ namespace Jobs
         }
 
         /// <summary>
+        /// Meshes one block: emits its geometry, then stamps its emissive strength onto those vertices.
+        /// </summary>
+        private void GenerateVoxelMeshData(Vector3Int pos, uint packedData, BlockTypeJobData voxelProps,
+            ref NativeArray<OptionalVoxelState> neighbors, ref NativeArray<ushort> neighborLights)
+        {
+            int startVertex = _vertexIndex;
+            GenerateVoxelGeometry(pos, packedData, voxelProps, ref neighbors, ref neighborLights);
+            StampEmissiveStrength(in voxelProps, startVertex);
+        }
+
+        /// <summary>
+        /// Writes this block's emission into the alpha channel of the vertices it just produced (RF-3).
+        /// </summary>
+        /// <remarks>
+        /// Stamped here rather than threaded through the <see cref="VoxelMeshHelper"/> writers because
+        /// <see cref="GenerateVoxelMeshData"/> is the single router and <see cref="_vertexIndex"/> brackets
+        /// every shape path — so one pass covers standard cubes, custom meshes, cross meshes and fluids
+        /// alike, including any path added later. Alpha is the only vertex-color channel free on all three
+        /// submeshes (no shader read it before RF-3); RGB stays untouched and is claimed by TF-11.
+        /// Emission is 0-15, scaled by 17 to fill the byte.
+        /// <para>
+        /// The writers in <see cref="Helpers.VoxelMeshHelper"/> seed alpha to <b>0</b>, not 255 — the
+        /// shader reads this channel as "no emission at 0", so a 255 fill would make every ordinary block
+        /// in the world render at full emissive boost. That lets non-emitters return here immediately and
+        /// pay nothing.
+        /// </para>
+        /// </remarks>
+        /// <param name="voxelProps">Properties of the block whose geometry was just emitted.</param>
+        /// <param name="startVertex">Vertex index recorded before the block emitted any geometry.</param>
+        private void StampEmissiveStrength(in BlockTypeJobData voxelProps, int startVertex)
+        {
+            if (voxelProps.LightEmission == 0) return;
+
+            byte strength = (byte)(voxelProps.LightEmission * 17);
+            for (int v = startVertex; v < _vertexIndex; v++)
+            {
+                Color32 packed = Output.Colors[v];
+                packed.a = strength;
+                Output.Colors[v] = packed;
+            }
+        }
+
+        /// <summary>
         /// The main router that decides how to mesh a block (Standard, Custom, Cross, or Fluid).
         /// </summary>
         /// <remarks>
@@ -321,7 +379,7 @@ namespace Jobs
         /// always interpret the meta byte as a fluid level via the existing <c>GenerateFluidMeshData</c>
         /// path, and cross meshes do not use orientation at all.</para>
         /// </remarks>
-        private void GenerateVoxelMeshData(Vector3Int pos, uint packedData, BlockTypeJobData voxelProps,
+        private void GenerateVoxelGeometry(Vector3Int pos, uint packedData, BlockTypeJobData voxelProps,
             ref NativeArray<OptionalVoxelState> neighbors, ref NativeArray<ushort> neighborLights)
         {
             ushort id = BurstVoxelDataBitMapping.GetId(packedData);
@@ -348,12 +406,7 @@ namespace Jobs
                 {
                     for (int face = 0; face < 6; face++)
                     {
-                        // Reuse the already-fetched 14-neighbor array instead of re-calling GetVoxelStateFromLocalPos.
-                        // Mapping: Back(-Z)→2(S), Front(+Z)→0(N), Top(+Y)→8(Above), Bottom(-Y)→9(Below), Left(-X)→3(W), Right(+X)→1(E)
-                        int neighborIdx = face switch { 0 => 2, 1 => 0, 2 => 8, 3 => 9, 4 => 3, 5 => 1, _ => 0 };
-                        OptionalVoxelState cached = neighbors[neighborIdx];
-                        VoxelState? directNeighbor = cached.HasValue ? new VoxelState?(cached.State) : null;
-                        CalculateCornerLights(face, pos, directNeighbor,
+                        CalculateCornerLights(face, pos, faceIsInteriorToSampleCell: false,
                             out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3);
                         cornerLights.SetFace(face, l0, l1, l2, l3);
                     }
@@ -376,17 +429,14 @@ namespace Jobs
                 if (SmoothLighting >= SmoothLightingQuality.Standard)
                 {
                     // Top-level corners: sample the block above the flora (Top face at pos).
-                    VoxelState? aboveNeighbor = GetVoxelStateFromLocalPos(pos + BurstVoxelData.FaceChecks.Data[2]);
-                    CalculateCornerLights(2, pos, aboveNeighbor,
+                    CalculateCornerLights(2, pos, faceIsInteriorToSampleCell: false,
                         out crossLights.TopL0, out crossLights.TopL1, out crossLights.TopL2, out crossLights.TopL3);
 
                     if (SmoothLighting >= SmoothLightingQuality.High)
                     {
                         // Bottom-level corners: sample Top face of the block below (light at ground level).
-                        // The direct neighbor for this shifted sample is the flora block itself.
-                        VoxelState? centerVoxel = GetVoxelStateFromLocalPos(pos);
                         Vector3Int belowPos = pos + BurstVoxelData.FaceChecks.Data[3];
-                        CalculateCornerLights(2, belowPos, centerVoxel,
+                        CalculateCornerLights(2, belowPos, faceIsInteriorToSampleCell: false,
                             out crossLights.BotL0, out crossLights.BotL1, out crossLights.BotL2, out crossLights.BotL3);
                     }
                     else
@@ -401,18 +451,29 @@ namespace Jobs
                 else
                 {
                     // Off: flat lighting from the flora block's own light level.
-                    ushort blockLightData = GetLightDataFromLocalPos(pos);
+                    ushort lightData = GetLightDataFromLocalPos(pos);
                     Color32 flat = new Color32(
-                        (byte)(LightBitMapping.GetSkyLight(blockLightData) * 17),
-                        (byte)(LightBitMapping.GetBlocklightR(blockLightData) * 17),
-                        (byte)(LightBitMapping.GetBlocklightG(blockLightData) * 17),
-                        (byte)(LightBitMapping.GetBlocklightB(blockLightData) * 17));
+                        (byte)(LightBitMapping.GetSkylight(lightData) * 17),
+                        (byte)(LightBitMapping.GetBlocklightR(lightData) * 17),
+                        (byte)(LightBitMapping.GetBlocklightG(lightData) * 17),
+                        (byte)(LightBitMapping.GetBlocklightB(lightData) * 17));
                     crossLights.TopL0 = crossLights.TopL1 = crossLights.TopL2 = crossLights.TopL3 = flat;
                     crossLights.BotL0 = crossLights.BotL1 = crossLights.BotL2 = crossLights.BotL3 = flat;
                 }
 
+                // FL-1: per-voxel wind phase, hashed in voxel space (ChunkPosition is the chunk's
+                // voxel-space origin) so it survives floating-origin re-anchors and re-meshes.
+                float swayPhase = VoxelMeshHelper.VoxelHash01(
+                    (int)ChunkPosition.x + pos.x, pos.y, (int)ChunkPosition.z + pos.z);
+
+                // FL-4: deterministic per-voxel offset / scale / mirror, hashed over the same
+                // voxel-space cell as the phase so a re-mesh or re-anchor reproduces it exactly.
+                // FL-4b: the envelope it varies within is the block type's authored one.
+                CrossMeshVariation variation = CrossMeshVariation.FromCell(
+                    (int)ChunkPosition.x + pos.x, pos.y, (int)ChunkPosition.z + pos.z, in voxelProps);
+
                 VoxelMeshHelper.GenerateCrossMesh(textureID, in crossLights,
-                    pos, ref _vertexIndex, ref Output.Vertices, ref Output.TransparentTriangles, ref Output.Uvs, ref Output.Colors, ref Output.Normals,
+                    pos, swayPhase, in variation, ref _vertexIndex, ref Output.Vertices, ref Output.TransparentTriangles, ref Output.Uvs, ref Output.Colors, ref Output.Normals,
                     ref Output.LightData);
                 return;
             }
@@ -438,6 +499,7 @@ namespace Jobs
             }
 
             // --- CASE 4: STANDARD CUBE ---
+            int swayVertStart = _vertexIndex;
             switch (voxelProps.MetadataSchema)
             {
                 case MetadataSchema.None:
@@ -458,6 +520,34 @@ namespace Jobs
                 default:
                     GenerateStandardCubeMesh_Legacy(pos, packedData, id, voxelProps);
                     break;
+            }
+
+            // FL-2: leaf-block shimmer — a sway-flagged cube gets a uniform weight on every emitted
+            // vert (cubes are not rooted, unlike FL-1's cross meshes) plus the same voxel-space phase.
+            // A post-pass over the voxel's vertex range covers all six schema arms in one place.
+            if (voxelProps.SwayStrength > 0f && _vertexIndex > swayVertStart)
+                ApplySwayChannels(swayVertStart, voxelProps.SwayStrength, pos);
+        }
+
+        /// <summary>
+        /// Rewrites the UV ZW sway channels (FL-2) of every vertex emitted for the current voxel:
+        /// Z = the block's authored sway strength, W = the voxel's deterministic wind phase
+        /// (<see cref="VoxelMeshHelper.VoxelHash01"/> over the voxel-space cell, re-anchor-safe).
+        /// </summary>
+        /// <param name="fromVert">First vertex index of the voxel's emitted range.</param>
+        /// <param name="swayStrength">The block's authored sway strength in [0, 1].</param>
+        /// <param name="pos">The voxel's chunk-local position.</param>
+        private void ApplySwayChannels(int fromVert, float swayStrength, Vector3Int pos)
+        {
+            float swayPhase = VoxelMeshHelper.VoxelHash01(
+                (int)ChunkPosition.x + pos.x, pos.y, (int)ChunkPosition.z + pos.z);
+            half z = (half)swayStrength;
+            half w = (half)swayPhase;
+
+            for (int i = fromVert; i < _vertexIndex; i++)
+            {
+                half4 uv = Output.Uvs[i];
+                Output.Uvs[i] = new half4(uv.x, uv.y, z, w);
             }
         }
 
@@ -482,17 +572,28 @@ namespace Jobs
                 // Skip faces not defined in the custom mesh
                 if (p >= meshData.FaceCount) continue;
 
-                Vector3Int neighborPos = pos + BurstVoxelData.FaceChecks.Data[p];
-                VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(neighborPos);
+                // VO-6: this path's cull check and face index are both unrotated (only the vertices take
+                // the Y rotation), so the sample cell is resolved in that same unrotated frame — identity
+                // matrix, unrotated face normal. A Y rotation leaves a face's own-cell-vs-boundary
+                // character unchanged for the shapes this path serves.
+                float3x3 identity = float3x3.identity;
+                Vector3Int faceNormal = BurstVoxelData.FaceChecks.Data[p];
+                Vector3Int sampleCell = ResolveFaceSampleCell(pos, in identity,
+                    CustomFaces[meshData.FaceStartIndex + p].Centroid, faceNormal);
+                bool faceIsInterior = sampleCell == pos;
+                VoxelState? sampleVoxel = GetVoxelStateFromLocalPos(sampleCell);
 
-                if (ShouldDrawFace(voxelProps, neighborVoxel))
+                // An interior face keeps the cell's own open half in front of it, and only this block can
+                // occupy that space — so nothing outside the cell can occlude it (Bug M02).
+                if (faceIsInterior || ShouldDrawFace(voxelProps, sampleVoxel))
                 {
                     int translatedP = VoxelHelper.GetTranslatedFaceIndex(p, orientation);
                     int textureID = GetTextureID(id, translatedP);
 
                     if (SmoothLighting >= SmoothLightingQuality.Standard)
                     {
-                        CalculateCornerLights(p, pos, neighborVoxel, out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3);
+                        CalculateCornerLights(p, sampleCell - faceNormal, faceIsInterior,
+                            out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3);
                         VoxelMeshHelper.GenerateCustomMeshFace(translatedP, textureID, pos, rotation,
                             p, l0, l1, l2, l3,
                             voxelProps.CustomMeshIndex, in CustomMeshes, in CustomFaces, in CustomVerts, in CustomTris,
@@ -501,7 +602,7 @@ namespace Jobs
                     }
                     else
                     {
-                        Color32 flatLight = BuildFlatLightData(neighborVoxel, neighborPos);
+                        Color32 flatLight = BuildFlatLightData(sampleVoxel, sampleCell);
                         VoxelMeshHelper.GenerateCustomMeshFace(translatedP, textureID, flatLight, pos, rotation,
                             voxelProps.CustomMeshIndex, in CustomMeshes, in CustomFaces, in CustomVerts, in CustomTris,
                             ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles, ref Output.Uvs,
@@ -519,8 +620,9 @@ namespace Jobs
         /// <remarks>
         /// Handles <see cref="MetadataSchema.Axis3"/>, <see cref="MetadataSchema.Facing6"/>,
         /// <see cref="MetadataSchema.Facing6Roll2"/>, and <see cref="MetadataSchema.HorizontalOnly"/>.
-        /// Face culling rotates the neighbor-check direction through the same rotation matrix
-        /// as the vertices, ensuring correct occlusion for all orientations.
+        /// Face culling rotates the check direction through the same rotation matrix as the vertices, then
+        /// asks <see cref="ResolveFaceSampleCell"/> which cell the face looks into, so a face sitting
+        /// inside its own cell is not culled by a neighbor a whole cell away.
         /// </remarks>
         private void GenerateCustomBlockMesh_SchemaAware(Vector3Int pos, uint packedData, ushort id, BlockTypeJobData voxelProps)
         {
@@ -541,17 +643,28 @@ namespace Jobs
                 Vector3Int faceCheck = BurstVoxelData.FaceChecks.Data[p];
                 float3 rotatedCheck = math.round(math.mul(matrix, new float3(faceCheck.x, faceCheck.y, faceCheck.z)));
                 Vector3Int rotatedOffset = new Vector3Int((int)rotatedCheck.x, (int)rotatedCheck.y, (int)rotatedCheck.z);
-                Vector3Int neighborPos2 = pos + rotatedOffset;
-                VoxelState? neighborVoxel = GetVoxelStateFromLocalPos(neighborPos2);
 
-                if (ShouldDrawFace(voxelProps, neighborVoxel))
+                // Visibility and light both ask about the cell this face actually looks into.
+                Vector3Int sampleCell = ResolveFaceSampleCell(pos, in matrix,
+                    CustomFaces[meshData.FaceStartIndex + p].Centroid, rotatedOffset);
+                bool faceIsInterior = sampleCell == pos;
+                VoxelState? sampleVoxel = GetVoxelStateFromLocalPos(sampleCell);
+
+                // An interior face keeps the cell's own open half in front of it, and only this block can
+                // occupy that space — so nothing outside the cell can occlude it (Bug M02).
+                if (faceIsInterior || ShouldDrawFace(voxelProps, sampleVoxel))
                 {
                     int textureID = GetTextureID(id, p);
 
                     if (SmoothLighting >= SmoothLightingQuality.Standard)
                     {
                         int worldFace = DirectionToFaceIndex(rotatedOffset);
-                        CalculateCornerLights(worldFace, pos, neighborVoxel, out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3);
+
+                        // The ring's LUT offsets are relative to a block whose face-normal neighbor is the
+                        // sampled cell, so re-basing by one face step moves the ring and the direct term
+                        // together. For a boundary face this is exactly `pos`, as before.
+                        CalculateCornerLights(worldFace, sampleCell - rotatedOffset, faceIsInterior,
+                            out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3);
                         VoxelMeshHelper.GenerateCustomMeshFace(p, textureID, pos, in matrix,
                             worldFace, l0, l1, l2, l3,
                             voxelProps.CustomMeshIndex, in CustomMeshes, in CustomFaces, in CustomVerts, in CustomTris,
@@ -560,7 +673,7 @@ namespace Jobs
                     }
                     else
                     {
-                        Color32 flatLight = BuildFlatLightData(neighborVoxel, neighborPos2);
+                        Color32 flatLight = BuildFlatLightData(sampleVoxel, sampleCell);
                         VoxelMeshHelper.GenerateCustomMeshFace(p, textureID, flatLight, pos, in matrix,
                             voxelProps.CustomMeshIndex, in CustomMeshes, in CustomFaces, in CustomVerts, in CustomTris,
                             ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
@@ -653,7 +766,13 @@ namespace Jobs
 
                     if (SmoothLighting >= SmoothLightingQuality.Standard)
                     {
-                        CalculateCornerLights(p, pos, neighborVoxel, out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3);
+                        // Sampling by world position makes the corner-light permutation unnecessary on the
+                        // tessellated path: each sub-vertex asks about the cell it actually sits under.
+                        if (ShadeOrEmitStandardCubeFace(p, translatedP, pos, rotation, 0, textureID,
+                                voxelProps.RenderNeighborFaces,
+                                out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3))
+                            continue;
+
                         PermuteCornerLightsForYRotation(p, rotation, ref l0, ref l1, ref l2, ref l3);
                         VoxelMeshHelper.GenerateStandardCubeFace(translatedP, textureID, in pos, rotation,
                             0, l0, l1, l2, l3,
@@ -673,6 +792,134 @@ namespace Jobs
                 }
             }
         }
+
+        /// <summary>
+        /// Resolves one standard-cube face's shading: samples its neighborhood once, then either emits the
+        /// face here as a tessellated grid or hands the four corner values back for the caller to emit.
+        /// <para>
+        /// The single sampling pass is the point. The 3×3 gather is the mesher's heaviest read — nine
+        /// voxel states and their light — and deciding tessellation separately from emitting ran it twice
+        /// for every face an occluder reached.
+        /// </para>
+        /// </summary>
+        /// <param name="worldFace">Cardinal face index used for neighbor sampling.</param>
+        /// <param name="geometryFace">Face index whose vertices and UVs are emitted (differs from
+        /// <paramref name="worldFace"/> only on the legacy rotated path).</param>
+        /// <param name="pos">Block position in chunk-local space.</param>
+        /// <param name="rotation">Y-axis rotation in degrees applied to the emitted geometry.</param>
+        /// <param name="uvQuarterTurnsCW">Number of 90° clockwise UV rotations to apply (0-3).</param>
+        /// <param name="textureID">Atlas texture index for this face.</param>
+        /// <param name="renderNeighborFaces">Routes the triangles to the transparent submesh.</param>
+        /// <param name="l0">Light at corner 0; only meaningful when this returns <see langword="false"/>.</param>
+        /// <param name="l1">Light at corner 1; only meaningful when this returns <see langword="false"/>.</param>
+        /// <param name="l2">Light at corner 2; only meaningful when this returns <see langword="false"/>.</param>
+        /// <param name="l3">Light at corner 3; only meaningful when this returns <see langword="false"/>.</param>
+        /// <returns><see langword="true"/> when the face was emitted here; <see langword="false"/> when the
+        /// caller must emit it from the corner values.</returns>
+        private bool ShadeOrEmitStandardCubeFace(int worldFace, int geometryFace, Vector3Int pos,
+            float rotation, int uvQuarterTurnsCW, int textureID, bool renderNeighborFaces,
+            out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3)
+        {
+            // Deliberately not inlined into the per-face callers: they run inside the six-face loop, and a
+            // stackalloc there would grow the frame once per iteration instead of once per face.
+            Span<FaceOccluder> occluders = stackalloc FaceOccluder[FACE_OCCLUDER_COUNT];
+
+            // A standard cube's faces always sit on its cell boundary — only a custom mesh can put one
+            // inside its own cell (VO-6).
+            PrepareFaceSampling(worldFace, pos, faceIsInteriorToSampleCell: false, occluders,
+                out Vector3Int directCell, out _, out int axisA, out int axisB, out int tessellation);
+
+            if (tessellation > 1)
+            {
+                EmitTessellatedStandardCubeFace(geometryFace, pos, rotation, uvQuarterTurnsCW,
+                    textureID, renderNeighborFaces, tessellation, directCell, axisA, axisB, occluders);
+                l0 = l1 = l2 = l3 = default;
+                return true;
+            }
+
+            l0 = ShadeCorner(worldFace, 0, pos, directCell, axisA, axisB, occluders);
+            l1 = ShadeCorner(worldFace, 1, pos, directCell, axisA, axisB, occluders);
+            l2 = ShadeCorner(worldFace, 2, pos, directCell, axisA, axisB, occluders);
+            l3 = ShadeCorner(worldFace, 3, pos, directCell, axisA, axisB, occluders);
+            return false;
+        }
+
+        /// <summary>
+        /// VO-9b: emits one standard cube face as an N×N grid of sub-quads, shading every sub-vertex
+        /// through <see cref="ShadePoint"/> instead of blending four cell-corner values.
+        /// <para>
+        /// This is what gives a partial occluder a contact shadow of the right <i>width</i>. A slab's
+        /// edge lies at the cell midline, where an undivided face has no vertex, so its shadow was
+        /// smeared across the whole cell at a fraction of its strength — the resolution of the shading
+        /// signal was pinned to the resolution of the mesh.
+        /// </para>
+        /// <para>
+        /// Only faces that a partial occluder can actually reach take this path, and the shading
+        /// function reduces to the undivided model at the face's own corners, so a tessellated face
+        /// still meets an ordinary neighboring face without a seam.
+        /// </para>
+        /// </summary>
+        /// <param name="geometryFace">Face index whose vertices and UVs are emitted (differs from the
+        /// sampled world face only on the legacy rotated path).</param>
+        /// <param name="pos">Block position in chunk-local space.</param>
+        /// <param name="rotation">Y-axis rotation in degrees applied to the emitted geometry.</param>
+        /// <param name="uvQuarterTurnsCW">Number of 90° clockwise UV rotations to apply (0-3).</param>
+        /// <param name="textureID">Atlas texture index for this face.</param>
+        /// <param name="renderNeighborFaces">Routes the triangles to the transparent submesh.</param>
+        /// <param name="tessellation">Sub-quads per axis, from the face's own gate.</param>
+        /// <param name="directCell">The cell in front of the face, from <see cref="PrepareFaceSampling"/>.</param>
+        /// <param name="axisA">The face's first tangent axis.</param>
+        /// <param name="axisB">The face's second tangent axis.</param>
+        /// <param name="occluders">The hoisted 3x3, already sampled for this face.</param>
+        private void EmitTessellatedStandardCubeFace(int geometryFace, Vector3Int pos,
+            float rotation, int uvQuarterTurnsCW, int textureID, bool renderNeighborFaces,
+            int tessellation, Vector3Int directCell, int axisA, int axisB,
+            ReadOnlySpan<FaceOccluder> occluders)
+        {
+            VoxelMeshHelper.GetStandardCubeFaceQuad(geometryFace, in pos, rotation, uvQuarterTurnsCW,
+                out VoxelMeshHelper.FaceQuad face);
+            Vector3 normal = BurstVoxelData.FaceChecks.Data[geometryFace];
+
+            float step = 1f / tessellation;
+
+            for (int j = 0; j < tessellation; j++)
+            {
+                for (int i = 0; i < tessellation; i++)
+                {
+                    float u0 = i * step, v0 = j * step, u1 = (i + 1) * step, v1 = (j + 1) * step;
+                    VoxelMeshHelper.GetSubQuad(in face, u0, v0, u1, v1, out VoxelMeshHelper.FaceQuad sub);
+
+                    // Every sub-vertex asks the same question an ordinary face asks at its corners, at
+                    // its own position — so a subdivided face and an undivided neighbor agree wherever
+                    // they meet, without the tessellation needing to know about the seam.
+                    Color32 s0 = ShadePoint(sub.P0, directCell, axisA, axisB, occluders);
+                    Color32 s1 = ShadePoint(sub.P1, directCell, axisA, axisB, occluders);
+                    Color32 s2 = ShadePoint(sub.P2, directCell, axisA, axisB, occluders);
+                    Color32 s3 = ShadePoint(sub.P3, directCell, axisA, axisB, occluders);
+
+                    VoxelMeshHelper.EmitFaceQuad(in sub, textureID, in normal, s0, s1, s2, s3,
+                        ref _vertexIndex, ref Output.Vertices, ref Output.Triangles,
+                        ref Output.TransparentTriangles, ref Output.Uvs, ref Output.Colors,
+                        ref Output.Normals, ref Output.LightData, renderNeighborFaces);
+                }
+            }
+        }
+
+        /// <summary>
+        /// How many sub-quads per axis a face is split into when a partial occluder can reach it. The
+        /// sample points land on multiples of <c>1 / N</c>, so a value of 4 puts one exactly on the cell
+        /// midline — where an axis-aligned slab's edge sits.
+        /// </summary>
+        private const int SUB_CELL_TESSELLATION = 4;
+
+        /// <summary>
+        /// SS-3: sub-quads per axis for a face reached only by <b>full-cube</b> occluders. Half the
+        /// density of <see cref="SUB_CELL_TESSELLATION"/>, because a full cube's silhouette is its whole
+        /// cell — there is no sub-cell edge position to resolve, only a falloff — and the vertex cost
+        /// goes as the square: measured across terrain and built geometry, 4 costs 3.1×–4.7× the world's
+        /// vertices where 2 costs 1.4×–1.7× (design doc §8).
+        /// </summary>
+        private const int FULL_CUBE_SUB_CELL_TESSELLATION = 2;
 
         /// <summary>
         /// Checks visibility of a single cube face and, if visible, emits its vertices, UVs, and
@@ -697,7 +944,11 @@ namespace Jobs
 
             if (SmoothLighting >= SmoothLightingQuality.Standard)
             {
-                CalculateCornerLights(worldFace, pos, neighborVoxel, out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3);
+                if (ShadeOrEmitStandardCubeFace(worldFace, worldFace, pos, rotation: 0f, uvQuarterTurnsCW,
+                        textureID, voxelProps.RenderNeighborFaces,
+                        out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3))
+                    return;
+
                 VoxelMeshHelper.GenerateStandardCubeFace(worldFace, textureID, in pos, rotation: 0f, uvQuarterTurnsCW,
                     l0, l1, l2, l3,
                     ref _vertexIndex, ref Output.Vertices, ref Output.Triangles, ref Output.TransparentTriangles,
@@ -817,23 +1068,23 @@ namespace Jobs
 
         /// <summary>
         /// Builds a flat (uniform) light Color32 from a neighbor voxel state with separate
-        /// sun and block channels. Used by the flat lighting fallback paths.
+        /// sky and block channels. Used by the flat lighting fallback paths.
         /// </summary>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private Color32 BuildFlatLightData(VoxelState? neighborVoxel, Vector3Int neighborPos)
         {
             if (!neighborVoxel.HasValue)
             {
-                const byte fullSun = 15 * 17; // 255
-                return new Color32(fullSun, 0, 0, 0);
+                const byte fullSky = 15 * 17; // 255
+                return new Color32(fullSky, 0, 0, 0);
             }
 
             ushort lightData = GetLightDataFromLocalPos(neighborPos);
-            byte sun = (byte)(LightBitMapping.GetSkyLight(lightData) * 17);
+            byte sky = (byte)(LightBitMapping.GetSkylight(lightData) * 17);
             byte blockR = (byte)(LightBitMapping.GetBlocklightR(lightData) * 17);
             byte blockG = (byte)(LightBitMapping.GetBlocklightG(lightData) * 17);
             byte blockB = (byte)(LightBitMapping.GetBlocklightB(lightData) * 17);
-            return new Color32(sun, blockR, blockG, blockB);
+            return new Color32(sky, blockR, blockG, blockB);
         }
 
         /// <summary>
@@ -919,120 +1170,593 @@ namespace Jobs
         }
 
         /// <summary>
-        /// Computes per-vertex corner-averaged light values for smooth lighting.
-        /// Samples 4 neighboring blocks per corner (direct + sideA + sideB + diagonal)
-        /// and averages sunlight and blocklight channels independently.
+        /// VO-6: resolves which cell a custom-mesh face actually looks into — the cell containing the
+        /// space immediately in front of the face's own position, rather than the block-boundary neighbor.
+        /// <para>
+        /// A boundary face's centroid lies on a cell wall, so stepping off it lands in the neighbor and
+        /// this returns exactly <c>pos + rotatedNormal</c> — today's behavior, unchanged. A half slab's
+        /// large face lies on the mid-plane, so stepping off it stays inside the block's own cell, which
+        /// is the <c>MESHING_BUGS.md</c> Bug M01 fix.
+        /// </para>
         /// </summary>
+        /// <param name="pos">The voxel's chunk-local position.</param>
+        /// <param name="matrix">The block's metadata rotation, applied about the cell center exactly as
+        /// <see cref="VoxelMeshHelper.GenerateCustomMeshFace"/> applies it to the vertices.</param>
+        /// <param name="centroid">The face's unrotated block-local centroid.</param>
+        /// <param name="rotatedNormal">The face's rotated normal, ±1 on exactly one axis.</param>
+        /// <returns>The chunk-local cell whose light this face should sample.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static Vector3Int ResolveFaceSampleCell(Vector3Int pos, in float3x3 matrix,
+            float3 centroid, Vector3Int rotatedNormal)
+        {
+            float3 center = BurstVoxelData.BlockCenter;
+            float3 rotatedCentroid = math.mul(matrix, centroid - center) + center;
+            float3 probe = rotatedCentroid
+                           + FACE_SAMPLE_STEP * new float3(rotatedNormal.x, rotatedNormal.y, rotatedNormal.z);
+            int3 cell = (int3)math.floor(probe);
+            return new Vector3Int(pos.x + cell.x, pos.y + cell.y, pos.z + cell.z);
+        }
+
+        /// <summary>
+        /// How far off a face to step, in cells, when asking which cell it faces. Must be strictly
+        /// between 0 and 0.5.
+        /// <para>
+        /// A half-cell step — the obvious choice, and the one this phase's plan originally specified —
+        /// puts a mid-plane face at exactly <c>0.5 ± 0.5</c>, a cell boundary, where <c>floor</c> breaks
+        /// the tie toward the own cell for a negative normal and toward the neighbor for a positive one.
+        /// That silently fixes half the orientations and leaves the other half untouched. Any step short
+        /// of the boundary resolves both, and for a face that is not on the mid-plane every step in the
+        /// range agrees anyway. Guarded by <c>KM01a</c> (negative normal) and <c>KM01b</c> (positive).
+        /// </para>
+        /// </summary>
+        private const float FACE_SAMPLE_STEP = 0.25f;
+
+        /// <summary>
+        /// Computes per-vertex corner-shaded light values for smooth lighting: the four cell corners of
+        /// one face, each evaluated against the 3x3 neighborhood in front of it.
+        /// </summary>
+        /// <param name="faceIndex">Face direction, in <c>VoxelData.FaceChecks</c> order.</param>
+        /// <param name="blockPos">The shaded block's chunk-local position.</param>
+        /// <param name="faceIsInteriorToSampleCell">True when the face sits inside its own cell (VO-6).</param>
+        /// <param name="l0">Light at corner 0.</param>
+        /// <param name="l1">Light at corner 1.</param>
+        /// <param name="l2">Light at corner 2.</param>
+        /// <param name="l3">Light at corner 3.</param>
         private void CalculateCornerLights(int faceIndex, Vector3Int blockPos,
-            VoxelState? directNeighbor,
+            bool faceIsInteriorToSampleCell,
             out Color32 l0, out Color32 l1, out Color32 l2, out Color32 l3)
         {
-            // Extract light from the pre-fetched direct neighbor (same for all 4 corners).
-            byte directSun, directR, directG, directB;
-            if (!directNeighbor.HasValue)
-            {
-                directSun = 15;
-                directR = 0;
-                directG = 0;
-                directB = 0;
-            }
-            else
-            {
-                VoxelState ds = directNeighbor.Value;
-                bool directOpaque = BlockTypes[ds.ID].IsOpaque;
-                if (directOpaque)
-                {
-                    directSun = 0;
-                    directR = 0;
-                    directG = 0;
-                    directB = 0;
-                }
-                else
-                {
-                    // Read RGB from the ushort light array via the face neighbor position
-                    Vector3Int neighborPos = blockPos + BurstVoxelData.FaceChecks.Data[faceIndex];
-                    ushort lightData = GetLightDataFromLocalPos(neighborPos);
-                    directSun = LightBitMapping.GetSkyLight(lightData);
-                    directR = LightBitMapping.GetBlocklightR(lightData);
-                    directG = LightBitMapping.GetBlocklightG(lightData);
-                    directB = LightBitMapping.GetBlocklightB(lightData);
-                }
-            }
+            Span<FaceOccluder> occluders = stackalloc FaceOccluder[FACE_OCCLUDER_COUNT];
 
-            l0 = SampleCorner(faceIndex, 0, blockPos, directSun, directR, directG, directB);
-            l1 = SampleCorner(faceIndex, 1, blockPos, directSun, directR, directG, directB);
-            l2 = SampleCorner(faceIndex, 2, blockPos, directSun, directR, directG, directB);
-            l3 = SampleCorner(faceIndex, 3, blockPos, directSun, directR, directG, directB);
+            // The tessellation gate this computes is discarded: only standard cubes subdivide, and they
+            // go through ShadeOrEmitStandardCubeFace. A custom mesh's face keeps its authored geometry.
+            PrepareFaceSampling(faceIndex, blockPos, faceIsInteriorToSampleCell, occluders,
+                out Vector3Int directCell, out _, out int axisA, out int axisB, out _);
+
+            l0 = ShadeCorner(faceIndex, 0, blockPos, directCell, axisA, axisB, occluders);
+            l1 = ShadeCorner(faceIndex, 1, blockPos, directCell, axisA, axisB, occluders);
+            l2 = ShadeCorner(faceIndex, 2, blockPos, directCell, axisA, axisB, occluders);
+            l3 = ShadeCorner(faceIndex, 3, blockPos, directCell, axisA, axisB, occluders);
         }
 
+        /// <summary>
+        /// Evaluates <see cref="ShadePoint"/> at one of a face's four cell corners — the shading points
+        /// the mesher used exclusively before VO-9 introduced sub-cell sampling, and still the only ones
+        /// an undivided face emits.
+        /// </summary>
+        /// <param name="faceIndex">Face direction, in <c>VoxelData.FaceChecks</c> order.</param>
+        /// <param name="cornerIndex">Which of the face's four corners (0-3).</param>
+        /// <param name="blockPos">The shaded block's chunk-local position.</param>
+        /// <param name="directCell">The cell in front of the face.</param>
+        /// <param name="axisA">The face's first tangent axis.</param>
+        /// <param name="axisB">The face's second tangent axis.</param>
+        /// <param name="occluders">The hoisted 3x3.</param>
+        /// <returns>The corner's encoded light value.</returns>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private Color32 SampleCorner(int faceIndex, int cornerIndex, Vector3Int blockPos,
-            byte directSun, byte directR, byte directG, byte directB)
+        private Color32 ShadeCorner(int faceIndex, int cornerIndex, Vector3Int blockPos,
+            Vector3Int directCell, int axisA, int axisB, ReadOnlySpan<FaceOccluder> occluders)
         {
-            int lutBase = faceIndex * 12 + cornerIndex * 3;
-            int3 sideAOffset = BurstVoxelData.CornerOffsets.Data[lutBase + 0];
-            int3 sideBOffset = BurstVoxelData.CornerOffsets.Data[lutBase + 1];
-            int3 diagOffset = BurstVoxelData.CornerOffsets.Data[lutBase + 2];
+            int3 cornerVert = BurstVoxelData.CornerVertices.Data[faceIndex * 4 + cornerIndex];
+            float3 samplePoint = new float3(
+                blockPos.x + cornerVert.x, blockPos.y + cornerVert.y, blockPos.z + cornerVert.z);
 
-            SampleNeighborLight(blockPos + new Vector3Int(sideAOffset.x, sideAOffset.y, sideAOffset.z),
-                out byte sideASun, out byte sideAR, out byte sideAG, out byte sideAB, out bool sideAOpaque);
+            return ShadePoint(samplePoint, directCell, axisA, axisB, occluders);
+        }
 
-            SampleNeighborLight(blockPos + new Vector3Int(sideBOffset.x, sideBOffset.y, sideBOffset.z),
-                out byte sideBSun, out byte sideBR, out byte sideBG, out byte sideBB, out bool sideBOpaque);
+        /// <summary>
+        /// Resolves everything a face's shading samples share: the cell in front of it, its two tangent
+        /// axes, the 3x3 of occluders and light around it, and how finely it must be subdivided.
+        /// <para>
+        /// The 3x3 is gathered here once and read by every sample on the face, which is what lets a
+        /// sub-vertex be shaded without any voxel reads of its own.
+        /// </para>
+        /// </summary>
+        /// <param name="faceIndex">Face direction, in <c>VoxelData.FaceChecks</c> order.</param>
+        /// <param name="blockPos">The shaded block's chunk-local position.</param>
+        /// <param name="faceIsInteriorToSampleCell">True when the face sits inside its own cell (VO-6).</param>
+        /// <param name="occluders">Receives the 3x3 in front of the face, in <see cref="OccluderIndex"/>
+        /// order; must have <see cref="FACE_OCCLUDER_COUNT"/> entries.</param>
+        /// <param name="directCell">The cell in front of the face (the 3x3's center).</param>
+        /// <param name="normalAxis">The face's normal axis (0 = X, 1 = Y, 2 = Z).</param>
+        /// <param name="axisA">The face's first tangent axis.</param>
+        /// <param name="axisB">The face's second tangent axis.</param>
+        /// <param name="tessellation">Sub-quads per axis this face needs: 1 leaves it undivided.</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void PrepareFaceSampling(int faceIndex, Vector3Int blockPos,
+            bool faceIsInteriorToSampleCell, Span<FaceOccluder> occluders,
+            out Vector3Int directCell, out int normalAxis, out int axisA, out int axisB,
+            out int tessellation)
+        {
+            Vector3Int faceNormal = BurstVoxelData.FaceChecks.Data[faceIndex];
+            directCell = blockPos + faceNormal;
 
-            byte diagSun = 0, diagR = 0, diagG = 0, diagB = 0;
-            if (!(sideAOpaque && sideBOpaque))
+            normalAxis = faceNormal.x != 0 ? 0 : (faceNormal.y != 0 ? 1 : 2);
+            axisA = normalAxis == 0 ? 1 : 0;
+            axisB = normalAxis == 2 ? 1 : 2;
+
+            // Bug M03: locate the shaded surface within the sampled cell. A boundary face lies on the
+            // wall its normal points away from; a face interior to its own cell (a slab's mid-plane,
+            // after VO-6) lies on the cell midline. Getting this wrong asks a block whether it occludes
+            // its own surface — which is how a recessed slab once rendered fully black.
+            int normalSign = faceNormal.x + faceNormal.y + faceNormal.z;
+            bool frontIsPositive = normalSign > 0;
+            bool lowHalf = faceIsInteriorToSampleCell ? normalSign < 0 : normalSign > 0;
+            float planeCoord = frontIsPositive
+                ? (lowHalf ? 0f : 0.5f)
+                : (lowHalf ? 0.5f : 1f);
+
+            bool hasPartialOccluder = false;
+            bool hasAnyOccluder = false;
+
+            // Hoist the whole 3x3 of cells in front of the face ONCE. Every shading point on this face
+            // draws from these nine, so this replaces the sixteen overlapping per-corner fetches the
+            // pre-SS-2 path made — and it is what lets a sub-vertex evaluate the full neighborhood
+            // without any per-point voxel reads at all.
+            for (int da = -1; da <= 1; da++)
             {
-                SampleNeighborLight(blockPos + new Vector3Int(diagOffset.x, diagOffset.y, diagOffset.z),
-                    out diagSun, out diagR, out diagG, out diagB, out _);
+                for (int db = -1; db <= 1; db++)
+                {
+                    Vector3Int cell = directCell + AxisStep(axisA, da) + AxisStep(axisB, db);
+                    FaceOccluder entry = default;
+
+                    VoxelState? state = GetVoxelStateFromLocalPos(cell);
+                    if (!state.HasValue)
+                    {
+                        // Outside the built neighborhood: treat as open sky, exactly as before.
+                        entry.Sky = 15;
+                        entry.HoldsLight = 1;
+                    }
+                    else
+                    {
+                        VoxelState s = state.Value;
+                        BlockTypeJobData props = BlockTypes[s.ID];
+
+                        if (LightAttenuation.AmbientOcclusionPlaneSilhouette(in props, s.Meta, normalAxis,
+                                planeCoord, frontIsPositive, out float2 rectMin, out float2 rectMax))
+                        {
+                            // Shift the silhouette into the face's own parameter frame, so distances to
+                            // every occluder are measured in one coordinate system.
+                            entry.RectMin = rectMin + new float2(da, db);
+                            entry.RectMax = rectMax + new float2(da, db);
+                            entry.Casts = 1;
+                            hasAnyOccluder = true;
+
+                            // Only a caster sets the finer grid, and only its SHAPE decides: the
+                            // silhouette already proves this volume reaches the plane, and only a partial
+                            // one can put an edge somewhere other than the cell border. IsOpaque is not
+                            // retested — a transparent volume never returns a silhouette at all.
+                            hasPartialOccluder |= props.HasCustomBounds;
+                        }
+
+                        // A fully-opaque cell holds only surface light and is fully shadowing wherever it
+                        // matters, so skip the read — the common case, and unchanged from before SS-2.
+                        if (!props.IsFullyOpaqueCell)
+                        {
+                            entry.HoldsLight = 1;
+                            ushort lightData = GetLightDataFromLocalPos(cell);
+                            entry.Sky = LightBitMapping.GetSkylight(lightData);
+                            entry.R = LightBitMapping.GetBlocklightR(lightData);
+                            entry.G = LightBitMapping.GetBlocklightG(lightData);
+                            entry.B = LightBitMapping.GetBlocklightB(lightData);
+                        }
+                    }
+
+                    occluders[OccluderIndex(da, db)] = entry;
+                }
             }
 
-            // Average all 4 channels independently (always divide by 4).
-            // Encode to UNorm8: value * 17 maps 0-15 → 0-255 (with rounding: (sum * 17 + 2) / 4).
-            int sunSum = directSun + sideASun + sideBSun + diagSun;
-            int rSum = directR + sideAR + sideBR + diagR;
-            int gSum = directG + sideAG + sideBG + diagG;
-            int bSum = directB + sideAB + sideBB + diagB;
+            // SS-3: a partial occluder needs the finer grid — its edge can sit anywhere inside a cell,
+            // which is the resolution problem VO-9b was built for. A full cube's silhouette is the cell
+            // itself, so its shadow only has to resolve a falloff, and half the density carries it at a
+            // quarter of the vertex cost. Faces no occluder reaches stay a single quad, which is what
+            // keeps flat ground free.
+            //
+            // Every term here is a question about the SHADOWS that reached this face, not about what
+            // happens to be standing near it: both flags are set only where a silhouette was cast, so a
+            // top slab hanging over a floor — which never reaches the floor's plane — leaves it at one
+            // quad instead of sixteen (B60). hasPartialOccluder implies hasAnyOccluder by construction.
+            tessellation = hasPartialOccluder
+                ? SUB_CELL_TESSELLATION
+                : (FullCubeContactShadows && hasAnyOccluder ? FULL_CUBE_SUB_CELL_TESSELLATION : 1);
+        }
+
+        /// <summary>
+        /// SS-2: one cell of the 3×3 in front of a shaded face — its silhouette on that face's plane
+        /// (already shifted into the face's parameter frame) and its raw light.
+        /// </summary>
+        private struct FaceOccluder
+        {
+            /// <summary>Silhouette minimum corner, in the shaded face's parameter frame.</summary>
+            public float2 RectMin;
+
+            /// <summary>Silhouette maximum corner.</summary>
+            public float2 RectMax;
+
+            /// <summary>1 when this cell's volume reaches the shaded plane and casts a shadow.</summary>
+            public byte Casts;
+
+            /// <summary>
+            /// 1 when this cell's stored light is meaningful ambient light. A fully-opaque cell holds
+            /// only a surface stamp, so it contributes nothing to the light mean — its effect on the
+            /// surface is carried entirely by the occlusion field.
+            /// </summary>
+            public byte HoldsLight;
+
+            /// <summary>The cell's raw sky light.</summary>
+            public byte Sky;
+
+            /// <summary>The cell's raw red block light.</summary>
+            public byte R;
+
+            /// <summary>The cell's raw green block light.</summary>
+            public byte G;
+
+            /// <summary>The cell's raw blue block light.</summary>
+            public byte B;
+        }
+
+        /// <summary>Number of cells hoisted per face — the 3×3 layer in front of it.</summary>
+        private const int FACE_OCCLUDER_COUNT = 9;
+
+        /// <summary>Maps a tangent-cell offset pair in <c>[-1, 1]²</c> to its slot in the hoisted 3×3.</summary>
+        /// <param name="da">Offset on the face's first tangent axis.</param>
+        /// <param name="db">Offset on the second tangent axis.</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static int OccluderIndex(int da, int db) => (da + 1) * 3 + (db + 1);
+
+        /// <summary>
+        /// SS-2: computes one smooth-lighting value at an arbitrary point on a face — the single shading
+        /// function, used at a face's own corners and at every sub-vertex of a subdivided one.
+        /// <para>
+        /// Two fields are evaluated and multiplied. <b>Occlusion</b> is a distance field: each of the
+        /// nine hoisted cells that casts a silhouette darkens the point by its share of the hemisphere,
+        /// attenuated by how far the point lies from that silhouette. <b>Light</b> is a weighted mean of
+        /// the surrounding cells' values, taken over the space those silhouettes leave open.
+        /// </para>
+        /// <para>
+        /// <b>At a cell corner this reduces exactly to the pre-SS-2 model.</b> Every weight is then a
+        /// quarter and every occluder is either in contact or a full cell away, so the result collapses
+        /// term-for-term to a quarter of the sum of the open cells' light — the expression the engine has
+        /// always evaluated, reproducing <c>255 / 191 / 128 / 64</c> for zero to three occluding
+        /// neighbors. That identity is what lets this replace a coverage model without moving ordinary
+        /// terrain, and baseline <b>B56</b> pins it.
+        /// </para>
+        /// <para>
+        /// <b>Why occlusion is kept out of the interpolation weights.</b> The weights exist to blend
+        /// <i>light</i>, and they collapse onto a single cell at the middle of a face — correct for
+        /// light and fatal for occlusion, because evaluating a form where the two are multiplied
+        /// together destroys every ring occluder's contribution toward the face center. That is
+        /// precisely the defect VO-9b shipped and had to correct (an inner corner's center went 144 to
+        /// 255). Separating them is what makes per-sub-vertex evaluation safe here.
+        /// </para>
+        /// </summary>
+        /// <param name="samplePoint">The shaded point, in chunk-local space, on the face's plane.</param>
+        /// <param name="directCell">The cell in front of the face (the 3x3's center).</param>
+        /// <param name="axisA">The face's first tangent axis (0 = X, 1 = Y, 2 = Z).</param>
+        /// <param name="axisB">The face's second tangent axis.</param>
+        /// <param name="occluders">The hoisted 3x3, from <see cref="PrepareFaceSampling"/>.</param>
+        /// <returns>The encoded light value at that point.</returns>
+        private Color32 ShadePoint(float3 samplePoint, Vector3Int directCell, int axisA, int axisB,
+            ReadOnlySpan<FaceOccluder> occluders)
+        {
+            float2 point = new float2(
+                samplePoint[axisA] - Component(directCell, axisA),
+                samplePoint[axisB] - Component(directCell, axisB));
+
+            // Two readings of the same nine silhouettes. `shadow` is per CELL — how strongly each cell
+            // shadows this point — and drives the corner seal and the light weighting, both of which are
+            // questions about cells. `quadrant` is per DIRECTION, and is what the occlusion term sums:
+            // occlusion is a share of the hemisphere, so it must be attributed to the quarter of the sky
+            // an occluder blocks, not to the cell that happens to contain it (SS-3a).
+            Span<float> shadow = stackalloc float[FACE_OCCLUDER_COUNT];
+            Span<float> quadrant = stackalloc float[QUADRANT_COUNT];
+
+            for (int i = 0; i < QUADRANT_COUNT; i++) quadrant[i] = 0f;
+
+            for (int i = 0; i < FACE_OCCLUDER_COUNT; i++)
+            {
+                FaceOccluder o = occluders[i];
+                if (o.Casts == 0)
+                {
+                    shadow[i] = 0f;
+                    continue;
+                }
+
+                shadow[i] = LightAttenuation.ContactShadowFalloff(DistanceToRect(point, in o));
+
+                // The same silhouette can darken several quadrants — a wall running past the point
+                // covers two of them — and that is exactly what makes its shadow independent of where
+                // the cell seams fall.
+                for (int qa = -1; qa <= 1; qa += 2)
+                for (int qb = -1; qb <= 1; qb += 2)
+                {
+                    if (!ClipToQuadrant(point, in o, qa, qb, out float2 clipMin, out float2 clipMax))
+                        continue;
+
+                    int q = QuadrantIndex(qa, qb);
+                    float lit = LightAttenuation.ContactShadowFalloff(DistanceToRect(point, clipMin, clipMax));
+                    quadrant[q] = math.max(quadrant[q], lit);
+                }
+            }
+
+            ApplyCornerSeal(shadow, quadrant);
+
+            float occlusion = 0f;
+            for (int i = 0; i < QUADRANT_COUNT; i++)
+            {
+                occlusion += LightAttenuation.QuadrantOcclusionShare * quadrant[i];
+            }
+
+            occlusion = math.saturate(occlusion);
+
+            // Light arrives from the part of the neighborhood this point can actually SEE, so the mean
+            // is taken over the interpolation kernel weighted by BOTH what holds light and what is not
+            // shadowed. Taking it over the same weights the occlusion term uses is what makes the two
+            // factors cancel rather than compound: since the kernel weights sum to one, the visible
+            // weight IS `1 - occlusion` at a corner, so `mean * (1 - occlusion)` collapses to
+            // `sum(weight * open * light)` — the expression the engine evaluated before SS-2, now for an
+            // arbitrary light field rather than only a uniform one. Baseline B58 pins that.
+            TangentSpan(point.x, out int offsetA, out float weightDirectA, out float weightNeighborA);
+            TangentSpan(point.y, out int offsetB, out float weightDirectB, out float weightNeighborB);
+
+            Span<int> kernelCell = stackalloc int[LIGHT_KERNEL_COUNT]
+            {
+                OccluderIndex(0, 0),
+                OccluderIndex(offsetA, 0),
+                OccluderIndex(0, offsetB),
+                OccluderIndex(offsetA, offsetB),
+            };
+
+            Span<float> kernelWeight = stackalloc float[LIGHT_KERNEL_COUNT]
+            {
+                weightDirectA * weightDirectB,
+                weightNeighborA * weightDirectB,
+                weightDirectA * weightNeighborB,
+                weightNeighborA * weightNeighborB,
+            };
+
+            float4 visibleSum = float4.zero, litSum = float4.zero;
+            float visibleWeight = 0f, litWeight = 0f;
+
+            for (int k = 0; k < LIGHT_KERNEL_COUNT; k++)
+            {
+                int cell = kernelCell[k];
+                float weight = kernelWeight[k];
+                if (weight <= 0f || occluders[cell].HoldsLight == 0) continue;
+
+                FaceOccluder o = occluders[cell];
+                float4 value = new float4(o.Sky, o.R, o.G, o.B);
+
+                litSum += weight * value;
+                litWeight += weight;
+
+                float visible = weight * (1f - shadow[cell]);
+                visibleSum += visible * value;
+                visibleWeight += visible;
+            }
+
+            // Fall back to the unshadowed mean when the kernel sees nothing: at a face center the kernel
+            // collapses onto the single cell in front of the face, and if that cell occludes — a slab
+            // standing on the surface — there is no visible light source left to average. The occlusion
+            // term already carries the darkening there; a zero would render the face black.
+            float4 light = visibleWeight > LIGHT_WEIGHT_EPSILON
+                ? visibleSum / visibleWeight
+                : (litWeight > LIGHT_WEIGHT_EPSILON ? litSum / litWeight : float4.zero);
+
+            float4 shaded = light * (1f - occlusion);
 
             return new Color32(
-                (byte)((sunSum * 17 + 2) / 4),
-                (byte)((rSum * 17 + 2) / 4),
-                (byte)((gSum * 17 + 2) / 4),
-                (byte)((bSum * 17 + 2) / 4)
-            );
+                EncodeChannel(shaded.x),
+                EncodeChannel(shaded.y),
+                EncodeChannel(shaded.z),
+                EncodeChannel(shaded.w));
         }
 
+        /// <summary>
+        /// Caps each diagonal cell's shadow at the weaker of the two cells flanking it — the smooth form
+        /// of classic voxel AO's "if both sides seal the corner, skip the diagonal" rule.
+        /// <para>
+        /// <b>Without it an inside corner between two walls lightens from 64 to 127.</b> A point tucked
+        /// into such a corner cannot see the diagonal quadrant at all, whatever that cell contains,
+        /// because the two walls meeting at the corner stand between them. Treating the diagonal as
+        /// independently open would let light leak through geometry — the artifact the original rule
+        /// exists to prevent, and one this model would otherwise have reintroduced.
+        /// </para>
+        /// <para>
+        /// Written as <c>max(own, sideA · sideB)</c> rather than the original boolean test, so the seal
+        /// closes gradually as the flanking occluders approach: a partial block half-blocking one side
+        /// half-seals the corner instead of switching it. <b>The product is the load-bearing choice</b>
+        /// (SS-2a). Both sides must hide the diagonal for it to be hidden, and only a product falls off
+        /// with distance from the corner in the way that conjunction demands — <c>min</c> holds the seal
+        /// at full strength along the entire diagonal, sealing open floor a whole cell away from the
+        /// corner and creasing where the two arguments cross. That shipped as a dark wedge running
+        /// diagonally out of every concave corner. Baseline <b>B57</b> guards both halves: the seal is
+        /// still whole in the corner, and it decays away from it.
+        /// </para>
+        /// <para>
+        /// At a cell corner with full cubes the two forms are identical (every argument is 0 or 1), which
+        /// is why <b>B56</b>'s reduction is untouched. Away from one they diverge sharply: measured on a
+        /// concave corner, the seal's contribution half a cell out along the diagonal falls from 16 light
+        /// units to 4, while the corner itself holds at 63.
+        /// </para>
+        /// </summary>
+        /// <param name="shadow">Per-cell shadow strengths for the hoisted 3x3, modified in place.</param>
+        /// <param name="quadrant">Per-direction shadow strengths, modified in place.</param>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private void SampleNeighborLight(Vector3Int pos, out byte sun, out byte blockR, out byte blockG, out byte blockB, out bool isOpaque)
+        private static void ApplyCornerSeal(Span<float> shadow, Span<float> quadrant)
         {
-            VoxelState? state = GetVoxelStateFromLocalPos(pos);
-            if (!state.HasValue)
+            for (int da = -1; da <= 1; da += 2)
             {
-                sun = 15;
-                blockR = 0;
-                blockG = 0;
-                blockB = 0;
-                isOpaque = false;
-                return;
-            }
+                for (int db = -1; db <= 1; db += 2)
+                {
+                    int diagonal = OccluderIndex(da, db);
+                    float sealStrength = shadow[OccluderIndex(da, 0)] * shadow[OccluderIndex(0, db)];
 
-            VoxelState s = state.Value;
-            isOpaque = BlockTypes[s.ID].IsOpaque;
-            if (isOpaque)
-            {
-                sun = 0;
-                blockR = 0;
-                blockG = 0;
-                blockB = 0;
+                    // Applied to both readings, and it has to be: the cell copy feeds the light mean,
+                    // the quadrant copy feeds the occlusion term, and the identity that keeps a corner
+                    // matching the pre-SS-2 model holds only while the two agree there.
+                    shadow[diagonal] = math.max(shadow[diagonal], sealStrength);
+
+                    int q = QuadrantIndex(da, db);
+                    quadrant[q] = math.max(quadrant[q], sealStrength);
+                }
             }
-            else
-            {
-                ushort lightData = GetLightDataFromLocalPos(pos);
-                sun = LightBitMapping.GetSkyLight(lightData);
-                blockR = LightBitMapping.GetBlocklightR(lightData);
-                blockG = LightBitMapping.GetBlocklightG(lightData);
-                blockB = LightBitMapping.GetBlocklightB(lightData);
-            }
+        }
+
+        /// <summary>
+        /// Clips an occluder's silhouette to one quadrant around the shaded point, rejecting clips with
+        /// no area — an occluder that merely <i>touches</i> a quadrant's boundary blocks none of it.
+        /// </summary>
+        /// <param name="point">The shaded point, in the face's parameter frame.</param>
+        /// <param name="occluder">The occluder whose silhouette is clipped.</param>
+        /// <param name="qa">Quadrant sign on the first tangent axis (-1 or +1).</param>
+        /// <param name="qb">Quadrant sign on the second tangent axis.</param>
+        /// <param name="clipMin">Minimum corner of the clipped rectangle.</param>
+        /// <param name="clipMax">Maximum corner.</param>
+        /// <returns>True when the silhouette covers area inside that quadrant.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static bool ClipToQuadrant(float2 point, in FaceOccluder occluder, int qa, int qb,
+            out float2 clipMin, out float2 clipMax)
+        {
+            clipMin = new float2(
+                qa > 0 ? math.max(occluder.RectMin.x, point.x) : occluder.RectMin.x,
+                qb > 0 ? math.max(occluder.RectMin.y, point.y) : occluder.RectMin.y);
+
+            clipMax = new float2(
+                qa > 0 ? occluder.RectMax.x : math.min(occluder.RectMax.x, point.x),
+                qb > 0 ? occluder.RectMax.y : math.min(occluder.RectMax.y, point.y));
+
+            return clipMax.x - clipMin.x > QUADRANT_AREA_EPSILON
+                   && clipMax.y - clipMin.y > QUADRANT_AREA_EPSILON;
+        }
+
+        /// <summary>Number of tangent quadrants around a shaded point.</summary>
+        private const int QUADRANT_COUNT = 4;
+
+        /// <summary>
+        /// Smallest extent that counts as covering a quadrant. A silhouette lying exactly along a
+        /// quadrant boundary — a neighboring cell's edge through the shaded point — has zero area on
+        /// one side and must not darken it, or every occluder would darken all four.
+        /// </summary>
+        private const float QUADRANT_AREA_EPSILON = 1e-4f;
+
+        /// <summary>Maps a quadrant's two signs to its slot.</summary>
+        /// <param name="qa">Sign on the first tangent axis (-1 or +1).</param>
+        /// <param name="qb">Sign on the second tangent axis.</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static int QuadrantIndex(int qa, int qb) => (qa > 0 ? 2 : 0) + (qb > 0 ? 1 : 0);
+
+        /// <summary>
+        /// How many cells the light interpolation kernel reaches: the sample box is one cell wide, so it
+        /// spans two cells on each tangent axis.
+        /// </summary>
+        private const int LIGHT_KERNEL_COUNT = 4;
+
+        /// <summary>
+        /// Euclidean distance from a point to an occluder's silhouette rectangle, in cells; zero when
+        /// the point lies inside it.
+        /// <para>
+        /// This metric is what makes the shadow follow the occluder's <i>shape</i>. The pre-SS-2 model
+        /// weighted an occluder by a product of two per-axis ramps, whose isocontours are hyperbolic —
+        /// so an isolated block's shadow reached about twice as far diagonally as it did straight out,
+        /// and read as a round blob rather than a band of even width.
+        /// </para>
+        /// </summary>
+        /// <param name="point">The sample point, in the face's parameter frame.</param>
+        /// <param name="occluder">The occluder whose silhouette is measured against.</param>
+        /// <returns>The distance in cells, clamped at zero inside the rectangle.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static float DistanceToRect(float2 point, in FaceOccluder occluder)
+        {
+            return DistanceToRect(point, occluder.RectMin, occluder.RectMax);
+        }
+
+        /// <summary>
+        /// Euclidean distance from a point to an axis-aligned rectangle given by its corners; zero when
+        /// the point lies inside it. The form <see cref="ClipToQuadrant"/> results are measured with.
+        /// </summary>
+        /// <param name="point">The sample point, in the face's parameter frame.</param>
+        /// <param name="rectMin">Minimum corner of the rectangle.</param>
+        /// <param name="rectMax">Maximum corner.</param>
+        /// <returns>The distance in cells, clamped at zero inside the rectangle.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static float DistanceToRect(float2 point, float2 rectMin, float2 rectMax)
+        {
+            float2 outside = math.max(math.max(rectMin - point, point - rectMax), 0f);
+            return math.length(outside);
+        }
+
+        /// <summary>Encodes one 0-15 light channel to UNorm8, rounding as the pre-SS-2 encode did.</summary>
+        /// <param name="value">The channel value, in <c>[0, 15]</c>.</param>
+        /// <returns>The encoded byte.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static byte EncodeChannel(float value)
+        {
+            return (byte)math.min(255f, value * 17f + 0.5f);
+        }
+
+        /// <summary>Below this total weight the light mean is undefined and the point is fully enclosed.</summary>
+        private const float LIGHT_WEIGHT_EPSILON = 1e-6f;
+
+        /// <summary>
+        /// Splits the sample box's extent along one tangent axis between the direct cell and whichever
+        /// neighbor the box reaches into.
+        /// <para>
+        /// The box is one cell wide and centred on the sample point, so it always spans exactly two cells
+        /// along each tangent axis. Sampling at a cell corner splits it evenly; sampling at the cell's
+        /// midline gives the whole box to the direct cell — correct for interpolating <i>light</i>, and
+        /// the reason occlusion must not ride on these weights (see <see cref="ShadePoint"/>).
+        /// </para>
+        /// </summary>
+        /// <param name="local">The sample point's coordinate on this axis, relative to the direct cell.</param>
+        /// <param name="neighborOffset">Which neighbor the box reaches: -1 or +1 cells.</param>
+        /// <param name="directWeight">Share of the box inside the direct cell, in <c>[0, 1]</c>.</param>
+        /// <param name="neighborWeight">Share of the box inside the neighbor.</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void TangentSpan(float local, out int neighborOffset,
+            out float directWeight, out float neighborWeight)
+        {
+            neighborOffset = local < 0.5f ? -1 : 1;
+            neighborWeight = math.saturate(neighborOffset < 0 ? 0.5f - local : local - 0.5f);
+            directWeight = 1f - neighborWeight;
+        }
+
+        /// <summary>Returns a unit-axis step vector: <paramref name="amount"/> on <paramref name="axis"/>, zero elsewhere.</summary>
+        /// <param name="axis">0 = X, 1 = Y, 2 = Z.</param>
+        /// <param name="amount">Signed cell count to step.</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static Vector3Int AxisStep(int axis, int amount)
+        {
+            return new Vector3Int(axis == 0 ? amount : 0, axis == 1 ? amount : 0, axis == 2 ? amount : 0);
+        }
+
+        /// <summary>Reads one component of a <see cref="Vector3Int"/> by axis index, branchlessly enough for Burst.</summary>
+        /// <param name="value">The vector to read.</param>
+        /// <param name="axis">0 = X, 1 = Y, 2 = Z.</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static int Component(Vector3Int value, int axis)
+        {
+            return axis == 0 ? value.x : axis == 1 ? value.y : value.z;
         }
 
         /// <summary>
@@ -1060,16 +1784,16 @@ namespace Jobs
                 if (pos.z < 0)
                 {
                     localPos.z += VoxelData.ChunkWidth;
-                    targetLight = LightBackLeft;
+                    targetLight = LightSW;
                 }
                 else if (pos.z >= VoxelData.ChunkWidth)
                 {
                     localPos.z -= VoxelData.ChunkWidth;
-                    targetLight = LightFrontLeft;
+                    targetLight = LightNW;
                 }
                 else
                 {
-                    targetLight = LightLeft;
+                    targetLight = LightW;
                 }
             }
             else if (pos.x >= VoxelData.ChunkWidth)
@@ -1078,16 +1802,16 @@ namespace Jobs
                 if (pos.z < 0)
                 {
                     localPos.z += VoxelData.ChunkWidth;
-                    targetLight = LightBackRight;
+                    targetLight = LightSE;
                 }
                 else if (pos.z >= VoxelData.ChunkWidth)
                 {
                     localPos.z -= VoxelData.ChunkWidth;
-                    targetLight = LightFrontRight;
+                    targetLight = LightNE;
                 }
                 else
                 {
-                    targetLight = LightRight;
+                    targetLight = LightE;
                 }
             }
             else
@@ -1095,12 +1819,12 @@ namespace Jobs
                 if (pos.z < 0)
                 {
                     localPos.z += VoxelData.ChunkWidth;
-                    targetLight = LightBack;
+                    targetLight = LightS;
                 }
                 else if (pos.z >= VoxelData.ChunkWidth)
                 {
                     localPos.z -= VoxelData.ChunkWidth;
-                    targetLight = LightFront;
+                    targetLight = LightN;
                 }
             }
 
@@ -1145,16 +1869,16 @@ namespace Jobs
                 if (pos.z < 0) // South-West
                 {
                     localPos.z += VoxelData.ChunkWidth;
-                    targetMap = NeighborBackLeft;
+                    targetMap = NeighborSW;
                 }
                 else if (pos.z >= VoxelData.ChunkWidth) // North-West
                 {
                     localPos.z -= VoxelData.ChunkWidth;
-                    targetMap = NeighborFrontLeft;
+                    targetMap = NeighborNW;
                 }
                 else // West
                 {
-                    targetMap = NeighborLeft;
+                    targetMap = NeighborW;
                 }
             }
             else if (pos.x >= VoxelData.ChunkWidth) // EAST (+X)
@@ -1163,16 +1887,16 @@ namespace Jobs
                 if (pos.z < 0) // South-East
                 {
                     localPos.z += VoxelData.ChunkWidth;
-                    targetMap = NeighborBackRight;
+                    targetMap = NeighborSE;
                 }
                 else if (pos.z >= VoxelData.ChunkWidth) // North-East
                 {
                     localPos.z -= VoxelData.ChunkWidth;
-                    targetMap = NeighborFrontRight;
+                    targetMap = NeighborNE;
                 }
                 else // East
                 {
-                    targetMap = NeighborRight;
+                    targetMap = NeighborE;
                 }
             }
             else // CENTER X
@@ -1180,12 +1904,12 @@ namespace Jobs
                 if (pos.z < 0) // South
                 {
                     localPos.z += VoxelData.ChunkWidth;
-                    targetMap = NeighborBack;
+                    targetMap = NeighborS;
                 }
                 else if (pos.z >= VoxelData.ChunkWidth) // North
                 {
                     localPos.z -= VoxelData.ChunkWidth;
-                    targetMap = NeighborFront;
+                    targetMap = NeighborN;
                 }
                 // Center case handled by fast path at top
             }

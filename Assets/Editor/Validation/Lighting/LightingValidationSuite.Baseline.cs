@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Editor.Validation.Lighting.Framework;
+using Helpers;
 using UnityEngine;
 using Scenario = Editor.Validation.Framework.Scenario;
 
@@ -27,7 +28,7 @@ namespace Editor.Validation.Lighting
             scenarios.Add(new Scenario("B10: Two emissive sources blend across the chunk border", Baseline_CrossBorderTwoSourceBlend));
             scenarios.Add(new Scenario("B11: Adjacent opposing lamps at the border converge without flicker", Baseline_AdjacentBorderLampsNoFlicker));
             scenarios.Add(new Scenario("B12: Broken source's area is re-lit by the cross-border independent source", Baseline_CrossBorderRespread));
-            scenarios.Add(new Scenario("B13: Sunlight uplift mods survive an in-flight neighbor job (race)", Baseline_InFlightSunlightUpliftRace));
+            scenarios.Add(new Scenario("B13: Skylight uplift mods survive an in-flight neighbor job (race)", Baseline_InFlightSkylightUpliftRace));
             scenarios.Add(new Scenario("B14: Generated emissive block illuminates surroundings on initial lighting", Baseline_GeneratedEmissiveSeedsBfs));
             // --- Bug-09 cross-chunk fleet (consolidated 2026-06-14; see LIGHTING_VALIDATION_HARNESS_FIDELITY.md §5).
             // The former eleven single-instance permutations (old B15–B25) folded into two deterministic
@@ -50,15 +51,15 @@ namespace Editor.Validation.Lighting
             scenarios.Add(new Scenario("B34: ChunkData.Reset() clears every transient flag/counter/queue on recycle (RemainingEdgeCheckRounds guard)", Baseline_ChunkDataResetClearsTransientState));
 
             // --- A4 oracle-independence probes (hand-derived constants, NO MatchesOracle) ---
-            scenarios.Add(new Scenario("B35: Vertical sunlight reaches the floor through air at full 15 (oracle-independent probe)", Baseline_ProbeVerticalSunlightThroughAir));
-            scenarios.Add(new Scenario("B36: Vertical sunlight passes a solid glass column undimmed — opacity, not solidity, blocks light (oracle-independent probe)", Baseline_ProbeVerticalSunlightThroughGlass));
+            scenarios.Add(new Scenario("B35: Vertical skylight reaches the floor through air at full 15 (oracle-independent probe)", Baseline_ProbeVerticalSkylightThroughAir));
+            scenarios.Add(new Scenario("B36: Vertical skylight passes a solid glass column undimmed — opacity, not solidity, blocks light (oracle-independent probe)", Baseline_ProbeVerticalSkylightThroughGlass));
             scenarios.Add(new Scenario("B37: Skylight decays -1/voxel below a leaves cap in a sealed shaft (oracle-independent probe)", Baseline_ProbeSkyAttenuationBelowCanopy));
             scenarios.Add(new Scenario("B38: Horizontal blocklight falls off -1 per air voxel on all channels (oracle-independent probe)", Baseline_ProbeHorizontalBlocklightFalloff));
             scenarios.Add(new Scenario("B39: Opaque face receives source-1 surface light but never propagates inward (oracle-independent probe)", Baseline_ProbeOpaqueSurfaceStamp));
             scenarios.Add(new Scenario("B45: Cumulative attenuation through two DimGlass layers in series — sky column + horizontal blocklight (oracle-independent probe; finding C5)", Baseline_ProbeCumulativeMultiLayerAttenuation));
 
-            // --- C4a sunlight-column persist→replay (the Sun-channel twin of B30) ---
-            scenarios.Add(new Scenario("B46: Cross-chunk sunlight toward an unloaded neighbor persists as a column and replays on load (finding C4a)", Baseline_PersistReplayCrossChunkSunlight));
+            // --- C4a skylight-column persist→replay (the Sky-channel twin of B30) ---
+            scenarios.Add(new Scenario("B46: Cross-chunk skylight toward an unloaded neighbor persists as a column and replays on load (finding C4a)", Baseline_PersistReplayCrossChunkSkylight));
 
             // --- C4b AddPendingBlocklight placement-after-removal guard (direct store invariant) ---
             scenarios.Add(new Scenario("B47: AddPendingBlocklight placement-after-removal guard holds (finding C4b)", Baseline_PendingBlocklightPlacementAfterRemovalGuard));
@@ -73,19 +74,19 @@ namespace Editor.Validation.Lighting
             scenarios.Add(new Scenario("B42: Dense-canopy generation converges to the oracle across randomized seeds (finding C2; surfaced Bug 10)", Baseline_Bug05CanopyFuzz));
 
             // --- Bug 10 (fixed June 2026, promoted from K10a/K10b): opaque-border light leak ---
-            scenarios.Add(new Scenario("B43: No sunlight leaks out of an opaque block across a chunk border (Bug 10 guard)", Baseline_OpaqueBorderSunlightNoLeak));
+            scenarios.Add(new Scenario("B43: No skylight leaks out of an opaque block across a chunk border (Bug 10 guard)", Baseline_OpaqueBorderSkylightNoLeak));
             scenarios.Add(new Scenario("B44: No surface blocklight leaks out of an opaque block across a chunk border (Bug 10 guard)", Baseline_OpaqueBorderBlocklightNoLeak));
 
-            // --- Bug 11 (fixed June 2026, promoted from K11a): cross-seam sunlight removal oscillation on reload ---
-            scenarios.Add(new Scenario("B48: Reload mid-darkness-wave at a mutually-lit seam converges to the oracle — no sunlight removal/replace oscillation (Bug 11 guard)", Baseline_ReloadSeamSunlightNoOscillation));
-            scenarios.Add(new Scenario("B49: Cross-chunk sunlight removal into a semi-transparent (DimGlass) seam voxel attenuates support by target opacity — a brighter in-chunk neighbor does not spuriously veto a legitimate removal", Baseline_CrossSeamSunlightRemovalThroughDimGlass));
+            // --- Bug 11 (fixed June 2026, promoted from K11a): cross-seam skylight removal oscillation on reload ---
+            scenarios.Add(new Scenario("B48: Reload mid-darkness-wave at a mutually-lit seam converges to the oracle — no skylight removal/replace oscillation (Bug 11 guard)", Baseline_ReloadSeamSkylightNoOscillation));
+            scenarios.Add(new Scenario("B49: Cross-chunk skylight removal into a semi-transparent (DimGlass) seam voxel attenuates support by target opacity — a brighter in-chunk neighbor does not spuriously veto a legitimate removal", Baseline_CrossSeamSkylightRemovalThroughDimGlass));
 
             // --- Bug 12 family (B50 tripwire, B51/B52 completeness, B53 promoted repro) lives in its own
             // partial file (Baselines/LightingValidationSuite.Baseline.Bug12.cs) and self-registers here.
             // First of the planned Baselines/ split; future groups follow the same Add*BaselineScenarios hook. ---
             AddBug12BaselineScenarios(scenarios);
 
-            // --- C3 cross-chunk sunlight darkening family (B54 in-flight race, B55 steady-state) lives in
+            // --- C3 cross-chunk skylight darkening family (B54 in-flight race, B55 steady-state) lives in
             // Baselines/LightingValidationSuite.Baseline.C3Darkening.cs and self-registers here. ---
             AddCrossChunkDarkeningBaselineScenarios(scenarios);
 
@@ -98,7 +99,7 @@ namespace Editor.Validation.Lighting
             // Baselines/LightingValidationSuite.Baseline.Bug14Ghost.cs and self-register here. ---
             AddBug14GhostBaselineScenarios(scenarios);
 
-            // --- Bug 15 fix baselines (B62 sun stamp, B63 RGB stamp; promoted from K15b/K15c) live in
+            // --- Bug 15 fix baselines (B62 sky stamp, B63 RGB stamp; promoted from K15b/K15c) live in
             // Baselines/LightingValidationSuite.Baseline.Bug15Stamp.cs and self-register here. ---
             AddBug15StampBaselineScenarios(scenarios);
 
@@ -112,7 +113,7 @@ namespace Editor.Validation.Lighting
                 Baseline_BorderHeightFuzz));
 
             // --- Completion-pass fault isolation (B65, HF-4 #2 / finding B7): the sim drives the shared
-            // LightingCompletionPass skeleton and injects a merge fault to prove per-job isolation. Lives in
+            // JobCompletionPass skeleton and injects a merge fault to prove per-job isolation. Lives in
             // Baselines/LightingValidationSuite.Baseline.FaultIsolation.cs and self-registers here. ---
             AddFaultIsolationBaselineScenarios(scenarios);
 
@@ -126,6 +127,12 @@ namespace Editor.Validation.Lighting
             // into the job. Lives in Baselines/LightingValidationSuite.Baseline.BandDecision.cs and
             // self-registers here. ---
             AddBandDecisionBaselineScenarios(scenarios);
+
+            // --- P9-2 outcome-conditional edge-check cascade (B97-B99): the pure
+            // EdgeCheckCascadeDecision predicate (incl. its flag-off reduction to the legacy rule) and the
+            // ChunkData.ApplyJobLightMap change signal it consumes, across the uniform-sky compaction
+            // boundary. Lives in Baselines/LightingValidationSuite.Baseline.P92Cascade.cs. ---
+            AddP92CascadeBaselineScenarios(scenarios);
 
             // --- LI-2 band differential gate (B75-B78): identical world scripts run banded vs full
             // height must produce bit-identical fields with equal round counts; B78 is the gate's
@@ -160,7 +167,84 @@ namespace Editor.Validation.Lighting
             // mod does not persistently over-clear an independently-sourced OTHER channel. Lives in
             // LightingValidationSuite.C13RgbMixedChannel.cs and self-registers here. ---
             AddC13RgbMixedChannelScenarios(scenarios);
+
+            // --- Bug 19 far-coordinate column routing (B95 routing integrity at four anchors, B96
+            // far-anchor differential twin): guards the integer SkylightColumnRouting seam against the
+            // pre-fix float round-trip that crashed skylight recalcs past ±2²⁴. Lives in
+            // Baselines/LightingValidationSuite.Baseline.Bug19FarColumns.cs and self-registers here. ---
+            AddBug19FarColumnsBaselineScenarios(scenarios);
+
+            // --- Partial-block directional occlusion: B104 asserts a vertical slab passes daylight through
+            // its open half; B101 (a floor slab still blocks daylight), B102 (full cube) and B103 (open
+            // shaft) are its controls — B101 is the tripwire against making slabs transparent, B103 the
+            // one that stops the others passing vacuously.
+            // Lives in LightingValidationSuite.PartialBlocks.cs. ---
+            AddPartialBlockOcclusionScenarios(scenarios);
+
+            // --- Cross-chunk directional occlusion: B106 asserts the removal veto's support scan credits a
+            // partial block per face, on both the source and target sides; B105 that a settled seam gradient
+            // fed through partial blocks matches the borderless oracle. B107 covers the sky column instead —
+            // sealing a partial-block shaft darkens the column beneath it and opening one re-lights it — and
+            // needs no chunk seam, so it guards a path the other two cannot reach.
+            // Lives in LightingValidationSuite.PartialBlocksCrossChunk.cs. ---
+            AddPartialBlockCrossChunkScenarios(scenarios);
+
+            // --- C14 mixed-channel mirrors (B108-B114): the suite's white-only blocklight families
+            // duplicated with asymmetric (14,8,3)/(15,9,3) sources, so a per-channel INDEXING defect (a
+            // transposed ApplyRemovalChannel argument, a mask on the wrong LightRemovalNode channel, a
+            // swapped r/g/b through the pending store) stops being invisible. The white originals are
+            // unchanged and still run. Lives in Baselines/LightingValidationSuite.Baseline.C14ChannelMirrors.cs
+            // and self-registers here. ---
+            AddC14ChannelMirrorBaselineScenarios(scenarios);
+
+            // --- LP-4 transition census (B115-B118): the LightingWork mutation layer, asserted directly on
+            // ChunkData rather than through a world. B115 pins each transition method to its census bit
+            // mask, B116 keeps the P9-2 cascade's three outcomes three at the mutation layer, B117 pins the
+            // callback contract (incl. LP-4's one accepted delta: a combined arm fires once, not twice), and
+            // B118 sweeps for the EdgeCheck-without-LightChanges half-arm behind three historical
+            // deadlocks. Lives in Baselines/LightingValidationSuite.Baseline.LightingWorkTransitions.cs. ---
+            AddLightingWorkTransitionBaselineScenarios(scenarios);
+
+            // --- LP-5 weak-gate edge-check fallback (B120): the §7 behavior where an armed edge check rides
+            // the REGULAR arm's schedule because the strict ReadyAndLit gate is shut. Documented since the
+            // pipeline doc was written, baselined only now. Lives in
+            // Baselines/LightingValidationSuite.Baseline.EdgeCheckFallback.cs. ---
+            AddEdgeCheckFallbackBaselineScenarios(scenarios);
+
+            // --- LP-6 lazy strict-gate evaluation (B121-B122): the scan evaluates only the neighbor gate the
+            // chunk's arm can read. Behavior-preserving by intent, so no other baseline can witness it — B121
+            // compares the lazy and pre-evaluated paths over all 64 inputs, B122 pins the laziness itself.
+            // Lives in Baselines/LightingValidationSuite.Baseline.LazyGateEquivalence.cs. ---
+            AddLazyGateEquivalenceBaselineScenarios(scenarios);
         }
+
+        /// <summary>Hook for the LP-6 lazy-gate baselines B121-B122 (implemented in Baselines/LightingValidationSuite.Baseline.LazyGateEquivalence.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddLazyGateEquivalenceBaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the LP-4 transition-census baselines B115-B118 (implemented in Baselines/LightingValidationSuite.Baseline.LightingWorkTransitions.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddLightingWorkTransitionBaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the LP-5 weak-gate fallback baseline B120 (implemented in Baselines/LightingValidationSuite.Baseline.EdgeCheckFallback.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddEdgeCheckFallbackBaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the C14 mixed-channel mirror baselines B108-B114 (implemented in Baselines/LightingValidationSuite.Baseline.C14ChannelMirrors.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddC14ChannelMirrorBaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the VO-4 cross-chunk partial-block baselines B105-B107 (implemented in LightingValidationSuite.PartialBlocksCrossChunk.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddPartialBlockCrossChunkScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the Bug-19 far-coordinate column-routing baselines B95-B96 (implemented in Baselines/LightingValidationSuite.Baseline.Bug19FarColumns.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddBug19FarColumnsBaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the VO-2/VO-3 partial-block directional occlusion baselines B101-B104 (implemented in LightingValidationSuite.PartialBlocks.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddPartialBlockOcclusionScenarios(List<Scenario> scenarios);
 
         /// <summary>Hook for the C13 mixed-channel cross-seam removal baseline B94 (implemented in LightingValidationSuite.C13RgbMixedChannel.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
@@ -182,7 +266,7 @@ namespace Editor.Validation.Lighting
         /// <param name="scenarios">The scenario list to append to.</param>
         static partial void AddBug12BaselineScenarios(List<Scenario> scenarios);
 
-        /// <summary>Hook for the C3 cross-chunk sunlight darkening baselines (implemented in Baselines/LightingValidationSuite.Baseline.C3Darkening.cs).</summary>
+        /// <summary>Hook for the C3 cross-chunk skylight darkening baselines (implemented in Baselines/LightingValidationSuite.Baseline.C3Darkening.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
         static partial void AddCrossChunkDarkeningBaselineScenarios(List<Scenario> scenarios);
 
@@ -197,6 +281,10 @@ namespace Editor.Validation.Lighting
         /// <summary>Hook for the LI-2 band-derivation baselines (implemented in Baselines/LightingValidationSuite.Baseline.BandDecision.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
         static partial void AddBandDecisionBaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the P9-2 edge-check-cascade baselines (Baselines/…Baseline.P92Cascade.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddP92CascadeBaselineScenarios(List<Scenario> scenarios);
 
         /// <summary>Hook for the LI-2 band differential gate baselines (implemented in Baselines/LightingValidationSuite.Baseline.BandDifferential.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
@@ -276,8 +364,8 @@ namespace Editor.Validation.Lighting
 
         /// <summary>
         /// B3: A solid roof spanning two chunk borders casts a shadow with side-bleed; breaking a
-        /// center roof block opens a full-brightness light shaft. Exercises sunlight column
-        /// recalculation, cross-chunk sunlight darkness/uplift mods, and the vertical-sunlight rule.
+        /// center roof block opens a full-brightness light shaft. Exercises skylight column
+        /// recalculation, cross-chunk skylight darkness/uplift mods, and the vertical-skylight rule.
         /// </summary>
         private static bool Baseline_RoofShadowAndShaft()
         {
@@ -291,9 +379,9 @@ namespace Editor.Validation.Lighting
             bool passed = LightingAssert.Converged(world.RunInitialLighting(), "B3: initial lighting converges");
 
             // Deep under the roof center: no direct sky, only side-bleed that decays to 0 within 14 steps.
-            passed &= LightingAssert.IsTrue(world.GetSkyLight(new Vector3Int(32, 20, 32)) < 15,
+            passed &= LightingAssert.IsTrue(world.GetSkylight(new Vector3Int(32, 20, 32)) < 15,
                 "B3: roof shadows the volume beneath",
-                $"Expected <15 under the roof, got {world.GetSkyLight(new Vector3Int(32, 20, 32))}");
+                $"Expected <15 under the roof, got {world.GetSkylight(new Vector3Int(32, 20, 32))}");
 
             passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world), "B3: shadow field matches oracle");
 
@@ -301,9 +389,9 @@ namespace Editor.Validation.Lighting
             world.BreakBlock(new Vector3Int(32, 30, 32));
             passed &= LightingAssert.Converged(world.RunToConvergence(), "B3: post-break convergence");
 
-            passed &= LightingAssert.IsTrue(world.GetSkyLight(new Vector3Int(32, 20, 32)) == 15,
+            passed &= LightingAssert.IsTrue(world.GetSkylight(new Vector3Int(32, 20, 32)) == 15,
                 "B3: light shaft reaches below the opened roof",
-                $"Expected 15 in the shaft, got {world.GetSkyLight(new Vector3Int(32, 20, 32))}");
+                $"Expected 15 in the shaft, got {world.GetSkylight(new Vector3Int(32, 20, 32))}");
 
             passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world), "B3: shaft field matches oracle");
             return passed;
@@ -371,7 +459,7 @@ namespace Editor.Validation.Lighting
 
         /// <summary>
         /// B6: A hollow cavity sealed inside solid stone must be pitch black (sky 0, blocklight 0).
-        /// Sanity-checks the sunlight column pass and confirms no light leaks through solid volumes.
+        /// Sanity-checks the skylight column pass and confirms no light leaks through solid volumes.
         /// </summary>
         private static bool Baseline_SealedCavity()
         {
@@ -587,12 +675,12 @@ namespace Editor.Validation.Lighting
         /// B13: Cross-chunk mods must survive an in-flight lighting job on the receiving chunk
         /// (Bug 08 path 2, fixed June 2026 — promoted from known-bug scenario K08a). A roof spans
         /// the border; chunk (2,1) has a lighting job IN FLIGHT (inputs already snapshotted) when a
-        /// roof block is broken in (1,1) and that chunk's job emits sunlight uplift mods into (2,1).
+        /// roof block is broken in (1,1) and that chunk's job emits skylight uplift mods into (2,1).
         /// Guards the defer/drain: mods targeting an in-flight chunk are deferred and applied right
         /// after that chunk's merge, instead of being applied to live data and silently reverted by
         /// the stale full-LightMap overwrite (which left the area permanently darker than the oracle).
         /// </summary>
-        private static bool Baseline_InFlightSunlightUpliftRace()
+        private static bool Baseline_InFlightSkylightUpliftRace()
         {
             using LightingTestWorld world = new LightingTestWorld(3);
             world.FillSuperflatFloor(10, TestBlockPalette.Stone);
@@ -1235,20 +1323,20 @@ namespace Editor.Validation.Lighting
         }
 
         /// <summary>
-        /// B46: The cross-chunk SUNLIGHT persist→replay round-trip (closes finding C4a in
-        /// LIGHTING_VALIDATION_HARNESS_FIDELITY.md — the sunlight twin of B30, which only covered blocklight).
+        /// B46: The cross-chunk SKYLIGHT persist→replay round-trip (closes finding C4a in
+        /// LIGHTING_VALIDATION_HARNESS_FIDELITY.md — the skylight twin of B30, which only covered blocklight).
         /// A roof slab spans the (1,1)/(2,1) border, shadowing the volume beneath. Breaking one roof block on
         /// the (1,1) border column opens a sky shaft whose light would normally spill east into (2,1) as a
-        /// Sun-channel cross-chunk mod (the B13 mechanism) — but (2,1) is UNLOADED when the edit converges, so
-        /// that mod is routed to <c>PersistUndeliverable</c> and saved as a sunlight COLUMN recalc in the
-        /// (in-memory) <c>LightingStateManager</c> (<c>PersistMod</c> <c>Channel == Sun</c> →
+        /// Sky-channel cross-chunk mod (the B13 mechanism) — but (2,1) is UNLOADED when the edit converges, so
+        /// that mod is routed to <c>PersistUndeliverable</c> and saved as a skylight COLUMN recalc in the
+        /// (in-memory) <c>LightingStateManager</c> (<c>PersistMod</c> <c>Channel == Sky</c> →
         /// <c>AddPending</c>) instead of applied. While (2,1) is unloaded its under-roof sky stays at the
         /// pre-break shadowed value; once it is marked loaded, the persisted column replays through
-        /// <c>SunColumnRecalcQueue</c> and the recalc re-derives the spill from (1,1)'s now-lit border — so the
-        /// converged field must match the all-loaded oracle exactly. Guards that the Sun-channel persist path
+        /// <c>SkyColumnRecalcQueue</c> and the recalc re-derives the spill from (1,1)'s now-lit border — so the
+        /// converged field must match the all-loaded oracle exactly. Guards that the Sky-channel persist path
         /// (distinct from B30/B31/B32's blocklight path) neither loses nor double-applies the column.
         /// </summary>
-        private static bool Baseline_PersistReplayCrossChunkSunlight()
+        private static bool Baseline_PersistReplayCrossChunkSkylight()
         {
             using LightingTestWorld world = new LightingTestWorld(3);
             world.FillSuperflatFloor(10, TestBlockPalette.Stone);
@@ -1262,31 +1350,31 @@ namespace Editor.Validation.Lighting
             // Deep under the roof interior in (2,1): only side-bleed reaches it, so it is shadowed (< 15) and
             // will brighten noticeably once the shaft's spill crosses the border.
             Vector3Int probe = new Vector3Int(32, 20, 24);
-            byte shadowed = world.GetSkyLight(probe);
+            byte shadowed = world.GetSkylight(probe);
 
-            // (2,1) is in-world but unloaded: the sun uplift mod emitted when the shaft opens must be persisted.
+            // (2,1) is in-world but unloaded: the sky uplift mod emitted when the shaft opens must be persisted.
             world.MarkChunkUnloaded(new Vector2Int(2, 1));
             world.BreakBlock(new Vector3Int(30, 30, 24)); // open a sky shaft on the (1,1) border column
 
-            // Run (1,1)'s job explicitly to assert the Sun-channel mod was persisted (not applied).
+            // Run (1,1)'s job explicitly to assert the Sky-channel mod was persisted (not applied).
             LightingTestWorld.LightingRunResult aResult = world.RunLightingJob(new Vector2Int(1, 1));
             passed &= LightingAssert.IsTrue(aResult.ModsPersisted > 0,
-                "B46: the sunlight spill mod is persisted while the neighbor is unloaded",
+                "B46: the skylight spill mod is persisted while the neighbor is unloaded",
                 $"Expected ModsPersisted > 0, got {aResult.ModsPersisted}");
             passed &= LightingAssert.Converged(world.RunToConvergence(), "B46: persist-while-unloaded converges");
 
             // The spill never crossed the border — it was persisted instead of applied.
-            passed &= LightingAssert.IsTrue(world.GetSkyLight(probe) == shadowed,
-                "B46: sunlight stays out of the unloaded neighbor (persisted, not applied)",
-                $"Expected sky to stay {shadowed} at {probe} while (2,1) unloaded, got {world.GetSkyLight(probe)}");
+            passed &= LightingAssert.IsTrue(world.GetSkylight(probe) == shadowed,
+                "B46: skylight stays out of the unloaded neighbor (persisted, not applied)",
+                $"Expected sky to stay {shadowed} at {probe} while (2,1) unloaded, got {world.GetSkylight(probe)}");
 
-            // Reload (2,1): the persisted sunlight column replays and the recalc re-derives from (1,1)'s border.
+            // Reload (2,1): the persisted skylight column replays and the recalc re-derives from (1,1)'s border.
             world.MarkChunkLoaded(new Vector2Int(2, 1), LightingTestWorld.ChunkLoadMode.LoadFromDisk);
             passed &= LightingAssert.Converged(world.RunToConvergence(), "B46: post-replay convergence");
 
-            passed &= LightingAssert.IsTrue(world.GetSkyLight(probe) > shadowed,
-                "B46: the replayed sunlight column brightens the shadowed region",
-                $"Expected sky > {shadowed} at {probe} after replay, got {world.GetSkyLight(probe)}");
+            passed &= LightingAssert.IsTrue(world.GetSkylight(probe) > shadowed,
+                "B46: the replayed skylight column brightens the shadowed region",
+                $"Expected sky > {shadowed} at {probe} after replay, got {world.GetSkylight(probe)}");
 
             passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world), "B46: replayed field matches oracle");
             return passed;
@@ -1368,14 +1456,14 @@ namespace Editor.Validation.Lighting
         /// <c>neighborsDataReady: true</c>, leaving the third arm of <see cref="LightingScheduleDecision"/>
         /// unexercised). A lamp is placed on the +X border of chunk (1,1) while (1,1)'s neighbor terrain
         /// data is marked NOT ready. Production's <c>WorldJobManager.ScheduleLightingUpdate</c> would set
-        /// <c>HasLightChangesToProcess = true</c> and decline to schedule; the simulator must do the same:
+        /// <c>FlagLightWork()</c> and decline to schedule; the simulator must do the same:
         /// across several frames the chunk is deferred (no job scheduled, none in flight), its pending
         /// light work is retained, and no blocklight propagates. Once the neighbors are marked ready, the
         /// retained work schedules and the field must converge to the all-ready oracle — proving the
         /// deferral neither loses nor double-applies the work.
         /// </summary>
         /// <summary>
-        /// B43 (Bug 10, sunlight — promoted from K10a, fixed June 2026): the cross-chunk edge check must
+        /// B43 (Bug 10, skylight — promoted from K10a, fixed June 2026): the cross-chunk edge check must
         /// not propagate an opaque block's surface sky light across the chunk border. An enclosed under-roof
         /// gap with one sky well in chunk (0,1) and a full-gap-height opaque post on the (0,1)/(1,1) shared
         /// border: the post is lit to sky 5 on its well-facing side, but being opaque it must transmit
@@ -1385,7 +1473,7 @@ namespace Editor.Validation.Lighting
         /// diagonal over-bright band along chunk borders at world-height (where the opaque heightmap surface
         /// sits on the borders), visible in the ChunkBorder debug visualization.
         /// </summary>
-        private static bool Baseline_OpaqueBorderSunlightNoLeak()
+        private static bool Baseline_OpaqueBorderSkylightNoLeak()
         {
             using LightingTestWorld world = new LightingTestWorld(3);
             world.FillSuperflatFloor(10, TestBlockPalette.Stone);
@@ -1393,7 +1481,7 @@ namespace Editor.Validation.Lighting
             const int worldMax = 3 * VoxelData.ChunkWidth - 1;
             // Enclosing roof at y=14 — the under-roof gap (y=11..13) is dark except the single sky well.
             world.FillBox(new Vector3Int(0, 14, 0), new Vector3Int(worldMax, 14, worldMax), TestBlockPalette.Stone);
-            // Sky well in chunk (0,1): remove the one roof voxel so sunlight reaches the gap below.
+            // Sky well in chunk (0,1): remove the one roof voxel so skylight reaches the gap below.
             world.SetBlock(new Vector3Int(5, 14, 24), TestBlockPalette.Air);
             // Full-gap-height opaque post on the (0,1)/(1,1) shared border.
             for (int y = 11; y <= 13; y++)
@@ -1402,7 +1490,7 @@ namespace Editor.Validation.Lighting
 
             bool passed = LightingAssert.Converged(world.RunInitialLighting(), "B43: initial lighting converges");
             passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world),
-                "B43: no sunlight leaks across the opaque border post");
+                "B43: no skylight leaks across the opaque border post");
             return passed;
         }
 
@@ -1419,7 +1507,7 @@ namespace Editor.Validation.Lighting
             world.FillSuperflatFloor(10, TestBlockPalette.Stone);
 
             const int worldMax = 3 * VoxelData.ChunkWidth - 1;
-            // Enclosing roof at y=14 with no well — under-roof sunlight is 0, isolating the blocklight path.
+            // Enclosing roof at y=14 with no well — under-roof skylight is 0, isolating the blocklight path.
             world.FillBox(new Vector3Int(0, 14, 0), new Vector3Int(worldMax, 14, worldMax), TestBlockPalette.Stone);
             // Torch in chunk (0,1) two voxels from the border; opaque post on the shared border.
             world.SetBlock(new Vector3Int(13, 11, 24), TestBlockPalette.Torch);
@@ -1496,27 +1584,27 @@ namespace Editor.Validation.Lighting
         private const int B48_EAST_SHAFT_X = 26; // chunk (1,1): x 16..31 — symmetric about the x15|16 seam
 
         /// <summary>
-        /// B48 (promoted from K11a, Bug 11, fixed June 2026): guards against the stale-snapshot sunlight
+        /// B48 (promoted from K11a, Bug 11, fixed June 2026): guards against the stale-snapshot skylight
         /// removal/re-placement oscillation across a chunk seam that stalled the initial load of reloaded
         /// worlds (<c>ForceCompleteDataJobsCoroutine exceeded max iterations</c>).
         /// <para>
         /// Builds a roofed horizontal corridor lit by two symmetric vertical sky shafts (one per seam
         /// chunk) so the shared border columns are fed equally from both sides (each reaches the seam at
-        /// distance 10 → sky 5). After convergence, BOTH seam chunks are seeded with a stale sunlight
-        /// removal node via <see cref="LightingTestWorld.SeedLoadedSunlightRemoval"/> — the faithful
+        /// distance 10 → sky 5). After convergence, BOTH seam chunks are seeded with a stale skylight
+        /// removal node via <see cref="LightingTestWorld.SeedLoadedSkylightRemoval"/> — the faithful
         /// mirror of two adjacent chunks reloaded from a save written mid-darkness-wave
-        /// (<c>ChunkSerializer.ReadLightQueue</c> restores an in-flight <c>SunlightBfsQueue</c> node) —
+        /// (<c>ChunkSerializer.ReadLightQueue</c> restores an in-flight <c>SkylightBfsQueue</c> node) —
         /// then the grid is run <b>wave-parallel</b> (all jobs snapshot the same pre-round state).
         /// </para>
         /// <para>
-        /// The fix (<c>CrossChunkLightModApplier.ComputeSunlight</c> + <c>InChunkSunlightSupport</c>)
-        /// vetoes a cross-chunk sunlight removal that an in-chunk neighbor still independently supports,
+        /// The fix (<c>CrossChunkLightModApplier.ComputeSkylight</c> + <c>InChunkSkylightSupport</c>)
+        /// vetoes a cross-chunk skylight removal that an in-chunk neighbor still independently supports,
         /// so the wave converges and matches the borderless oracle. Before the fix this never converged
         /// and pinned the two seam voxels at sky 4 instead of 5 — a regression here means the veto
         /// weakened or the removal path again clobbers independently-supported seam light.
         /// </para>
         /// </summary>
-        private static bool Baseline_ReloadSeamSunlightNoOscillation()
+        private static bool Baseline_ReloadSeamSkylightNoOscillation()
         {
             using LightingTestWorld world = new LightingTestWorld(3);
             int width = world.GridSize * VoxelData.ChunkWidth;
@@ -1541,15 +1629,15 @@ namespace Editor.Validation.Lighting
             // The seam columns are mutually lit to sky 5 from the two shafts before the perturbation.
             Vector3Int westSeam = new Vector3Int(15, B48_CORRIDOR_Y, B48_CORRIDOR_Z);
             Vector3Int eastSeam = new Vector3Int(16, B48_CORRIDOR_Y, B48_CORRIDOR_Z);
-            passed &= LightingAssert.IsTrue(world.GetSkyLight(westSeam) == 5 && world.GetSkyLight(eastSeam) == 5,
+            passed &= LightingAssert.IsTrue(world.GetSkylight(westSeam) == 5 && world.GetSkylight(eastSeam) == 5,
                 "B48: seam columns are mutually lit to sky 5 before reload",
-                $"Expected 5/5, got {world.GetSkyLight(westSeam)}/{world.GetSkyLight(eastSeam)}");
+                $"Expected 5/5, got {world.GetSkylight(westSeam)}/{world.GetSkylight(eastSeam)}");
 
             // Reload mid-darkness-wave: both seam chunks come back carrying a stale removal seed at their
             // shared border (strength 15, above the live value, so each launches a darkness wave back
             // across the seam against the other's stale snapshot).
-            world.SeedLoadedSunlightRemoval(westSeam, 15);
-            world.SeedLoadedSunlightRemoval(eastSeam, 15);
+            world.SeedLoadedSkylightRemoval(westSeam, 15);
+            world.SeedLoadedSkylightRemoval(eastSeam, 15);
 
             passed &= LightingAssert.Converged(world.RunWaveToConvergence(),
                 "B48: reload reconciliation converges (no removal/replace oscillation)");
@@ -1559,7 +1647,7 @@ namespace Editor.Validation.Lighting
             return passed;
         }
 
-        // --- B49 (finding 3 guard): a direct, deterministic test of the cross-chunk sunlight removal veto.
+        // --- B49 (finding 3 guard): a direct, deterministic test of the cross-chunk skylight removal veto.
         // We set ONE in-chunk neighbor of the probe to a known sky and read the production guard's support
         // through two test affordances. A full cross-chunk-removal scenario is intentionally NOT used:
         // removing a shaft that feeds a seam voxel with a bright in-chunk neighbor forms a cross-chunk
@@ -1570,8 +1658,8 @@ namespace Editor.Validation.Lighting
         private const byte B49_DIMGLASS_OPACITY = 5; // TestBlockPalette.DimGlass
 
         /// <summary>
-        /// B49 (code-review finding 3, June 2026): guards that the cross-chunk sunlight removal veto
-        /// (<c>CrossChunkLightModApplier.InChunkSunlightSupport</c>) attenuates a neighbor's sky by the
+        /// B49 (code-review finding 3, June 2026): guards that the cross-chunk skylight removal veto
+        /// (<c>CrossChunkLightModApplier.InChunkSkylightSupport</c>) attenuates a neighbor's sky by the
         /// <b>target voxel's opacity</b> (<c>max(1, opacity)</c>, matching
         /// <c>NeighborhoodLightingJob.AttenuateLight</c> and the <c>CheckEdgeVoxel</c> cross-chunk guard),
         /// not by a flat air step.
@@ -1579,7 +1667,7 @@ namespace Editor.Validation.Lighting
         /// One in-chunk neighbor of the probe is set to sky <see cref="B49_NEIGHBOR_SKY"/> (all other
         /// neighbors stay dark). The guard's support for a DimGlass (opacity 5) target must therefore be
         /// <c>sky − max(1,5) = sky − 5</c>, not the pre-fix flat <c>sky − 1</c>. We then drive the real
-        /// decision logic (<c>ComputeSunlight</c>) for a removal of a voxel held over-bright at a value
+        /// decision logic (<c>ComputeSkylight</c>) for a removal of a voxel held over-bright at a value
         /// strictly between those two estimates: the opacity-aware support lets the legitimate removal
         /// through, whereas the flat estimate would have vetoed it (pinning stale over-bright light until a
         /// full relight).
@@ -1589,7 +1677,7 @@ namespace Editor.Validation.Lighting
         /// and the veto comparison red.
         /// </para>
         /// </summary>
-        private static bool Baseline_CrossSeamSunlightRemovalThroughDimGlass()
+        private static bool Baseline_CrossSeamSkylightRemovalThroughDimGlass()
         {
             using LightingTestWorld world = new LightingTestWorld(1);
 
@@ -1597,12 +1685,12 @@ namespace Editor.Validation.Lighting
             // support is a deterministic function of one known neighbor sky.
             Vector3Int probe = new Vector3Int(8, 64, 8);
             Vector3Int neighbor = new Vector3Int(7, 64, 8);
-            world.SetSkyLightAt(neighbor, B49_NEIGHBOR_SKY);
+            world.SetSkylightAt(neighbor, B49_NEIGHBOR_SKY);
 
             // Finding 3: in-chunk support charges the TARGET voxel's opacity on entry (max(1, opacity)),
             // so DimGlass (opacity 5) support is neighborSky-5 — strictly below the pre-fix flat air step.
-            byte supportDim = world.InChunkSunlightSupportAt(probe, B49_DIMGLASS_OPACITY);
-            byte supportFlat = world.InChunkSunlightSupportAt(probe, 1);
+            byte supportDim = world.InChunkSkylightSupportAt(probe, B49_DIMGLASS_OPACITY);
+            byte supportFlat = world.InChunkSkylightSupportAt(probe, 1);
             bool passed = LightingAssert.IsTrue(
                 supportDim == B49_NEIGHBOR_SKY - B49_DIMGLASS_OPACITY && supportFlat == B49_NEIGHBOR_SKY - 1 && supportDim < supportFlat,
                 "B49: in-chunk support charges the target's opacity (neighborSky-5), not the flat air step (neighborSky-1)",
@@ -1612,14 +1700,14 @@ namespace Editor.Validation.Lighting
             // at/below the flat estimate. The opacity-aware guard applies the legitimate removal; the
             // pre-fix flat estimate would have spuriously vetoed it.
             const byte overBright = B49_NEIGHBOR_SKY - 3; // supportDim (sky-5) < overBright (sky-3) <= supportFlat (sky-1)
-            passed &= LightingAssert.IsTrue(!LightingTestWorld.CrossChunkSunlightRemovalVetoed(overBright, supportDim),
+            passed &= LightingAssert.IsTrue(!LightingTestWorld.CrossChunkSkylightRemovalVetoed(overBright, supportDim),
                 "B49: opacity-aware support does NOT veto the legitimate cross-chunk removal (it applies)",
                 $"removal of sky {overBright} with opacity-aware support {supportDim} was unexpectedly vetoed");
-            passed &= LightingAssert.IsTrue(LightingTestWorld.CrossChunkSunlightRemovalVetoed(overBright, supportFlat),
+            passed &= LightingAssert.IsTrue(LightingTestWorld.CrossChunkSkylightRemovalVetoed(overBright, supportFlat),
                 "B49: the pre-fix flat-attenuation support WOULD have vetoed the same removal (the bug the fix prevents)",
                 $"removal of sky {overBright} with flat support {supportFlat} was expected to be vetoed");
 
-            // A FULLY-OPAQUE in-chunk neighbor cannot propagate sunlight (mirror of
+            // A FULLY-OPAQUE in-chunk neighbor cannot propagate skylight (mirror of
             // PropagateLight's IsOpaque source guard), so even storing a high sky-top value it must
             // contribute ZERO support. A separate probe whose only lit neighbor is an opaque Stone block
             // holding full sky must read 0 — otherwise the guard would over-estimate and veto a legitimate
@@ -1627,11 +1715,11 @@ namespace Editor.Validation.Lighting
             Vector3Int opaqueProbe = new Vector3Int(8, 70, 8);
             Vector3Int opaqueNeighbor = new Vector3Int(7, 70, 8);
             world.SetBlock(opaqueNeighbor, TestBlockPalette.Stone);
-            world.SetSkyLightAt(opaqueNeighbor, 15);
-            byte opaqueSupportDim = world.InChunkSunlightSupportAt(opaqueProbe, B49_DIMGLASS_OPACITY);
-            byte opaqueSupportFlat = world.InChunkSunlightSupportAt(opaqueProbe, 1);
+            world.SetSkylightAt(opaqueNeighbor, 15);
+            byte opaqueSupportDim = world.InChunkSkylightSupportAt(opaqueProbe, B49_DIMGLASS_OPACITY);
+            byte opaqueSupportFlat = world.InChunkSkylightSupportAt(opaqueProbe, 1);
             passed &= LightingAssert.IsTrue(opaqueSupportDim == 0 && opaqueSupportFlat == 0,
-                "B49: a fully-opaque neighbor (cannot propagate sunlight) contributes zero support, even storing sky 15",
+                "B49: a fully-opaque neighbor (cannot propagate skylight) contributes zero support, even storing sky 15",
                 $"Expected 0 support from an opaque sky-15 neighbor, got dim={opaqueSupportDim}, flat={opaqueSupportFlat}");
 
             return passed;

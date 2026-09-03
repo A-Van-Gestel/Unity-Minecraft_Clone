@@ -122,7 +122,7 @@ from `unscaledDeltaTime`; sub-phases from `WorldFrameProfiler`).
 ## Cross-references
 
 - **Isolated tick (gate opener):** [`BEHAVIOR_TG4_FLUID_TICK_2026_06_23_BENCHMARK.md`](BEHAVIOR_TG4_FLUID_TICK_2026_06_23_BENCHMARK.md).
-- **Design / fork:** [`Design/TG4_BLOCK_BEHAVIOR_DATA_SEPARATION.md`](../Design/TG4_BLOCK_BEHAVIOR_DATA_SEPARATION.md) §5.
+- **Design / fork:** [`Architecture/BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md`](../Architecture/BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md) Appendix A.
 - **Backlog:** [`Design/PERFORMANCE_IMPROVEMENTS_REPORT.md`](../Design/PERFORMANCE_IMPROVEMENTS_REPORT.md) — TG-4 (tick spike) + the lighting line (LI-1 / P-2).
 - **Harness:** `Assets/Scripts/Benchmarks/FluidStressController.cs`, `WorldFrameProfiler.cs`, `FluidBenchmarkScenarios.cs`.
 - **Related limitation:** `Documentation/Bugs/LIGHTING_BUGS.md` Bug 13 (opaque-slab skylight oscillation — why the floor is `Facade`).

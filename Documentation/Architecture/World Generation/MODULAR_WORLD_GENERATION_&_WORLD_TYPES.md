@@ -1,85 +1,71 @@
 # Modular World Generation & World Types
 
-**Version:** 2.5  
+**Version:** 2.7  
 **Date:** 2026-04-03  
 **Status:** Implemented (2026-05-14)  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)  
-**Context:** Decoupling legacy `Mathf.PerlinNoise` generation from a new `[BurstCompile]` `FastNoiseLite` generation pipeline via a modular "World Type" architecture.
+**Context:** Decoupling legacy `Mathf.PerlinNoise` generation from a new `[BurstCompile]` `FastNoiseLite` generation pipeline via a modular "World Type" architecture.  
+**Partially re-verified:** 2026-08-17, at commit `0327c61e` (branch `docs/doc-sync`). Only **§3, §5.1
+and §6.3** were re-derived from code — `World.cs`, `WorldJobManager.cs`,
+`Jobs/Generators/IChunkGenerator.cs`, `Serialization/Migration/MigrationManager.cs`,
+`Serialization/Migration/Steps/Migration_v3_to_v4_WorldTypes.cs`, `SaveSystem.cs`. **§§1, 2, 4, 8, 9,
+11 and 12 were not re-verified per claim** and still carry their original 2026-04/05 wording.
+
+> [!NOTE]
+> **The migration plan that delivered this architecture is archived.** The Phase 1–3
+> execution steps, the before/after code diffs, the post-review pitfall notes and the resolved open
+> questions live in
+> [`../../Archived/MODULAR_WORLD_GENERATION_MIGRATION_PLAN.md`](../../Archived/MODULAR_WORLD_GENERATION_MIGRATION_PLAN.md).
+> §7, §10 and §13 here are pointer stubs into it — kept as stubs rather than removed so that section
+> numbering, and §12 in particular, is unchanged.
+>
+> **Do not renumber or remove §12.** Five entries in
+> [`../../Design/WORLDGEN_FEATURE_IMPROVEMENTS_REPORT.md`](../../Design/WORLDGEN_FEATURE_IMPROVEMENTS_REPORT.md)
+> cite `§12.4`, `§12.1.D` and `§12.3.C` by number; §12's disposition table exists to keep those
+> resolving.
 
 ---
 
-## Changelog
+## Document History
 
-### v2.5 (from v2.4) — Final Review
+### v2.7 (from v2.6) — Architecture conversion
 
-**Self-review fixes:**
+- **Archived** the migration plan. The plan-shaped sections — §7 (Phase 1–3 execution steps), the
+  proposed-vs-current code in §3, §6.3's "we add a new step" framing, §10's TODO cross-reference
+  table, §13 (Resolved Questions) and Appendix A (post-review pitfalls) — moved to
+  [`../../Archived/MODULAR_WORLD_GENERATION_MIGRATION_PLAN.md`](../../Archived/MODULAR_WORLD_GENERATION_MIGRATION_PLAN.md),
+  per `docs-sync`'s promotion protocol §4. §7, §10 and §13 remain as pointer stubs so the numbering
+  (and §12 in particular) is unchanged.
+- **Rewrote §3** as current state — retitled *Initialization Order & Disposal Ownership*, re-derived
+  from `World.cs`. The world-type resolution reads `loadedWorldType`, not `metadata.worldType`; the
+  `Amplified` remap's placement before the registry lookup is documented as a contract, since
+  `WorldJobManager`'s constructor throws on an unmapped type.
+- **Rewrote §5.1** as current state — retitled *Structure Delegation*. It documented a call to
+  `_chunkGenerator.ExpandFlora(mod)`, which does not exist; the real seam is
+  `ExpandStructure(StructureSpawnMarker)`, reached from two drain arms, with `VoxelModSource.WorldGen`
+  stamping and a per-frame `modsBudget`.
+- **Rewrote §6.3** as current state — retitled *Save-Format Position*. The chain now runs to
+  `CURRENT_VERSION = 15` with the v3→v4 step third of fourteen, and the step reads the frozen
+  `LegacyLevelDat` DTO rather than the live `WorldSaveData` the plan proposed.
 
-- **Fixed** Section 3: `loadedSaveData.worldType` → `metadata.worldType` to match actual `StartWorld()` variable name.
-- **Fixed** Section 5: Documented that `WorldJobManager`'s factory switch is the single intentional exception to the "zero legacy references" rule, with a note pointing to the Assembly Definition resolution in Section 15.
-- **Fixed** Section 7 Phase 2 Step 3: Corrected cross-reference from "step 1 of Phase 1" to "step 3 of Phase 1."
-- **Fixed** Section 10.2.A: Updated "Sky Skip" status from "Recommended for Phase 3" to "Addressed by Section 12.1.A" (Density Band pattern).
-- **Fixed** Section 12.1.E.1: Removed dead code (unused first noise evaluation) from erosion pseudocode.
-- **Expanded** Section 4.1 (`FastNoiseConfig`): Added missing fields (`RotationType3D`, `WeightedStrength`, `PingPongStrength`) and a note on Domain Warp requiring a separate config instance.
-- **Clarified** Section 11.2 capability table: Distinguished "Phase 3 initial" from "future enhancement" for overhangs/caves.
+### v2.6 (from v2.5) — Backlog migration
 
-**Colleague review merges:**
+- **Moved** the forward-looking backlog out of this Architecture doc: former **Section 12** (world-generation
+  enhancements), **Section 13** (editor tooling) and **Section 15** (assembly-definition boundary) now live in
+  [`../../Design/WORLDGEN_FEATURE_IMPROVEMENTS_REPORT.md`](../../Design/WORLDGEN_FEATURE_IMPROVEMENTS_REPORT.md)
+  as `TF-15`..`TF-19`. Every sketch was status-checked against code first, so only still-open items moved;
+  §12 is now the **disposition mapping table** (what shipped, what an existing `TF-*` already owned, what
+  migrated), retained so other docs' `§12.x`/`§13.x` citations keep resolving.
+- **Renumbered** former Section 14 (Resolved Questions) → **Section 13**. Sections 1–11 and Appendix A are unchanged.
+- **Fixed** §11.3's "adding a new flora type" instruction — structures are authored as pool entries and
+  expanded through `ExpandStructure`, not added as `ExpandFlora` switch cases (see the §2.2 note).
 
-- **Resolved** Open Question #1: Confirmed `Vector3Int` is 100% blittable in Unity (three sequential `int` fields).
-  Removed the requirement to create a `VoxelModNative` struct; `NativeQueue<VoxelMod>` works in Burst out of the box. Removed from Section 14, updated notes in Sections 4.2 and 4.3.
-- **Added** `TerrainAmplitude` to `StandardBiomeAttributesJobData` and `StandardBiomeAttributes` (Section 4.1). `FastNoiseLite` returns normalized -1.0 to 1.0 values; an amplitude multiplier is required to define the physical height of hills/mountains per biome.
-- **Refined** the `[MovedFrom]` attribute signature for `LegacyBiomeAttributes` and `LegacyLode` to include the assembly name `"Assembly-CSharp"` for safe namespace transition from the global namespace (Sections 2.3 and 7).
-- **Clarified** SIMD expectations in Section 8 Performance table: Burst heavily optimizes scalar noise math, but true SIMD loop vectorization is limited by per-voxel branching/hashing in the noise algorithm.
+### v2.0 – v2.5
 
-### v2.4 (from v2.3)
-
-- **Expanded** Section 12.1.A from a brief cave description to a comprehensive "Density Band" pattern covering caves, overhangs, cliff shelves, and arches — with per-biome band parameters (`CaveDepth`, `OverhangHeight`), noise-type-to-style mapping tables,
-  and performance analysis showing the band approach is actually faster than legacy's full-column 2D evaluation.
-- **Added** Section 12.1.E: Terrain Erosion & Weathering — two approaches:
-    - E.1: Noise-based "fake" erosion (Ridged + Domain Warp, low effort, recommended first) with noise style table and concrete code sketch.
-    - E.2: True hydraulic erosion simulation (future experimental) with job chaining pattern, cross-chunk boundary mitigations, performance estimates, and fallback strategy.
-
-### v2.3 (from v2.2)
-
-- **Added** Section 11: Extensibility Analysis — documents the three-layer flexibility model (noise primitives, composable configs, strategy pattern), what the new system unlocks vs. legacy limitations, and a concrete capability comparison table.
-- **Added** Section 12: Future Enhancements — World Generation, covering terrain improvements (3D density caves, domain warp, continental landmasses, river carving), lode improvements (cellular veins, depth-weighted density),
-  flora improvements (biome-aware placement, multi-structure types), and new world type ideas (Amplified, Far Lands, Flat/Creative).
-- **Added** Section 13: Future Enhancements — Editor Tooling, covering noise preview inspectors, biome map visualizer, world type comparison tool, lode distribution preview, and seed browser.
-- **Renumbered** former Section 11 (Open Questions) → Section 14, Section 12 (Assembly Definition) → Section 15.
-
-### v2.2 (from v2.1)
-
-- **Split** `Lode` / `LodeJobData` along the same boundary as biomes — legacy gets `LegacyLode` + `LegacyLodeJobData` (frozen), standard gets `StandardLode` + `StandardLodeJobData` (free to evolve with `FastNoiseConfig`, density curves, etc.). See Section 2.3 updated tables and
-  Section 4.1 for `StandardLodeJobData`.
-- **Established** guiding principle for shared vs. owned types: "Shared types describe the output contract, not the generation algorithm." Applied throughout Sections 2.3 and 4.1.
-- **Updated** Section 7 Phase 2 steps to include the `Lode`/`LodeJobData` split and migration into Legacy.
-- **Updated** `StandardBiomeAttributes` (Section 4.1) to reference `StandardLode` instead of the old shared `Lode`.
-
-### v2.1 (from v2.0)
-
-- **Adopted** "Sealed Legacy Module" architecture (Option A): all legacy code is fully self-contained in `Assets/Scripts/Legacy/`, with zero legacy type references in the main codebase. See Section 2.3 for full rationale and folder layout.
-- **Added** `ExpandFlora()` to `IChunkGenerator` interface (Section 2.2) — severs the last cross-cutting dependency between `WorldJobManager` and legacy code (`Structure.cs` + `Noise.cs`).
-- **Added** `LegacyNoise.cs` and `LegacyStructure.cs` to the legacy module — `Noise.cs` and `Structure.cs` are removed from the main codebase after migration.
-- **Updated** Section 5 (`WorldJobManager`): `ProcessGenerationJobs()` now delegates flora expansion to `_chunkGenerator.ExpandFlora()` instead of calling `Structure.GenerateMajorFlora()` directly — also fixes the existing `_world.biomes[0]` hardcoded-biome bug.
-- **Updated** Section 7 (Execution Plan) to reflect the new file movements and legacy isolation steps.
-- **Resolved** Open Question #2 (Flora Height) — each generator owns its flora expansion logic, legacy uses `LegacyNoise`-based height, standard uses `Unity.Mathematics.Random`-based height.
-- **Added** Assembly Definition boundary as future expansion option in Section 12.
-
-### v2.0 (from v1.0)
-
-- **Updated** target from Unity 6.3 to Unity 6.4 (build 60004.0f1).
-- **Updated** all code samples to match actual current codebase (namespaces, signatures, field names).
-- **Updated** `SaveSystem.CURRENT_VERSION` references: current version is `3` (not `1`), so migration becomes `v3 → v4`.
-- **Updated** `WorldJobManager` constructor: current signature is `WorldJobManager(World world)`, not the redesigned version from v1.0 yet.
-- **Updated** `JobDataManager` field names and constructor to match current code (`BiomesJobData`, `AllLodesJobData`, etc.).
-- **Updated** `WorldSaveData`: current class lives in `namespace Serialization` and uses `version = 1` default.
-- **Updated** `WorldLaunchState`: current class lives in `namespace Data`.
-- **Updated** `BiomeAttributes` field names to match actual codebase (e.g., `surfaceBlock` not `SurfaceBlock`).
-- **Updated** `ChunkGenerationJob` to reflect actual current fields (`Vector2Int ChunkPosition`, flora helpers `GetTerrainHeight`, `GetStrongestBiome`).
-- **Clarified** that `VoxelMod` uses `Vector3Int` (not `Vector3`) — later confirmed as fully blittable and Burst-safe in v2.5.
-- **Added** Section 9: FastNoiseLite Library Audit with findings and recommendations.
-- **Added** Section 10: Cross-reference with `WORLD_GENERATION_PERFORMANCE_TODOS.md`.
-- **Added** detailed notes on `Structure.cs` flora generation (uses `Noise.Get2DPerlin` internally for height randomization).
-- **Removed** `MigrationV1ToV2Dummy` reference — this file exists only as a test fixture, the real v1→v2 migration (`MigrationV1ToV2RegionRepack`) and v2→v3 (`MigrationV2ToV3RestoreLighting`) are already implemented.
+The drafting history of the migration plan (v2.0 through v2.5 — self-review fixes, colleague review
+merges, and the successive expansions of the since-migrated backlog sections) is retained with the
+plan itself, in
+[`../../Archived/MODULAR_WORLD_GENERATION_MIGRATION_PLAN.md`](../../Archived/MODULAR_WORLD_GENERATION_MIGRATION_PLAN.md).
 
 ---
 
@@ -213,51 +199,72 @@ namespace Jobs.Generators
     public interface IChunkGenerator
     {
         /// <summary>
-        /// Injects explicit dependencies required for generation.
-        /// Called once during WorldJobManager construction.
+        /// Controls which optional generation passes (caves, lodes, water) are executed.
+        /// Defaults to GenerationFeatureFlags.Default (all passes enabled).
+        /// Set before calling ScheduleGeneration to take effect.
         /// </summary>
-        /// <param name="seed">The deterministic world seed.</param>
-        /// <param name="worldType">The ScriptableObject containing biome configuration.</param>
-        /// <param name="globalJobData">World-type-agnostic data (Blocks, Meshes, etc.).</param>
-        void Initialize(int seed, WorldTypeDefinition worldType, JobDataManager globalJobData);
+        GenerationFeatureFlags FeatureFlags { get; set; }
+
+        /// <summary>Injects explicit dependencies required for generation. Called once during WorldJobManager construction.</summary>
+        void Initialize(int seed, WorldTypeDefinition worldType, JobDataManager globalJobData,
+            bool isSingleBiomeMode = false, StandardBiomeAttributes selectedBiome = null);
 
         /// <summary>
         /// Schedules the generation job and returns a populated GenerationJobData struct.
+        /// <paramref name="activeVoxelPool"/> (TG-6): when supplied, the per-chunk active-voxel list is
+        /// rented from it and flagged so the caller returns it instead of disposing; null on the
+        /// editor / preview / benchmark paths.
         /// </summary>
-        /// <param name="coord">The chunk coordinate to generate.</param>
-        GenerationJobData ScheduleGeneration(ChunkCoord coord);
+        GenerationJobData ScheduleGeneration(ChunkCoord coord,
+            global::Helpers.ActiveVoxelListPool activeVoxelPool = null);
 
-        /// <summary>
-        /// Synchronous main-thread voxel query. Used by World.GetHighestVoxel and spawn-point logic.
-        /// </summary>
-        /// <param name="globalPos">The global voxel position to query.</param>
-        /// <returns>The block ID at the given position.</returns>
+        /// <summary>Synchronous main-thread voxel query. Used by World.GetHighestVoxel and spawn-point logic.</summary>
         byte GetVoxel(Vector3Int globalPos);
 
         /// <summary>
-        /// Expands a flora root point (queued by the generation job) into a full
-        /// set of VoxelMods (trunk + leaves, cactus body, etc.).
-        /// Called on the main thread during WorldJobManager.ProcessGenerationJobs().
-        /// Each generator owns its own noise/random strategy for trunk height determination,
-        /// ensuring legacy worlds use Mathf.PerlinNoise and standard worlds use Unity.Mathematics.Random.
+        /// Expands a structure spawn marker (queued by the generation job) into a full set of VoxelMods
+        /// (trunk + leaves, cactus body, etc.). Called on the main thread during
+        /// WorldJobManager.ProcessGenerationJobs(). Each generator owns its own structure templates and
+        /// random strategy.
         /// </summary>
-        /// <param name="rootMod">The flora root VoxelMod as queued by the generation job.
-        /// The ID field encodes the flora type index (0 = tree, 1 = cactus, etc.).</param>
-        /// <returns>An enumerable of VoxelMods representing the full flora structure.</returns>
-        IEnumerable<VoxelMod> ExpandFlora(VoxelMod rootMod);
+        IEnumerable<VoxelMod> ExpandStructure(StructureSpawnMarker marker);
 
         /// <summary>
-        /// Disposes of any internal NativeArrays allocated during Initialize.
+        /// Resolves the biome at a voxel-space column on the main thread, through the same
+        /// Jobs/Helpers/BiomeSelection arithmetic the generation job uses. Returns false on
+        /// generators with no Voronoi selection to answer with (the legacy generator).
+        /// Sampled ~1 Hz by World.BiomeTracker; not a per-voxel query.
         /// </summary>
+        bool TryGetBiomeAt(int voxelX, int voxelZ, out BiomeSample sample);
+
+        /// <summary>Terrain generation diagnostics for one column. Main-thread only; used by DebugScreen.</summary>
+        TerrainDebugInfo GetTerrainDebugInfo(int globalX, int globalZ);
+
+        /// <summary>Evaluates a batch of pixels for the terrain debug minimap (RGBA32 into outputPixels).</summary>
+        void EvaluateTerrainDebugPixels(int startIndex, int count, int textureSize,
+            int originX, int originZ, int scale, TerrainDebugRenderMode mode,
+            int biomeCount, int sliceY, byte[] outputPixels);
+
+        /// <summary>Disposes of any internal NativeArrays allocated during Initialize.</summary>
         void Dispose();
     }
 }
 ```
 
+> **Structures superseded flora (`ExpandStructure`, not `ExpandFlora`).** The interface originally carried
+> `ExpandFlora(VoxelMod rootMod)`, which encoded the flora type in the mod's `ID` field. It was replaced by
+> the generic **structure-marker** path: the generation job queues a `StructureSpawnMarker`
+> (`int3 Position` + `int PoolEntryIndex`, a flat index into the generator's flattened structure pool), and
+> the main thread resolves that index to a `CompositeStructureTemplate`. Trees, cacti, and minor flora are
+> all pool entries under this one mechanism, selected through the major/minor flora pools and flora-zone
+> noises on `StandardBiomeAttributes`. Sections below that still speak of `ExpandFlora` and of adding "a case
+> per flora type" describe the superseded shape — adding a structure today means authoring a template and
+> adding a pool entry, not editing a `switch`.
+
 ### 2.3. Legacy Isolation Architecture ("Sealed Legacy Module")
 
 All legacy world generation code will be fully self-contained in `Assets/Scripts/Legacy/`. The main codebase will contain **zero references** to any legacy type — the only bridge is the `IChunkGenerator` interface — with one intentional exception:
-`WorldJobManager`'s factory switch must create `new LegacyChunkGenerator()` (see Section 5 for the caveat and Section 15 for how to eliminate this via the Assembly Definition pattern).
+`WorldJobManager`'s factory switch must create `new LegacyChunkGenerator()` (see Section 5 for the caveat, and `TF-19` in [`WORLDGEN_FEATURE_IMPROVEMENTS_REPORT.md`](../../Design/WORLDGEN_FEATURE_IMPROVEMENTS_REPORT.md) for how to eliminate it via the Assembly Definition pattern).
 This prevents accidental breakage of legacy worlds when modifying the active (Standard) generation code.
 
 #### Design Rationale
@@ -373,95 +380,103 @@ Assets/Scripts/
 * **Status:** Active / Default for new worlds.
 * **Compiler:** `[BurstCompile(FloatPrecision.Standard, FloatMode.Default)]` — `FloatMode.Default` ensures cross-platform math determinism for seeds, unlike `FloatMode.Fast`.
 * **Behavior:** Highly optimized, branchless where possible, utilizing CPU vectorization.
-* **Flora:** `StandardChunkGenerator.ExpandFlora()` uses `Unity.Mathematics.Random` (seeded deterministically per-column) for trunk height, instead of `Noise.Get2DPerlin`. New flora types are added here only — the legacy module is frozen.
+* **Structures / flora:** `StandardChunkGenerator.ExpandStructure()` resolves the marker's `PoolEntryIndex` to a `CompositeStructureTemplate` and uses `Unity.Mathematics.Random` (seeded deterministically per-column) for placement variation, instead of `Noise.Get2DPerlin`. New structures are added here only — the legacy module is frozen.
 
 ---
 
-## 3. Resolving the Lifecycle Timing & Disposal Conflict
+## 3. Initialization Order & Disposal Ownership
 
-Currently, `World.cs` initializes `JobManager` and `JobDataManager` in `Awake()` (lines 159-179), with biome data parsed in `PrepareJobData()` (line 1040). We will split initialization and enforce strict, encapsulated disposal.
+The world type is not known at `Awake()` — it comes from `level.dat` (loaded worlds) or the create
+menu (new worlds), both of which are read inside the `StartWorld()` coroutine. Job data
+initialization is therefore split across the two, along the line of what does and does not depend
+on the world type.
 
-**Current `Awake()` (to be modified):**
+### 3.1. `Awake()` — world-type-agnostic data only
 
-```csharp
-// Current code at World.cs:159-179
-private void Awake()
-{
-    if (Instance is not null && Instance != this) Destroy(gameObject);
-    else
-    {
-        Instance = this;
-        appSaveDataPath = Application.persistentDataPath;
-        JobManager = new WorldJobManager(this);       // Current: no world-type awareness
-        ChunkPool = new ChunkPoolManager(transform);
-        PrepareJobData();                             // Current: parses biomes + blocks together
-    }
-}
-```
-
-**Updated `World.cs` (proposed changes):**
+`World.Awake()` establishes the singleton and prepares only data that every world type shares. It
+deliberately does **not** construct `WorldJobManager`:
 
 ```csharp
-[Header("World Configuration")]
-[SerializeField] private WorldTypeRegistry worldTypeRegistry;
+Instance = this;
+appSaveDataPath = Application.persistentDataPath;
 
-// Set during StartWorld(). Read by any system that needs to know the active generation type.
-public WorldTypeDefinition ActiveWorldType { get; private set; }
+// NOTE: JobManager is now created in StartWorld() after the world type is resolved.
 
-private void Awake()
-{
-    if (Instance is not null && Instance != this) Destroy(gameObject);
-    else
-    {
-        Instance = this;
-        appSaveDataPath = Application.persistentDataPath;
-        ChunkPool = new ChunkPoolManager(transform);
+ChunkPool = new ChunkPoolManager(transform);
 
-        // Parses BlockDatabase into NativeArrays (Custom Meshes, Textures, etc.)
-        // DOES NOT parse Biomes anymore — that is the generator's responsibility.
-        PrepareGlobalJobData();
-    }
-}
+if (_blockDatabase == null)
+    _blockDatabase = ResourceLoader.LoadBlockDatabase();
 
-private IEnumerator StartWorld()
-{
-    // ... existing Load Save Data & Settings (lines 321-379 unchanged) ...
+EmissiveBlockLookup.Initialize(BlockTypes);
 
-    // DETERMINE WORLD TYPE (new code, after line 379)
-    // 'metadata' is the WorldSaveData loaded from level.dat at World.cs:371
-    WorldTypeID typeToLoad = WorldLaunchState.IsNewGame
-        ? WorldLaunchState.SelectedWorldType
-        : metadata.worldType;
+// --- Prepare Job-Safe Data (Block Types & Custom Meshes only — biomes are owned by the generator) ---
+PrepareGlobalJobData();
 
-    // SAFE FALLBACK: Resolve any unsupported type IDs here, before the registry lookup.
-    if (typeToLoad == WorldTypeID.Amplified)
-    {
-        Debug.LogWarning("[World] Amplified world type is not yet implemented. Falling back to Standard.");
-        typeToLoad = WorldTypeID.Standard;
-    }
-
-    ActiveWorldType = worldTypeRegistry.GetWorldType(typeToLoad);
-
-    // INITIALIZE JOB MANAGER & STRATEGY
-    // Explicitly passes JobDataManager to avoid hidden order-of-operation contracts.
-    JobManager = new WorldJobManager(this, ActiveWorldType, JobDataManager);
-
-    // ... Proceed to LoadOrGenerateChunk (line 415+) ...
-}
-
-private void OnDestroy()
-{
-    // ENCAPSULATED DISPOSAL
-    // World.cs no longer iterates job dictionaries directly. It trusts the Managers.
-    JobManager?.Dispose();
-    JobDataManager?.Dispose();
-    FluidVertexTemplates?.Dispose();
-    // ... other standard cleanup (ChunkPool, StorageManager, etc.) ...
-}
+ChunkData.OnLightWorkFlagged = _lightWork.Flag;
 ```
 
-**Key change:** `JobManager` construction moves from `Awake()` to `StartWorld()`, after the world type is resolved from save data or UI selection. The current `PrepareJobData()` at line 1040 is split: block/mesh data stays in `Awake()` (`PrepareGlobalJobData()`), biome/lode data
-moves into each `IChunkGenerator.Initialize()`.
+`PrepareGlobalJobData()` delegates the flattening to `JobDataManagerFactory.Create(_blockDatabase)`
+— one shared implementation, also used by the editor tools and the OM-1 startup calibrator — and
+keeps the resulting containers: `JobDataManager`, `FluidVertexTemplates`, `IsActiveById`, and
+`IsSolidById`. Biome and lode data is **not** among them; each `IChunkGenerator` allocates its own
+during `Initialize()` (see [DATA_STRUCTURES.md](../DATA_STRUCTURES.md) §4.2).
+
+### 3.2. `StartWorld()` — world-type resolution, then the job manager
+
+Once `level.dat` has been read, `StartWorld()` resolves the type and only then builds the job
+manager:
+
+```csharp
+WorldTypeID typeToLoad = isNewGame && !isEditorReplay
+    ? WorldLaunchState.SelectedWorldType
+    : loadedWorldType;
+
+// ... the TF-14 border radius is resolved here, on the same isNewGame test ...
+
+// Safe fallback for unimplemented types
+if (typeToLoad == WorldTypeID.Amplified)
+{
+    Debug.LogWarning("[World] Amplified world type is not yet implemented. Falling back to Standard.");
+    typeToLoad = WorldTypeID.Standard;
+}
+
+ActiveWorldType = _worldTypeRegistry.GetWorldType(typeToLoad);
+// ... log the resolved type ...
+
+JobManager = new WorldJobManager(this, ActiveWorldType, JobDataManager);
+```
+
+A new world takes the type the create menu selected; a loaded world (and an editor re-play, which
+replays an existing save) takes the type restored from `level.dat`.
+
+**The `Amplified` remap happens here, before the registry lookup, and that placement is a
+contract.** `WorldJobManager`'s constructor throws `ArgumentException` on any `WorldTypeID` it has
+no generator for, so every unimplemented type must be remapped to a supported one *before*
+construction. Adding a reserved-but-unimplemented type without extending this fallback turns world
+load into a hard failure.
+
+`ActiveWorldType` is exposed as `public WorldTypeDefinition ActiveWorldType { get; private set; }`
+and is the read point for any system that needs the active generation type — the day/night clock
+reads its authored `timeOfDaySettings` the same way. The registry itself is a
+`[SerializeField] private WorldTypeRegistry _worldTypeRegistry`.
+
+### 3.3. Disposal is encapsulated
+
+`World.OnDestroy()` does not iterate job dictionaries or generator-owned native arrays. It disposes
+the managers and lets each own its contents — `WorldJobManager.Dispose()` completes in-flight jobs
+and disposes the active `IChunkGenerator`, which in turn releases the biome/lode arrays it
+allocated in `Initialize()`:
+
+```csharp
+JobManager?.Dispose();          // completes jobs, disposes the generator strategy
+JobDataManager?.Dispose();      // global block/mesh data
+FluidVertexTemplates?.Dispose();
+FastNoiseLite.ShutdownLookupTables();   // frees the pinned GCHandle lookup tables
+```
+
+`FastNoiseLite.ShutdownLookupTables()` is the counterpart to the pinned gradient tables described
+in §9.3 — the lookup tables are process-wide unmanaged state, so they are released here rather than
+by any single generator.
 
 ---
 
@@ -713,8 +728,12 @@ if (random.NextFloat() > biome.MajorFloraPlacementThreshold)
 }
 ```
 
-> **Flora Expansion:** Each `IChunkGenerator` owns its flora expansion via `ExpandFlora()` (Section 2.2). The `StandardChunkGenerator.ExpandFlora()` implementation uses `Unity.Mathematics.Random` (seeded from `math.hash(position, seed)`) for trunk height determination instead of
-`Noise.Get2DPerlin`. The legacy path (`LegacyChunkGenerator.ExpandFlora()`) delegates to `LegacyStructure.GenerateMajorFlora()`, which continues using `LegacyNoise.Get2DPerlin` unchanged. Neither `Noise.cs` nor `Structure.cs` exist in the main codebase — see Section 2.3.
+> **Structure Expansion:** Each `IChunkGenerator` owns its structure expansion via `ExpandStructure()`
+(Section 2.2). The `StandardChunkGenerator` implementation resolves the marker's pool entry to a
+`CompositeStructureTemplate` and uses `Unity.Mathematics.Random` (seeded from `math.hash(position, seed)`) for
+placement variation instead of `Noise.Get2DPerlin`. The legacy path delegates to
+`LegacyStructure.GenerateMajorFlora()`, which continues using `LegacyNoise.Get2DPerlin` unchanged. Neither
+`Noise.cs` nor `Structure.cs` exist in the main codebase — see Section 2.3.
 
 ### 4.4. Standard Biome Blending Strategy
 
@@ -793,7 +812,7 @@ public class WorldJobManager : IDisposable
         // NOTE: This is the SINGLE intentional exception to the "zero legacy references"
         // rule from Section 2.3. The factory must create concrete generator instances,
         // which requires referencing the Legacy namespace. If the Assembly Definition
-        // boundary (Section 15) is adopted later, this switch is replaced by a
+        // boundary (TF-19) is adopted later, this switch is replaced by a
         // registration pattern (GeneratorRegistry) that eliminates the direct reference.
         _chunkGenerator = activeWorldType.TypeID switch
         {
@@ -854,46 +873,49 @@ public class WorldJobManager : IDisposable
 }
 ```
 
-### 5.1. `ProcessGenerationJobs` Flora Delegation
+### 5.1. `ProcessGenerationJobs` Structure Delegation
 
-The current `ProcessGenerationJobs()` at `WorldJobManager.cs:326` has a direct dependency on `Structure.GenerateMajorFlora()` and `_world.biomes[0]` for flora expansion. This must be refactored to delegate to the active generator:
+`WorldJobManager` holds no structure-authoring knowledge. Stage 2 of `ProcessGenerationJobs()`
+drains the completed generation job's spawn queues and hands every marker to the active strategy —
+`WorldJobManager` never resolves a biome, a template, or a trunk height itself.
 
-**Current code (to be replaced):**
+There are two drain arms, both terminating in the same call:
+
+- **2A — legacy root mods.** Generators that still emit a bare `VoxelMod` per structure root have it
+  adapted into a `StructureSpawnMarker`, with the mod's `ID` reinterpreted as `PoolEntryIndex` and
+  its `GlobalPosition` as the marker `Position`.
+- **2B — data-driven spawns.** `GenerationJobData.StructureSpawns` already carries
+  `StructureSpawnMarker` values written by the job, so they are dequeued and passed straight through.
 
 ```csharp
-// WorldJobManager.cs:347 — STAGE 2 inside ProcessGenerationJobs()
-while (jobEntry.Value.Mods.TryDequeue(out VoxelMod mod))
+IEnumerable<VoxelMod> structureMods = _chunkGenerator.ExpandStructure(marker);
+
+foreach (VoxelMod sm in structureMods)
 {
-    IEnumerable<VoxelMod> floraMods = Structure.GenerateMajorFlora(
-        mod.ID, mod.GlobalPosition,
-        _world.biomes[0].minHeight,   // BUG: hardcoded to first biome
-        _world.biomes[0].maxHeight);  // BUG: ignores actual biome at position
-    _world.EnqueueVoxelModifications(floraMods);
+    VoxelMod worldGenMod = sm;
+    worldGenMod.Source = VoxelModSource.WorldGen;
+    _world.EnqueueVoxelModification(worldGenMod);
+    modsBudget--;
 }
 ```
 
-**Updated code (generator-agnostic):**
+Two properties of that loop are load-bearing:
 
-```csharp
-// WorldJobManager.cs — STAGE 2 inside ProcessGenerationJobs()
-while (jobEntry.Value.Mods.TryDequeue(out VoxelMod mod))
-{
-    // Delegate flora expansion to the active generator strategy.
-    // Each generator resolves the correct biome at the mod's position and uses
-    // its own noise/random strategy for trunk height determination.
-    IEnumerable<VoxelMod> floraMods = _chunkGenerator.ExpandFlora(mod);
-    _world.EnqueueVoxelModifications(floraMods);
-}
-```
+- **Every expanded mod is stamped `VoxelModSource.WorldGen`.** That selects which `canReplaceTags`
+  field the `Default` replacement rule consults — the broad world-generation mask, not the narrower
+  player-placement one (see [DATA_STRUCTURES.md](../DATA_STRUCTURES.md) §5).
+- **Expansion is budgeted.** `modsBudget` is decremented per emitted mod; when it is exhausted the
+  drain breaks, marks the job not fully processed, and leaves the remaining markers queued for a
+  later frame. A single chunk full of large structures therefore cannot monopolise a frame.
 
-This change:
+The interface method is `IEnumerable<VoxelMod> ExpandStructure(StructureSpawnMarker marker)`
+(`Assets/Scripts/Jobs/Generators/IChunkGenerator.cs:93`), implemented by both
+`StandardChunkGenerator` and `LegacyChunkGenerator`.
 
-- **Removes** the direct dependency on `Structure.cs` and `Noise.cs` from `WorldJobManager`.
-- **Removes** the direct dependency on `World.biomes` (`BiomeAttributes[]`) from `WorldJobManager`.
-- **Fixes** the existing bug where all flora used `biomes[0]` regardless of the actual biome at the position.
-
-> **Migration Note:** The existing `ScheduleMeshing()`, `ScheduleLightingUpdate()`, `ProcessMeshJobs()`, and `ProcessLightingJobs()` methods in `WorldJobManager.cs` are world-type-agnostic (they operate on `GenerationJobData`, `MeshDataJobOutput`, `LightingJobData`) and do **not
-** need to change. Only `ScheduleGeneration()` and the flora expansion call in `ProcessGenerationJobs()` are modified to delegate to the strategy.
+> **Scope of the strategy seam:** `ScheduleMeshing()`, `ScheduleLightingUpdate()`,
+> `ProcessMeshJobs()`, and `ProcessLightingJobs()` are world-type-agnostic — they operate on
+> `GenerationJobData`, `MeshDataJobOutput`, and `LightingJobData`, none of which vary by world type.
+> Only `ScheduleGeneration()` and this structure expansion delegate to the generator.
 
 ---
 
@@ -982,169 +1004,47 @@ namespace Data
 }
 ```
 
-### 6.3. Migration Strategy (`v3 → v4`)
+### 6.3. Save-Format Position (`v3 → v4`)
 
-The current save version is `3` (see `SaveSystem.cs:14`). The existing migration chain is:
-
-- `v1 → v2`: `MigrationV1ToV2RegionRepack` (fixed region file layout)
-- `v2 → v3`: `MigrationV2ToV3RestoreLighting` (restored lighting for empty sections)
-
-We add a new step:
-
-**File Location:** `Assets/Scripts/Serialization/Migration/Steps/Migration_v3_to_v4_WorldTypes.cs`
-
-* **Action:** Parses the old `level.dat` JSON, explicitly injects `"worldType": 0` (Legacy), and ensures the JSON is saved with version `4`.
-* **Note:** `SaveSystem.CURRENT_VERSION` is updated from `3` to `4`.
+World-type metadata entered the save format at **version 4**, via
+`MigrationV3ToV4WorldTypes` (`Assets/Scripts/Serialization/Migration/Steps/Migration_v3_to_v4_WorldTypes.cs`).
+It is a `level.dat`-only step — it overrides `MigrateLevelDat` and nothing else, so no chunk
+format version changed:
 
 ```csharp
-namespace Serialization.Migration.Steps
-{
-    public class MigrationV3ToV4WorldTypes : WorldMigrationStep
-    {
-        public override int SourceWorldVersion => 3;
-        public override int TargetWorldVersion => 4;
-        public override string Description => "Adding World Type metadata";
-        public override string ChangeSummary => "Assigns the Legacy world type to existing worlds.";
-
-        public override string MigrateLevelDat(string oldJson)
-        {
-            // Parse, inject worldType: 0, bump version to 4, re-serialize.
-            // Implementation uses Unity's JsonUtility or manual string injection.
-            var data = UnityEngine.JsonUtility.FromJson<WorldSaveData>(oldJson);
-            data.worldType = Data.WorldTypes.WorldTypeID.Legacy;
-            data.version = TargetWorldVersion;
-            return UnityEngine.JsonUtility.ToJson(data, true);
-        }
-    }
-}
+public override int SourceWorldVersion => 3;
+public override int TargetWorldVersion => 4;
+public override string Description => "Adding World Type metadata";
+public override string ChangeSummary => "Assigns the Legacy world type to existing worlds.";
 ```
 
-Register in `MigrationManager.cs` (line 23-28):
+`MigrateLevelDat` deserializes into the **frozen** `LegacyLevelDat` DTO — never the live
+`WorldSaveData` — sets `worldType` to `(int)WorldTypeID.Legacy`, stamps `version = 4`, and
+re-serializes. Reading the frozen DTO is mandatory rather than stylistic: the step round-trips the
+whole JSON document, so a live type carrying a field this step predates would be silently rewritten
+(see `.agents/rules/serialization-safety.md`, and `LegacyLevelDat`'s own header for the WS-4c v13
+case that demonstrated it).
 
-```csharp
-private readonly List<WorldMigrationStep> _steps = new List<WorldMigrationStep>
-{
-    new MigrationV1ToV2RegionRepack(),
-    new MigrationV2ToV3RestoreLighting(),
-    new MigrationV3ToV4WorldTypes(),  // NEW
-};
-```
+Assigning `Legacy` — not `Standard` — to pre-v4 worlds is what preserves their terrain: those
+worlds were generated by `Mathf.PerlinNoise` and must keep resolving to `LegacyChunkGenerator`.
+
+This step is now one link in a longer chain. `SaveSystem.CURRENT_VERSION` is **15**
+(`Assets/Scripts/SaveSystem.cs:59`), and `MigrationManager._steps` registers fourteen steps from
+`MigrationV1ToV2RegionRepack` through `MigrationV14ToV15TimeOfDay`, with the v3→v4 step third. A
+world older than v4 still passes through it on the way forward. The migration system itself is
+documented in [AOT_WORLD_MIGRATION_SYSTEM.md](../AOT_WORLD_MIGRATION_SYSTEM.md).
 
 ---
 
 ## 7. Execution Plan & Migration Steps
 
-### Phase 1: Preparation & Asset Protection (Non-Breaking)
+The three-phase execution plan that delivered this refactor (Phase 1 asset protection and
+`[MovedFrom]` attributes, Phase 2 legacy isolation and the save-format split, Phase 3 the
+`FastNoiseLite` path and UI hookup) is a delivery record, not current behavior. It is archived at
+[`../../Archived/MODULAR_WORLD_GENERATION_MIGRATION_PLAN.md`](../../Archived/MODULAR_WORLD_GENERATION_MIGRATION_PLAN.md)
+§7.
 
-1. **FastNoiseLite is already ported** at `Assets/Scripts/Libraries/FastNoiseLite.cs` (namespace `Libraries`). See Section 9 for audit findings and recommended fixes.
-   > **Gate (confirmed against source):** `FastNoiseLite` is **72 bytes**, fully blittable (18 fields × 4 bytes). All lookup tables live in a pinned `SharedStatic<LookupPointers>` via `GCHandle` — they are not struct fields. Pass-by-value is confirmed. Add `using Libraries;` to
-   all consuming files.
-
-2. **Remove No-Op Attribute:** Remove `[BurstCompile]` from the `FastNoiseLite` struct declaration (line 13). `[BurstCompile]` on a plain struct does nothing — it only has effect on `IJob*` structs and static methods. It misleads readers into thinking the struct itself is
-   compiled by Burst.
-
-3. **Protect Legacy Assets (CRITICAL):** Rename `BiomeAttributes` (at `Assets/Scripts/BiomeAttributes.cs`) to `LegacyBiomeAttributes : BiomeBase` and move to `Assets/Scripts/Legacy/LegacyBiomeAttributes.cs`. **You MUST add the following attribute to the new class signature —
-   without it, Unity loses script references on all existing `.asset` files and all biome data is silently nullified:**
-   ```csharp
-   [UnityEngine.Scripting.APIUpdating.MovedFrom(true, null, "Assembly-CSharp", "BiomeAttributes")]
-   public class LegacyBiomeAttributes : BiomeBase { ... }
-   ```
-   After renaming, run **Assets → Reimport All** to confirm all biome assets upgrade cleanly.
-
-4. Create a custom `Editor` script at `Assets/Scripts/Legacy/Editor/LegacyBiomeAttributesEditor.cs` that sets `GUI.enabled = false` in `OnInspectorGUI()`. This makes legacy biome assets visually read-only in the Inspector, preventing accidental modification.
-
-5. Create the following files in `Data.WorldTypes`:
-    - `BiomeBase.cs`
-    - `WorldTypeDefinition.cs` (including `WorldTypeID` enum)
-    - `WorldTypeRegistry.cs`
-
-6. Create `IChunkGenerator.cs` in `Jobs.Generators` (including the `ExpandFlora()` method per Section 2.2).
-
-7. Add `WorldTypeID` to `WorldSaveData` (in `Serialization/SaveDataTypes.cs`) and `WorldLaunchState` (in `Data/WorldLaunchState.cs`) per Section 6.
-
-### Phase 2: Legacy Isolation & Safe Serialization (The Split)
-
-1. **Move and rename generation code to `Legacy/`:**
-    - `WorldGen.cs` → `Legacy/LegacyWorldGen.cs` (rename class to `LegacyWorldGen`)
-    - `ChunkGenerationJob.cs` → `Legacy/LegacyChunkGenerationJob.cs` (rename struct to `LegacyChunkGenerationJob`)
-    - Add a prominent comment block to both files documenting the intentional preservation of the biome evaluation loop.
-
-2. **Copy utility code to `Legacy/` and delete originals from main codebase:**
-    - `Noise.cs` → copy to `Legacy/LegacyNoise.cs` (rename class to `LegacyNoise`). Update all references within the legacy module (`LegacyWorldGen`, `LegacyChunkGenerationJob`, `LegacyStructure`) to use `LegacyNoise` instead of `Noise`. **Delete** `Assets/Scripts/Noise.cs`.
-    - `Structure.cs` → copy to `Legacy/LegacyStructure.cs` (rename class to `LegacyStructure`). Update internal calls from `Noise.Get2DPerlin` to `LegacyNoise.Get2DPerlin`. **Delete** `Assets/Scripts/Structure.cs`.
-
-3. **Extract legacy job-data structs from shared `Data/JobData.cs`:**
-    - Move the `BiomeAttributesJobData` struct to `Legacy/LegacyBiomeAttributesJobData.cs` (rename to `LegacyBiomeAttributesJobData`). Update all references within the legacy module.
-    - Move the `LodeJobData` struct to `Legacy/LegacyLodeJobData.cs` (rename to `LegacyLodeJobData`). Rename the constructor parameter type from `Lode` to `LegacyLode`. Update all references within the legacy module.
-    - Remove both `BiomeAttributesJobData` and `LodeJobData` from `Data/JobData.cs`.
-    - **Note:** The `Lode` class (currently in `BiomeAttributes.cs`) has already been moved to `Legacy/LegacyBiomeAttributes.cs` as `LegacyLode` in step 3 of Phase 1. Add `[MovedFrom(true, null, "Assembly-CSharp", "Lode")]` to preserve serialized `.asset` references.
-
-4. **Create `LegacyChunkGenerator : IChunkGenerator`** at `Assets/Scripts/Legacy/LegacyChunkGenerator.cs`. This class:
-    - Owns `NativeArray<LegacyBiomeAttributesJobData>` and `NativeArray<LegacyLodeJobData>` (both moved from `JobDataManager`).
-    - Retains the `LegacyBiomeAttributes[]` ScriptableObject array reference for flora min/max height lookup.
-    - `ScheduleGeneration()` contains the job creation logic currently at `WorldJobManager.cs:44-80`.
-    - `GetVoxel()` delegates to `LegacyWorldGen.GetVoxel()`.
-    - `ExpandFlora()` resolves the correct biome at the mod position using `LegacyNoise.Get2DPerlin` for biome selection, then delegates to `LegacyStructure.GenerateMajorFlora()` with the correct per-biome `minHeight`/`maxHeight`. This fixes the current `_world.biomes[0]`
-      hardcoded bug.
-    - `Dispose()` disposes both NativeArrays.
-
-5. **Update `World.cs`:**
-    - Remove the `public BiomeAttributes[] biomes` field (line 33).
-    - Update `World.GetHighestVoxel()` (at line 2578) to call `JobManager.GetVoxel()` instead of `WorldGen.GetVoxel()` directly.
-    - Remove any remaining references to `WorldGen`, `Noise`, or `Structure`.
-
-6. **Update `WorldJobManager.cs`:**
-    - Change constructor to accept `WorldTypeDefinition` and `JobDataManager` (see Section 5).
-    - Refactor `ScheduleGeneration()` to delegate to `_chunkGenerator.ScheduleGeneration()`.
-    - Refactor flora expansion in `ProcessGenerationJobs()` to call `_chunkGenerator.ExpandFlora()` (see Section 5.1).
-    - Remove direct references to `Structure`, `Noise`, `BiomeAttributes`, and `World.biomes`.
-
-7. **Split `PrepareJobData()` (at `World.cs:1040`):**
-    - `Awake()` calls a new `PrepareGlobalJobData()` that parses only BlockTypes and CustomMeshes (lines 1071-1147 of current `PrepareJobData`).
-    - `StartWorld()` resolves `ActiveWorldType` and constructs `WorldJobManager`.
-    - Remove `BiomesJobData` and `AllLodesJobData` from `JobDataManager` constructor and fields (currently at `JobDataManager.cs:11-12`).
-
-8. Increment `SaveSystem.CURRENT_VERSION` from `3` to `4` (at `SaveSystem.cs:14`).
-
-9. Create `Migration_v3_to_v4_WorldTypes.cs` and register it in `MigrationManager._steps` (at `MigrationManager.cs:23-28`).
-
-10. **Verification Gate:** Confirm the game compiles, existing saves migrate gracefully to `Legacy`, and terrain generated from known seeds is bit-for-bit identical to pre-refactor output. Verify that no file in `Assets/Scripts/` (excluding `Assets/Scripts/Legacy/`) references
-    any legacy type: `LegacyWorldGen`, `LegacyNoise`, `LegacyStructure`, `LegacyBiomeAttributes`, `LegacyBiomeAttributesJobData`, `LegacyLode`, or `LegacyLodeJobData`.
-
-### Phase 3: The New Tech & UI Hookup
-
-1. Create the following new files. Ensure `using Libraries;` is present in all files referencing `FastNoiseLite`.
-    - `FastNoiseConfig.cs` (`namespace Jobs.Data`) — shared noise configuration struct.
-    - `StandardLodeJobData.cs` (`namespace Jobs.Data`) — blittable lode struct with `FastNoiseConfig`.
-    - `StandardBiomeAttributesJobData.cs` (`namespace Jobs.Data`) — blittable biome struct referencing `StandardLodeJobData` via index range.
-    - `StandardBiomeAttributes.cs` (`namespace Data.WorldTypes`) — authoring ScriptableObject including `StandardLode` class.
-
-2. Create `StandardChunkGenerationJob` with:
-    - `[BurstCompile(FloatPrecision.Standard, FloatMode.Default)]`
-    - `int2 ChunkPosition` for SIMD vectorization (replacing current `Vector2Int` at `ChunkGenerationJob.cs:22`)
-    - `NativeQueue<VoxelMod>.ParallelWriter Modifications` output field (`VoxelMod` with `Vector3Int` is fully blittable — see Note in Section 4.2)
-    - `Unity.Mathematics.Random` flora root detection per Section 4.3
-    - All `Unity.Mathematics` types (`float3`, `int3`, `float2`) instead of `Vector3`, `Vector3Int`, `Vector2`
-    - `Unity.Mathematics.math` functions instead of `Mathf` (per project rules in `repomix-instructions.md` Section 6)
-
-3. Create `StandardChunkGenerator : IChunkGenerator`:
-    - **Lookup warmup (CRITICAL):** Immediately after creating all `FastNoiseLite` instances, call `FastNoiseLite.Create(seed).GetNoise(0f, 0f)`. This forces the `Lookup` static constructor (`FastNoiseLite.cs:1892`) to fire and pin the gradient arrays via `GCHandle`. Without
-      this, the `SharedStatic` pointers are null when the first worker thread executes `GradCoord`, resulting in a silent read from address 0 or a native crash with no Unity stack trace.
-    - `Initialize()` allocates and owns both `NativeArray<StandardBiomeAttributesJobData>` and `NativeArray<StandardLodeJobData>`. The lode arrays are flattened across all biomes (mirroring the current `PrepareJobData` pattern at `World.cs:1044-1069`), with each biome's
-      `LodeStartIndex` and `LodeCount` set accordingly. Each `StandardLode` is converted to `StandardLodeJobData` via its constructor, and its `FastNoiseConfig` is used to construct a `FastNoiseLite` instance for ore evaluation.
-    - `ExpandFlora()` uses `Unity.Mathematics.Random` (seeded deterministically from position + world seed) for trunk height calculation. Flora structure logic (leaf/trunk placement patterns) can be reimplemented inline or in a new `StandardStructure` helper class — it does **not
-      ** reference `LegacyNoise` or `LegacyStructure`.
-    - `Dispose()` disposes both NativeArrays.
-    - Wire all `FastNoiseConfig` cellular fields (`CellularDistanceFunction`, `CellularReturnType`, `CellularJitter`) to the corresponding `SetCellular*` calls when constructing `FastNoiseLite` instances.
-
-4. Author new Standard Biome `ScriptableObjects`. Tune using `FastNoiseLite` APIs. Use `NoiseType.Cellular` for biome selection and configure `CellularJitter` to control boundary organicness.
-
-5. **UI Update:** In `WorldSelectMenu.cs` (at `Assets/Scripts/UI/WorldSelectMenu.cs`), add a `public TMP_Dropdown worldTypeDropdown;` field. Inside `OnConfirmCreateClicked()` (line 279), map the dropdown's integer value:
-   ```csharp
-   // After line 290 (WorldLaunchState.IsNewGame = true;)
-   WorldLaunchState.SelectedWorldType = (WorldTypeID)worldTypeDropdown.value;
-   ```
-   The Create World panel (`createPanel` at line 21) needs to be updated in the Unity scene to include the dropdown UI element.
+The end state those phases produced is what §§1–6 and §§8–12 of this document describe.
 
 ---
 
@@ -1159,7 +1059,7 @@ private readonly List<WorldMigrationStep> _steps = new List<WorldMigrationStep>
 
 *\*Note on Vectorization:* Burst heavily optimizes `FastNoiseLite`'s scalar math (constant folding, branch elimination, register allocation),
 but true SIMD loop vectorization is limited when evaluating single coordinates per iteration — the noise algorithm's internal hashing and branching prevents the compiler from batching 4+ voxels into a single SIMD instruction.
-This is still ~5–8x faster than managed code. For perfect SIMD scaling, a dedicated `float4`-native noise library would be required in the future (see Section 10.4.A).
+This is still ~5–8x faster than managed code. For perfect SIMD scaling, a dedicated `float4`-native noise library would be required in the future (see the archived plan's [§10.4.A](../../Archived/MODULAR_WORLD_GENERATION_MIGRATION_PLAN.md)).
 
 ---
 
@@ -1184,13 +1084,13 @@ The Burst-compatible `FastNoiseLite` port at `Assets/Scripts/Libraries/FastNoise
 
 #### A. Remove `[BurstCompile]` from Struct Declaration (Low Priority)
 
-**Location:** `FastNoiseLite.cs:13`
-**Issue:** `[BurstCompile]` on a plain struct (not an `IJob*`) is a no-op. It only affects job structs and static methods. Its presence is misleading.
+**Location:** `FastNoiseLite.cs:13`  
+**Issue:** `[BurstCompile]` on a plain struct (not an `IJob*`) is a no-op. It only affects job structs and static methods. Its presence is misleading.  
 **Action:** Remove the attribute. The struct is Burst-compatible by virtue of being blittable — the attribute is not what makes it so.
 
 #### B. Extract Duplicate Constants (Low Priority, Readability)
 
-**Issue:** Constants like `SQRT3`, `F2`, and `R3` are redefined locally within multiple methods (e.g., `TransformNoiseCoordinate`, `SingleOpenSimplex2`, domain warp methods).
+**Issue:** Constants like `SQRT3`, `F2`, and `R3` are redefined locally within multiple methods (e.g., `TransformNoiseCoordinate`, `SingleOpenSimplex2`, domain warp methods).  
 **Action:** Extract to private struct-level constants for clarity:
 
 ```csharp
@@ -1203,17 +1103,17 @@ private const float R3 = 2.0f / 3.0f;
 
 #### C. GCHandle Lifetime (No Action Needed)
 
-**Issue:** The 4 `GCHandle` objects in `Lookup` (lines 1887-1890) are never freed with `.Free()`.
+**Issue:** The 4 `GCHandle` objects in `Lookup` (lines 1887-1890) are never freed with `.Free()`.  
 **Assessment:** This is intentional and correct. The `Lookup` class is static and lives for the entire application lifetime. Freeing handles would cause Burst worker threads to access invalid memory. No action needed.
 
 #### D. Seed Overflow in Fractal Loops (No Action Needed)
 
-**Issue:** Fractal methods increment `seed++` per octave (e.g., line 624). If `mSeed` is `int.MaxValue`, this overflows.
+**Issue:** Fractal methods increment `seed++` per octave (e.g., line 624). If `mSeed` is `int.MaxValue`, this overflows.  
 **Assessment:** Extremely unlikely in practice (max 16 octaves). C# `unchecked` integer arithmetic wraps safely. The original FastNoiseLite C++ library has the same behavior. No action needed.
 
 #### E. Consider `readonly struct` (Low Priority, Future)
 
-**Issue:** The struct is not marked `readonly`. Adding `readonly` would provide stronger guarantees about no-mutation and enable the compiler to avoid defensive copies when passed by `in` reference.
+**Issue:** The struct is not marked `readonly`. Adding `readonly` would provide stronger guarantees about no-mutation and enable the compiler to avoid defensive copies when passed by `in` reference.  
 **Consideration:** Many setter methods (`SetSeed`, `SetFrequency`, etc.) mutate the struct, so marking it `readonly` would require refactoring the API to use `Create()` with all parameters or a builder pattern. **Not recommended for this phase.** Revisit when/if the API
 stabilizes.
 
@@ -1235,37 +1135,13 @@ stabilizes.
 
 ## 10. Cross-Reference: `WORLD_GENERATION_PERFORMANCE_TODOS.md`
 
-This section maps each item from the Performance TODOs document to its status relative to this design.
-
-### 10.1. Making `ChunkGenerationJob` Burst-Compatible
-
-| TODO Item                                         | Status         | Notes                                                                                                                                                                                                                                                 |
-|---------------------------------------------------|----------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Step 1:** Choose Burst-compatible noise library | **Done**       | `FastNoiseLite` ported at `Assets/Scripts/Libraries/FastNoiseLite.cs`. See Section 9 for audit.                                                                                                                                                       |
-| **Step 2:** Create `BurstNoise` abstraction layer | **Superseded** | This design passes `FastNoiseLite` by value directly into the job (72 bytes, L1 cache-friendly). A static wrapper adds an unnecessary indirection layer. The `FastNoiseConfig` struct (Section 4.1) serves as the authoring-side abstraction instead. |
-| **Step 3:** Pass noise state via job data         | **Addressed**  | `StandardChunkGenerationJob` (Section 4.2) accepts `FastNoiseLite GlobalCaveNoise` by value. Per-biome noise instances are constructed from `FastNoiseConfig` during `Initialize()` and baked into `StandardBiomeAttributesJobData`.                  |
-| **Step 4:** Refactor `WorldGen.GetVoxel`          | **Addressed**  | Legacy `WorldGen.GetVoxel` is preserved as-is (renamed to `LegacyWorldGen`). New generation logic lives inline in `StandardChunkGenerationJob.Execute()`, using `Unity.Mathematics` types throughout.                                                 |
-
-### 10.2. Algorithmic Optimizations
-
-| TODO Item                                | Status                          | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-|------------------------------------------|---------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **A. Heightmap Early Exit ("Sky Skip")** | **Addressed by Section 12.1.A** | The "Density Band" pattern (Section 12.1.A) subsumes this optimization. A cheap 2D terrain height is calculated first, then 3D noise is only evaluated in the band `[terrainHeight - CAVE_DEPTH .. terrainHeight + OVERHANG_HEIGHT]`. Blocks outside the band are filled without any noise evaluation (~75% of the column). This is strictly better than the original TODO's proposal because it also enables caves and overhangs, not just a sky skip. |
-| **B. Pre-calculated Biome Map**          | **Addressed by Section 4.4**    | The Standard path uses Cellular noise for biome assignment, which is a single 2D evaluation per column — effectively the same as a pre-calculated biome map but without the separate job overhead. If biome blending is added later, a separate "Biome Job" pass becomes necessary.                                                                                                                                                                     |
-
-### 10.3. Architectural Improvements
-
-| TODO Item                                   | Status                  | Notes                                                                                                                                                                                                                                                                                                                                                                     |
-|---------------------------------------------|-------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **A. Job Chaining (Internal Dependencies)** | **Deferred**            | The current `WorldJobManager` uses `Update()` polling (via `ProcessGenerationJobs()`, `ProcessMeshJobs()`, `ProcessLightingJobs()`). This pattern works and is not a bottleneck. Job chaining can be added later as an optimization to `StandardChunkGenerator.ScheduleGeneration()` if profiling shows main-thread polling overhead.                                     |
-| **B. Deferred Structure Generation**        | **Partially Addressed** | Trees are already deferred to main thread via `NativeQueue<VoxelMod>.ParallelWriter` (current code at `ChunkGenerationJob.cs:47,104`). The TODO's "Decoration Pass" (waiting for neighbors before placing) remains a future enhancement. The current approach of queuing VoxelMods works correctly — it just causes main-thread spikes in `Structure.GenerateMajorFlora`. |
-
-### 10.4. Micro-Optimizations
-
-| TODO Item                   | Status                                   | Notes                                                                                                                                                                                                                                                                                                                                       |
-|-----------------------------|------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **A. SIMD / Vectorization** | **Automatically handled**                | Burst auto-vectorizes loops using AVX2/SSE4 when `Unity.Mathematics` types are used. The `StandardChunkGenerationJob` uses `int2`, `int3`, `float2`, `float3` throughout, enabling Burst's optimizer. Manual `float4` batching is unnecessary unless profiling shows otherwise.                                                             |
-| **B. Look Up Tables (LUT)** | **Already implemented in FastNoiseLite** | The `FastNoiseLite` library uses pre-computed gradient and random vector lookup tables pinned via `SharedStatic` (see `FastNoiseLite.cs:1870-1978`). No additional LUTs are needed for the noise calculations. The TODO's mention of `Mathf.Sin`/`cos` for biome blending is eliminated by the Cellular noise biome strategy (Section 4.4). |
+The item-by-item mapping between this architecture and the old world-generation performance TODO
+list is a record of what that investigation concluded, not a description of current behavior. Both
+documents are now archived: the TODO list at
+[`../../Archived/WORLD_GENERATION_PERFORMANCE_TODOS.md`](../../Archived/WORLD_GENERATION_PERFORMANCE_TODOS.md),
+and the mapping table itself in
+[`../../Archived/MODULAR_WORLD_GENERATION_MIGRATION_PLAN.md`](../../Archived/MODULAR_WORLD_GENERATION_MIGRATION_PLAN.md)
+§10.
 
 ---
 
@@ -1337,420 +1213,68 @@ These are the specific places where new features can be added with minimal archi
 
 3. **Adding a new world type:** Create a new `IChunkGenerator` implementation + job struct. Register in `WorldJobManager`'s factory switch. Add a new `WorldTypeID` enum value. Add biome `ScriptableObject` subclass if needed. No changes to existing generators.
 
-4. **Adding a new flora type:** Add a case to `StandardChunkGenerator.ExpandFlora()`. The detection logic in the job stays the same (it just queues a `VoxelMod` with an index). No changes to `IChunkGenerator` interface or `WorldJobManager`.
+4. **Adding a new structure / flora type:** author a `CompositeStructureTemplate` and add it as a pool entry on the biome — `StandardChunkGenerator.ExpandStructure()` resolves the marker's `PoolEntryIndex` against the flattened pool, so no `switch` arm is added per type. The detection logic in the job stays the same (it queues a `StructureSpawnMarker`). No changes to the `IChunkGenerator` interface or `WorldJobManager`. *(Pre-supersession this was "add a case to `ExpandFlora()`" — see the note in §2.2.)*
 
 5. **Adding a new generation pass:** Add a new `NativeArray` output to `GenerationJobData` (or chain a second job in `ScheduleGeneration()`). `ProcessGenerationJobs()` reads the new output. The interface doesn't change — `GenerationJobData` is the output contract.
 
 ---
 
-## 12. Future Enhancements — World Generation
-
-This section catalogs concrete improvements enabled by the new architecture, organized by terrain feature. Each entry notes the difficulty, which structs/files are affected, and whether it requires interface changes.
-
-### 12.1. Terrain Shape Improvements
-
-#### A. 3D Density Field (Caves, Overhangs, Arches)
-
-The legacy system is a **pure 2D heightmap** — each column has exactly one terrain height from `Noise.Get2DPerlin`, making overhangs and caves physically impossible. Every block below the height is solid, every block above is air.
-
-The Standard system replaces this with a **3D density field** evaluated in a band around the terrain surface. This single change unlocks caves, overhangs, cliff shelves, and arches simultaneously.
-
-**How — Band Evaluation (the "Density Band" pattern):**
-
-```
-For each column (x, z):
-  1. terrainHeight = terrainNoise2D(x, z)                          // cheap 2D eval
-  2. For y in [terrainHeight - CAVE_DEPTH .. terrainHeight + OVERHANG_HEIGHT]:
-       density = (terrainHeight - y) + 3dNoise(x, y, z) * amplitude
-       if density > 0 → solid block (stone/dirt/surface)
-       if density ≤ 0 → air
-  3. Below the band (y < terrainHeight - CAVE_DEPTH) → always solid (stone/ores)
-  4. Above the band (y > terrainHeight + OVERHANG_HEIGHT) → always air (or water)
-```
-
-The `(terrainHeight - y)` term creates a natural bias: blocks well below the surface are strongly positive (always solid), blocks well above are strongly negative (always air).
-The 3D noise only needs to "push" the density across zero near the surface to create features. This is why the band can be narrow — deep underground and high sky don't need 3D evaluation.
-
-**Overhang control via noise type:**
-
-| Noise Config                          | Overhang Style                          |
-|---------------------------------------|-----------------------------------------|
-| `FractalType.Ridged` + low frequency  | Sharp cliff ledges, mesa shelves        |
-| `FractalType.FBm` + medium frequency  | Smooth rounded overhangs, gentle arches |
-| Domain Warp + Ridged                  | Twisted, organic cliff faces            |
-| `NoiseType.Cellular` + `Distance2Sub` | Layered terraced overhangs              |
-
-**Cave control via noise type (underground portion of the band):**
-
-| Noise Config                                         | Cave Style                          |
-|------------------------------------------------------|-------------------------------------|
-| `FractalType.Ridged`                                 | Swiss-cheese interconnected caverns |
-| `FractalType.FBm` + low frequency                    | Large open underground chambers     |
-| `NoiseType.Cellular` + `CellularReturnType.Distance` | Tube-shaped tunnels                 |
-
-**Band parameters** (`CAVE_DEPTH` and `OVERHANG_HEIGHT`) can be per-biome fields on `StandardBiomeAttributesJobData`, allowing mountain biomes to have deep caves and tall overhangs while plains have shallow caves and no overhangs.
-
-**Performance:** The band evaluation is the same "Sky Skip" optimization from Section 10.2.A. Blocks outside the band skip 3D noise entirely. With a typical band of 30 blocks (20 below + 10 above surface) out of 128 total height, ~75% of blocks skip 3D evaluation. This is
-actually **faster** than the legacy system's approach of looping all 128 Y levels with 2D noise per level.
-
-**Affects:** `StandardChunkGenerationJob.Execute()` only. The `GlobalCaveNoise` field already exists in the job definition (Section 4.2). Optionally add `int CaveDepth` and `int OverhangHeight` to `StandardBiomeAttributesJobData` for per-biome control.
-**Difficulty:** Low — ~15 lines of density math in `Execute()`, plus optional per-biome band parameters. No interface changes.
-
-#### B. Domain-Warped Terrain
-
-**What:** Apply `DomainWarp()` to the X/Z coordinates before evaluating terrain height noise. This distorts the terrain non-linearly, creating organic coastlines, twisted mountain ranges, and non-repetitive landscapes.
-
-**How:** Add a `FastNoiseConfig DomainWarpConfig` to `StandardBiomeAttributesJobData`. In the job, construct a warp instance and call `warpNoise.DomainWarp(ref wx, ref wz)` before `terrainNoise.GetNoise(wx, wz)`.
-
-**Affects:** `StandardBiomeAttributesJobData` + `StandardBiomeAttributes` (new field), `StandardChunkGenerationJob.Execute()` (read warp, apply).
-**Difficulty:** Low — FastNoiseLite's `DomainWarp` API is already available and Burst-safe.
-
-#### C. Continental Landmass Scale
-
-**What:** Add a very-low-frequency noise layer that controls whether a region is "land" or "ocean" at a macro scale (thousands of blocks). This multiplies the terrain height, creating continents separated by vast oceans.
-
-**How:** Add a `FastNoiseConfig ContinentalNoiseConfig` to `StandardBiomeAttributesJobData` (or as a global field on the job). Evaluate at very low frequency (e.g., `0.0005f`). Use the 0–1 output as a multiplier on terrain height. Values near 0 produce ocean floor; values near 1
-produce full-height terrain.
-
-**Affects:** `StandardBiomeAttributesJobData` or `StandardChunkGenerationJob` (new field), `Execute()` (evaluate + multiply).
-**Difficulty:** Low — single additional noise evaluation per column.
-
-#### D. River Carving
-
-**What:** Carve river channels into the terrain surface using Cellular noise distance fields.
-
-**How:** Configure a `FastNoiseLite` instance with `NoiseType.Cellular` and `CellularReturnType.Distance`. The distance value represents proximity to cell edges — where distance is low, carve the terrain down to water level. `CellularJitter` controls how winding the rivers are.
-
-**Affects:** `StandardChunkGenerationJob.Execute()` (add a river noise evaluation per column), potentially a new `FastNoiseConfig RiverNoiseConfig` on the biome or job.
-**Difficulty:** Medium — requires careful integration with the heightmap to avoid floating blocks at river banks.
-
-#### E. Terrain Erosion & Weathering
-
-Natural terrain exhibits erosion patterns — valleys carved by water flow, sediment deposited in basins, cliff faces weathered into slopes. The legacy pure-2D-heightmap system cannot represent these patterns at all. The Standard system enables two approaches, ordered by
-implementation priority.
-
-##### E.1. Noise-Based "Fake" Erosion (Recommended First)
-
-**What:** Use Domain Warp + Ridged fractal noise to *simulate the visual appearance* of hydraulic erosion without running a physics simulation. Ridged noise naturally creates valley-like channels. Domain Warp makes them meander organically. The result is terrain that *looks*
-eroded without the computational cost of a true simulation.
-
-**How:** Layer a secondary noise pass that modifies the 2D terrain height before the density band evaluation:
-
-```
-// Inside StandardChunkGenerationJob.Execute(), per column
-float baseHeight = terrainNoise.GetNoise(x, z);
-
-// Domain warp the coordinates for organic meandering erosion channels
-float wx = x, wz = z;
-erosionWarp.DomainWarp(ref wx, ref wz);
-
-// Evaluate erosion noise at warped coordinates — ridged noise creates valley channels
-float erosion = erosionNoise.GetNoise(wx, wz);  // FractalType.Ridged, low frequency
-
-// Subtract erosion from terrain height — valleys form where ridged noise peaks
-float terrainHeight = baseHeight - erosion * erosionStrength;
-```
-
-Combined with the 3D density band from Section 12.1.A, this produces:
-
-- **Carved valleys** where ridged noise subtracts from the heightmap
-- **Natural overhangs** at valley walls where 3D density keeps upper blocks solid
-- **Winding canyon paths** from domain warp distortion
-- **Weathered cliff faces** where erosion partially carves into steep terrain
-
-**Noise configs for different erosion styles:**
-
-| Config                                                    | Visual Result                                |
-|-----------------------------------------------------------|----------------------------------------------|
-| `FractalType.Ridged` + `Frequency 0.002` + Domain Warp    | Wide, winding river valleys with cliff walls |
-| `FractalType.Ridged` + `Frequency 0.008` + high amplitude | Deep narrow canyons, mesa terrain            |
-| `FractalType.PingPong` + low frequency                    | Terraced hillsides, stepped erosion patterns |
-| `FractalType.FBm` + `Frequency 0.005` + low amplitude     | Gentle rolling hills with subtle weathering  |
-
-**Affects:** `StandardBiomeAttributesJobData` (new `FastNoiseConfig ErosionNoiseConfig` + `FastNoiseConfig ErosionWarpConfig` + `float ErosionStrength`), `StandardBiomeAttributes` (matching authoring fields), `StandardChunkGenerationJob.Execute()` (evaluate + subtract).
-**Difficulty:** Low — two additional noise evaluations per column plus one domain warp. All Burst-compatible. No interface changes.
-
-##### E.2. True Hydraulic Erosion Simulation (Future Experimental)
-
-**What:** A physics-based erosion pass that simulates water droplets flowing downhill across the terrain heightmap, carving channels and depositing sediment. Produces highly realistic terrain at the cost of significant computation.
-
-**How:** Chain a second Burst job after initial terrain generation:
-
-1. `StandardChunkGenerationJob` produces the raw heightmap (as normal).
-2. A new `ErosionSimulationJob : IJobFor` runs N iterations of droplet simulation on the heightmap:
-    - Each iteration spawns a water droplet at a random position (seeded deterministically).
-    - The droplet follows the steepest descent, accumulating sediment from carved blocks.
-    - When the droplet slows (flat terrain or basin), it deposits sediment.
-    - The heightmap is modified in-place.
-3. The eroded heightmap is then used by the density band evaluation for the final voxel output.
-
-**Job chaining within `StandardChunkGenerator.ScheduleGeneration()`:**
-
-```csharp
-// Phase 1: Generate raw terrain
-JobHandle terrainHandle = terrainJob.Schedule(256, 8);
-
-// Phase 2: Erode the heightmap (depends on Phase 1)
-JobHandle erosionHandle = erosionJob.Schedule(erosionIterations, 16, terrainHandle);
-
-// Return the final handle — WorldJobManager waits on this
-return new GenerationJobData { Handle = erosionHandle, ... };
-```
-
-**Cross-chunk boundary challenge:** Erosion naturally flows across chunk boundaries. Mitigations:
-
-- Generate a slightly larger heightmap (chunk + N-block border from neighbor noise) and only write the inner 16×16 result. The border provides context for water flow direction without requiring neighbor chunk data.
-- Accept minor discontinuities at chunk edges — at voxel scale these are often invisible.
-- Alternatively, run erosion at a larger scale (region-level) as a pre-process, but this significantly complicates the pipeline.
-
-**Performance consideration:** True erosion is expensive. 10,000 droplet iterations on a 16×16 heightmap takes ~0.5–2ms per chunk on a modern CPU with Burst. This is acceptable for initial world generation but may cause hitches during runtime chunk loading. Consider:
-
-- Running erosion only for chunks within the initial load radius (pre-generation).
-- Skipping erosion for runtime-loaded chunks and using the noise-based fake erosion (E.1) as a fallback.
-- Making erosion iteration count configurable per world type (e.g., "Standard" = 0 iterations, "Eroded" = 5000 iterations).
-
-**Affects:** New `ErosionSimulationJob` struct, `StandardChunkGenerator.ScheduleGeneration()` (job chaining), optionally new `ErosionConfig` fields on `WorldTypeDefinition` or `StandardBiomeAttributesJobData`.
-**Difficulty:** High — new job struct, cross-chunk boundary handling, performance tuning. No interface changes (job chaining is internal to `ScheduleGeneration()`).
-**Status:** Future experimental. Implement E.1 (noise-based) first for immediate visual improvement at near-zero cost.
-
-### 12.2. Lode / Ore Improvements
-
-#### A. Cellular Vein Patterns
-
-**What:** Replace the current blob-shaped ore deposits with realistic vein/streak patterns using Cellular noise.
-
-**How:** Configure `StandardLode.noiseConfig` with `NoiseType.Cellular` and `CellularReturnType.Distance2Sub` or `Distance2Div`. This produces thin, vein-like patterns along cell boundaries. `CellularJitter` controls vein spacing.
-
-**Affects:** `StandardLode` Inspector tuning only — no code changes needed if the lode evaluation already uses `FastNoiseLite` from the config.
-**Difficulty:** None (configuration only, once the Standard lode system is implemented).
-
-#### B. Depth-Weighted Density
-
-**What:** Make ore rarity vary by depth — e.g., diamonds only below Y=16, more common the deeper you go.
-
-**How:** Add a `float DepthDensityMultiplier` field to `StandardLode`/`StandardLodeJobData`. In the lode evaluation loop, multiply the noise threshold by a linear or curve-based depth factor:
-`adjustedThreshold = baseThreshold * lerp(1.0, DepthDensityMultiplier, (maxHeight - y) / (maxHeight - minHeight))`.
-
-**Affects:** `StandardLode` + `StandardLodeJobData` (new field), lode evaluation in `StandardChunkGenerationJob.Execute()`.
-**Difficulty:** Low — single multiply per lode per block.
-
-#### C. Multi-Block Veins
-
-**What:** A single lode generates clusters of two block types (e.g., iron ore mixed with gravel pockets).
-
-**How:** Add `byte SecondaryBlockID` and `float SecondaryRatio` to `StandardLode`/`StandardLodeJobData`. When a lode check passes, use a second noise evaluation or `Unity.Mathematics.Random` to choose between primary and secondary block.
-
-**Affects:** `StandardLode` + `StandardLodeJobData` (new fields), lode evaluation loop.
-**Difficulty:** Low.
-
-### 12.3. Flora & Decoration Improvements
-
-#### A. Biome-Aware Flora Placement
-
-**What:** Different biomes support different flora types and densities — e.g., dense oak forests in temperate biomes, scattered acacia in savanna, no trees in desert.
-
-**How:** Add `byte[] FloraIndices` and `float[] FloraWeights` arrays to `StandardBiomeAttributes`. The `StandardChunkGenerationJob` selects a flora type from the weighted list using `Unity.Mathematics.Random`. The `ExpandFlora()` method maps flora index to structure generator.
-
-**Affects:** `StandardBiomeAttributes` (new array fields), `StandardBiomeAttributesJobData` (flattened index range, similar to lode pattern), `StandardChunkGenerator.ExpandFlora()` (multi-type dispatch).
-**Difficulty:** Medium — requires flattening variable-length arrays into NativeArrays using the same start-index/count pattern as lodes.
-
-#### B. Multi-Structure Flora Types
-
-**What:** Add new structure types beyond trees and cacti — bushes, fallen logs, boulders, tall grass clusters, mushrooms.
-
-**How:** Add new cases to `StandardChunkGenerator.ExpandFlora()`. Each case produces a different `IEnumerable<VoxelMod>` pattern. The flora index in the `VoxelMod` dispatches to the correct case.
-
-**Affects:** `StandardChunkGenerator.ExpandFlora()` only. No interface changes.
-**Difficulty:** Low per structure type.
-
-#### C. Neighbor-Aware Decoration Pass
-
-**What:** Structures that can span chunk boundaries (large trees, villages) are placed only after all neighbor chunks are generated, preventing half-trees at chunk edges.
-
-**How:** Add a second decoration pass in `ProcessGenerationJobs()` that fires only when a chunk and all 8 neighbors have completed generation. The `IChunkGenerator` interface could gain an optional
-`ExpandDeferredStructures(ChunkCoord coord, Func<ChunkCoord, ChunkData> neighborLookup)` method.
-
-**Affects:** `IChunkGenerator` (new optional method), `WorldJobManager.ProcessGenerationJobs()` (state tracking for neighbor completion).
-**Difficulty:** High — requires state machine tracking "generated but not decorated" vs. "fully decorated" per chunk.
-
-### 12.4. New World Type Ideas
-
-These are enabled by the `IChunkGenerator` strategy pattern with zero changes to existing world types:
-
-| World Type                  | Generator Approach                                                                                                                                                                                                 | Effort   |
-|-----------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------|
-| **Amplified**               | Reuse `StandardChunkGenerator` with scaled terrain height parameters (e.g., `BaseTerrainHeight × 2.5`). Could be as simple as a `WorldTypeDefinition` with different biome assets — no new generator class needed. | Very Low |
-| **Far Lands**               | New generator with extreme domain warp amplitudes (`DomainWarpAmp > 100`) producing wildly distorted terrain. Same biome/lode system as Standard.                                                                  | Low      |
-| **Flat / Creative**         | Trivial generator that returns a fixed heightmap (e.g., grass at Y=64, dirt Y=61-63, stone below). No noise evaluation at all. `GetVoxel()` is a simple Y-comparison.                                              | Very Low |
-| **Void**                    | Returns Air for everything except a small starting platform. `GetVoxel()` returns 0.                                                                                                                               | Trivial  |
-| **Custom Noise Playground** | Exposes all `FastNoiseConfig` fields directly in the `WorldTypeDefinition` for user experimentation. No hardcoded terrain logic — pure noise-to-height mapping.                                                    | Medium   |
+## 12. Enhancement Backlog — Migrated to `WORLDGEN_FEATURE_IMPROVEMENTS_REPORT.md`
+
+This document is an **Architecture** doc: it describes the world-generation architecture as built.
+It used to also carry ~360 lines of forward-looking backlog here (§12 world-generation ideas, §13
+editor-tooling ideas, §15 the assembly-definition boundary), which is Design-doc content. On
+**2026-08-17** that backlog moved to
+[`../../Design/WORLDGEN_FEATURE_IMPROVEMENTS_REPORT.md`](../../Design/WORLDGEN_FEATURE_IMPROVEMENTS_REPORT.md),
+the live worldgen feature backlog, where it is tracked under `TF-*` IDs alongside the rest.
+
+**Every sketch was status-checked against code before moving**, because a large share of it had
+quietly shipped in the two years of worldgen work since it was written — importing that verbatim
+into a live backlog would have re-opened finished features. The table below is the full disposition,
+and it is deliberately kept here so that the `§12.x` / `§13.x` citations other documents already
+make (for example this report's TF-5/TF-6, TF-7 and TF-10 entries) still resolve to something
+meaningful.
+
+| Old §                    | Sketch                                            | Disposition                                                                                                                                                            |
+|--------------------------|---------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **12.1.A**               | 3D density field (caves, overhangs, arches)       | ✅ **Shipped** — as a full 3D volumetric density pipeline plus dedicated worm carvers, not the proposed narrow "density band". See [PROCEDURAL_TERRAIN_GENERATION.md](PROCEDURAL_TERRAIN_GENERATION.md) and [CAVE_GENERATION.md](CAVE_GENERATION.md). The per-biome `CaveDepth`/`OverhangHeight` band parameters were never adopted and do not exist. |
+| **12.1.B**               | Domain-warped terrain                             | ✅ **Shipped** — per-biome density warp + cave warp noises (`StandardChunkGenerator._biomeDensityWarpNoises`, `_caveWarpNoises`).                                        |
+| **12.1.C**               | Continental landmass scale                        | ✅ **Shipped** — as the Multi-Noise **continentalness** channel with per-biome `BurstSpline` curves, not a height multiplier.                                            |
+| **12.1.D**               | River carving (cellular distance field)           | ⏸️ **Open — owned by `TF-7`** (rivers). That entry already cites this sketch.                                                                                           |
+| **12.1.E.1**             | Noise-based "fake" erosion                        | ⛔ **Superseded** — shipped differently, as the Multi-Noise **erosion** channel with per-biome splines, rather than subtracting ridged noise from the heightmap.          |
+| **12.1.E.2**             | True hydraulic erosion simulation                 | ⏸️ **Open — migrated as `TF-15`.**                                                                                                                                      |
+| **12.2.A**               | Cellular vein patterns for lodes                  | ✅ **Available with no code change** — set a lode's noise config to `Cellular` + `Distance2Sub`/`Distance2Div`. Inspector tuning, so not a backlog item.                  |
+| **12.2.B**               | Depth-weighted lode density                       | ⏸️ **Open — migrated as `TF-16`** (with 12.2.C).                                                                                                                        |
+| **12.2.C**               | Multi-block veins                                 | ⏸️ **Open — migrated as `TF-16`.**                                                                                                                                      |
+| **12.3.A**               | Biome-aware flora placement                       | ✅ **Shipped** — flora zones + weighted major/minor structure pools on `StandardBiomeAttributes`, flattened into `StructurePoolEntryJobData`.                             |
+| **12.3.B**               | Multi-structure flora types                       | ✅ **Shipped** — superseded in shape: structures are authored as `CompositeStructureTemplate` pool entries and expanded via `IChunkGenerator.ExpandStructure`, so adding one is authoring work, not a new `switch` case (see §2.2). |
+| **12.3.C**               | Neighbor-aware (deferred) decoration pass         | ⏸️ **Open — owned by `TF-10`** (multi-piece / large structures). That entry already cites this sketch.                                                                   |
+| **12.4** Amplified       | Amplified world type                              | ⏸️ **Open — owned by `TF-5`.** `WorldTypeID.Amplified = 2` is reserved but unimplemented.                                                                                |
+| **12.4** Far Lands       | Far Lands world type                              | ⏸️ **Open — owned by `TF-6`.**                                                                                                                                          |
+| **12.4** Flat/Void/Noise | Flat/Creative, Void, Custom Noise Playground      | ⏸️ **Open — migrated as `TF-17`.**                                                                                                                                      |
+| **13.1**                 | Noise preview inspector                           | ✅ **Shipped** — as the `WorldGenPreviewWindow` **Noise Channels** tab (+ `NoisePreviewJob`), i.e. a window tab rather than the proposed `PropertyDrawer`.                |
+| **13.2**                 | Biome map visualizer                              | ✅ **Shipped** — `WorldGenPreviewWindow` **Biome Editor** / **World Blending** tabs, plus the runtime minimap's `TerrainDebugRenderMode` (`IChunkGenerator.EvaluateTerrainDebugPixels`). |
+| **13.3**                 | World type comparison tool (split view)           | ⏸️ **Open — migrated as `TF-18`.** The existing `WorldType` tab *edits* one definition; it cannot render two side by side.                                               |
+| **13.4**                 | Lode distribution preview                         | ✅ **Shipped** — `WorldGenPreviewWindow` **Cross Section** tab, which has a `Lodes` toggle.                                                                              |
+| **13.5**                 | Seed browser                                      | ⏸️ **Open — migrated as `TF-18`** (with 13.3).                                                                                                                          |
+| **15**                   | `Legacy.asmdef` boundary                          | ⏸️ **Open — migrated as `TF-19`.** Legacy isolation is still folder convention (§2.3), not compile-enforced.                                                             |
+
+**What was dropped rather than moved.** The sketch prose for the ✅/⛔ rows above — including
+§12.1.A's noise-type→cave/overhang style tables and §12.1.E.1's erosion pseudocode — was not
+carried anywhere: it describes designs the engine either implemented differently or did not take,
+and the Architecture docs named in each row now own the as-built behavior. Recover it from git
+history (`git log -- "$THIS_FILE"`, versions ≤ v2.5) if a future item needs the reasoning.
 
 ---
 
-## 13. Future Enhancements — Editor Tooling
+## 13. Historical Record — the migration plan
 
-Custom editor tools can dramatically speed up biome and world type tuning. All tools listed below are Inspector-only (editor-time) and do not affect runtime performance.
+The execution plan that delivered this architecture in 2026-04/05 — the Phase 1–3 steps, the
+before/after code diffs for `World`'s initialization split and the flora delegation, the
+post-review implementation pitfalls, the resolved open questions, and the cross-reference against
+the (also archived) `WORLD_GENERATION_PERFORMANCE_TODOS.md` — has been moved to
+[`../../Archived/MODULAR_WORLD_GENERATION_MIGRATION_PLAN.md`](../../Archived/MODULAR_WORLD_GENERATION_MIGRATION_PLAN.md).
 
-### 13.1. Noise Preview Inspector
-
-**What:** A custom `PropertyDrawer` or `Editor` for `FastNoiseConfig` that renders a live 2D noise texture below the config fields. Changing any parameter (noise type, frequency, octaves, etc.) instantly updates the preview.
-
-**Implementation sketch:**
-
-- Create `FastNoiseConfigDrawer : PropertyDrawer` in an `Editor/` folder.
-- On every `OnGUI`, construct a `FastNoiseLite` from the serialized config fields.
-- Sample a 128×128 grid of `GetNoise(x, y)` values. Map to grayscale. Write to a cached `Texture2D`.
-- Render the texture below the property fields using `EditorGUI.DrawPreviewTexture()`.
-- Optionally overlay contour lines at key thresholds to visualize where ores/caves would activate.
-
-**Benefits:** Currently, tuning noise parameters requires entering play mode, generating chunks, and flying around to observe results. A live preview reduces the iteration loop from minutes to milliseconds.
-
-**Applies to:** Every `FastNoiseConfig` field in the project — `StandardBiomeAttributes.TerrainNoiseConfig`, `StandardBiomeAttributes.BiomeWeightNoiseConfig`, `StandardLode.noiseConfig`, future domain warp configs, etc.
-
-### 13.2. Biome Map Visualizer (Editor Window)
-
-**What:** A standalone `EditorWindow` that renders a top-down biome assignment map for a given seed and world type. Shows which biome is assigned to each column in a configurable area (e.g., 512×512 blocks).
-
-**Implementation sketch:**
-
-- User selects a `WorldTypeDefinition` asset and enters a seed.
-- The tool constructs a `FastNoiseLite` instance with the biome selection noise config (Cellular Voronoi from Section 4.4).
-- Evaluates noise for each column in the grid, maps cell value to biome index, assigns biome color.
-- Renders as a color-coded `Texture2D` in the editor window.
-- Optionally overlay grid lines at chunk boundaries (every 16 blocks) to visualize chunk alignment.
-
-**Benefits:** Lets designers see biome distribution at a macro scale without entering play mode. Useful for tuning `CellularJitter`, frequency, and biome count balance.
-
-### 13.3. World Type Comparison Tool (Editor Window)
-
-**What:** A split-view `EditorWindow` that renders two world types side-by-side for the same seed. Shows heightmap differences, biome assignment differences, and ore distribution differences.
-
-**Implementation sketch:**
-
-- Two panels, each rendering a top-down heightmap (grayscale) for a selected `WorldTypeDefinition`.
-- Shared seed input. Shared camera position (pan/zoom synced).
-- Optionally highlight cells where the two heightmaps differ by more than N blocks (useful for verifying legacy vs. standard divergence during development).
-
-**Benefits:** Critical during Phase 2 verification — confirms that legacy output matches pre-refactor. Later useful for comparing Standard vs. Amplified tuning.
-
-### 13.4. Lode Distribution Preview
-
-**What:** A custom `Editor` for `StandardBiomeAttributes` that renders a vertical cross-section (X/Y slice at fixed Z) showing where each lode would generate blocks. Each lode gets a distinct color.
-
-**Implementation sketch:**
-
-- Render a 256×128 texture (X × Y) representing one chunk-width cross-section.
-- For each pixel, evaluate the terrain height noise to determine if the block is stone.
-- For stone blocks, evaluate each lode's `FastNoiseConfig` and color the pixel if the lode threshold is met.
-- Highest-priority lode (last in the array, matching current behavior) wins color conflicts.
-
-**Benefits:** Visualizes ore density, depth distribution, and how `DepthDensityMultiplier` (Section 12.2.B) affects placement — without entering play mode.
-
-### 13.5. Seed Browser
-
-**What:** An `EditorWindow` that generates thumbnail previews for multiple seeds at once (e.g., seeds 1–100), showing a small heightmap thumbnail per seed. Clicking a thumbnail sets it as the active seed.
-
-**Implementation sketch:**
-
-- Grid of small (64×64) heightmap thumbnails.
-- Background thread evaluates terrain noise for each seed.
-- Useful for finding visually interesting seeds during content creation.
-
-**Benefits:** Seed selection is currently trial-and-error. A visual browser makes it systematic.
-
----
-
-## 14. Resolved Questions
-
-1. **Biome Blending:** The initial Standard implementation uses hard Voronoi boundaries. Smooth blending is a separate, future enhancement that would be done as part of a full biome system overhaul (temperature/humidity maps,
-   cellular distance field interpolation, cross-biome gradient transitions). Tracked in Section 12 as a future improvement — not a blocker for Phase 3.
-
-2. **World Type UI:** The Create World panel in `WorldSelectMenu.cs` needs a `TMP_Dropdown` for world type selection (see Phase 3 Step 5 and Appendix A.2).
-   The world type should also be displayed in the existing World Info screen (`WorldSelectMenu.OnInfoClicked()` at `WorldSelectMenu.cs:179`, which already shows world metadata via `WorldInfoUtility.FetchWorldInfoAsync()`).
-   This requires reading `WorldSaveData.worldType` from `level.dat` and mapping the `WorldTypeID` to `WorldTypeDefinition.DisplayName` via the registry. Consider also showing it in `WorldListItem.cs` as a subtitle or badge next to the seed.
-
----
-
-## 15. Future Enhancement: Assembly Definition Boundary
-
-The legacy isolation in Section 2.3 relies on folder convention and the Phase 2 verification gate to enforce that the main codebase never references legacy types.
-For additional compile-time safety, an **Assembly Definition** (`Legacy.asmdef`) can be added to `Assets/Scripts/Legacy/` in a future pass.
-
-### How It Works
-
-```
-Assets/Scripts/Legacy/Legacy.asmdef       ← References: Main assembly (for shared types like VoxelMod, GenerationJobData)
-Assets/Scripts/VoxelEngine.asmdef         ← Does NOT reference Legacy assembly
-```
-
-The main assembly physically *cannot* `using Legacy;` or reference `LegacyChunkGenerator` because it lacks the assembly reference. The only connection is through `IChunkGenerator`, which is defined in the main assembly.
-
-### The Factory Bridge
-
-If the main assembly can't reference `Legacy`, `WorldJobManager`'s factory switch needs an indirect resolution:
-
-1. **Registration pattern (Recommended):** `LegacyChunkGenerator` self-registers with a shared `GeneratorRegistry` at `[RuntimeInitializeOnLoadMethod]` time. The registry lives in the main assembly and maps `WorldTypeID` → `Func<IChunkGenerator>`. No direct reference needed.
-
-   ```csharp
-   // In Legacy assembly — auto-runs before any scene loads
-   [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-   private static void Register()
-   {
-       GeneratorRegistry.Register(WorldTypeID.Legacy, () => new LegacyChunkGenerator());
-   }
-   ```
-
-2. **ScriptableObject factory:** Each `WorldTypeDefinition` holds a `[SerializeReference] IChunkGeneratorFactory` field. Unity serialization handles the cross-assembly reference via the Inspector.
-
-### When to Adopt
-
-- **Not needed now:** The current team size and discipline level make folder convention sufficient.
-- **Adopt when:** The project gains multiple contributors, or legacy code is accidentally referenced despite the verification gate.
-- **Prerequisite:** The Section 2.3 folder structure is already asmdef-ready — adding the `.asmdef` files is a non-breaking change.
-
----
-
-## Appendix A: Implementation Notes (Post-Review)
-
-These notes were identified during the final review cycle. They do not change the architecture but address concrete implementation pitfalls to watch for during each phase.
-
-### A.1. `VoxelMod.ImmediateUpdate` `bool` Blittability (Phase 1 — CRITICAL)
-
-While `Vector3Int` is confirmed blittable (Section 4.2), the `VoxelMod` struct at `Data/VoxelMod.cs` also contains:
-
-```csharp
-public bool ImmediateUpdate;
-```
-
-Per the project's own `BURST_COMPILER_GUIDE.md` (Rule 2), standard C# `bool` has an undefined memory layout and is **not** inherently blittable in Burst. The legacy `ChunkGenerationJob` was never Burst-compiled, so `NativeQueue<VoxelMod>` was permitted.
-Once `StandardChunkGenerationJob` uses `[BurstCompile]`, Burst will throw compiler error `BC1063` on the `NativeQueue<VoxelMod>.ParallelWriter` field.
-
-**Fix (apply during Phase 1, before any Burst job references `VoxelMod`):**
-
-```csharp
-[System.Runtime.InteropServices.MarshalAs(System.Runtime.InteropServices.UnmanagedType.U1)]
-public bool ImmediateUpdate;
-```
-
-This explicitly defines `bool` as a 1-byte unsigned integer in memory, making the struct fully blittable. The fix is backwards-compatible — it does not change serialization behavior or affect the legacy path.
-
-> **Note:** The existing `VoxelMod` already uses `[MarshalAs]` on other fields in the codebase (see `BlockTypeJobData` at `Data/JobData.cs:139-140` for the pattern). This is a known project convention.
-
-### A.2. `TMP_Dropdown` World Type Mapping Safety (Phase 3)
-
-Section 7 Phase 3 Step 5 maps the UI dropdown to the enum via direct cast:
-
-```csharp
-WorldLaunchState.SelectedWorldType = (WorldTypeID)worldTypeDropdown.value;
-```
-
-`TMP_Dropdown.value` returns a 0-indexed `int` based on the **order of options in the Unity Inspector**. Because `WorldTypeID` explicitly assigns `Legacy = 0` and `Standard = 1`, this cast works correctly **only if the dropdown options are ordered identically** (Option 0 =
-Legacy, Option 1 = Standard).
-
-If a designer later reorders or alphabetizes the dropdown list, the cast silently maps to the wrong world type.
-
-**Mitigations (pick one):**
-
-- Add a comment on the UI prefab warning against reordering.
-- Validate in `OnConfirmCreateClicked()` with an assertion: `Debug.Assert(worldTypeDropdown.options[0].text == "Legacy")`.
-- Use a lookup array instead of a direct cast: `private static readonly WorldTypeID[] DropdownMapping = { WorldTypeID.Legacy, WorldTypeID.Standard };`
+It is frozen there as a historical record. This document describes only how the system behaves
+now; the archived plan describes how it was sequenced, and its "current code" blocks refer to the
+pre-refactor codebase.

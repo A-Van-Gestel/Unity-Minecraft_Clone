@@ -62,7 +62,7 @@ namespace Helpers
         /// uncreated output (no-op).
         /// </summary>
         /// <param name="output">The output to return. Must no longer be referenced by any scheduled job.</param>
-        public void Return(in MeshDataJobOutput output)
+        public void Return(MeshDataJobOutput output)
         {
             if (!output.Vertices.IsCreated) return;
 

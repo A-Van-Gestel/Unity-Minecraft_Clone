@@ -25,11 +25,12 @@ Shader "Minecraft/Transparent Blocks"
             HLSLPROGRAM
             #pragma vertex vertFunction
             #pragma fragment fragFunction
-            #pragma target 2.0
+            #pragma target 4.5
             #pragma multi_compile _ DEBUG_LIGHTDATA
 
             #include "Includes/VoxelCommon.hlsl"
             #include "Includes/VoxelLighting.hlsl"
+            #include "Includes/VoxelFog.hlsl"
 
             CBUFFER_START(UnityPerMaterial)
                 float _AlphaCutout;
@@ -39,10 +40,12 @@ Shader "Minecraft/Transparent Blocks"
             float GlobalLightLevel;
             float minGlobalLightLevel;
             float maxGlobalLightLevel;
-            half3 SkyLightColor;
+            half3 SkylightColor;
 
             VoxelV2F vertFunction(VoxelAppdata v)
             {
+                // FL-1: wind sway for flora — a no-op for verts whose baked sway weight (uv.z) is 0.
+                v.vertex.xyz = ApplyFoliageSway(v.vertex.xyz, v.uv.zw);
                 return VoxelVert(v);
             }
 
@@ -57,13 +60,20 @@ Shader "Minecraft/Transparent Blocks"
                 return half4(i.lightData.r, i.lightData.a, 0.0, 1.0);
                 #endif
 
-                // Apply voxel lighting: sun (scalar, tinted by sky color) + block (RGB)
+                // Apply voxel lighting: sky (scalar, tinted by sky color) + block (RGB)
                 col.rgb = ApplyVoxelLightingRGB(col.rgb, i.lightData.r, i.lightData.gba,
-                                                SkyLightColor,
+                                                SkylightColor,
                                                 GlobalLightLevel, minGlobalLightLevel, maxGlobalLightLevel);
 
                 // Multiply by vertex RGB to support BlockIconGenerator shadows and tinting
                 col.rgb *= i.color.rgb;
+
+                // Emission rides on top of the lit color, before fog — so a distant lamp still fades
+                // into the fog instead of glowing through it.
+                col.rgb = ApplyVoxelEmissive(col.rgb, i.color.a);
+
+                // Fog last, after all lighting — it replaces the surface rather than being lit by it.
+                col.rgb = ApplyVoxelFog(col.rgb, i.fogDistance);
 
                 return col;
             }

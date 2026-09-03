@@ -20,10 +20,18 @@ This is the primary folder for all game development.
 
 -   **Purpose:** Contains all scripts that run exclusively within the Unity Editor. This includes custom editor windows, inspectors, and asset generation tools.
 -   **Key Rule:** Code in this folder is wrapped in `#if UNITY_EDITOR` or is inside a class that inherits from an `Editor` type. It will not be included in the final game build.
+-   **Key Rule (assets):** Source *assets* consumed only by these tools belong here too — **never under `Resources/`**. See the `Assets/Resources/` rule below.
 -   **Examples:**
     -   `BlockEditorWindow.cs`: The custom UI for editing all `BlockType` assets.
-    -   `AtlasPacker.cs`: The tool for combining individual block textures into a single texture atlas.
+    -   `AtlasPacker.cs`: The tool for combining individual block textures into a single texture atlas. Its input tiles live in `Editor/AtlasPacker/SourceTextures/`; only the baked atlas ships.
     -   `FluidDataGenerator.cs`: A script to pre-calculate and save fluid mesh data as `ScriptableObject` assets.
+
+### `Assets/Resources/`
+
+-   **Purpose:** Assets that must be loadable by path at runtime without a scene reference.
+-   **Key Rule:** **Everything in a `Resources/` folder ships in the player build and is invisible to the managed stripper** — inclusion is by folder location, not by reference. An unreferenced asset here is dead weight that no build setting can remove.
+-   **Consequence:** Put an asset here only if runtime code actually loads it by path. Editor-tool inputs go under `Assets/Editor/`. Assets referenced from a scene or prefab do not need to be here at all — they are pulled in by reference.
+-   **Contents:** `Data/BlockDatabase`, `Data/BuildStamp`, `FluidData/`, `BlockTagPresets/`, `CreditsDatabase`. Runtime loads go through `ResourceLoader.cs`; `BuildStamp` is read by `BenchmarkEnvironment`.
 
 ### `Assets/Scripts/`
 
@@ -53,7 +61,7 @@ This is the heart of the project, containing all C# source code. It is organized
 -   **Purpose:** Contains `static` utility classes that provide reusable functions. These classes typically do not hold any state. They are the "verbs" or tools of the project.
 -   **Examples:**
     -   `VoxelMeshHelper.cs`: A Burst-compiled static class with methods for generating mesh data for different voxel types (cubes, custom, fluids).
-    -   `ResourceLoader.cs`: Handles loading assets from the `Resources` folder.
+    -   `ResourceLoader.cs`: Handles loading assets from the `Resources` folder — the single runtime entry point for it.
     -   `VoxelHelper.cs`: Provides utility functions for voxel math, like calculating face indices based on orientation.
 
 #### `Scripts/Jobs/`
@@ -73,6 +81,8 @@ This is the heart of the project, containing all C# source code. It is organized
 -   **Examples:**
     -   `TitleMenu.cs`: Logic for the main menu screen.
     -   `UIItemSlot.cs`: Manages the visual representation of an item slot in the inventory or toolbar.
+    -   `Builders/`: Shared factory for UI hierarchies built in code rather than in a scene or prefab
+        (`RuntimeUIFactory.cs`).
 
 ### `Assets/Shaders/`
 

@@ -192,13 +192,15 @@ T11
             scenarios.Add(new Scenario("BH-B6: grass spreads to convertible dirt (reservoir sampling + spread roll)", Bh6_GrassSpreadsToDirt));
             scenarios.Add(new Scenario("BH-B7: grass turns to dirt under a solid block (deterministic)", Bh7_GrassUnderSolidTurnsToDirt));
 
+            // Placeholder-neighbor guards (promoted K18a/K18b) — see BehaviorValidationSuite.Baseline.PlaceholderNeighbor.cs.
+            scenarios.Add(new Scenario("BH-B8: fluids do not spread into an unpopulated placeholder (Burst path)", Bh8_NoSpreadIntoPlaceholderBurst));
+            scenarios.Add(new Scenario("BH-B9: fluids do not spread into an unpopulated placeholder (managed path)", Bh9_NoSpreadIntoPlaceholderManaged));
+            scenarios.Add(new Scenario("BH-B10: a seam quiesced against a placeholder wakes when it populates", Bh10_SeamWakesWhenPlaceholderPopulates));
+            scenarios.Add(new Scenario("BH-B11: the seam wake covers grass (up-diagonal dirt target)", Bh11_SeamWakeCoversGrass));
+            scenarios.Add(new Scenario("BH-B12: cross-chunk reads resolve the right voxel in the far lands", Bh12_FarCoordinateSeamReadResolves));
+
             // BH-D1 old-vs-new differential (comparator self-test + driver-pair fixtures) — see BehaviorValidationSuite.Differential.cs.
             AddDifferentialScenarios(scenarios);
-        }
-
-        /// <summary>Registers the known-bug reproduction scenarios (none yet).</summary>
-        static partial void AddKnownBugScenarios(List<Scenario> scenarios)
-        {
         }
 
         /// <summary>

@@ -4,8 +4,8 @@
 > arc and the lessons that shaped the current (implemented) two-tier worm + noise design.
 > Promoted from a Design draft on 2026-06-16 once the full system shipped.
 
-**Created:** 2026-05-26
-**Status:** Implemented (2026-06-16)
+**Created:** 2026-05-26  
+**Status:** Implemented (2026-06-16)  
 **Related:** [PROCEDURAL_TERRAIN_GENERATION.md](PROCEDURAL_TERRAIN_GENERATION.md) (terrain shape + the generation job this carving runs inside), [MODULAR_WORLD_GENERATION_&_WORLD_TYPES.md](MODULAR_WORLD_GENERATION_&_WORLD_TYPES.md) (world-type / biome plumbing).
 
 ---
@@ -275,6 +275,63 @@ The `16f` denominator models a virtual target 16 blocks ahead horizontally, prod
 
 **Implemented as:** A `WormYAttraction` serializable struct (matching the `WormNoiseSeeking` grouping pattern) with fields `strength` (0-1, default 0 = disabled), `minY`, and `maxY`. Used as `wormYAttraction` on `StandardCaveLayer` (per-biome local worms, default band [20, 40]) and `yAttraction` on `TrunkWormConfig` (world-level trunk worms, default band [15, 35]). Per-biome override via `trunkYAttractionCenterOverride` on `StandardBiomeAttributes` --- shifts the trunk band center while preserving the global band width (same pattern as
 `trunkVerticalBiasOverride`). Job data structs keep the fields flat (`WormYAttractionStrength`, `WormYAttractionMin`, `WormYAttractionMax`) for Burst blittability. Applied in `SimulateWormStack` after horizontal bias and before noise seeking. The runtime normalizes `min <= max` via `math.min`/`math.max` to guard against inverted config. `BiomeConfigValidator` warns when the attraction band is inverted, doesn't overlap the spawn height range, or strength exceeds 0.8.
+
+#### 3.1.5 Far-Coordinate Precision --- Cell-Local Simulation Frame (Implemented)
+
+**Problem:** Worm positions are `float3` accumulators. Far from the origin the `float` ulp exceeds a
+march step, so spawn offsets, march increments, and carve deltas quantize *before* any noise call —
+worm tunnels flatten into axis-aligned planes/spikes past ~±2²⁴ voxels (the `Precise64` noise rider
+cannot recover this "garbage-in").
+
+**Solution:** In `Precise64` worlds the worm simulates in a **cell-local frame** — `WormState.Pos` is
+relative to the origin cell corner (bounded to a few hundred blocks by the 16-chunk search cap, so
+small floats stay exact). World coordinates are formed as exact `double` only at the noise/height/carve
+boundaries (`ToWorldX`/`ToWorldZ` = `cellOrigin + (double)local`; X/Z gain the integer cell origin, Y is
+already exact). A single `UseCellLocalFrame` flag drives it: with `cellOrigin == (0,0)` (Classic32 "Far
+Lands") every expression collapses to the classic absolute-float path **bit-identically**, so there is
+one code path, not two. Guarded by the `Validate Worm Carver` suite (`Assets/Editor/Validation/Generation/`).
+
+> **Before changing that suite or re-opening the gating decision**, read
+> [`../../Archived/WORM_CARVER_FAR_COORDINATE_PRECISION.md`](../../Archived/WORM_CARVER_FAR_COORDINATE_PRECISION.md)
+> §7 and §9. They hold the per-baseline design rationale that did not merge into this section — notably
+> why B1 is a *relative* precise-vs-classic comparison rather than an absolute assertion (an absolute one
+> false-reds on any biome cave retune), why B2 asserts `carved > 0` first, and that B5's Classic32 golden
+> was captured in editor/Mono and is **not** IL2CPP `FloatMode.Fast`-verified — plus the five gating
+> decisions that were settled with the user before implementation.
+
+**The invariant the frame change had to keep — scatter re-simulation determinism.** The carver is a
+scatter algorithm: every chunk within the search radius independently re-simulates the *same* worms
+(same cell hash → same RNG stream → same path) and keeps only the carves intersecting itself. Chunks
+never communicate; they agree because the simulation is a pure function of `(cellX, cellZ, BaseSeed)`
+plus compile-time code. A cell-local frame is safe for tearing precisely because the rebase origin is
+the **cell corner, not the simulating chunk** — the purity is preserved. The only per-chunk inputs are
+`chunkMin`/`chunkMax`/`ChunkPosition` (clipping and mask writes, which cannot affect the *path*) and
+`OutputWormMask` reads. ⚠️ **Mask seek is the one exception** (§3.5): it reads the current chunk's own
+mask, so two chunks re-simulating one worm can steer it differently once a seek fires — a pre-existing,
+deliberate cross-chunk divergence. Its probes were position-quantization-sensitive before the fix and
+are exact after it, which may slightly shift seek hit rates far from origin. Accepted, and covered by
+the suite's baselines.
+
+**Why a cell-local frame rather than the alternatives.** No option was bit-identical to the old
+behavior near origin — worm paths are chaotic (position feeds radius noise, biome lookups, surface
+fade, seek checks, so a 1-ulp difference can flip a threshold and diverge a path), which is why the
+gating was a user decision rather than a technical one.
+
+- **`double3` worm positions** (rejected as primary, kept as fallback) — smallest conceptual diff and
+  exact to 2⁵³ outright, but it puts doubles in the *march hot loop*: the per-step vector math runs at
+  half SIMD width where Burst vectorizes, on every worm step of every re-simulating chunk. It also
+  leaves `chunkMin`/`chunkMax` and `centerX` as separate one-off fixes.
+- **Distance-gated hybrid** (rejected) — local frame only past ±2²⁴, classic path in-band. The only
+  option preserving in-band bit-identity, but it creates a permanent behavioral seam ring at ±2²⁴
+  (a worm cell straddling the gate simulates differently than its neighbor) and two live simulation
+  paths forever. This is the same trade the `Precise64` noise rider already rejected. *If in-band
+  bit-identity is ever made mandatory in precise mode, this becomes the only answer and this section
+  must be revisited.*
+
+**Deferred (unrelated to precision, same loop):** long-trunk spatial hashing / path caching to lift the
+16-chunk search cap — a pre-existing code-comment backlog item; coordinate with it if scheduled. And if
+the noise rider's "Far Lands onset distance" slider ever ships, the worm carver's classic path should
+participate for a coherent aesthetic (design pass required).
 
 ### 3.2 Zone Attenuation: Per-Layer Opt-In (Implemented)
 
@@ -551,7 +608,7 @@ This is a **narrowing** of the current behavior: today all non-worm layers are s
 2. Multiple local worms from different origin chunks can also see each other's carvings (earlier scatter loop entries write before later ones read).
 3. Cross-chunk connections continue to rely on indirect noise seeking toward shared cheese chambers (Section 3.4.3).
 
-**Implemented as:** Two fields on the `WormNoiseSeeking` struct: `maskSeekChance` (0-1, default 0 = disabled) and `maskSeekMinSteps` (0-100, default 30). `OutputWormMask` on `StandardWormCarverJob` changed from `[WriteOnly]` to read-write (safe because `IJob` is single-threaded). A helper method `IsWormMaskSetAtWorld(float3)` converts world positions to local chunk coordinates and returns `false` for out-of-chunk positions.
+**Implemented as:** Two fields on the `WormNoiseSeeking` struct: `maskSeekChance` (0-1, default 0 = disabled) and `maskSeekMinSteps` (0-100, default 30). `OutputWormMask` on `StandardWormCarverJob` changed from `[WriteOnly]` to read-write (safe because `IJob` is single-threaded). A helper method `IsWormMaskSetAtLocal(int2 cellOrigin, float3 localPos)` (renamed from `IsWormMaskSetAtWorld` by the far-coordinate precision work, §3.1.5) converts cell-local positions to local chunk coordinates and returns `false` for out-of-chunk positions.
 
 **How it works at runtime:**
 

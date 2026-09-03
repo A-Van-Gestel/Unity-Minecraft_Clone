@@ -13,17 +13,21 @@ namespace Editor.Validation.Behavior
     /// <see cref="BehaviorTestWorld.SetNeighborBlock"/>).
     /// <para>
     /// These fixtures are appended to <see cref="DifferentialFixtures"/>, so every BH-D1 driver pair runs them. Under
-    /// the <b>current</b> drivers (<see cref="TickDriver.Legacy"/>, <see cref="TickDriver.SplitFamily"/>,
-    /// <see cref="TickDriver.FluidBurstHybrid"/>) the border stays on the managed path in <em>both</em> sides, so they
-    /// are byte-identical (green) — this proves the multi-chunk harness models cross-seam reads + emission faithfully.
-    /// They become the real <b>prove-red → green</b> gate once Phase 4b adds the halo-fed all-fluids Burst driver
-    /// (<c>BH-D1[L|H]</c>), whose border voxels must reproduce this exact stream from the gathered halo.
+    /// the managed-only drivers (<see cref="TickDriver.Legacy"/>, <see cref="TickDriver.SplitFamily"/>) the border
+    /// stays on the managed path in <em>both</em> sides, so they are byte-identical (green) — this proves the
+    /// multi-chunk harness models cross-seam reads + emission faithfully. They are the real parity gate for the
+    /// halo-fed all-fluids Burst driver (<c>BH-D1[L|HB]</c>), whose border voxels must reproduce this exact stream
+    /// from the gathered Y-band halo.
     /// </para>
     /// </summary>
     public static partial class BehaviorValidationSuite
     {
-        // Interior center origin: all 8 neighbor coords stay in-world (WorldData.IsVoxelInWorld requires
-        // x,z ∈ [0, WorldSizeInVoxels=1600)), so a chunk at the world origin could not read −X/−Z neighbors.
+        // Center origin for the cross-chunk fixtures. This was originally chosen "interior" because the pre-WS-3
+        // IsVoxelInWorld bounded XZ to [0, 1600) and a chunk at the world origin therefore could not read −X/−Z
+        // neighbors. That is no longer why: WS-3 removed the XZ bounds entirely, so IsVoxelInWorld tests only Y and
+        // any origin — negative or far out — reads its neighbors fine (BH-B12 exercises one at x≈2.1e9). The value is
+        // retained purely for continuity; nothing depends on it, and the two comparisons against it in
+        // BehaviorValidationSuite.Baseline.PlaceholderNeighbor.cs are written relative to whatever it is.
         private static readonly Vector2Int s_bh4CenterOrigin = new Vector2Int(128, 128);
         private const int BH4_FLOOR_Y = 10;
         private const int BH4_MID = 8; // mid-axis lane the seam scenarios center on
@@ -129,9 +133,9 @@ namespace Editor.Validation.Behavior
         /// <see cref="BH4_FLOOR_Y"/> floor, one over a <see cref="BH4_SPLIT_HIGH_FLOOR_Y"/> floor — in the SAME center
         /// chunk. The active-fluid band therefore spans <c>[BH4_FLOOR_Y−reach, BH4_SPLIT_HIGH_FLOOR_Y+1+reach]</c>
         /// (one contiguous window covering both clusters and the gap between them). Both clusters reach the −X seam, so
-        /// the halo drivers job-tick them; <c>BH-D1[H|HB]</c> proves the band (sized from the min/max scan over both
-        /// clusters) gathers/reads identically to the full-height halo. A per-cluster band model would split the window
-        /// and diverge here.
+        /// the halo driver job-ticks them; <c>BH-D1[L|HB]</c> proves the band (sized from the min/max scan over both
+        /// clusters) gathers/reads identically to the legacy managed border. A per-cluster band model would split the
+        /// window and diverge here.
         /// </summary>
         private static BehaviorTestWorld BuildBh4SplitYWorld()
         {

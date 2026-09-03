@@ -65,20 +65,21 @@ Shader "Minecraft/UberLiquidShader"
             HLSLPROGRAM
             #pragma vertex vertFunction
             #pragma fragment fragFunction
-            #pragma target 3.0
+            #pragma target 4.5
             #pragma multi_compile _ _FLUID_QUALITY_LOW _FLUID_QUALITY_MED
             #pragma multi_compile _ _FLUID_REFRACTION_OFF
 
             // Shared liquid logic (structs, vertex, noise, shore, evaluate)
             #include "Includes/LiquidCore.hlsl"
             #include "Includes/VoxelLighting.hlsl"
+            #include "Includes/VoxelFog.hlsl"
 
             // Game-only: scene refraction via URP Opaque Texture
             #include "Packages/com.unity.render-pipelines.universal/ShaderLibrary/DeclareOpaqueTexture.hlsl"
 
             // Game-only: global light uniforms from World.cs
             float GlobalLightLevel, minGlobalLightLevel, maxGlobalLightLevel;
-            half3 SkyLightColor;
+            half3 SkylightColor;
 
             LiquidV2F vertFunction(LiquidAppdata v)
             {
@@ -93,8 +94,8 @@ Shader "Minecraft/UberLiquidShader"
                 if (!unity_IsEditorPlaying) finalLiquidType = _EditorPreviewType;
                 #endif
 
-                half3 litWhite = ApplyVoxelLightingRGB(half3(1, 1, 1), i.sunLight, i.blockRGB,
-                                                       SkyLightColor,
+                half3 litWhite = ApplyVoxelLightingRGB(half3(1, 1, 1), i.skylight, i.blockRGB,
+                                                       SkylightColor,
                                                        GlobalLightLevel, minGlobalLightLevel, maxGlobalLightLevel);
 
                 // --- FLOW MAPPING TIME SETUP ---
@@ -131,6 +132,16 @@ Shader "Minecraft/UberLiquidShader"
                     // Lava is self-luminous — skip litWhite tinting so the
                     // procedural color (cracks, pulse, crust) renders unmodified.
                     lava_col *= i.shadowMultiplier;
+
+                    // RF-3: push the crust past 1.0 so bloom catches it. Applied here, before fog, for the
+                    // same reason as the block shaders — distant lava should fade into the haze, not glow
+                    // through it.
+                    lava_col = ApplyVoxelEmissive(lava_col, i.emissive);
+
+                    // Fog the surface BEFORE blending with the refracted background: that background is
+                    // opaque terrain which the block shaders already fogged, so fogging the blend result
+                    // would apply fog to it twice.
+                    lava_col = ApplyVoxelFog(lava_col, distance(i.worldPos.xz, _WorldSpaceCameraPos.xz));
                     return lerp(background, half4(lava_col, 1.0), 0.95);
                 }
                 else // Water
@@ -168,7 +179,14 @@ Shader "Minecraft/UberLiquidShader"
                     final_color *= litWhite;
                     final_color *= i.shadowMultiplier;
 
-                    half4 water_base_color = lerp(_DeepColor, _ShallowColor, i.sunLight);
+                    // RF-3: a no-op for water, whose emission is 0. Wired anyway so any future emissive
+                    // water-like fluid glows without needing this branch revisited.
+                    final_color = ApplyVoxelEmissive(final_color, i.emissive);
+
+                    // Fog the surface BEFORE blending with the refracted background — see the lava branch.
+                    final_color = ApplyVoxelFog(final_color, distance(i.worldPos.xz, _WorldSpaceCameraPos.xz));
+
+                    half4 water_base_color = lerp(_DeepColor, _ShallowColor, i.skylight);
                     return lerp(background, half4(final_color, 1.0), water_base_color.a);
                 }
             }

@@ -2,6 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using Data;
 using Data.Enums;
+using Helpers;
 using UnityEngine;
 
 namespace Benchmarks
@@ -93,11 +94,12 @@ namespace Benchmarks
             WorldFrameProfiler.Enabled = true;
             _profilerEnabled = true;
 
-            // Teleport to the world-centre region at sky height so its columns load around us and the suspended
-            // ocean is in view. The flood region is the centre REGION_CHUNKS×REGION_CHUNKS chunks.
-            const int centerChunk = VoxelData.WorldCentre / VoxelData.ChunkWidth;
+            // Teleport to the default-spawn region at sky height so its columns load around us and the suspended
+            // ocean is in view. The flood region is the center REGION_CHUNKS×REGION_CHUNKS chunks.
+            const int centerChunk = VoxelData.DefaultSpawnPosition / VoxelData.ChunkWidth;
             ChunkCoord regionMin = new ChunkCoord(centerChunk - REGION_CHUNKS / 2, centerChunk - REGION_CHUNKS / 2);
-            transform.position = new Vector3(VoxelData.WorldCentre, FluidBenchmarkScenarios.SkyWaterTopY + 16f, VoxelData.WorldCentre);
+            transform.position = WorldOrigin.VoxelToUnity(new Vector3(
+                VoxelData.DefaultSpawnPosition, FluidBenchmarkScenarios.SkyWaterTopY + 16f, VoxelData.DefaultSpawnPosition));
             transform.rotation = Quaternion.Euler(45f, 0f, 0f); // look down toward the flood
 
             Debug.Log($"[FluidStress] World loaded. Region min chunk {regionMin.X},{regionMin.Z} " +

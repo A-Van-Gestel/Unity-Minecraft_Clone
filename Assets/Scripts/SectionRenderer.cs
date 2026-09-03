@@ -6,6 +6,28 @@ using UnityEngine;
 using UnityEngine.Rendering;
 using Object = UnityEngine.Object;
 
+/// <summary>
+/// The per-section (16×16×16) render object: one <see cref="UnityEngine.GameObject"/> with a
+/// <see cref="MeshFilter"/> + <see cref="MeshRenderer"/>, pooled together with its owning
+/// <see cref="Chunk"/>.
+/// <para>
+/// <b>Two-axis visibility ownership (GS-5 §7.3).</b> A section can be hidden for two unrelated
+/// reasons, and each reason has exactly one mechanism and one owner:
+/// <list type="bullet">
+/// <item><b>"Has geometry"</b> → <see cref="UnityEngine.GameObject.SetActive"/>, owned by this
+/// class (<see cref="UpdateMeshNative"/> toggles it by vertex count; <see cref="Clear"/>
+/// deactivates on pool recycle).</item>
+/// <item><b>"Occlusion-culled"</b> → <see cref="Renderer.forceRenderingOff"/> via
+/// <see cref="SetOcclusionCulled"/>, owned exclusively by the future <c>VisibilityManager</c>.</item>
+/// </list>
+/// Neither owner may write the other's flag, so any interleaving of remesh and cull events
+/// composes correctly — a single shared flag is what made the previous culling attempt render
+/// stale/garbage geometry (see <c>Documentation/Design/VISIBILITY_CULLING_ARCHITECTURE.md</c> §7.3).
+/// <b>One deliberate exception:</b> <see cref="Clear"/> also writes the occlusion flag, but only ever
+/// <i>resets</i> it to false on pool recycle (never sets it), so a recycled section starts rendered.
+/// A culler that caches its own culled-set must therefore re-issue after a recycle.
+/// </para>
+/// </summary>
 public class SectionRenderer
 {
     public readonly GameObject GameObject;
@@ -25,20 +47,26 @@ public class SectionRenderer
     {
         new VertexAttributeDescriptor(VertexAttribute.Position), // Float32×3, 12B
         new VertexAttributeDescriptor(VertexAttribute.TexCoord0, VertexAttributeFormat.Float16, 4, stream: 1), // 8B
+        // RGB: white for blocks, (FluidShaderID, shoreMask, shadowMul) for fluids. Alpha: RF-3 emissive
+        // strength. See Data.MeshDataJobOutput.Colors for the full channel allocation.
         new VertexAttributeDescriptor(VertexAttribute.Color, VertexAttributeFormat.UNorm8, 4, stream: 2), // 4B
         new VertexAttributeDescriptor(VertexAttribute.Normal, VertexAttributeFormat.SNorm8, 4, stream: 3), // 4B
         new VertexAttributeDescriptor(VertexAttribute.TexCoord1, VertexAttributeFormat.UNorm8, 4, stream: 3), // 4B
     };
 
     /// <summary>
-    /// MR-4: a section's geometry is always confined to its 16×16×16 cell (fluid surface heights and
-    /// cross meshes stay inside block bounds), so its post-processed section-space vertices lie in
-    /// [0, SECTION_SIZE]³. A constant <see cref="Bounds"/> replaces the per-update
-    /// <see cref="Mesh.RecalculateBounds"/> vertex scan in <see cref="UpdateMeshNative"/>.
+    /// MR-4: a section's geometry stays within its 16×16×16 cell plus a fixed margin — fluid surface
+    /// heights stay inside block bounds, and FL-4's per-voxel cross-mesh variation can push a border
+    /// tuft at most <see cref="CrossMeshVariation.MaxCellEscape"/> blocks past the section face. A
+    /// constant padded <see cref="Bounds"/> replaces the per-update
+    /// <see cref="Mesh.RecalculateBounds"/> vertex scan in <see cref="UpdateMeshNative"/>; the margin
+    /// is derived from the variation limits so the two cannot drift apart.
     /// </summary>
     private static readonly Bounds s_sectionBounds = new Bounds(
         new Vector3(ChunkMath.SECTION_SIZE * 0.5f, ChunkMath.SECTION_SIZE * 0.5f, ChunkMath.SECTION_SIZE * 0.5f),
-        new Vector3(ChunkMath.SECTION_SIZE, ChunkMath.SECTION_SIZE, ChunkMath.SECTION_SIZE));
+        new Vector3(ChunkMath.SECTION_SIZE + 2f * CrossMeshVariation.MaxCellEscape,
+            ChunkMath.SECTION_SIZE + 2f * CrossMeshVariation.MaxCellEscape,
+            ChunkMath.SECTION_SIZE + 2f * CrossMeshVariation.MaxCellEscape));
 
     // --- MR-3: cached material combinations ---
     // There are only 8 possible submesh-presence combinations (bit0=opaque, bit1=transparent,
@@ -96,6 +124,11 @@ public class SectionRenderer
 
         MeshFilter meshFilter = GameObject.AddComponent<MeshFilter>();
         _meshRenderer = GameObject.AddComponent<MeshRenderer>();
+        // Inert today, and deliberately left so. The URP asset disables the main light
+        // (m_MainLightRenderingMode: 0), sets m_ShadowDistance: 0, and no longer compiles shadow variants
+        // (m_MainLightShadowsSupported: 0), so no shadow pass runs and TwoSided costs nothing. Those four
+        // settings are one coupled group: re-enabling shadows without first tiering THIS line renders every
+        // loaded section twice-sided into a 2048 shadow map.
         _meshRenderer.shadowCastingMode = ShadowCastingMode.TwoSided;
 
         _mesh = new Mesh();
@@ -111,6 +144,11 @@ public class SectionRenderer
     /// This is critical to prevent Unity from validating new submesh descriptors against stale index buffer data.
     /// </para>
     /// </summary>
+    /// <remarks>
+    /// Owns the <i>"has geometry"</i> axis only (the vertex-count <c>SetActive</c> toggle) — it must never
+    /// read or write <see cref="Renderer.forceRenderingOff"/>, which belongs to the culler. See the
+    /// two-axis ownership contract on <see cref="SectionRenderer"/>.
+    /// </remarks>
     public void UpdateMeshNative(
         NativeArray<Vector3> verts, NativeArray<half4> uvs, NativeArray<Color32> colors,
         NativeArray<NormalLightVertex> stream3, int vertexStart, int vertexCount,
@@ -204,6 +242,24 @@ public class SectionRenderer
     }
 
     /// <summary>
+    /// Sets whether this section is hidden by occlusion culling — the only code in the codebase that
+    /// <i>sets</i> <see cref="Renderer.forceRenderingOff"/> (GS-5 Phase 0.5). <see cref="Clear"/> is the
+    /// one other writer and is <b>reset-only</b> (false, on pool recycle).
+    /// </summary>
+    /// <remarks>
+    /// Reserved for the future <c>VisibilityManager</c> and unused by production until GS-5 Phase 2/3,
+    /// so today every section renders. Do NOT use this to express <i>"has geometry"</i> — that axis is
+    /// <c>SetActive</c>, owned by this class; see the contract on <see cref="SectionRenderer"/>.
+    /// <see cref="Renderer.forceRenderingOff"/> is preferred over <c>SetActive</c>/<c>enabled</c> for
+    /// culling: it suppresses submission without dirtying transforms or running <c>OnEnable</c>-style work.
+    /// </remarks>
+    /// <param name="culled">True to suppress rendering of this section; false to render it normally.</param>
+    public void SetOcclusionCulled(bool culled)
+    {
+        _meshRenderer.forceRenderingOff = culled;
+    }
+
+    /// <summary>
     /// Rebuilds <see cref="s_materialCombinations"/> from the current <see cref="World.Instance"/>
     /// materials if they have changed identity (or on first use). The 8 arrays each hold the present
     /// submeshes' materials in opaque → transparent → fluid order. Main-thread only (called from the
@@ -250,10 +306,19 @@ public class SectionRenderer
     /// Clears the mesh data and disables the object for pooling.
     /// Does NOT destroy the mesh or object, preserving memory allocation.
     /// </summary>
+    /// <remarks>
+    /// The pool-recycle reset point, so it resets <b>both</b> visibility axes: <c>SetActive(false)</c>
+    /// ("has geometry") and <see cref="Renderer.forceRenderingOff"/> back to false. A recycled section
+    /// must never inherit the previous lifecycle's culled state — and when in doubt the conservative
+    /// direction is "render", never "hidden" (culling doc §7.5).
+    /// </remarks>
     public void Clear()
     {
         if (_mesh != null) _mesh.Clear();
         if (GameObject != null) GameObject.SetActive(false);
+
+        // GS-5 §7.3/§7.5: drop any occlusion state from the previous lifecycle (see the remarks above).
+        if (_meshRenderer != null) _meshRenderer.forceRenderingOff = false;
 
         // MR-3: a recycled section must reassign sharedMaterials on its first update (the renderer's
         // material state is no longer tracked once cleared). Reset to the "none assigned yet" default.

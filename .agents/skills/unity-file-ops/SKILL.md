@@ -23,7 +23,7 @@ Unity tracks assets by GUID, stored in the sibling `.meta` file. Text-level file
 Every asset that Unity tracks has a `{asset}.meta` sibling containing a GUID. Scenes, prefabs, and ScriptableObjects reference other assets by that GUID — never by file path. Therefore:
 
 - **Moving or renaming a `.cs` file MUST move its `.meta` file along with it.** Use `git mv` for both, or move both in the file system and commit together. A missing `.meta` migration leaves the file compiling fine but every prefab that referenced the script shows "missing script" in the Editor.
-- **Deleting a `.cs` file MUST delete its `.meta` file** in the same commit. An orphan `.meta` without its asset produces a duplicate-GUID warning on the next Editor import.
+- **Deleting a `.cs` file MUST delete its `.meta` file** in the same commit. An orphan `.meta` without its asset produces a duplicate-GUID warning on the next Editor import. Before deleting, `mcp__rider__safe_delete` with `preview: true` confirms no *code* references remain (it covers the code side only — still grep for the GUID to catch prefab/scene references).
 - **Adding a `.cs` file:** let Unity generate the `.meta` on import. Commit both in the same commit so teammates do not get a GUID-mismatch when they pull.
 
 ### Verifying assets via unity-mcp

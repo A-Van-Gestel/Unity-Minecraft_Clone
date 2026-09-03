@@ -22,6 +22,9 @@ namespace Config
         /// <summary>Max concurrently in-flight mesh jobs before scheduling pauses.</summary>
         public readonly int MaxInFlightMeshJobs;
 
+        /// <summary>Max concurrently in-flight generation jobs before scheduling pauses (P-4 §3.1).</summary>
+        public readonly int MaxInFlightGenerationJobs;
+
         /// <summary>Per-frame lighting-job budget (maps to <c>Settings.maxLightJobsPerFrame</c>).</summary>
         public readonly int MaxLightJobsPerFrame;
 
@@ -29,10 +32,11 @@ namespace Config
         public readonly int MaxMeshRebuildsPerFrame;
 
         /// <summary>Initializes a resolved budget set.</summary>
-        public CalibrationResult(int jobArrayPoolRetention, int maxInFlightMeshJobs, int maxLightJobsPerFrame, int maxMeshRebuildsPerFrame)
+        public CalibrationResult(int jobArrayPoolRetention, int maxInFlightMeshJobs, int maxInFlightGenerationJobs, int maxLightJobsPerFrame, int maxMeshRebuildsPerFrame)
         {
             JobArrayPoolRetention = jobArrayPoolRetention;
             MaxInFlightMeshJobs = maxInFlightMeshJobs;
+            MaxInFlightGenerationJobs = maxInFlightGenerationJobs;
             MaxLightJobsPerFrame = maxLightJobsPerFrame;
             MaxMeshRebuildsPerFrame = maxMeshRebuildsPerFrame;
         }
@@ -40,6 +44,7 @@ namespace Config
         /// <inheritdoc/>
         public override string ToString() =>
             $"retention={JobArrayPoolRetention}, inFlightMesh={MaxInFlightMeshJobs}, " +
+            $"inFlightGen={MaxInFlightGenerationJobs}, " +
             $"lightJobs/frame={MaxLightJobsPerFrame}, meshRebuilds/frame={MaxMeshRebuildsPerFrame}";
     }
 
@@ -72,6 +77,15 @@ namespace Config
         // --- In-flight mesh cap: scales linearly with retention (today: 20 at retention 512). ---
         private const int INFLIGHT_MESH_CEILING = 20; // today's hardcoded literal in World.Update
         private const int INFLIGHT_MESH_FLOOR = 4;
+
+        // --- In-flight generation cap (P-4 §3.1): scales linearly with retention, same memory-cap
+        // taxonomy as the mesh cap. No historical literal to reproduce — generation was previously
+        // uncapped — so the desktop ceiling is chosen to comfortably keep every job worker fed on a
+        // typical desktop (~2× worker count) while RAM-scaling down on constrained devices. Generation
+        // job buffers (~230 KB: Map + HeightMap + queues, WG-1) are lighter than mesh/light buffers,
+        // so this ceiling costs well under the mesh cap's memory at the same count. ---
+        private const int INFLIGHT_GEN_CEILING = 32;
+        private const int INFLIGHT_GEN_FLOOR = 8;
 
         // --- Throughput tuning: reference-anchored scaling. ---
         // budget = clamp(round(DEFAULT_BUDGET * REFERENCE_MS / medianJobMs), floor, ceiling).
@@ -114,6 +128,7 @@ namespace Config
 
             int retention = ResolvePoolRetention(SystemInfo.systemMemorySize);
             int inFlightMesh = ResolveInFlightMesh(retention);
+            int inFlightGen = ResolveInFlightGeneration(retention);
 
             StartupCalibrationProbe.ProbeResult probe = StartupCalibrationProbe.Measure(jobData, fluidTemplates);
             double meshMs = probe.MeshMs;
@@ -128,7 +143,7 @@ namespace Config
             int meshBudget = MapThroughputBudget(meshMs, DEFAULT_MESH_BUDGET, REFERENCE_MESH_MS, MESH_BUDGET_FLOOR, MESH_BUDGET_CEILING);
             int lightBudget = MapThroughputBudget(lightMs, DEFAULT_LIGHT_BUDGET, REFERENCE_LIGHT_MS, LIGHT_BUDGET_FLOOR, LIGHT_BUDGET_CEILING);
 
-            CalibrationResult result = new CalibrationResult(retention, inFlightMesh, lightBudget, meshBudget);
+            CalibrationResult result = new CalibrationResult(retention, inFlightMesh, inFlightGen, lightBudget, meshBudget);
 
             // In precision-capture mode, persist a self-contained baseline record to disk so it can be
             // harvested off devices whose logs are awkward to read (e.g. Android). See OM1 §3.3 / §5.
@@ -176,6 +191,11 @@ namespace Config
             Mathf.Clamp(
                 Mathf.RoundToInt(INFLIGHT_MESH_CEILING * (retention / (float)POOL_RETENTION_CEILING)),
                 INFLIGHT_MESH_FLOOR, INFLIGHT_MESH_CEILING);
+
+        private static int ResolveInFlightGeneration(int retention) =>
+            Mathf.Clamp(
+                Mathf.RoundToInt(INFLIGHT_GEN_CEILING * (retention / (float)POOL_RETENTION_CEILING)),
+                INFLIGHT_GEN_FLOOR, INFLIGHT_GEN_CEILING);
 
         private static int MapThroughputBudget(double medianMs, int defaultBudget, double referenceMs, int floor, int ceiling)
         {

@@ -193,6 +193,149 @@ namespace Data
     }
 
     /// <summary>
+    /// FL-4: the deterministic per-voxel variation applied to one cross mesh at mesh time —
+    /// an XZ offset, a uniform scale anchored at the plant's base, and a texture mirror flag.
+    /// Derived from the <b>voxel-space</b> cell (never Unity-space) so it survives floating-origin
+    /// re-anchors and chunk re-meshes bit-identically, exactly like FL-1's sway phase (WS-4 rule).
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CrossMeshVariation
+    {
+        /// <summary>Default half-width of the hashed XZ offset, in blocks (FL-4's shipped value).</summary>
+        public const float DefaultMaxOffset = 0.15f;
+
+        /// <summary>Default smallest hashed uniform scale (FL-4's shipped value).</summary>
+        public const float DefaultMinScale = 0.85f;
+
+        /// <summary>Default largest hashed uniform scale (FL-4's shipped value).</summary>
+        public const float DefaultMaxScale = 1.1f;
+
+        /// <summary>
+        /// The hard ceiling on how far any varied cross mesh may reach outside its own 1×1×1 cell,
+        /// in blocks: an XZ offset plus the overhang of a scaled-up cross (scaling is centred in XZ).
+        /// Vertical escape is smaller (the base is anchored, so only the top grows), so this covers
+        /// both. <see cref="SectionRenderer"/> pads its constant section bounds by exactly this amount
+        /// (MR-4), which is why <see cref="BlockTypeJobData"/> clamps authored FL-4b envelopes against
+        /// it — an authored range may never widen the geometry past the culling volume.
+        /// </summary>
+        public const float MaxCellEscape = DefaultMaxOffset + (DefaultMaxScale - 1f) * 0.5f;
+
+        /// <summary>
+        /// The largest scale any block can end up with after <see cref="SanitizeEnvelope"/>. The
+        /// binding direction is <b>vertical</b>, not horizontal: scaling is centred in XZ (each side
+        /// overhangs only half the growth) but anchored at the base in Y, so the whole of
+        /// <c>scale - 1</c> rises above the cell. The ceiling is therefore
+        /// <c>1 + MaxCellEscape</c>, not <c>1 + 2 * MaxCellEscape</c> — a taller plant would poke out
+        /// of the padded section bounds and pop under frustum culling. Nothing may render larger,
+        /// whatever was authored.
+        /// </summary>
+        public const float MaxSanitizedScale = 1f + MaxCellEscape;
+
+        /// <summary>XZ offset in blocks, each component in [-<see cref="MaxOffset"/>, <see cref="MaxOffset"/>].</summary>
+        public float OffsetX, OffsetZ;
+
+        /// <summary>Uniform scale in [<see cref="MinScale"/>, <see cref="MaxScale"/>], anchored at y = 0.</summary>
+        public float Scale;
+
+        /// <summary>When true the texture's U coordinate is flipped, giving a free second visual variant.</summary>
+        [MarshalAs(UnmanagedType.U1)]
+        public bool MirrorU;
+
+        /// <summary>
+        /// The neutral variation: no offset, unit scale, no mirror. Used by the block-preview icon
+        /// renderer, which must stay centred and static.
+        /// </summary>
+        public static CrossMeshVariation Identity => new CrossMeshVariation { Scale = 1f };
+
+        /// <summary>
+        /// Derives the variation for one flora voxel from its voxel-space cell, within the block
+        /// type's authored envelope (FL-4b). All four values come from bit-slices of a single hash,
+        /// and use a salt distinct from FL-1's sway phase so a tuft's size and its wind phase are
+        /// not correlated.
+        /// </summary>
+        /// <param name="voxelX">Voxel-space cell X.</param>
+        /// <param name="voxelY">Voxel-space cell Y.</param>
+        /// <param name="voxelZ">Voxel-space cell Z.</param>
+        /// <param name="maxOffset">The block's XZ offset half-width, already clamped by <see cref="BlockTypeJobData"/>.</param>
+        /// <param name="minScale">The block's smallest uniform scale.</param>
+        /// <param name="maxScale">The block's largest uniform scale, already clamped.</param>
+        /// <param name="allowMirror">Whether this block's texture may be mirrored.</param>
+        /// <returns>The cell's deterministic offset / scale / mirror.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static CrossMeshVariation FromCell(int voxelX, int voxelY, int voxelZ,
+            float maxOffset, float minScale, float maxScale, bool allowMirror)
+        {
+            uint h = VoxelMeshHelper.VoxelHashU32(voxelX, voxelY, voxelZ, VARIATION_SALT);
+
+            // Three independent 10-bit slices + one spare bit: enough resolution for sub-block
+            // jitter, and cheaper than three separate hash calls.
+            float ox = ((h & 0x3FFu) * (1f / 1023f)) * 2f - 1f;
+            float oz = (((h >> 10) & 0x3FFu) * (1f / 1023f)) * 2f - 1f;
+            float s = ((h >> 20) & 0x3FFu) * (1f / 1023f);
+
+            return new CrossMeshVariation
+            {
+                OffsetX = ox * maxOffset,
+                OffsetZ = oz * maxOffset,
+                Scale = math.lerp(minScale, maxScale, s),
+                MirrorU = allowMirror && ((h >> 31) & 1u) != 0u,
+            };
+        }
+
+        /// <summary>
+        /// Convenience overload deriving the variation from a block type's mirrored envelope.
+        /// </summary>
+        /// <param name="voxelX">Voxel-space cell X.</param>
+        /// <param name="voxelY">Voxel-space cell Y.</param>
+        /// <param name="voxelZ">Voxel-space cell Z.</param>
+        /// <param name="props">The flora block's job data, carrying its clamped FL-4b envelope.</param>
+        /// <returns>The cell's deterministic offset / scale / mirror.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static CrossMeshVariation FromCell(int voxelX, int voxelY, int voxelZ, in BlockTypeJobData props)
+            => FromCell(voxelX, voxelY, voxelZ,
+                props.VariationOffset, props.VariationScaleMin, props.VariationScaleMax, props.VariationAllowMirror);
+
+        /// <summary>
+        /// Clamps an authored FL-4b envelope into what the engine can actually render: a non-inverted
+        /// scale range, and an offset/scale pair whose combined reach stays within
+        /// <see cref="MaxCellEscape"/> — the exact margin <see cref="SectionRenderer"/> pads its
+        /// constant section bounds by, so exceeding it would put geometry outside the culling volume.
+        /// The scale ceiling is spent first (it is the harder constraint, see
+        /// <see cref="MaxSanitizedScale"/>), then whatever margin is left goes to the offset.
+        /// </summary>
+        /// <param name="settings">The block's authored envelope.</param>
+        /// <param name="offset">The clamped XZ offset half-width.</param>
+        /// <param name="scaleMin">The clamped smallest scale.</param>
+        /// <param name="scaleMax">The clamped largest scale.</param>
+        public static void SanitizeEnvelope(CrossMeshVariationSettings settings,
+            out float offset, out float scaleMin, out float scaleMax)
+        {
+            // A non-positive scale ceiling means the struct was never authored (default(T) rather
+            // than CrossMeshVariationSettings.Default) — fail safe to the engine defaults instead of
+            // rendering that block type as a quarter-size stub.
+            if (settings.scaleMax <= 0f) settings = CrossMeshVariationSettings.Default;
+
+            // An inverted range is an authoring slip, not an intent: order it rather than emitting
+            // a degenerate mesh.
+            scaleMin = math.max(CrossMeshVariationSettings.MinAuthoredScale, math.min(settings.scaleMin, settings.scaleMax));
+            scaleMax = math.max(scaleMin, math.max(settings.scaleMax, settings.scaleMin));
+
+            // Vertical escape (the full scale - 1, since the base is anchored) is what binds; the XZ
+            // overhang is half of it and can never be the limiting direction.
+            if (scaleMax > MaxSanitizedScale)
+            {
+                scaleMax = MaxSanitizedScale;
+                scaleMin = math.min(scaleMin, scaleMax);
+            }
+
+            float scaleOverhang = math.max(0f, (scaleMax - 1f) * 0.5f);
+            offset = math.clamp(settings.offset, 0f, MaxCellEscape - scaleOverhang);
+        }
+
+        private const uint VARIATION_SALT = 0x1B873593u;
+    }
+
+    /// <summary>
     /// A job-safe representation of a nullable VoxelState.
     /// </summary>
     public struct OptionalVoxelState
@@ -225,6 +368,19 @@ namespace Data
         public int VertCount;
         public int TriStartIndex;
         public int TriCount;
+
+        /// <summary>
+        /// VO-6: the mean of this face's vertices in unrotated block-local <c>[0,1]³</c> — where the face
+        /// actually sits inside its cell. A boundary face's centroid lies on a cell wall; a half slab's
+        /// large face lies on the mid-plane at 0.5, which is the whole point (<c>MESHING_BUGS.md</c> Bug M01).
+        /// <para>
+        /// Precomputed at load rather than averaged per voxel: it is a per-block-type constant and the
+        /// meshing job is the engine's hottest loop. Both flatteners that build this struct
+        /// (<c>JobDataManagerFactory</c> for production, <c>TestCustomMeshLibrary</c> for the meshing
+        /// harness) must fill it, or the harness silently meshes against a zero centroid.
+        /// </para>
+        /// </summary>
+        public float3 Centroid;
     }
 
     /// <summary>
@@ -247,6 +403,25 @@ namespace Data
 
         [MarshalAs(UnmanagedType.U1)]
         public readonly bool RenderNeighborFaces;
+
+        /// <summary>Foliage wind-sway strength in [0, 1] (FL-2); 0 = rigid. Written to the emitted verts' UV Z by the meshing job's sway post-pass.</summary>
+        public readonly float SwayStrength;
+
+        // FL-4b: the block's authored cross-mesh variation envelope, already sanitised (see the
+        // constructor). Only RenderShape.CrossMesh reads these; every other shape ignores them.
+
+        /// <summary>Clamped XZ offset half-width, in blocks.</summary>
+        public readonly float VariationOffset;
+
+        /// <summary>Smallest uniform scale, base-anchored.</summary>
+        public readonly float VariationScaleMin;
+
+        /// <summary>Largest uniform scale, clamped so the block cannot escape its section.</summary>
+        public readonly float VariationScaleMax;
+
+        /// <summary>Whether this block's texture may render mirrored.</summary>
+        [MarshalAs(UnmanagedType.U1)]
+        public readonly bool VariationAllowMirror;
 
         public readonly RenderShape RenderShape;
         public readonly int CustomMeshIndex; // -1 if not a custom mesh
@@ -285,6 +460,33 @@ namespace Data
         public readonly PlacementMetadataMode PlacementMetadataMode;
         public readonly byte DefaultMetadata;
 
+        // Block shape (VO-1) — the Burst-side mirror of BlockCollisionBounds, so jobs can ask what
+        // volume a block actually occupies. Read via Jobs.BurstData.BurstOcclusionUtility, which
+        // shares its rotation core with the managed Helpers.BlockCollisionBoundsUtility.
+
+        /// <summary>True when this block's volume differs from a full cell (mirrors <see cref="BlockCollisionBounds.HasCustomBounds"/>).</summary>
+        [MarshalAs(UnmanagedType.U1)]
+        public readonly bool HasCustomBounds;
+
+        /// <summary>Authored minimum corner of the block's volume, block-local <c>[0,1]³</c>, unrotated.</summary>
+        public readonly float3 BoundsMin;
+
+        /// <summary>Authored maximum corner of the block's volume, block-local <c>[0,1]³</c>, unrotated.</summary>
+        public readonly float3 BoundsMax;
+
+        /// <summary>
+        /// True when this block fills its whole cell with opaque material — the question the lighting
+        /// BFS's propagation-source guards ask. A *partial* opaque block (a slab) is deliberately NOT
+        /// this: the open part of its cell holds a real light value it must be able to propagate onward.
+        /// Gating those guards on whole-block opacity instead is <c>_FIXED_BUGS.md</c> Lighting #26. Use
+        /// <see cref="Jobs.BurstData.LightAttenuation.FaceBlocksLight"/> for per-face questions.
+        /// </summary>
+        public bool IsFullyOpaqueCell
+        {
+            [MethodImpl(MethodImplOptions.AggressiveInlining)]
+            get => IsOpaque && !HasCustomBounds;
+        }
+
         // Texture ID's
         public readonly int BackFaceTexture;
         public readonly int FrontFaceTexture;
@@ -305,8 +507,21 @@ namespace Data
             // Block properties
             IsSolid = blockType.isSolid;
             RenderNeighborFaces = blockType.renderNeighborFaces;
+            SwayStrength = blockType.swayStrength;
+
+            // FL-4b: sanitise the authored envelope once, here, so every consumer (runtime meshing,
+            // the BlockEditor preview, the validation palettes) sees the same clamped values and no
+            // authored range can push geometry outside the padded MR-4 section bounds.
+            CrossMeshVariation.SanitizeEnvelope(blockType.crossMeshVariation,
+                out VariationOffset, out VariationScaleMin, out VariationScaleMax);
+            VariationAllowMirror = blockType.crossMeshVariation.allowMirror;
             RenderShape = blockType.renderShape;
             CustomMeshIndex = customMeshIdx;
+
+            // VO-1: mirror the authored collision volume so Burst jobs can derive per-face coverage.
+            HasCustomBounds = blockType.collisionBounds.HasCustomBounds;
+            BoundsMin = blockType.collisionBounds.min;
+            BoundsMax = blockType.collisionBounds.max;
 
             // Fluid properties
             FluidType = blockType.fluidType;
@@ -364,6 +579,12 @@ namespace Data
 
         /// <summary>
         /// Returns true if the block has an opacity, and thus has an effect on the light.
+        /// <para>
+        /// <b>Not the heightmap test.</b> This is a whole-block question, so it cannot distinguish a
+        /// vertical half slab (which leaves the sky column intact) from the same block laid flat. Use
+        /// <c>LightAttenuation.ObstructsSkyColumn</c> for anything that decides what belongs in the
+        /// heightmap — using this one there is <c>_FIXED_BUGS.md</c> Lighting #25.
+        /// </para>
         /// </summary>
         public bool IsLightObstructing
         {
@@ -519,10 +740,17 @@ namespace Data
         public NativeList<int> Triangles;
         public NativeList<int> TransparentTriangles;
         public NativeList<int> FluidTriangles;
+
         public NativeList<half4> Uvs; // MR-2: Float16×4. xy = flow/atlas UV, zw = shore push (fluid top face) or (0,0)
-        public NativeList<Color32> Colors; // MR-2: UNorm8×4. White for blocks; fluid encodes (FluidShaderID, shoreMask, shadowMul, 0)
+
+        // MR-2: UNorm8×4. RGB = white for blocks; fluid encodes (FluidShaderID, shoreMask, shadowMul).
+        // Alpha = RF-3 emissive strength (block emission 0-15 scaled ×17), stamped by
+        // MeshGenerationJob.StampEmissiveStrength on every shape path. It was the only channel free on
+        // all three submeshes, so RGB stays available for TF-11's climate foliage tint — together they
+        // fill the stream exactly, and RF-9 must find capacity elsewhere.
+        public NativeList<Color32> Colors;
         public NativeList<Vector3> Normals; // Full-precision working buffer; packed to SNorm8×4 in MeshPostProcessJob
-        public NativeList<Color32> LightData; // TexCoord1 UNorm8: (sunlight, reserved, reserved, blocklight)
+        public NativeList<Color32> LightData; // TexCoord1 UNorm8: (skylight, reserved, reserved, blocklight)
         public NativeList<NormalLightVertex> InterleavedStream3; // Packed Normal + LightData interleaved for GPU upload
 
         // Track stats per section (Index 0 = Section 0, Index 1 = Section 1, etc.)
@@ -545,8 +773,7 @@ namespace Data
             LightData = new NativeList<Color32>(DefaultVertexCapacity, allocator);
             InterleavedStream3 = new NativeList<NormalLightVertex>(DefaultVertexCapacity, allocator);
 
-            // 8 Sections per chunk (128 / 16).
-            SectionStats = new NativeArray<MeshSectionStats>(VoxelData.ChunkHeight / ChunkMath.SECTION_SIZE, allocator);
+            SectionStats = new NativeArray<MeshSectionStats>(ChunkMath.SECTIONS_PER_CHUNK, allocator);
         }
 
         /// <summary>

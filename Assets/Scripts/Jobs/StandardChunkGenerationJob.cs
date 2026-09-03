@@ -215,42 +215,17 @@ namespace Jobs
             int globalZ = z + ChunkPosition.y;
 
             // --- BIOME SELECTION (Voronoi / Cellular) ---
-            int biomeIndex;
-            if (IsSingleBiomeMode)
-            {
-                biomeIndex = ForceBiomeIndex;
-            }
-            else
-            {
-                // Single evaluation per column — O(1) regardless of biome count.
-                float biomeNoise = BiomeSelectionNoise.GetNoise(globalX, globalZ);
-                // Noise is enforced to [0,1] normalization internally
-                biomeIndex = (int)math.floor(biomeNoise * Biomes.Length);
-                biomeIndex = math.clamp(biomeIndex, 0, Biomes.Length - 1);
-            }
+            int biomeIndex = BiomeSelection.SelectIndex(
+                ref BiomeSelectionNoise, globalX, globalZ, Biomes.Length, IsSingleBiomeMode, ForceBiomeIndex);
 
             StandardBiomeAttributesJobData biome = Biomes[biomeIndex];
 
             // --- SURFACE BIOME DITHERING ---
-            // Calculate a secondary biome index for surface/strata block types to organically dither boundaries
-            // We use Simplex noise (snoise) with an irrational scale (0.23f) and distinct offsets
-            // to avoid grid-aligned repeating artifacts commonly seen with Perlin (cnoise).
-            float ditherNoiseX = noise.snoise(new float2(globalX * 0.23f + 1337f, globalZ * 0.23f + BaseSeed));
-            float ditherNoiseZ = noise.snoise(new float2(globalX * 0.23f - 42f, globalZ * 0.23f - BaseSeed));
-            float ditherX = globalX + ditherNoiseX * biome.SurfaceBlockDitheringWidth * 30f;
-            float ditherZ = globalZ + ditherNoiseZ * biome.SurfaceBlockDitheringWidth * 30f;
-
-            int surfaceBiomeIndex;
-            if (IsSingleBiomeMode)
-            {
-                surfaceBiomeIndex = ForceBiomeIndex;
-            }
-            else
-            {
-                float ditheredBiomeNoise = BiomeSelectionNoise.GetNoise(ditherX, ditherZ);
-                surfaceBiomeIndex = (int)math.floor(ditheredBiomeNoise * Biomes.Length);
-                surfaceBiomeIndex = math.clamp(surfaceBiomeIndex, 0, Biomes.Length - 1);
-            }
+            // Surface/strata blocks resolve through a jittered re-sample so boundaries dither
+            // organically instead of following the hard Voronoi edge.
+            int surfaceBiomeIndex = BiomeSelection.SelectSurfaceIndex(
+                ref BiomeSelectionNoise, globalX, globalZ, Biomes.Length,
+                biome.SurfaceBlockDitheringWidth, BaseSeed, IsSingleBiomeMode, ForceBiomeIndex);
 
             StandardBiomeAttributesJobData surfaceBiome = Biomes[surfaceBiomeIndex];
 
@@ -298,7 +273,8 @@ namespace Jobs
                 // ----- 3D DENSITY BAND & DOMAIN WARPING -----
                 if (biome.Enable3DDensity && y >= bandLow && y <= bandHigh)
                 {
-                    float dx = globalX, dy = y, dz = globalZ;
+                    // double: exact world coords into the warp/noise chain (Precise64 path).
+                    double dx = globalX, dy = y, dz = globalZ;
 
                     if (biome.EnableDensityWarp)
                     {
@@ -426,7 +402,7 @@ namespace Jobs
                         if (caveLayer.Mode == CaveMode.Cheese)
                         {
                             if (!FeatureFlags.EnableCheese) continue;
-                            float cx = globalX, cy = y, cz = globalZ;
+                            double cx = globalX, cy = y, cz = globalZ;
                             if (caveLayer.EnableWarp)
                                 CaveWarpNoises[caveIdx].DomainWarp(ref cx, ref cy, ref cz);
 
@@ -445,7 +421,9 @@ namespace Jobs
                         {
                             if (!FeatureFlags.EnableSpaghetti) continue;
 
-                            float bound = caveNoise.GetNoise(globalX * 0.25f, y * 0.25f, globalZ * 0.25f);
+                            // 0.25 in double: exact int scaling for the Precise64 path (power-of-two
+                            // scale — bit-identical to the old float multiply on the Classic32 path).
+                            float bound = caveNoise.GetNoise(globalX * 0.25, y * 0.25, globalZ * 0.25);
                             if (bound < effectiveThreshold - 0.2f) continue;
 
                             float noiseVal = (caveNoise.GetNoise(globalX, y) + caveNoise.GetNoise(y, globalZ) +
@@ -466,7 +444,7 @@ namespace Jobs
                         {
                             if (!FeatureFlags.EnableNoodle) continue;
 
-                            float cx = globalX, cy = y, cz = globalZ;
+                            double cx = globalX, cy = y, cz = globalZ;
                             if (caveLayer.EnableWarp)
                                 CaveWarpNoises[caveIdx].DomainWarp(ref cx, ref cy, ref cz);
 
@@ -487,7 +465,7 @@ namespace Jobs
                         {
                             if (!FeatureFlags.EnableSpaghetti) continue;
 
-                            float cx = globalX, cy = y, cz = globalZ;
+                            double cx = globalX, cy = y, cz = globalZ;
                             if (caveLayer.EnableWarp)
                                 CaveWarpNoises[caveIdx].DomainWarp(ref cx, ref cy, ref cz);
 
@@ -568,10 +546,11 @@ namespace Jobs
                             }
                         }
 
-                        // Grid-cell election with this entry's spacing
+                        // Grid-cell election with this entry's spacing. Integer floor-div: exact to the
+                        // ±2³¹ edge, both signs (a float division here caps exactness at ±2²⁴).
                         int spacing = math.max(1, entry.Spacing);
-                        int cellX = (int)math.floor((float)globalX / spacing);
-                        int cellZ = (int)math.floor((float)globalZ / spacing);
+                        int cellX = ChunkMath.FloorDiv(globalX, spacing);
+                        int cellZ = ChunkMath.FloorDiv(globalZ, spacing);
 
                         // Seed includes the entry index for independence between entries
                         uint cellHash = math.hash(new int4(cellX, cellZ, BaseSeed, entryIndex));
@@ -616,7 +595,7 @@ namespace Jobs
                 }
 
                 // --- Heightmap ---
-                if (!highestBlockFound && voxelProps.IsLightObstructing)
+                if (!highestBlockFound && LightAttenuation.ObstructsSkyColumn(in voxelProps, packedMeta))
                 {
                     int heightmapIndex = x + VoxelData.ChunkWidth * z;
                     OutputHeightMap[heightmapIndex] = (ushort)y;

@@ -1,3 +1,4 @@
+using Data.Enums;
 using UnityEngine;
 
 namespace Data
@@ -13,5 +14,8 @@ namespace Data
 
         [Tooltip("The tags of blocks that this block type can replace when placed by the player (normally the soft set: REPLACEABLE, LIQUID).")]
         public BlockTags placementCanReplaceTags;
+
+        [Tooltip("The sound group blocks using this preset default to. Copied down on Apply, like the tag masks.")]
+        public SoundMaterial soundMaterial;
     }
 }

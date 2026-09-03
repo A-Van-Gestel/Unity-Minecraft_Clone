@@ -19,16 +19,16 @@ added **parallel-vs-serial determinism gates** (`FluidParallelDeterminismValidat
 **`Minecraft Clone/Dev/Validate Fluid Parallel Determinism`** + **`… (Cross-Chunk Halo)`** + **`… (Cross-Chunk Halo,
 Y-band)`**) — N concurrent pooled tickers byte-identical to the serial baseline + run-to-run, interior and over a 3×3
 distinct-chunk grid. **BH-4 (Tier-2 cross-chunk) is CLOSED** (2026-06-24); the **Y-band is SHIPPED** (2026-06-27) with
-its `BH-4-SPLIT-Y` (vertically-split) + `BH-4-BAND-EDGE` (section-boundary) fixtures.
-**Created:** 2026-06-20 (as a Design draft) · **Promoted:** 2026-06-21 · **BH-D1 + parallel gates built:** 2026-06-23/24
+its `BH-4-SPLIT-Y` (vertically-split) + `BH-4-BAND-EDGE` (section-boundary) fixtures.  
+**Created:** 2026-06-20 (as a Design draft) · **Promoted:** 2026-06-21 · **BH-D1 + parallel gates built:** 2026-06-23/24  
 **Author intent:** the parity guard that lets the **TG-4** (per-behavior native collections) and **TG-5**
 (Burst function-pointer dispatch) optimizations in
 [PERFORMANCE_IMPROVEMENTS_REPORT.md](../../Design/PERFORMANCE_IMPROVEMENTS_REPORT.md) claim *behavior-preserving* —
-the same role the Meshing suite plays for `MR-*` and the Lighting suite plays for the lighting engine.
+the same role the Meshing suite plays for `MR-*` and the Lighting suite plays for the lighting engine.  
 **Scope:** `Assets/Editor/Validation/Behavior/` — the `BehaviorValidationSuite` (+ `.Baseline`) +
 `BehaviorTestWorld` + `BehaviorSnapshot` + `TestBehaviorBlockPalette`, atop the shared
 `Editor.Validation.Framework.{GoldenMaster,ValidationReflection}` helpers, menu item
-**`Minecraft Clone/Dev/Validate Behavior`**.
+**`Minecraft Clone/Dev/Validate Behavior`**.  
 **Siblings (same document shape & conventions):**
 [MESHING_VALIDATION_HARNESS_FIDELITY.md](MESHING_VALIDATION_HARNESS_FIDELITY.md),
 [LIGHTING_VALIDATION_HARNESS_FIDELITY.md](LIGHTING_VALIDATION_HARNESS_FIDELITY.md).
@@ -219,7 +219,7 @@ is the faithful path but couples far beyond the behavior surface:
 |----------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------|-------------------------------------------------------------|
 | `if (World.Instance is null) return;` (`:425`)                             | **hard-blocks** — World stub mandatory                                                          | requires BH-2                                               |
 | `World.Instance.BlockTypes[id]`, `settings.enableLighting`                 | fine with the stub palette + `enableLighting=false`                                             | S1, S3(+`enableLighting`)                                   |
-| `worldData.QueueSunlightRecalculation` (`:495`)                            | skipped (gated on `lightingEnabled`)                                                            | none                                                        |
+| `worldData.QueueSkylightRecalculation` (`:495`)                            | skipped (gated on `lightingEnabled`)                                                            | none                                                        |
 | `World.NotifyChunkModified` (`:501`)                                       | no-op — empty `_chunkMap` ⇒ `chunk==null`, interior ⇒ no border rebuilds (`World.cs:1663–1685`) | none                                                        |
 | `worldData.ModifiedChunks.Add(this)` (`:514`)                              | **NRE unless `worldData` stubbed**                                                              | requires `worldData` stub                                   |
 | `Chunk.AddActiveVoxel/RemoveActiveVoxel` via the `Chunk` link (`:506–512`) | skipped if `Chunk==null` — but then the active set never grows as fluid spreads                 | needs a `Chunk` link OR harness-side active-set maintenance |
@@ -344,6 +344,40 @@ two cells write the same neighbor. The driver must replicate production's order:
   mod): close with a **direct `ApplyMod` unit test** driven by crafted mods (the harness would need to expose
   the apply path for testing) — *not* a `Behave`-driven scenario. BH-B9/BH-B10 in §4 are gated on that.
 - **Effort:** ✅ closed (reachability analysis only; no scenario built — none is constructible today).
+
+---
+
+### BH-8 — Placeholder neighbors and the population event · **CLOSED (2026-07-27)** · two false greens found
+
+Modelling `_FIXED_BUGS.md` Fluid §18/§19 needed a third neighbor state and a mid-scenario event, and building
+them exposed **two harness fidelity gaps that each produced a passing scenario against deliberately broken
+production code**. Both are worth reading before writing any scenario that drives production code.
+
+**Affordances added to `BehaviorTestWorld`:**
+
+| Affordance                        | Models                                                                                                   |
+|-----------------------------------|-----------------------------------------------------------------------------------------------------------|
+| `AddNeighborPlaceholder`          | The production placeholder — registered in `Chunks`, no sections, `IsPopulated == false`. A **third** state beside seeded (generated) and unseeded (absent → void). Throws if the coord was already seeded, since a chunk cannot model both. |
+| `PopulateNeighborPlaceholder`     | The population **event**: flips the placeholder, runs the real `World.WakeSeamBehaviorNeighborhood`, then absorbs the result into the harness's own active model. Rejects diagonal offsets — production wakes cardinals only, so a diagonal would assert against a seam that never wakes. |
+| `IsActiveById` / `IsSolidById` mirrors | `World` init is bypassed in edit mode, but the seam-wake pass reads both flat tables. Mirrored from the test palette; **keep in step with `JobDataManagerFactory`'s co-built tables**. |
+| Center-chunk registration         | See gap 2 below.                                                                                          |
+
+**Gap 1 — the bucket lags the model by one tick.** `SyncFluidBucketToActives` reconciles
+`ChunkData`'s bucket to `_activeVoxels` at the *start* of a tick, so a voxel that went inactive is still in the
+bucket until the next tick's sync (production's drain has already removed it by then). A scenario that read the
+bucket after a tick therefore saw last tick's stale entry and reported it as "woken" no matter what production
+did. Fixed by reconciling before the populate event; any scenario reading the bucket between ticks must do the
+same.
+
+**Gap 2 — the center chunk was never in the stub `WorldData`.** Only *neighbors* were registered, because
+cross-chunk reads resolve other coords. But a production pass that resolves a chunk **by coordinate** — as the
+seam wake does — looked the center up, found nothing, and silently no-opped; the scenario passed because of
+gap 1. The center is now registered and `IsPopulated`, exactly as production has it. **Any future scenario
+driving production code that looks chunks up by coord inherits this requirement.**
+
+**Lesson:** both gaps were caught only by the `validation-driven-bugfix` prove-red step (neuter the fix, confirm
+the baseline reds). A scenario written alongside its fix and never observed red proves nothing — here it would
+have shipped two guards that guarded nothing.
 
 ---
 
@@ -493,10 +527,12 @@ doc, and the inbound cross-references were updated (`PERFORMANCE_IMPROVEMENTS_RE
 
 - **Run it:** menu item **`Minecraft Clone/Dev/Validate Behavior`**. Green when the console logs
   `ALL N BEHAVIOR BASELINE TESTS PASSED`.
-- **`Unity_RunCommand` is unavailable in this environment** — its C#-exec backend (`com.unity.ai.assistant`)
-  returns `ApiNoLongerSupported`, and a restart does not fix it. Drive the suite (and any ad-hoc in-editor
-  check) via **`Unity_ManageMenuItem` + `Unity_ReadConsole`** instead, which work. For a one-off probe, add a
-  throwaway `[MenuItem]` that logs via `Debug.Log`, then delete it.
+- **`Unity_RunCommand` works again (since 2026-07-06)** — the embedded, patched `com.unity.ai.assistant`
+  restored the C#-exec backend; the former `ApiNoLongerSupported` note here was stale as of 2026-07-27.
+  It compiles fresh against the loaded assemblies on every call, which makes it the reliable way to force
+  a recompile (`AssetDatabase.Refresh` + `CompilationPipeline.RequestScriptCompilation`) and to probe state
+  the menu cannot show. It still blocks `System.Reflection`/`System.IO` and injects your class into a
+  package namespace, so fully qualify types that collide (e.g. `UnityEditor.Compilation.CompilationPipeline`).
 - **New-file / edit cycle:** after editing, `Unity_ManageMenuItem Execute "Assets/Refresh"` → poll
   `Unity_ManageEditor GetState` until `IsCompiling == false` → check `Unity_ReadConsole` (Type=Error) for
   compile errors → run the suite. `Clear` the console before a run and use `FilterText` + `IncludeStacktrace=false`

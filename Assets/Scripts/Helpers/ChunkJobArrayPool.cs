@@ -24,10 +24,14 @@ namespace Helpers
         /// Maximum buffers retained per element type; returns beyond this cap dispose instead,
         /// so a backlog spike does not permanently pin its peak native memory.
         /// <para>Device-calibrated (OM-1, <c>Settings.chunkJobArrayPoolRetention</c>): on a high-RAM
-        /// desktop this resolves to <c>512</c> — sized above peak steady-state in-flight demand
-        /// (≈468 buffers per type at max job settings: (32 lighting + 20 mesh jobs) × 9 buffers per type)
-        /// so renting never degrades into an alloc/free storm (worst-case retention ≈ 96 MB). Low-RAM
-        /// devices get a proportionally smaller cap so the pool ceiling matches what they can hold.</para>
+        /// desktop this resolves to <c>512</c> — sized above peak steady-state in-flight demand for the
+        /// full-chunk maps (≈468 buffers per type at max job settings: (32 lighting + 20 mesh jobs) × 9
+        /// buffers per type) so renting never degrades into an alloc/free storm. Low-RAM devices get a
+        /// proportionally smaller cap so the pool ceiling matches what they can hold.</para>
+        /// <para><b>Retention ceilings differ per stack.</b> The cap applies to each of the four types
+        /// independently, so at 512 it permits ≈246 MB (64 + 32 + 100 + 50). Demand-limited retention is
+        /// far lower and ≈96 MB in practice: only the full-chunk maps approach the cap (9 per job), while
+        /// the padded buffers are rented one of each per lighting job and peak in the tens.</para>
         /// </summary>
         private readonly int _maxRetainedPerType;
 
@@ -42,7 +46,7 @@ namespace Helpers
 
         private bool _isDisposed;
 
-        /// <summary>Default retention cap reproducing the historical desktop constant (≈96 MB worst case).</summary>
+        /// <summary>Default retention cap reproducing the historical desktop constant.</summary>
         public const int DefaultMaxRetainedPerType = 512;
 
         /// <summary>

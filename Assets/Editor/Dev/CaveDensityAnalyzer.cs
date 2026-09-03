@@ -65,7 +65,7 @@ namespace Editor.Dev
         private Vector2 _scrollPos;
         private GUIStyle _monoStyle;
 
-        [MenuItem("Minecraft Clone/Dev/Cave Density Analyzer")]
+        [MenuItem("Minecraft Clone/Dev/Cave Density Analyzer", priority = DevMenuPriority.Diagnostics)]
         private static void ShowWindow()
         {
             CaveDensityAnalyzer window = GetWindow<CaveDensityAnalyzer>("Cave Density Analyzer");

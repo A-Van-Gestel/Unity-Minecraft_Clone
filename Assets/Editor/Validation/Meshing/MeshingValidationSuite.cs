@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Editor.Dev;
 using Editor.Validation.Framework;
 using UnityEditor;
 
@@ -26,7 +27,7 @@ namespace Editor.Validation.Meshing
         /// <see cref="ValidationSuiteRunner"/>. Baseline failures mark the suite red; known-bug
         /// reproductions are reported as warnings.
         /// </summary>
-        [MenuItem("Minecraft Clone/Dev/Validate Meshing")]
+        [MenuItem("Minecraft Clone/Dev/Validate Meshing", priority = DevMenuPriority.Validation)]
         public static void RunAll() => Execute();
 
         /// <summary>
@@ -40,6 +41,9 @@ namespace Editor.Validation.Meshing
             List<Scenario> scenarios = new List<Scenario>();
             AddBaselineScenarios(scenarios);
             AddRendererScenarios(scenarios);
+            AddSchedulingScenarios(scenarios);
+            AddCompletionScenarios(scenarios);
+            AddLoadAnimationScenarios(scenarios);
             AddKnownBugScenarios(scenarios);
             return ValidationSuiteRunner.Execute("Meshing", scenarios, KnownBugChannel.Bug, logToConsole, showProgress);
         }
@@ -53,6 +57,28 @@ namespace Editor.Validation.Meshing
         /// meshing-job <see cref="Framework.MeshingTestWorld"/>; they count as baselines (must stay green).
         /// </summary>
         static partial void AddRendererScenarios(List<Scenario> scenarios);
+
+        /// <summary>
+        /// Registers the MP-2 orchestration baselines (B24 decision census + B25 drain policy, implemented in
+        /// MeshingValidationSuite.Scheduling.cs). Pure decision + queue logic, no world coupling; count as
+        /// baselines (must stay green).
+        /// </summary>
+        static partial void AddSchedulingScenarios(List<Scenario> scenarios);
+
+        /// <summary>
+        /// Registers the MP-4 completion-pass baseline (B27 skeleton-order replay, implemented in
+        /// MeshingValidationSuite.Completion.cs). Pure — a recording fake driver over the shared
+        /// <c>JobCompletionPass</c>, no world coupling; counts as a baseline (must stay green).
+        /// </summary>
+        static partial void AddCompletionScenarios(List<Scenario> scenarios);
+
+        /// <summary>
+        /// Registers the chunk load-animation baselines (B34–B36, implemented in
+        /// MeshingValidationSuite.LoadAnimation.cs). These drive a real <see cref="Chunk"/> through its own
+        /// fixture — the unit is the chunk, not the renderer — and guard the 2026-04-09 toggle regression;
+        /// count as baselines (must stay green).
+        /// </summary>
+        static partial void AddLoadAnimationScenarios(List<Scenario> scenarios);
 
         /// <summary>Registers the known-bug reproduction scenarios (none yet).</summary>
         static partial void AddKnownBugScenarios(List<Scenario> scenarios);

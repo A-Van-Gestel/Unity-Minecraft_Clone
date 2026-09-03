@@ -5,6 +5,7 @@ using Data;
 using Data.Enums;
 using MyBox;
 using Serialization;
+using Sky;
 using UI;
 using UI.Attributes;
 using UI.Enums;
@@ -164,8 +165,43 @@ public class Settings
     [Range(1, 32)]
     [Tooltip("The radius of chunks around the player that will be visible and rendered.\n\n" +
              TooltipTags.Performance + "Higher values significantly impact memory and rendering times.\n" +
-             TooltipTags.DefaultColorStart + "5" + TooltipTags.DefaultColorEnd)]
-    public int viewDistance = 5;
+             TooltipTags.DefaultColorStart + "10" + TooltipTags.DefaultColorEnd)]
+    public int viewDistance = 10;
+
+    /// <summary>
+    /// Resolution the world is rendered at, as a percentage of the window resolution.
+    /// Below 100 the render target is smaller than the window and upscaled; above 100 it is
+    /// supersampled down. The UI is a screen-space overlay and is never scaled.
+    /// </summary>
+    [SubHeader("Resolution")]
+    [SettingField(SettingsTab.Graphics, Label = "Render Scale", Format = "f0", Order = 1)]
+    [Range(30, 200)]
+    [Tooltip("Renders the world at a fraction (or multiple) of your window resolution.\n\n" +
+             TooltipTags.BulletOptionStart + "Below 100" + TooltipTags.BulletOptionEnd +
+             "Renders smaller and upscales. The cheapest way to buy frame rate on a weak GPU.\n" +
+             TooltipTags.BulletOptionStart + "Above 100" + TooltipTags.BulletOptionEnd +
+             "Renders larger and downsamples for a sharper image.\n\n" +
+             TooltipTags.Note + "Menus and the HUD stay at full resolution either way.\n" +
+             TooltipTags.Warning + "This multiplies with Anti-Aliasing: 200 with 4x samples every " +
+             "pixel 16 times over.\n" +
+             TooltipTags.Performance + "The single most effective GPU lever available.\n" +
+             TooltipTags.DefaultColorStart + "100" + TooltipTags.DefaultColorEnd)]
+    public int renderScalePercent = 100;
+
+    /// <summary>
+    /// Multisample anti-aliasing level applied to the world camera.
+    /// </summary>
+    [SettingField(SettingsTab.Graphics, Label = "Anti-Aliasing (MSAA)", Order = 1)]
+    [Tooltip("Smooths the jagged edges of blocks by sampling each pixel several times.\n\n" +
+             TooltipTags.BulletOptionStart + "Off" + TooltipTags.BulletOptionEnd +
+             "No multisampling. The resolve pass is skipped entirely.\n" +
+             TooltipTags.BulletOptionStart + "2x / 4x / 8x" + TooltipTags.BulletOptionEnd +
+             "Progressively smoother block silhouettes at progressively higher bandwidth cost.\n\n" +
+             TooltipTags.Note + "Cleans up block edges against the sky, but does nothing for grass and " +
+             "flowers, whose edges come from texture cut-outs rather than geometry.\n" +
+             TooltipTags.Warning + "This multiplies with Render Scale.\n" +
+             TooltipTags.DefaultColorStart + "Off" + TooltipTags.DefaultColorEnd)]
+    public MsaaLevel msaa = MsaaLevel.Off;
 
     /// <summary>
     /// Controls the visual fidelity of liquid (water and lava) rendering.
@@ -218,6 +254,18 @@ public class Settings
     public SmoothLightingQuality smoothLighting = SmoothLightingQuality.High;
 
     /// <summary>
+    /// If true, ordinary full blocks cast sub-cell contact shadows onto the surfaces beside them.
+    /// </summary>
+    [SettingField(SettingsTab.Graphics, Label = "Full-Block Contact Shadows", Order = 5)]
+    [Tooltip("Lets ordinary full blocks cast a tight contact shadow on the surfaces beside them, " +
+             "instead of shading evenly across the whole neighboring block.\n\n" +
+             "Blocks with their own shape (slabs, posts) cast contact shadows either way.\n\n" +
+             TooltipTags.Performance + "Subdivides every surface within one block of a wall, ledge or " +
+             "step. Flat open ground is unaffected; broken terrain and built structures cost the most.\n" +
+             TooltipTags.DefaultColorStart + "Off" + TooltipTags.DefaultColorEnd)]
+    public bool fullBlockContactShadows;
+
+    /// <summary>
     /// The visual style of clouds in the sky.
     /// </summary>
     [SubHeader("Effects")]
@@ -229,10 +277,46 @@ public class Settings
     public CloudStyle clouds = CloudStyle.Fancy;
 
     /// <summary>
+    /// How heavily distance fog veils the world. The world type authors the fog's shape; this chooses
+    /// how much of it the player sees.
+    /// </summary>
+    [SettingField(SettingsTab.Graphics, Label = "Distance Fog", Order = 5)]
+    [Tooltip("Haze that thickens with distance, hiding the edge of the loaded world.\n\n" +
+             TooltipTags.BulletOptionStart + "Off" + TooltipTags.BulletOptionEnd + "No fog. Terrain ends abruptly against the sky at the view distance.\n" +
+             TooltipTags.BulletOptionStart + "Light" + TooltipTags.BulletOptionEnd + "Held back to the far distance; the middle ground stays clear.\n" +
+             TooltipTags.BulletOptionStart + "Full" + TooltipTags.BulletOptionEnd + "The world's authored fog.\n\n" +
+             TooltipTags.Performance + "A few shader instructions per pixel; no measurable cost.\n" +
+             TooltipTags.DefaultColorStart + "Full" + TooltipTags.DefaultColorEnd)]
+    public FogStyle distanceFog = FogStyle.Full;
+
+    /// <summary>
+    /// If true, the camera runs the post-processing stack and light sources render brighter than white
+    /// so bloom can catch them.
+    /// </summary>
+    [SettingField(SettingsTab.Graphics, Label = "Bloom", Order = 5)]
+    [Tooltip("Makes light sources glow — lamps and lava render brighter than white and bleed into the " +
+             "surrounding pixels.\n\n" +
+             "Turning this off also stops emitters rendering above full brightness, so they look exactly " +
+             "as they did before.\n\n" +
+             TooltipTags.Performance + "Enables the post-processing stack: one full-screen pass plus an " +
+             "intermediate render target.\n" +
+             TooltipTags.DefaultColorStart + "On" + TooltipTags.DefaultColorEnd)]
+    public bool bloom = true;
+
+    /// <summary>
+    /// If true, flora (grass blades and future foliage) sways in the wind via shader vertex animation.
+    /// </summary>
+    [SettingField(SettingsTab.Graphics, Label = "Foliage Sway", Order = 6)]
+    [Tooltip("Animates flora (grass blades) swaying in the wind.\n\n" +
+             TooltipTags.Performance + "A small amount of extra vertex shader work; negligible on desktop.\n" +
+             TooltipTags.DefaultColorStart + "On" + TooltipTags.DefaultColorEnd)]
+    public bool enableFoliageSway = true;
+
+    /// <summary>
     /// Vertical synchronization mode. Maps directly to <see cref="QualitySettings.vSyncCount"/>.
     /// </summary>
     [Header("Frame Rate")]
-    [SettingField(SettingsTab.Graphics, Label = "VSync", Order = 6)]
+    [SettingField(SettingsTab.Graphics, Label = "VSync", Order = 7)]
     [Tooltip("Controls vertical synchronization.\n\n" +
              TooltipTags.BulletOptionStart + "Off" + TooltipTags.BulletOptionEnd + "No VSync. Lowest input latency.\n" +
              TooltipTags.BulletOptionStart + "On" + TooltipTags.BulletOptionEnd + "Eliminates tearing. +1 frame latency. FPS halves if GPU can't keep up.\n" +
@@ -244,7 +328,7 @@ public class Settings
     /// If true, the frame rate is uncapped (renders as fast as possible) when VSync is off.
     /// Overrides <see cref="maxFps"/> when enabled.
     /// </summary>
-    [SettingField(SettingsTab.Graphics, Label = "Unlimited FPS", Order = 7)]
+    [SettingField(SettingsTab.Graphics, Label = "Unlimited FPS", Order = 8)]
     [DisabledWhen(nameof(vSync), ComparisonOp.NotEqual, VSyncMode.Off)]
     [Tooltip("Removes the frame rate cap entirely when VSync is off.\n" +
              "The application renders as fast as possible.\n\n" +
@@ -267,6 +351,79 @@ public class Settings
 
     #endregion
 
+    #region Audio Tab
+
+    // ═══════════════════════════════════════════════════════════════════
+    // AUDIO TAB
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Master output volume. Scales every category below.
+    /// </summary>
+    [Header("Volume")]
+    [SettingField(SettingsTab.Audio, Label = "Master Volume", Format = "f2", Order = 0)]
+    [Range(0f, 1f)]
+    [Tooltip("Overall output volume. Scales every category below.\n\n" +
+             TooltipTags.DefaultColorStart + "1.00" + TooltipTags.DefaultColorEnd)]
+    public float masterVolume = 1f;
+
+    /// <summary>
+    /// Volume of the background music scheduler.
+    /// </summary>
+    [SettingField(SettingsTab.Audio, Label = "Music Volume", Format = "f2", Order = 1)]
+    [Range(0f, 1f)]
+    [Tooltip("Volume of background music.\n\n" +
+             TooltipTags.DefaultColorStart + "0.70" + TooltipTags.DefaultColorEnd)]
+    public float musicVolume = 0.7f;
+
+    /// <summary>
+    /// Volume of the biome, cave and weather ambience beds.
+    /// </summary>
+    [SettingField(SettingsTab.Audio, Label = "Ambient Volume", Format = "f2", Order = 2)]
+    [Range(0f, 1f)]
+    [Tooltip("Volume of biome and cave ambience beds.\n\n" +
+             TooltipTags.DefaultColorStart + "1.00" + TooltipTags.DefaultColorEnd)]
+    public float ambientVolume = 1f;
+
+    /// <summary>
+    /// Volume of block break, place and footstep one-shots.
+    /// </summary>
+    [SettingField(SettingsTab.Audio, Label = "Block Volume", Format = "f2", Order = 3)]
+    [Range(0f, 1f)]
+    [Tooltip("Volume of block break, place and footstep sounds.\n\n" +
+             TooltipTags.DefaultColorStart + "1.00" + TooltipTags.DefaultColorEnd)]
+    public float blockVolume = 1f;
+
+    /// <summary>
+    /// Volume of the looping fluid emitters (flowing water, waterfalls, lava).
+    /// </summary>
+    [SettingField(SettingsTab.Audio, Label = "Fluid Volume", Format = "f2", Order = 4)]
+    [Range(0f, 1f)]
+    [Tooltip("Volume of flowing water, waterfall and lava loops.\n\n" +
+             TooltipTags.DefaultColorStart + "1.00" + TooltipTags.DefaultColorEnd)]
+    public float fluidVolume = 1f;
+
+    /// <summary>
+    /// Volume of interface sounds.
+    /// </summary>
+    [SettingField(SettingsTab.Audio, Label = "UI Volume", Format = "f2", Order = 5)]
+    [Range(0f, 1f)]
+    [Tooltip("Volume of interface sounds.\n\n" +
+             TooltipTags.DefaultColorStart + "1.00" + TooltipTags.DefaultColorEnd)]
+    public float uiVolume = 1f;
+
+    /// <summary>
+    /// If true, a card naming the song appears when a music track starts.
+    /// </summary>
+    [SettingField(SettingsTab.Audio, Label = "Now Playing Toasts", Order = 6)]
+    [Tooltip("Shows a card in the top-right corner naming the track when music starts.\n\n" +
+             TooltipTags.BulletOptionStart + "If true" + TooltipTags.BulletOptionEnd + "A card appears for a few seconds with the song title and artist.\n" +
+             TooltipTags.BulletOptionStart + "If false" + TooltipTags.BulletOptionEnd + "Music plays with no on-screen notice.\n\n" +
+             TooltipTags.DefaultColorStart + "On" + TooltipTags.DefaultColorEnd)]
+    public bool showNowPlayingToasts = true;
+
+    #endregion
+
     #region World Tab
 
     // ═══════════════════════════════════════════════════════════════════
@@ -279,7 +436,7 @@ public class Settings
     [Header("Lighting")]
     [SettingField(SettingsTab.World, Label = "Lighting", Order = 0)]
     [InitializationField]
-    [Tooltip("Toggles the dynamic voxel lighting engine (Sunlight and Blocklight).\n\n" +
+    [Tooltip("Toggles the dynamic voxel lighting engine (Skylight and Blocklight).\n\n" +
              TooltipTags.Note + "Requires a world reload to fully apply to already generated chunks. The world will render full-bright if turned off.")]
     public bool enableLighting = true;
 
@@ -334,6 +491,19 @@ public class Settings
              TooltipTags.Note + "Requires a new world or unexplored chunks to take effect.")]
     public bool enableMinorFloraPass = true;
 
+    /// <summary>
+    /// If true, world generation uses the classic 32-bit float noise pipeline, whose precision
+    /// artifacts progressively corrupt terrain past ~±16.7 million blocks ("Far Lands").
+    /// When false, a 64-bit coordinate pipeline keeps generation artifact-free to the world edge.
+    /// </summary>
+    [SettingField(SettingsTab.World, Label = "Far Lands (Classic Noise)", Order = 6)]
+    [InitializationField]
+    [Tooltip("Uses the classic 32-bit float noise pipeline for world generation.\n\n" +
+             "Terrain progressively corrupts past ~16.7 million blocks from the origin — the mythical \"Far Lands\".\n" +
+             "When disabled, generation uses a 64-bit precision pipeline that stays artifact-free out to the world edge (±2.1 billion blocks).\n\n" +
+             TooltipTags.Note + "Applies to chunks generated after the next world load. Chunks generated under a different mode may not match at their borders far from spawn.")]
+    public bool enableFarLands = false;
+
     #endregion
 
     #region Performance Tab
@@ -387,6 +557,28 @@ public class Settings
     public int maxLightJobsPerFrame = 32;
 
     /// <summary>
+    /// P9-2 (Option B1): re-arm the post-generation edge-check cascade only when a lighting pass actually
+    /// changed light, instead of on every stable completion. **Default-ON since the 2026-08-02 GO** — the
+    /// capture cut lighting amplification 6.12 → 1.86 per delivered chunk at vd 32 and met the visibility
+    /// budget at every view distance. Retained as a rollback lever, and listed in
+    /// <see cref="OverlayBenchmarkSettingsFromDisk"/> so a cold-cache benchmark launch can still A/B it.
+    /// <para>
+    /// ⚠ <b>`World.prefab` carries a stale serialized `0` for this field and that is harmless</b> — it was
+    /// serialized while the default was still false. `World` overwrites its whole `settings` reference from
+    /// <see cref="LoadSettings"/> at startup, so the prefab value never reaches the pipeline. Do not "fix"
+    /// the prefab by hand (project rule: let the editor own .prefab serialization) and do not read it as
+    /// evidence that the feature is off.
+    /// </para>
+    /// </summary>
+    [SettingField(SettingsTab.Performance, Label = "Convergent Edge-Check Cascade", Order = 9)]
+    [Tooltip("Skips the post-generation edge-check round (and its neighbor triggers) when the lighting " +
+             "pass that would have armed it changed nothing.\n\n" +
+             TooltipTags.Performance + "Removes lighting work that recomputes an unchanged result — " +
+             "roughly 3x less lighting work per delivered chunk. Turn off only to diagnose a lighting " +
+             "convergence problem.")]
+    public bool enableConvergentEdgeCheckCascade = true;
+
+    /// <summary>
     /// The maximum number of structure-related VoxelMods that can be expanded in a single frame.
     /// Prevents lag spikes when generating massive structures.
     /// </summary>
@@ -410,6 +602,22 @@ public class Settings
     public int maxInFlightMeshJobs = 20;
 
     /// <summary>
+    /// Maximum generation jobs allowed in flight before <c>World</c> pauses scheduling new ones to let
+    /// <c>ProcessGenerationJobs</c> drain (memory cap + backpressure; P-4 §3.1). Calibrated from system
+    /// RAM; the default is the desktop ceiling (generation was previously uncapped, so there is no older
+    /// literal to reproduce).
+    /// </summary>
+    public int maxInFlightGenerationJobs = 32;
+
+    /// <summary>
+    /// Maximum lighting jobs allowed in flight before the ready-set scan stops scheduling for the
+    /// frame (memory bound — each job rents ~11 pooled full-volume buffers, so this ceiling keeps a
+    /// hitch-scaled §3.4 quota from blowing past the pool retention into a Persistent alloc storm).
+    /// Inert under the legacy count cap; not device-calibrated (2× the desktop per-frame cap).
+    /// </summary>
+    public int maxInFlightLightingJobs = 64;
+
+    /// <summary>
     /// Buffers retained per type in the chunk job array pool — the native-memory retention ceiling
     /// (OM-1). Calibrated from system RAM; default reproduces the historical constant (≈96 MB worst case).
     /// </summary>
@@ -422,6 +630,137 @@ public class Settings
     /// </summary>
     public int calibrationVersion = 0;
 
+    // ── P-4 §3.4/§3.5 pipeline backpressure knobs ────────────────────────
+    // The four ms ceilings are Performance-tab sliders (smoothness ↔ chunk-fill-speed trade is a
+    // player-facing preference); the rollback flags and panic thresholds stay OM-1-style non-UI
+    // fields (persisted + user-editable, but not everyday options). The ms ceilings are deliberately
+    // NOT device-calibrated — frame-time targets are device-independent, and device scaling already
+    // flows in through the calibrated per-frame count caps that anchor each pass's rate quota
+    // (see Helpers.PipelinePassBudget).
+
+    /// <summary>
+    /// Master switch for the §3.4 time-based pass budgets (rate quota + ms ceiling). Off restores the
+    /// exact legacy fixed per-frame count caps — kept as a rollback / A-B lever (TG-4 precedent).
+    /// </summary>
+    public bool enablePipelineTimeBudgets = true;
+
+    /// <summary>
+    /// When true, the four time ceilings scale with a voluntarily lowered FPS cap (a 30/15-FPS AFK /
+    /// battery / mobile frame is mostly idle sleep and can afford a bigger pipeline slice) — anchored at
+    /// 60 FPS, clamped ×8, keyed off the cap's intent and never measured frame time (see
+    /// <see cref="Helpers.PipelinePassBudget.ScaleCeilingMs"/>). Off restores the fixed absolute-ms
+    /// ceilings — kept as a rollback / A-B lever alongside <see cref="enablePipelineTimeBudgets"/>.
+    /// No effect when budgets are off or no FPS cap is active.
+    /// </summary>
+    public bool scaleBudgetCeilingsWithFpsCap = true;
+
+    /// <summary>
+    /// Time ceiling (ms) for processing completed generation jobs in one frame
+    /// (<see cref="maxStructureModsPerFrame"/> still bounds structure expansion inside the pass).
+    /// Un-processed completed jobs stay enrolled for the next frame. ≤ 0 disables the ceiling.
+    /// </summary>
+    [Header("Pipeline Time Budgets")]
+    [SettingField(SettingsTab.Performance, Label = "Generation Process Budget (ms)", Format = "f1", Order = 5)]
+    [Range(0.5f, 20f)]
+    [Tooltip("Per-frame time ceiling for processing completed terrain-generation jobs.\n" +
+             "Lower = smoother frames while chunks stream in; higher = faster chunk fill.\n" +
+             "(Setting 0 in the settings file disables the ceiling entirely.)\n\n" +
+             TooltipTags.Performance + "Bounds the main-thread cost of generation results per frame.\n" +
+             TooltipTags.DefaultColorStart + "6" + TooltipTags.DefaultColorEnd)]
+    public float genProcessBudgetMs = 6f;
+
+    /// <summary>
+    /// Time ceiling (ms) for scheduling lighting jobs from the ready set in one frame. The rate quota
+    /// (<see cref="maxLightJobsPerFrame"/> × frame duration × 60) drives throughput; this bounds the
+    /// frame cost when scheduling is expensive. ≤ 0 disables the ceiling (quota only).
+    /// </summary>
+    [SettingField(SettingsTab.Performance, Label = "Light Schedule Budget (ms)", Format = "f1", Order = 6)]
+    [Range(0.5f, 20f)]
+    [Tooltip("Per-frame time ceiling for scheduling lighting jobs.\n" +
+             "Lower = smoother frames while chunks stream in; higher = faster chunk fill.\n" +
+             "(Setting 0 in the settings file disables the ceiling — rate quota only.)\n\n" +
+             TooltipTags.Performance + "Bounds the main-thread cost of lighting scheduling per frame.\n" +
+             TooltipTags.DefaultColorStart + "8" + TooltipTags.DefaultColorEnd)]
+    public float lightScheduleBudgetMs = 8f;
+
+    /// <summary>
+    /// Time ceiling (ms) for scheduling mesh jobs in one frame (rate quota anchored on
+    /// <see cref="maxMeshRebuildsPerFrame"/>). ≤ 0 disables the ceiling (quota only).
+    /// </summary>
+    [SettingField(SettingsTab.Performance, Label = "Mesh Schedule Budget (ms)", Format = "f1", Order = 7)]
+    [Range(0.5f, 20f)]
+    [Tooltip("Per-frame time ceiling for scheduling mesh-build jobs.\n" +
+             "Lower = smoother frames while chunks stream in; higher = faster chunk fill.\n" +
+             "(Setting 0 in the settings file disables the ceiling — rate quota only.)\n\n" +
+             TooltipTags.Performance + "Bounds the main-thread cost of mesh scheduling per frame.\n" +
+             TooltipTags.DefaultColorStart + "6" + TooltipTags.DefaultColorEnd)]
+    public float meshScheduleBudgetMs = 6f;
+
+    /// <summary>
+    /// Time ceiling (ms) for applying completed mesh jobs (the buffer-upload pass) in one frame.
+    /// Deferred completions stay enrolled — buffers are held one extra frame, bounded by the
+    /// in-flight cap. ≤ 0 disables the ceiling (legacy: apply everything completed).
+    /// </summary>
+    [SettingField(SettingsTab.Performance, Label = "Mesh Apply Budget (ms)", Format = "f1", Order = 8)]
+    [Range(0.5f, 20f)]
+    [Tooltip("Per-frame time ceiling for uploading finished chunk meshes.\n" +
+             "Lower = smoother frames while chunks stream in; higher = faster chunk fill.\n" +
+             "(Setting 0 in the settings file disables the ceiling — apply everything completed.)\n\n" +
+             TooltipTags.Performance + "Bounds the main-thread cost of mesh uploads per frame.\n" +
+             TooltipTags.DefaultColorStart + "4" + TooltipTags.DefaultColorEnd)]
+    public float meshApplyBudgetMs = 4f;
+
+    // NOTE: there is no draw budget. The old "Chunk Draw Budget (ms)" ceiling paced a queue whose only
+    // job was triggering chunk load animations; MP-6 retired that stage and moved the trigger into the
+    // mesh apply pass above, so the apply budget is now the whole mesh tail.
+
+    /// <summary>
+    /// Master switch for the §3.5 generation panic gate (pause admissions while the lighting backlog
+    /// is saturated). Kept as a rollback lever alongside <see cref="enablePipelineTimeBudgets"/>.
+    /// </summary>
+    public bool enableGenerationPanicGate = true;
+
+    /// <summary>
+    /// Scales the panic-gate thresholds with the resident load square (P-8). <b>Default-OFF</b> — the
+    /// shipping path uses the two thresholds below verbatim. ON is retained as an opt-in for re-testing,
+    /// not as a shipping default.
+    /// <para>Listed in <c>SettingsManager.OverlayBenchmarkSettingsFromDisk</c> so a benchmark run can
+    /// capture either leg from the same build even on a cold settings cache, where the overlay list is the
+    /// only channel from disk.</para>
+    /// </summary>
+    /// <remarks>
+    /// The reasoning was sound and the measurement refuted it. The thresholds count backlogged chunks while
+    /// the population they guard grows as view distance squared, so a fixed pair looks like an unreachable
+    /// brake at low view distance and a permanent throttle at high ones. Scaling them buys almost
+    /// nothing, because the backlog simply grows to meet the larger threshold: at view distance 32 a 4.2×
+    /// threshold moved gate closure by 0.1 points (94.6 % vs 94.5 %) while admitted work rose 0.2 % and
+    /// <i>completions fell 16 %</i>. The binding constraint is the lighting/mesh schedule <c>Quota</c> —
+    /// saturated on 99 %+ of frames in both legs — not admission.
+    /// <para>
+    /// Keep this OFF until that throughput ceiling moves; at that point the gate becomes binding again and a
+    /// residency-scaled threshold is the right shape. Evidence:
+    /// <c>Documentation/Performance/CHUNK_PIPELINE_P8_GATE_SCALING_IL2CPP_2026-08-01_BENCHMARK.md</c>
+    /// (NO-GO). Scale and rationale: <see cref="Helpers.GenerationPanicGate.DeriveThresholds"/>.
+    /// </para>
+    /// </remarks>
+    public bool scalePanicGateThresholdsWithResidency = false;
+
+    /// <summary>
+    /// Lighting ready-set size at which the panic gate closes (stops admitting generation requests), stated
+    /// at <see cref="Helpers.GenerationPanicGate.ReferenceResidentWidth"/> — i.e. at the default view
+    /// distance, where it is used as-is. With
+    /// <see cref="scalePanicGateThresholdsWithResidency"/> on, the effective value scales up from here with
+    /// the resident square's width. Must exceed the reopen threshold.
+    /// </summary>
+    public int panicGateCloseThreshold = 256;
+
+    /// <summary>
+    /// Lighting ready-set size at or below which a closed panic gate reopens, stated at the same reference
+    /// width as <see cref="panicGateCloseThreshold"/> and scaled with it. The gap below that threshold is
+    /// the hysteresis band that prevents oscillation.
+    /// </summary>
+    public int panicGateReopenThreshold = 128;
+
     #endregion
 
     #region Benchmark Tab
@@ -431,36 +770,72 @@ public class Settings
     // ═══════════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// The side length (in chunks) of the square region the benchmark sweeps.
-    /// Waypoints are generated within this region centered on the world origin,
-    /// independent of the actual <see cref="VoxelData.WorldSizeInChunks"/>.
+    /// Arms the in-world micro-benchmark harnesses that live on the World scene's <c>BenchmarkRunner</c>
+    /// object (chunk generation, mesh generation, lighting job). <b>Default-OFF</b>, so a production build
+    /// ships them inert no matter what the scene has serialized; each harness reads this once in
+    /// <c>Start()</c> and disables itself, which is why a change only lands on the next world load.
+    /// <para>Forced off under <see cref="Data.WorldLaunchState.IsAutomatedMode"/> regardless of this value:
+    /// the automated route and fluid-stress captures run in the same World scene, and a harness triggered
+    /// mid-capture would corrupt that run's numbers.</para>
     /// </summary>
-    [Header("Benchmark Region")]
-    [SettingField(SettingsTab.Benchmark, Label = "Region Size (chunks)", Format = "f0", Order = 0)]
-    [Range(16, 512)]
-    [Tooltip("The side length (in chunks) of the square area the benchmark sweeps.\n" +
-             "Larger regions produce longer runs but cover more of the world.\n\n" +
-             TooltipTags.Performance + "Very large regions (256+) may produce extremely long benchmark runs.\n" +
-             TooltipTags.DefaultColorStart + "64" + TooltipTags.DefaultColorEnd)]
-    public int benchmarkRegionSize = 64;
+    [Header("In-World Micro-Benchmarks")]
+    // Order -1 keeps the master switch above the route fields (which start at 0) without renumbering them.
+    [SettingField(SettingsTab.Benchmark, Label = "Enable Micro-Benchmarks", Order = -1)]
+    [Tooltip("Arms the per-system micro-benchmark harnesses in the world scene, each triggered by its own " +
+             "key: C = chunk generation, M = mesh generation, L = lighting job.\n\n" +
+             TooltipTags.Warning + "Each run freezes the game for minutes and allocates heavily. Leave this " +
+             "off for normal play.\n" +
+             TooltipTags.Note + "Takes effect on the next world load. Always off during automated benchmark " +
+             "and fluid-stress captures.\n" +
+             TooltipTags.DefaultColorStart + "Off" + TooltipTags.DefaultColorEnd)]
+    public bool enableInWorldMicroBenchmarks = false;
+
+    /// <summary>
+    /// Waypoints the benchmark's generation sweep emits (two per row). Honored exactly, rounded up to an
+    /// even number. The swept region is <b>derived</b> from the configured speeds and phase duration, so
+    /// this controls the sweep's shape, not the run's length.
+    /// </summary>
+    [Header("Benchmark Route")]
+    [SettingField(SettingsTab.Benchmark, Label = "Generation Waypoints", Format = "f0", Order = 0)]
+    [Range(4, 128)]
+    [Tooltip("How many waypoints the generation sweep uses (2 per row, so this rounds up to an even number).\n" +
+             "Controls the SHAPE of the sweep — more waypoints means more, shorter rows — not how long the " +
+             "run takes. Phase Duration is what lengthens a run.\n\n" +
+             "Honoured exactly: extra distance from faster speeds or longer phases widens the rows rather " +
+             "than adding more.\n\n" +
+             TooltipTags.DefaultColorStart + "12" + TooltipTags.DefaultColorEnd)]
+    public int benchmarkGenerationWaypoints = 12;
+
+    /// <summary>
+    /// Seconds each speed phase runs. Drives the total distance traveled, and with it the derived size of
+    /// the benchmark region — the sweep is sized to the distance the phases will actually cover.
+    /// </summary>
+    [SettingField(SettingsTab.Benchmark, Label = "Phase Duration (s)", Format = "f0", Order = 1)]
+    [Range(5, 300)]
+    [Tooltip("How long each speed phase runs, in seconds.\n" +
+             "This is the knob that lengthens a benchmark run: every generation and loading phase uses it.\n\n" +
+             TooltipTags.Performance + "A full run is roughly (generation speeds + loading speeds) x this, " +
+             "plus the ensure-generated sweep.\n" +
+             TooltipTags.DefaultColorStart + "30" + TooltipTags.DefaultColorEnd)]
+    public float benchmarkPhaseSeconds = 30f;
 
     /// <summary>
     /// Semicolon-separated movement speeds (m/s) for the generation pass.
-    /// Each entry becomes a speed phase lasting <c>TIME_PER_PHASE</c> seconds.
-    /// The final speed is held until all waypoints are visited.
+    /// Each entry becomes a speed phase lasting <see cref="benchmarkPhaseSeconds"/> seconds. Every phase
+    /// runs its full duration; the route is sized to outlast them.
     /// Parsed at benchmark initialization time.
     /// </summary>
     [Header("Speed Phases (m/s)")]
     [SettingField(SettingsTab.Benchmark, Label = "Gen", Order = 1)]
     [Tooltip("Semicolon-separated list of movement speeds for the generation pass.\n" +
-             "Each value becomes a timed speed phase. The last speed is held until all waypoints are visited.\n\n" +
-             TooltipTags.Note + "More phases or higher speeds require a larger Region Size.\n" +
+             "Each value becomes a timed speed phase, each running its full Phase Duration.\n\n" +
+             TooltipTags.Note + "More phases or higher speeds automatically enlarge the swept region.\n" +
              TooltipTags.DefaultColorStart + "10; 20; 50; 100; 200" + TooltipTags.DefaultColorEnd)]
     public string benchmarkGenerationSpeeds = "10; 20; 50; 100; 200";
 
     /// <summary>
     /// Semicolon-separated movement speeds (m/s) for the loading pass.
-    /// Each entry becomes a speed phase lasting <c>TIME_PER_PHASE</c> seconds.
+    /// Each entry becomes a speed phase lasting <see cref="benchmarkPhaseSeconds"/> seconds.
     /// Loading waypoints loop if exhausted before phases end.
     /// Parsed at benchmark initialization time.
     /// </summary>
@@ -505,6 +880,67 @@ public class Settings
 
     #endregion
 
+    #region Debug Screen Tab
+
+    // ═══════════════════════════════════════════════════════════════════
+    // DEBUG SCREEN TAB — per-entry visibility toggles for the in-game debug HUD (DebugScreen).
+    // Each gates one logical block in its Populate*Builder; the DebugMode (FPSOnly/Performance/Full)
+    // still decides which panels are active. All default ON to preserve the pre-toggle HUD, except the
+    // CP-1 lifecycle block which is opt-in. Not DebugOnly — this is a player-facing tab (MC F3 parity).
+    // ═══════════════════════════════════════════════════════════════════
+
+    [SettingField(SettingsTab.DebugScreen, Label = "FPS", Order = 0)]
+    [Tooltip("Shows the FPS line on the debug screen. Always shown in FPS-Only mode regardless of this toggle.")]
+    public bool debugHudShowFps = true;
+
+    [SettingField(SettingsTab.DebugScreen, Label = "Graphics API", Order = 1)]
+    [Tooltip("Shows the active graphics API line on the debug screen.")]
+    public bool debugHudShowGraphicsApi = true;
+
+    [SettingField(SettingsTab.DebugScreen, Label = "World Info", Order = 2)]
+    [Tooltip("Shows the WORLD block: position, render position, origin chunk, looking angle, chunk coord and seed.")]
+    public bool debugHudShowWorldInfo = true;
+
+    [SettingField(SettingsTab.DebugScreen, Label = "Biome", Order = 3)]
+    [Tooltip("Shows the biome line in the WORLD block: the biome at the player, and the surface biome underfoot when the two differ at a boundary.")]
+    public bool debugHudShowBiome = true;
+
+    [SettingField(SettingsTab.DebugScreen, Label = "Player Info", Order = 4)]
+    [Tooltip("Shows the PLAYER block: grounded/flying/noclip state, speed and velocity.")]
+    public bool debugHudShowPlayerInfo = true;
+
+    [SettingField(SettingsTab.DebugScreen, Label = "Chunk & Pool Stats", Order = 5)]
+    [Tooltip("Shows the CHUNK block: active voxel/chunk counts, pool sizes, mesh queue and voxel-modification totals.")]
+    public bool debugHudShowChunkStats = true;
+
+    [SettingField(SettingsTab.DebugScreen, Label = "Section Info", Order = 6)]
+    [Tooltip("Shows the SECTION block for the section the player currently occupies.")]
+    public bool debugHudShowSectionInfo = true;
+
+    [SettingField(SettingsTab.DebugScreen, Label = "Ground Voxel", Order = 7)]
+    [Tooltip("Shows the GROUND VOXEL inspector (the voxel directly under the player).")]
+    public bool debugHudShowGroundVoxel = true;
+
+    [SettingField(SettingsTab.DebugScreen, Label = "Target Voxel", Order = 8)]
+    [Tooltip("Shows the TARGET VOXEL inspector (the voxel the player is looking at).")]
+    public bool debugHudShowTargetVoxel = true;
+
+    [SettingField(SettingsTab.DebugScreen, Label = "Chunk Lifecycle (CP-1)", Order = 9)]
+    [Tooltip("Shows the CP-1 lifecycle observability block: unload deferrals, save/deserialize counts, load-arm " +
+             "faults, stuck-loading detector and pool churn.\n\n" +
+             TooltipTags.Note + "Off by default — a diagnostic block for chunk-pipeline debugging.")]
+    public bool debugHudShowChunkLifecycle = false;
+
+    [SettingField(SettingsTab.DebugScreen, Label = "Performance Panel", Order = 10)]
+    [Tooltip("Shows the performance panel (frame time, CPU phases, memory, GC). Also the panel shown in Performance mode.")]
+    public bool debugHudShowPerformance = true;
+
+    [SettingField(SettingsTab.DebugScreen, Label = "Visualization Info", Order = 11)]
+    [Tooltip("Shows the debug-visualization mode line and visualizer pool count.")]
+    public bool debugHudShowVisualization = true;
+
+    #endregion
+
     #region Internal (Non-UI) Fields
 
     // ═══════════════════════════════════════════════════════════════════
@@ -538,6 +974,19 @@ public class Settings
     /// This is a calculated property, dynamically derived from the viewDistance plus a safe buffer.
     /// </summary>
     public int LoadDistance => viewDistance + DATA_LOAD_BUFFER;
+
+    /// <summary>
+    /// Gets the side length, in chunks, of the resident load square — <c>2 × LoadDistance + 1</c>, floored at
+    /// 1 so a nonsensical configuration cannot yield a zero or negative square. Shared by the panic gate,
+    /// which scales its thresholds by it (P-8), and the benchmark's settings snapshot, which reports it:
+    /// those two must never disagree about how big the resident world is.
+    /// </summary>
+    /// <remarks>
+    /// Not yet the <i>only</i> derivation — <c>PipelineTelemetry.EstimateTraceCapacity</c> still computes the
+    /// same square from its own <c>loadDistance</c> parameter, because it is called before a
+    /// <see cref="Settings"/> is in scope. Route new callers here rather than re-deriving.
+    /// </remarks>
+    public int ResidentWidth => Mathf.Max(1, LoadDistance * 2 + 1);
 
     #endregion
 }
@@ -699,6 +1148,7 @@ public static class SettingsManager
             settings.maxMeshRebuildsPerFrame = result.MaxMeshRebuildsPerFrame;
             settings.maxLightJobsPerFrame = result.MaxLightJobsPerFrame;
             settings.maxInFlightMeshJobs = result.MaxInFlightMeshJobs;
+            settings.maxInFlightGenerationJobs = result.MaxInFlightGenerationJobs;
             settings.chunkJobArrayPoolRetention = result.JobArrayPoolRetention;
             settings.calibrationVersion = DeviceCalibration.CalibrationVersion;
             Debug.Log($"[SettingsManager] Device-calibrated budgets (OM-1): {result}");
@@ -847,9 +1297,26 @@ public static class SettingsManager
     /// Reads the saved settings file (if it exists) and overlays benchmark-specific
     /// fields onto the provided defaults. This allows benchmark mode to use
     /// deterministic gameplay settings while still honoring user-configured
-    /// benchmark parameters (e.g., region size).
+    /// benchmark parameters (waypoints, phase duration, speed lists) plus the
+    /// <b>rollback levers a capture needs to A/B</b>.
     /// </summary>
     /// <param name="defaults">The fresh defaults to overlay onto.</param>
+    /// <remarks>
+    /// <b>This list is the only channel from disk on a COLD settings cache</b> — the caller hands us a fresh
+    /// <see cref="Settings"/> and never reads the file itself, so a capture is not silently shaped by whatever
+    /// the operator last configured for play.
+    /// <para>
+    /// It does <i>not</i> hold on the menu-launched path, which is how captures are actually run:
+    /// <see cref="LoadSettings"/>'s benchmark branch returns an already-cached instance first, and the main
+    /// menu populates that cache from disk (via <c>UIScaleController</c>) while the mode is still
+    /// <see cref="RuntimeMode.Default"/> — so a menu-launched run inherits the <b>whole</b> settings file.
+    /// That is what lets a capture sweep <c>viewDistance</c> or the per-frame budgets on one build.
+    /// </para>
+    /// <para>
+    /// A rollback flag a benchmark must toggle therefore still belongs here, so it works on <i>both</i>
+    /// paths rather than only the warm one, and the field's own docstring should say so.
+    /// </para>
+    /// </remarks>
     private static void OverlayBenchmarkSettingsFromDisk(Settings defaults)
     {
         if (!File.Exists(s_settingsFilePath)) return;
@@ -860,9 +1327,19 @@ public static class SettingsManager
             Settings saved = JsonUtility.FromJson<Settings>(json);
             if (saved == null) return;
 
-            defaults.benchmarkRegionSize = saved.benchmarkRegionSize;
+            defaults.benchmarkGenerationWaypoints = saved.benchmarkGenerationWaypoints;
+            defaults.benchmarkPhaseSeconds = saved.benchmarkPhaseSeconds;
             defaults.benchmarkGenerationSpeeds = saved.benchmarkGenerationSpeeds;
             defaults.benchmarkLoadingSpeeds = saved.benchmarkLoadingSpeeds;
+
+            // P-8's opt-in lever. It is default-OFF after its capture came back NO-GO, and stays listed
+            // here because the re-test it is retained for needs to switch legs without a rebuild — a
+            // rebuilt leg would not be the same build, which is the whole point of running one.
+            defaults.scalePanicGateThresholdsWithResidency = saved.scalePanicGateThresholdsWithResidency;
+
+            // P9-2's opt-in lever, default-OFF until its capture scores Q1/Q2. Listed for the same reason
+            // as P-8's: the A/B legs have to be the same build, so the flag must survive a cold cache.
+            defaults.enableConvergentEdgeCheckCascade = saved.enableConvergentEdgeCheckCascade;
         }
         catch (Exception)
         {

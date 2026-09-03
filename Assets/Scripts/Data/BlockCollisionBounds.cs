@@ -36,7 +36,7 @@ namespace Data
     /// <remarks>
     /// Phase 6 explicitly targets rectangular sub-blocks only (half-slabs, quarter-slabs, pillars).
     /// Compound shapes (stairs, L-shapes) are deferred to a future phase.
-    /// See Documentation/Design/SUB_VOXEL_COLLISION_SYSTEM.md for the full design.
+    /// See Documentation/Architecture/SUB_VOXEL_COLLISION_SYSTEM.md for the full design.
     /// </remarks>
     [Serializable]
     public struct BlockCollisionBounds

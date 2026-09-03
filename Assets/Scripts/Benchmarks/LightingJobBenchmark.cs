@@ -19,9 +19,13 @@ namespace Benchmarks
 {
     /// <summary>
     /// A benchmark utility for measuring the performance of the NeighborhoodLightingJob.
-    /// Tests various scenarios including sunlight propagation, blocklight spread, darkness removal,
+    /// Tests various scenarios including skylight propagation, blocklight spread, darkness removal,
     /// edge consistency checks, and complex geometry. Produces structured reports with system info
     /// and optional file output for baseline tracking.
+    /// <para>
+    /// Armed by <see cref="MicroBenchmarkGate"/> (default-off setting, read once in <c>Start</c>); otherwise
+    /// the component disables itself and the trigger key is inert.
+    /// </para>
     /// </summary>
     public class LightingJobBenchmark : MonoBehaviour
     {
@@ -29,26 +33,26 @@ namespace Benchmarks
 
         private enum LightingScenario
         {
-            // --- Sunlight scenarios ---
+            // --- Skylight scenarios ---
 
             /// <summary>
-            /// Flat world where sunlight travels straight down. Tests column recalculation logic.
+            /// Flat world where skylight travels straight down. Tests column recalculation logic.
             /// Used as the baseline for cost-factor comparisons.
             /// </summary>
-            SunlightVerticalFlat,
+            SkylightVerticalFlat,
 
             /// <summary>
-            /// World with many holes and overhangs (Swiss Cheese). Tests sunlight spreading
+            /// World with many holes and overhangs (Swiss Cheese). Tests skylight spreading
             /// horizontally into caves after column recalculation.
             /// </summary>
-            SunlightComplexCaves,
+            SkylightComplexCaves,
 
             /// <summary>
-            /// Places a solid roof over fully-sunlit Swiss Cheese terrain. Tests vertical and
+            /// Places a solid roof over fully-skylit Swiss Cheese terrain. Tests vertical and
             /// horizontal darkness propagation. Requires two-phase setup: first propagate light,
             /// then measure the darkness removal.
             /// </summary>
-            SunlightRemovalCovered,
+            SkylightRemovalCovered,
 
             // --- Blocklight scenarios ---
 
@@ -115,7 +119,7 @@ namespace Benchmarks
         /// </summary>
         private static bool IsTwoPhaseScenario(LightingScenario scenario)
         {
-            return scenario is LightingScenario.SunlightRemovalCovered
+            return scenario is LightingScenario.SkylightRemovalCovered
                 or LightingScenario.BlocklightRemovalSimple
                 or LightingScenario.BlocklightRemovalStress
                 or LightingScenario.BlocklightRGBRemoval;
@@ -137,10 +141,6 @@ namespace Benchmarks
         #region Serialized Fields
 
         [Header("Benchmark Configuration")]
-        [Tooltip("Whether the benchmark is enabled and allowed to run.")]
-        [SerializeField]
-        private bool _benchMarkEnabled = true;
-
         [Tooltip("If checked, runs all scenarios sequentially and generates a final report.")]
         [SerializeField]
         private bool _runFullComparison = true;
@@ -158,7 +158,7 @@ namespace Benchmarks
         [Header("Single Run Settings (Used if Full Comparison is false)")]
         [Tooltip("The scenario to test for a single run.")]
         [SerializeField]
-        private LightingScenario _scenario = LightingScenario.SunlightComplexCaves;
+        private LightingScenario _scenario = LightingScenario.SkylightComplexCaves;
 
 
         [Header("Execution Settings")]
@@ -204,7 +204,7 @@ namespace Benchmarks
 
         private void Start()
         {
-            if (!_benchMarkEnabled)
+            if (!MicroBenchmarkGate.IsArmed())
             {
                 enabled = false;
                 return;
@@ -226,7 +226,7 @@ namespace Benchmarks
 
         private void Update()
         {
-            if (Keyboard.current[_triggerKey].wasPressedThisFrame)
+            if (InputManager.Instance != null && InputManager.Instance.DebugKeyPressed(_triggerKey))
             {
                 TriggerBenchmark();
             }
@@ -454,23 +454,23 @@ namespace Benchmarks
                 PaddedVoxels = new NativeArray<uint>(ChunkMath.PADDED_LIGHTING_VOLUME, allocator, NativeArrayOptions.UninitializedMemory),
                 PaddedLight = new NativeArray<ushort>(ChunkMath.PADDED_LIGHTING_VOLUME, allocator, NativeArrayOptions.UninitializedMemory),
 
-                SunLightQueue = new NativeQueue<LightQueueNode>(allocator),
-                BlockLightQueue = new NativeQueue<LightQueueNode>(allocator),
-                SunLightRecalcQueue = new NativeQueue<Vector2Int>(allocator),
+                SkylightQueue = new NativeQueue<LightQueueNode>(allocator),
+                BlocklightQueue = new NativeQueue<LightQueueNode>(allocator),
+                SkylightRecalcQueue = new NativeQueue<Vector2Int>(allocator),
 
                 Mods = new NativeList<LightModification>(allocator),
                 PullBackClaims = new NativeList<PullBackClaim>(allocator),
                 IsStable = new NativeArray<bool>(1, allocator),
             };
 
-            foreach (LightQueueNode lightQueueNode in sourceData.SourceSunLightQueue)
-                jobData.SunLightQueue.Enqueue(lightQueueNode);
+            foreach (LightQueueNode lightQueueNode in sourceData.SourceSkylightQueue)
+                jobData.SkylightQueue.Enqueue(lightQueueNode);
 
-            foreach (LightQueueNode lightQueueNode in sourceData.SourceBlockLightQueue)
-                jobData.BlockLightQueue.Enqueue(lightQueueNode);
+            foreach (LightQueueNode lightQueueNode in sourceData.SourceBlocklightQueue)
+                jobData.BlocklightQueue.Enqueue(lightQueueNode);
 
-            foreach (Vector2Int vector2Int in sourceData.SourceSunRecalcQueue)
-                jobData.SunLightRecalcQueue.Enqueue(vector2Int);
+            foreach (Vector2Int vector2Int in sourceData.SourceSkyRecalcQueue)
+                jobData.SkylightRecalcQueue.Enqueue(vector2Int);
 
             return jobData;
         }
@@ -489,9 +489,9 @@ namespace Benchmarks
                 BandHeight = ChunkMath.CHUNK_HEIGHT, // LI-2: benchmark measures the full-height path
                 BandMinY = 0,
                 ChunkPosition = new Vector2Int(0, 0),
-                SunlightBfsQueue = data.SunLightQueue,
-                BlocklightBfsQueue = data.BlockLightQueue,
-                SunlightColumnRecalcQueue = data.SunLightRecalcQueue,
+                SkylightBfsQueue = data.SkylightQueue,
+                BlocklightBfsQueue = data.BlocklightQueue,
+                SkylightColumnRecalcQueue = data.SkylightRecalcQueue,
 
                 Heightmap = data.Input.Heightmap,
 
@@ -540,9 +540,9 @@ namespace Benchmarks
 
                 // Clear the queues — the pre-lighting phase consumed them. The removal phase
                 // will populate new queue entries for the actual operation being benchmarked.
-                sourceData.SourceSunLightQueue.Clear();
-                sourceData.SourceBlockLightQueue.Clear();
-                sourceData.SourceSunRecalcQueue.Clear();
+                sourceData.SourceSkylightQueue.Clear();
+                sourceData.SourceBlocklightQueue.Clear();
+                sourceData.SourceSkyRecalcQueue.Clear();
             }
             finally
             {
@@ -638,7 +638,7 @@ namespace Benchmarks
         {
             switch (scenario)
             {
-                case LightingScenario.SunlightRemovalCovered:
+                case LightingScenario.SkylightRemovalCovered:
                     // Place a solid platform at Y=100, blocking light from above.
                     // Queue column recalculations so the job processes the darkness.
                     for (int x = 0; x < VoxelData.ChunkWidth; x++)
@@ -651,7 +651,7 @@ namespace Benchmarks
                                 BurstVoxelDataBitMapping.BuildMetaLegacy(orientation: 1, fluidLevel: 0, isFluid: false));
                             sourceData.HeightMap[x + VoxelData.ChunkWidth * z] = 100;
 
-                            sourceData.SourceSunRecalcQueue.Add(new Vector2Int(x, z));
+                            sourceData.SourceSkyRecalcQueue.Add(new Vector2Int(x, z));
                         }
                     }
 
@@ -699,17 +699,17 @@ namespace Benchmarks
 
             switch (scenario)
             {
-                case LightingScenario.SunlightVerticalFlat:
+                case LightingScenario.SkylightVerticalFlat:
                     QueueAllColumns(data);
                     break;
 
-                case LightingScenario.SunlightComplexCaves:
+                case LightingScenario.SkylightComplexCaves:
                     CarveSwissCheese(data);
                     QueueAllColumns(data);
                     break;
 
-                case LightingScenario.SunlightRemovalCovered:
-                    // Phase 1: Create Swiss Cheese terrain and propagate sunlight.
+                case LightingScenario.SkylightRemovalCovered:
+                    // Phase 1: Create Swiss Cheese terrain and propagate skylight.
                     // Phase 2 (SetupRemovalPhase): Place a roof and queue column recalculations.
                     CarveSwissCheese(data);
                     QueueAllColumns(data);
@@ -810,7 +810,7 @@ namespace Benchmarks
         {
             for (int x = 0; x < VoxelData.ChunkWidth; x++)
             for (int z = 0; z < VoxelData.ChunkWidth; z++)
-                data.SourceSunRecalcQueue.Add(new Vector2Int(x, z));
+                data.SourceSkyRecalcQueue.Add(new Vector2Int(x, z));
         }
 
         private static void CarveSwissCheese(LightingBenchmarkData data)
@@ -854,7 +854,7 @@ namespace Benchmarks
                 BurstVoxelDataBitMapping.BuildMetaLegacy(orientation: 1, fluidLevel: 0, isFluid: false));
             data.CenterLight[index] = LightBitMapping.PackLightData(0, level, level, level);
 
-            data.SourceBlockLightQueue.Add(new LightQueueNode
+            data.SourceBlocklightQueue.Add(new LightQueueNode
             {
                 Position = pos,
                 OldLightLevel = 0,
@@ -874,7 +874,7 @@ namespace Benchmarks
             data.Center[index] = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Air, 0);
             data.CenterLight[index] = 0;
 
-            data.SourceBlockLightQueue.Add(new LightQueueNode
+            data.SourceBlocklightQueue.Add(new LightQueueNode
             {
                 Position = pos,
                 OldLightLevel = oldLevel,
@@ -987,7 +987,7 @@ namespace Benchmarks
             report.AppendLine("=== Benchmark Results ===");
             report.AppendLine();
 
-            long baseline = results.GetValueOrDefault(nameof(LightingScenario.SunlightVerticalFlat), 1);
+            long baseline = results.GetValueOrDefault(nameof(LightingScenario.SkylightVerticalFlat), 1);
             if (baseline <= 0) baseline = 1;
 
             foreach (LightingScenario scenario in Enum.GetValues(typeof(LightingScenario)))
@@ -1006,7 +1006,7 @@ namespace Benchmarks
 
                 AppendTimingRow(report, time);
 
-                if (scenario != LightingScenario.SunlightVerticalFlat)
+                if (scenario != LightingScenario.SkylightVerticalFlat)
                 {
                     float factor = (float)time / baseline;
                     report.AppendLine($"  vs Baseline:  {factor,8:F1}x");
@@ -1069,12 +1069,12 @@ namespace Benchmarks
             public NativeArray<ushort> LightN, LightE, LightS, LightW;
             public NativeArray<ushort> LightNE, LightSE, LightSW, LightNW;
 
-            // No current scenario populates SourceSunLightQueue (sunlight uses column
-            // recalc via SourceSunRecalcQueue), but the field mirrors the job struct's
-            // SunlightBfsQueue for future scenarios that need direct sun BFS entries.
-            public List<LightQueueNode> SourceSunLightQueue;
-            public List<LightQueueNode> SourceBlockLightQueue;
-            public List<Vector2Int> SourceSunRecalcQueue;
+            // No current scenario populates SourceSkylightQueue (skylight uses column
+            // recalc via SourceSkyRecalcQueue), but the field mirrors the job struct's
+            // SkylightBfsQueue for future scenarios that need direct sky BFS entries.
+            public List<LightQueueNode> SourceSkylightQueue;
+            public List<LightQueueNode> SourceBlocklightQueue;
+            public List<Vector2Int> SourceSkyRecalcQueue;
 
             public LightingBenchmarkData(Allocator allocator)
             {
@@ -1100,9 +1100,9 @@ namespace Benchmarks
                 LightSW = new NativeArray<ushort>(MAP_SIZE, allocator);
                 LightNW = new NativeArray<ushort>(MAP_SIZE, allocator);
 
-                SourceSunLightQueue = new List<LightQueueNode>();
-                SourceBlockLightQueue = new List<LightQueueNode>();
-                SourceSunRecalcQueue = new List<Vector2Int>();
+                SourceSkylightQueue = new List<LightQueueNode>();
+                SourceBlocklightQueue = new List<LightQueueNode>();
+                SourceSkyRecalcQueue = new List<Vector2Int>();
             }
 
             public void Dispose()

@@ -40,28 +40,35 @@ namespace Benchmarks
         /// <param name="totalDuration">Wall-clock duration of the entire benchmark run.</param>
         /// <param name="savedVSyncCount">The VSync count that was saved before forcing it off.</param>
         /// <param name="savedTargetFrameRate">The target frame rate that was saved before uncapping.</param>
+        /// <param name="pipelineSettings">Pipeline tuning captured at run start (FP-6) — the values the
+        /// FP stop-reason tallies must be read against.</param>
         /// <returns>A <see cref="BenchmarkReportResult"/> containing the report text and file path.</returns>
         public static BenchmarkReportResult GenerateAndWriteReport(
             BenchmarkMetricsCollector collector,
             float[] generationSpeeds,
             float[] loadingSpeeds,
             float timePerPhase,
-            int regionSize,
-            int configuredRegionSize,
+            BenchmarkRouteGeometry routeGeometry,
             int generationWaypointCount,
             int loadingWaypointCount,
             TimeSpan totalDuration,
             int savedVSyncCount,
-            int savedTargetFrameRate)
+            int savedTargetFrameRate,
+            PipelineSettingsSnapshot pipelineSettings)
         {
             StringBuilder sb = new StringBuilder(4096);
 
             AppendHeader(sb, totalDuration);
             sb.Append(BenchmarkEnvironment.DescribeSystem());
-            AppendConfiguration(sb, generationSpeeds, loadingSpeeds, timePerPhase, regionSize,
-                configuredRegionSize, generationWaypointCount, loadingWaypointCount, savedVSyncCount, savedTargetFrameRate);
+            AppendConfiguration(sb, generationSpeeds, loadingSpeeds, timePerPhase, routeGeometry,
+                generationWaypointCount, loadingWaypointCount, savedVSyncCount, savedTargetFrameRate);
+            pipelineSettings.AppendTo(sb);
             AppendOverallSummary(sb, collector.CompletedPhases, totalDuration);
             AppendGroupedPhases(sb, collector.CompletedPhases);
+
+            // FP-3: the pipeline-internal section, reported ALONGSIDE frame health rather than replacing it
+            // (§1 non-goals). No-op when the capture ran with telemetry disabled.
+            PipelineReportSection.Append(sb, PipelineTelemetry.CompletedPhases);
 
             string report = sb.ToString();
             Debug.Log(report);
@@ -89,8 +96,7 @@ namespace Benchmarks
             float[] generationSpeeds,
             float[] loadingSpeeds,
             float timePerPhase,
-            int regionSize,
-            int configuredRegionSize,
+            BenchmarkRouteGeometry routeGeometry,
             int generationWaypointCount,
             int loadingWaypointCount,
             int savedVSyncCount,
@@ -98,19 +104,71 @@ namespace Benchmarks
         {
             sb.AppendLine("<b>=== Configuration ===</b>");
 
-            string regionLabel = regionSize != configuredRegionSize
-                ? $"{regionSize} chunks (configured: {configuredRegionSize}, auto-scaled)"
-                : $"{regionSize} chunks";
-
-            sb.AppendLine($"Region size:         {regionLabel}");
             sb.AppendLine($"Phase duration:      {timePerPhase:F0} s");
             sb.AppendLine($"Generation speeds:   {string.Join("; ", generationSpeeds)} m/s");
             sb.AppendLine($"Loading speeds:      {string.Join("; ", loadingSpeeds)} m/s");
             sb.AppendLine($"Generation WPs:      {generationWaypointCount}");
             sb.AppendLine($"Loading WPs:         {loadingWaypointCount}");
+            sb.AppendLine();
+
+            // FP-9b: the route is DERIVED from the speeds and phase duration, so these are outputs, not
+            // settings. Printed because two captures whose routes differ are not comparable, and before FP-9b
+            // nothing in the report said so — the generation sweep had silently collapsed from 12 waypoints
+            // to 4 across the FP-8 view-distance sweep.
+            sb.AppendLine("  Route (derived — not configurable):");
+            sb.AppendLine($"    Region:            {routeGeometry.RegionChunks} chunks (derived)");
+            sb.AppendLine($"    Sweep rows:        {routeGeometry.Rows}  (row stride {routeGeometry.RowStrideChunks} chunks = 2 x LoadDistance)");
+            sb.AppendLine($"    Route length:      {routeGeometry.RouteLengthMeters:N0} m");
+            sb.AppendLine($"    Timed travel:      {routeGeometry.TimedTravelMeters:N0} m  (what the speed phases consume)");
+            sb.AppendLine($"    Loading tour:      {routeGeometry.TourChunks} chunks square" +
+                          (routeGeometry.TourWasShrunk
+                              ? $"  ** SHRUNK from {BenchmarkRouteGeometry.LoadingTourChunks} — the timed phases do not cover it, so the loading pass GENERATED terrain. Capture not comparable. **"
+                              : "  (fixed — independent of view distance)"));
+
+            // FP-11c: both derived, and both needed to read the coverage line below — a sweep that is slower
+            // or shorter than the reader assumes explains a coverage shortfall that would otherwise look like
+            // a pipeline result.
+            sb.AppendLine($"    Ensure sweep:      {BenchmarkRouteGeometry.EnsureGeneratedSpeed:F0} m/s over " +
+                          $"{routeGeometry.TourLengthMeters:N0} m = {routeGeometry.EnsureGeneratedSeconds:F1} s " +
+                          "(closed circuit, incl. the return leg the loading pass flies)");
+            AppendTourCoverage(sb);
+
             sb.AppendLine($"VSync override:      Forced Off (was: {(savedVSyncCount > 0 ? "On" : "Off")})");
             sb.AppendLine($"FPS cap override:    Uncapped (was: {(savedTargetFrameRate > 0 ? savedTargetFrameRate.ToString() : "Uncapped")})");
             sb.AppendLine();
+        }
+
+        /// <summary>
+        /// Renders the measured loading-tour coverage (FP-11a) — the lines that say whether the loading pass
+        /// measured loading or partly re-measured generation.
+        /// </summary>
+        /// <param name="sb">The report builder.</param>
+        /// <remarks>
+        /// Read from the static rather than passed in, exactly as the FP pipeline section reads
+        /// <see cref="PipelineTelemetry.CompletedPhases"/>. An unmeasurable result prints as NOT MEASURED: a
+        /// missing footprint must never render as a clean 100 %.
+        /// <para>Both instants are printed. The gap between them is how much of the tour the panic gate
+        /// deferred out of the ensure sweep and the transition drain then finished — a P-8 signal in its own
+        /// right, and invisible from either figure alone.</para>
+        /// </remarks>
+        private static void AppendTourCoverage(StringBuilder sb)
+        {
+            if (!BenchmarkTourCoverage.HasMeasurement)
+            {
+                sb.AppendLine("    Tour coverage:     ** NOT MEASURED — the loading pass's numbers cannot be " +
+                              "attributed to loading. **");
+                return;
+            }
+
+            sb.AppendLine($"    Tour coverage:     {BenchmarkTourCoverage.EnsurePassCoveredChunks:N0} / " +
+                          $"{BenchmarkTourCoverage.RequiredChunks:N0} chunks after the ensure sweep " +
+                          $"({BenchmarkTourCoverage.EnsurePassCoverageFraction * 100f:F1} %)");
+            sb.AppendLine($"                       {BenchmarkTourCoverage.CoveredChunks:N0} / " +
+                          $"{BenchmarkTourCoverage.RequiredChunks:N0} on disk when the loading pass starts " +
+                          $"({BenchmarkTourCoverage.CoverageFraction * 100f:F1} %)" +
+                          (BenchmarkTourCoverage.IsSufficient
+                              ? ""
+                              : "  ** the loading pass GENERATED the remainder. **"));
         }
 
         private static void AppendOverallSummary(StringBuilder sb, IReadOnlyList<PhaseMetrics> phases, TimeSpan totalDuration)

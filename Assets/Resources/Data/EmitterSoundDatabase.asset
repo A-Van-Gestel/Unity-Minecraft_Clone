@@ -1,0 +1,27 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 268db89af23c12a40baf383697e32b59, type: 3}
+  m_Name: EmitterSoundDatabase
+  m_EditorClassIdentifier: Assembly-CSharp::Data.EmitterSoundDatabase
+  _entries:
+  - loop: {fileID: 8300000, guid: 314f0c06e9ac11f41bae0d434f73c19f, type: 3}
+    volume: 1
+    audibleRadius: 0
+  - loop: {fileID: 8300000, guid: 029311db03989f44c9bc0fe239748168, type: 3}
+    volume: 0.95499265
+    audibleRadius: 0
+  - loop: {fileID: 8300000, guid: 00707f3dabd48984996cc19f5367b078, type: 3}
+    volume: 1
+    audibleRadius: 10
+  - loop: {fileID: 8300000, guid: ad085f7621949284691a3276355b9924, type: 3}
+    volume: 1
+    audibleRadius: 10

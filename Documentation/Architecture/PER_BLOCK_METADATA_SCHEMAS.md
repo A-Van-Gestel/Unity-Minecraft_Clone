@@ -13,7 +13,7 @@
 The current voxel format stores all per-voxel data inside a single packed `uint`:
 
 - `16 bits` block ID
-- `4 bits` sunlight
+- `4 bits` skylight
 - `4 bits` blocklight
 - `8 bits` metadata
 
@@ -42,7 +42,7 @@ The current packed voxel layout is documented in `Documentation/Architecture/DAT
 | Bits    | Size    | Purpose    |
 |---------|---------|------------|
 | `0-15`  | 16 bits | Block ID   |
-| `16-19` | 4 bits  | Sunlight   |
+| `16-19` | 4 bits  | Skylight   |
 | `20-23` | 4 bits  | Blocklight |
 | `24-31` | 8 bits  | Metadata   |
 
@@ -308,7 +308,7 @@ The current `PackVoxelData(..., bool isFluid)` shape is not compatible with the 
 Recommended replacement:
 
 ```csharp
-public static uint PackVoxelData(ushort id, byte sunLight, byte blockLight, byte meta)
+public static uint PackVoxelData(ushort id, byte skylight, byte blocklight, byte meta)
 ```
 
 Then schema-aware callers become responsible for computing the correct raw metadata byte before packing.
@@ -730,7 +730,7 @@ A short-lived development-only compatibility shim can be acceptable while implem
 
 The following fields are already effectively dense:
 
-- `Sunlight` = `4 bits`
+- `Skylight` = `4 bits`
 - `Blocklight` = `4 bits`
 - `FluidLevel` = `4 bits` for the current fluid model
 

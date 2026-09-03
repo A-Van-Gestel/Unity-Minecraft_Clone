@@ -6,7 +6,7 @@ using UnityEngine;
 namespace Placement
 {
     /// <summary>
-    /// The single home for player block-placement <b>policy</b>: it marches the player's view ray through the voxel
+    /// The single home for player block-placement <b>policy</b>: it traverses the player's view ray through the voxel
     /// world, resolves whether the held block replaces the hit cell or lands adjacent, and decides whether the
     /// resulting cell is a valid placement (world bounds + occupancy + the <see cref="BlockTags.REQUIRES_SUPPORT"/>
     /// rule). It composes the pure tag logic in <see cref="PlacementResolver"/> with <see cref="World"/>'s voxel-data
@@ -17,15 +17,30 @@ namespace Placement
     /// "exercise the real subsystem" philosophy: the placement suite drives this controller against a real stub
     /// <see cref="World"/>, not a handwritten fake.
     /// </para>
+    /// <para>
+    /// <b>Spaces (WS-4):</b> everything crossing this class's boundary — the ray, and the cells on
+    /// <see cref="PlacementProbe"/> — is <b>Unity space</b>, so callers can feed it the camera and drive transforms
+    /// from the result directly. Every <see cref="World"/> query inside converts to voxel space first, using the
+    /// <c>originVoxel</c> the caller supplies <i>per probe</i>.
+    /// </para>
     /// </summary>
+    /// <remarks>
+    /// The floating origin is a per-call parameter rather than constructor state so that a single probe is
+    /// <b>atomic</b> in one coordinate frame: a ray traversal makes one world query per cell it crosses, and all of
+    /// them must resolve against the same origin — a traversal torn across a re-anchor would silently target a
+    /// mix of two frames. Holding the origin would also make it go stale the moment the world re-anchors, with
+    /// nothing but a convention obliging callers to rebuild the controller. Passing it in makes both impossible by
+    /// construction, and keeps this class free of the <c>WorldOrigin</c> global so the placement suite can drive it
+    /// at any origin without global state to set or restore.
+    /// </remarks>
     public sealed class PlacementController
     {
         private readonly World _world;
 
         /// <summary>
-        /// Creates a controller bound to a world. Ray-march reach and resolution are supplied <i>per probe</i>
-        /// (not captured here), so live tweaks to the player's <c>reach</c> / <c>checkIncrement</c> take effect the
-        /// next frame.
+        /// Creates a controller bound to a world. Ray reach is supplied <i>per probe</i> (not captured here), so live
+        /// tweaks to the player's <c>reach</c> take effect the next frame. The floating origin is supplied per probe
+        /// for a stronger reason — see the class remarks.
         /// </summary>
         /// <param name="world">The world whose voxel-data primitives the decision reads.</param>
         public PlacementController(World world)
@@ -34,7 +49,7 @@ namespace Placement
         }
 
         /// <summary>
-        /// Marches a ray from <paramref name="rayOrigin"/> along <paramref name="rayDir"/> and resolves the full
+        /// Traverses a ray from <paramref name="rayOrigin"/> along <paramref name="rayDir"/> and resolves the full
         /// placement decision for <paramref name="heldBlock"/>: the hit cell + entered face, the replace-vs-adjacent
         /// destination, and whether that destination is world-placeable. Allocation-free (runs every frame).
         /// </summary>
@@ -42,32 +57,38 @@ namespace Placement
         /// <param name="rayDir">Ray direction (the player camera forward).</param>
         /// <param name="heldBlock">The held block, or <c>null</c> for an empty hand.</param>
         /// <param name="includeFluids">Whether the ray treats fluids as hittable surfaces.</param>
-        /// <param name="reach">Maximum ray distance (in blocks) the player can target.</param>
-        /// <param name="checkIncrement">Ray-march step size; smaller is more accurate.</param>
+        /// <param name="reach">Maximum ray distance the player can target, measured in units of
+        /// <paramref name="rayDir"/>'s length — blocks for the unit camera forward production passes.</param>
+        /// <param name="originVoxel">The floating-origin offset separating Unity space from voxel space, pinned for
+        /// the whole probe (see the class remarks).</param>
         /// <returns>The resolved <see cref="PlacementProbe"/>, or <see cref="PlacementProbe.Miss"/> when nothing is in reach.</returns>
         public PlacementProbe Probe(Vector3 rayOrigin, Vector3 rayDir, BlockType heldBlock, bool includeFluids,
-            float reach, float checkIncrement)
+            float reach, Vector3Int originVoxel)
         {
             BlockTags skipTags = PlacementResolver.GetRaycastSkipTags(heldBlock);
 
-            if (!MarchRay(rayOrigin, rayDir, includeFluids, skipTags, reach, checkIncrement,
+            if (!MarchRay(rayOrigin, rayDir, includeFluids, skipTags, reach, originVoxel,
                     out Vector3Int hitCell, out int3 normal, out Vector3Int adjacentCell))
             {
                 return PlacementProbe.Miss;
             }
 
-            VoxelState? hit = _world.GetVoxelState(hitCell);
-            bool replaces = hit.HasValue && PlacementResolver.ResolvesToReplace(heldBlock, hit.Value.Properties);
+            Vector3Int hitVoxel = hitCell + originVoxel;
+            bool replaces = _world.TryGetVoxel(hitVoxel.x, hitVoxel.y, hitVoxel.z, out VoxelState hit)
+                            && PlacementResolver.ResolvesToReplace(heldBlock, hit.Properties);
             Vector3Int placeCell = replaces ? hitCell : adjacentCell;
 
             return new PlacementProbe(
                 didHit: true, hitCell, normal, placeCell, replaces,
-                worldPlaceable: CanPlaceAt(placeCell, heldBlock));
+                worldPlaceable: CanPlaceAt(placeCell, heldBlock, originVoxel));
         }
 
         /// <summary>
-        /// The geometric half of a placement probe: marches a ray and reports the first non-skipped voxel it hits,
-        /// the entered face normal, and the cell adjacent to that face. The lower-level seam shared by
+        /// The geometric half of a placement probe: traverses the ray's cells in order (exactly, via
+        /// <see cref="VoxelRayDDA"/> — no cell is skipped) and reports the first voxel it actually hits, the face
+        /// it entered through, and the cell adjacent to that face. A block carrying sub-voxel
+        /// <see cref="BlockCollisionBounds"/> only stops the ray where its real volume does, so the traversal
+        /// continues past a cell whose block the ray merely passed by. The lower-level seam shared by
         /// <see cref="Probe"/> (which adds the replace/placeable decision) and <c>PlayerInteraction.RaycastForVoxel</c>
         /// (which needs the raw hit with an explicit skip mask). Allocation-free.
         /// </summary>
@@ -75,26 +96,49 @@ namespace Placement
         /// <param name="rayDir">Ray direction (the player camera forward).</param>
         /// <param name="includeFluids">Whether the ray treats fluids as hittable surfaces.</param>
         /// <param name="skipTags">Block tags the ray passes through (e.g. the held block's replaceable set).</param>
-        /// <param name="reach">Maximum ray distance (in blocks) the player can target.</param>
-        /// <param name="checkIncrement">Ray-march step size; smaller is more accurate.</param>
+        /// <param name="reach">Maximum ray distance the player can target, measured in units of
+        /// <paramref name="rayDir"/>'s length — blocks for the unit camera forward production passes.</param>
+        /// <param name="originVoxel">The floating-origin offset separating Unity space from voxel space, pinned for
+        /// the whole march so every step resolves in one coordinate frame (see the class remarks).</param>
         /// <param name="hitCell">The cell the ray stopped on (valid only when the method returns true).</param>
         /// <param name="hitNormal">The entered face normal (valid only when the method returns true).</param>
         /// <param name="adjacentCell">The cell adjacent to the hit face — where a non-replacing block lands.</param>
         /// <returns>True if a voxel was hit within reach.</returns>
         public bool MarchRay(Vector3 rayOrigin, Vector3 rayDir, bool includeFluids, BlockTags skipTags,
-            float reach, float checkIncrement,
+            float reach, Vector3Int originVoxel,
             out Vector3Int hitCell, out int3 hitNormal, out Vector3Int adjacentCell)
         {
-            for (float step = checkIncrement; step < reach; step += checkIncrement)
+            // The traversal itself stays in Unity space (small floats near the render origin); only the cell it
+            // lands on converts, so the query never adds a large float to a small one.
+            VoxelRayDDA traversal = VoxelRayDDA.Create(rayOrigin, rayDir, reach);
+            float3 origin = new float3(rayOrigin.x, rayOrigin.y, rayOrigin.z);
+            float3 direction = new float3(rayDir.x, rayDir.y, rayDir.z);
+
+            while (traversal.MoveNext(out int3 cell, out int3 enteredFace))
             {
-                Vector3 pos = rayOrigin + rayDir * step;
-                if (!_world.CheckForVoxel(pos, includeFluids, includeNonSolid: true, skipTags: skipTags))
+                if (!_world.TryGetRayHit(cell.x + originVoxel.x, cell.y + originVoxel.y, cell.z + originVoxel.z,
+                        includeFluids, includeNonSolid: true, skipTags: skipTags, out VoxelState voxel))
                     continue;
 
-                hitCell = new Vector3Int(
-                    Mathf.FloorToInt(pos.x), Mathf.FloorToInt(pos.y), Mathf.FloorToInt(pos.z));
-                hitNormal = FaceNormal(pos);
-                adjacentCell = hitCell + new Vector3Int(hitNormal.x, hitNormal.y, hitNormal.z);
+                // VQ-3 narrow phase: the cell is occupied, but a sub-voxel block only stops the ray where its
+                // actual volume does — aiming over a half-slab's empty top must reach whatever is behind it.
+                BlockType hitProperties = voxel.Properties;
+                if (hitProperties.collisionBounds.HasCustomBounds)
+                {
+                    Bounds blockBounds = BlockCollisionBoundsUtility.GetBounds(
+                        hitProperties, voxel.Meta, new Vector3(cell.x, cell.y, cell.z));
+
+                    if (!RayBoundsIntersection.TryIntersect(origin, direction, blockBounds, reach,
+                            out float _, out int3 slabFace))
+                        continue;
+
+                    // A ray that starts inside the volume crosses no face, and keeps the traversal's own answer.
+                    if (math.any(slabFace != int3.zero)) enteredFace = slabFace;
+                }
+
+                hitCell = new Vector3Int(cell.x, cell.y, cell.z);
+                hitNormal = enteredFace;
+                adjacentCell = hitCell + new Vector3Int(enteredFace.x, enteredFace.y, enteredFace.z);
                 return true;
             }
 
@@ -110,12 +154,19 @@ namespace Placement
         /// support-providing block directly beneath it (so it cannot float on water or air). Excludes the player-AABB
         /// overlap, which <c>PlayerInteraction</c> applies separately.
         /// </summary>
-        /// <param name="placeCell">The world voxel cell the block would occupy.</param>
+        /// <param name="placeCell">The <b>Unity-space</b> cell the block would occupy.</param>
         /// <param name="placedBlock">The block type being placed, or <c>null</c> when nothing is held.</param>
+        /// <param name="originVoxel">The floating-origin offset separating Unity space from voxel space (see the
+        /// class remarks).</param>
         /// <returns>True if placement into the cell is world-valid.</returns>
-        public bool CanPlaceAt(Vector3Int placeCell, BlockType placedBlock)
+        public bool CanPlaceAt(Vector3Int placeCell, BlockType placedBlock, Vector3Int originVoxel)
         {
-            if (!_world.worldData.IsVoxelInWorld(placeCell) || _world.IsCellOccupiedForPlacement(placeCell))
+            Vector3Int placeVoxel = placeCell + originVoxel;
+
+            // TF-14: the per-world border gates player edits (the pipeline stays border-blind, so the voxel may
+            // exist and render out there — it just cannot be edited).
+            if (!_world.worldData.IsVoxelInWorld(placeVoxel) || !_world.IsVoxelInsideBorder(placeVoxel) ||
+                _world.IsCellOccupiedForPlacement(placeVoxel))
                 return false;
 
             // A REQUIRES_SUPPORT block (e.g. grass blades) needs a support-providing block directly beneath it,
@@ -123,39 +174,15 @@ namespace Placement
             // skip the extra voxel lookup.
             if (placedBlock != null && (placedBlock.tags & BlockTags.REQUIRES_SUPPORT) != 0)
             {
-                VoxelState? below = _world.worldData.GetVoxelState(placeCell + Vector3Int.down);
-                BlockType belowProps = below.HasValue ? _world.BlockTypes[below.Value.ID] : null;
+                Vector3Int belowCell = placeVoxel + Vector3Int.down;
+                BlockType belowProps = _world.TryGetVoxel(belowCell.x, belowCell.y, belowCell.z, out VoxelState below)
+                    ? _world.BlockTypes[below.ID]
+                    : null;
                 if (!PlacementResolver.HasRequiredSupport(placedBlock, belowProps))
                     return false;
             }
 
             return true;
-        }
-
-        /// <summary>
-        /// Derives the entered face normal from a hit point's fractional position within its voxel — the dominant
-        /// (smallest-magnitude) axis offset names the face. Mirrors the legacy derivation in
-        /// <c>PlayerInteraction.RaycastForVoxel</c>.
-        /// </summary>
-        private static int3 FaceNormal(Vector3 pos)
-        {
-            float xCheck = CoordinateOffset(pos.x);
-            float yCheck = CoordinateOffset(pos.y);
-            float zCheck = CoordinateOffset(pos.z);
-
-            if (Mathf.Abs(xCheck) < Mathf.Abs(yCheck) && Mathf.Abs(xCheck) < Mathf.Abs(zCheck))
-                return xCheck < 0 ? Int3Directions.Right : Int3Directions.Left;
-            if (Mathf.Abs(zCheck) < Mathf.Abs(yCheck) && Mathf.Abs(zCheck) < Mathf.Abs(xCheck))
-                return zCheck < 0 ? Int3Directions.Forward : Int3Directions.Back;
-            return yCheck < 0 ? Int3Directions.Up : Int3Directions.Down;
-        }
-
-        /// <summary>Signed fractional offset of a coordinate within its voxel, in [-0.5, 0.5).</summary>
-        private static float CoordinateOffset(float coordinate)
-        {
-            float frac = coordinate - Mathf.Floor(coordinate);
-            if (frac > 0.5f) frac -= 1f;
-            return frac;
         }
     }
 }

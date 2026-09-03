@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Data;
 using Editor.Validation.Meshing.Framework;
 using Helpers;
 using UnityEngine;
@@ -20,6 +21,10 @@ namespace Editor.Validation.Meshing
     /// <item><b>B14</b> pins that <see cref="Mesh.bounds"/> CONTAIN every emitted vertex — a containment
     /// invariant stable across <b>MR-4</b> (constant section-cell bounds); MH-1 already proved the geometry
     /// premise from job output.</item>
+    /// <item><b>B28–B30</b> pin the <b>MP-5 / GS-5 §7.3 two-axis ownership split</b>: the apply path never
+    /// writes the occlusion flag (B28), <c>Clear()</c> resets it on pool recycle (B29), and
+    /// <see cref="SectionRenderer.SetOcclusionCulled"/> round-trips without disturbing
+    /// <c>activeSelf</c> (B30).</item>
     /// </list>
     /// <para>
     /// <b>Optimization-time follow-ups (NOT baselinable pre-optimization — build alongside the change):</b>
@@ -57,6 +62,9 @@ namespace Editor.Validation.Meshing
             scenarios.Add(new Scenario("B14: mesh bounds contain every emitted vertex (MH-6 / MR-4 containment premise)", B14_BoundsContainVertices));
             scenarios.Add(new Scenario("B15: unchanged submesh bitmask does not reassign sharedMaterials (MR-3 postcondition)", B15_NoReassignWhenBitmaskUnchanged));
             scenarios.Add(new Scenario("B16: mesh bounds equal the constant section cell (MR-4 postcondition)", B16_BoundsEqualConstantSectionCell));
+            scenarios.Add(new Scenario("B28: UpdateMeshNative never writes forceRenderingOff (MP-5 non-interference invariant)", B28_UpdateMeshNativeLeavesOcclusionFlag));
+            scenarios.Add(new Scenario("B29: Clear() resets forceRenderingOff on pool recycle (MP-5 reset invariant)", B29_ClearResetsOcclusionFlag));
+            scenarios.Add(new Scenario("B30: SetOcclusionCulled round-trips without touching activeSelf (MP-5 axis separation)", B30_SetOcclusionCulledRoundTrips));
         }
 
         /// <summary>
@@ -245,10 +253,12 @@ namespace Editor.Validation.Meshing
 
         /// <summary>
         /// B16 — MR-4 postcondition: after a non-empty update, <see cref="Mesh.bounds"/> must EQUAL the
-        /// constant 16³ section-cell box (center (8,8,8), size (16,16,16)), independent of the actual
-        /// geometry extent. Positive control: the probe verts' tight AABB is strictly smaller than the
-        /// cell, so a <c>RecalculateBounds()</c>-style tight result would fail this equality — proving
-        /// the assertion is not vacuously satisfied by whatever bounds the geometry happens to produce.
+        /// constant section-cell box — the 16³ cell padded on every side by
+        /// <see cref="CrossMeshVariation.MaxCellEscape"/>, the only distance any geometry may reach
+        /// outside its cell (FL-4 flora variation) — independent of the actual geometry extent.
+        /// Positive control: the probe verts' tight AABB is strictly smaller than that box, so a
+        /// <c>RecalculateBounds()</c>-style tight result would fail this equality — proving the
+        /// assertion is not vacuously satisfied by whatever bounds the geometry happens to produce.
         /// </summary>
         private static bool B16_BoundsEqualConstantSectionCell()
         {
@@ -257,8 +267,8 @@ namespace Editor.Validation.Meshing
             using SectionRendererTestFixture fixture = new SectionRendererTestFixture();
             fixture.RunUpdate(s_rendererProbeVerts, opaqueCount: 3, transparentCount: 0, fluidCount: 0);
 
-            const float size = ChunkMath.SECTION_SIZE;
-            const float half = size * 0.5f;
+            const float size = ChunkMath.SECTION_SIZE + 2f * CrossMeshVariation.MaxCellEscape;
+            const float half = ChunkMath.SECTION_SIZE * 0.5f;
             Bounds expected = new Bounds(new Vector3(half, half, half), new Vector3(size, size, size));
 
             allPassed &= RendererAssert.BoundsEqual("B16: mesh bounds equal the constant section cell",
@@ -270,6 +280,115 @@ namespace Editor.Validation.Meshing
             allPassed &= MeshAssert.IsTrue("B16 control: probe AABB differs from the constant section cell",
                 tight.size != expected.size,
                 $"tight probe AABB size {tight.size} != constant cell size {expected.size}");
+
+            return allPassed;
+        }
+
+        /// <summary>
+        /// B28 — MP-5 non-interference invariant: <c>UpdateMeshNative</c> owns only the "has geometry"
+        /// axis, so an occlusion state set EXTERNALLY (as the future <c>VisibilityManager</c> would) must
+        /// survive both apply paths. Two independent legs — a non-empty update and the empty-section
+        /// short-circuit — each re-stamp the flag first, so neither can pass on the other's leftovers.
+        /// Positive control: a fresh renderer reads un-culled and an external write is observable, proving
+        /// "the flag survived" is not vacuously true.
+        /// </summary>
+        private static bool B28_UpdateMeshNativeLeavesOcclusionFlag()
+        {
+            bool allPassed = true;
+
+            using SectionRendererTestFixture fixture = new SectionRendererTestFixture();
+
+            // Positive control: the accessor can observe a genuine change of the occlusion flag.
+            allPassed &= MeshAssert.IsTrue("B28 control: a fresh renderer is not occlusion-culled",
+                !fixture.OcclusionCulled, "forceRenderingOff starts false (the conservative 'render' default)");
+
+            fixture.OcclusionCulled = true;
+            allPassed &= MeshAssert.IsTrue("B28 control: an external write sets the occlusion flag",
+                fixture.OcclusionCulled, "forceRenderingOff reads true after an external set");
+
+            // Leg 1 — the non-empty apply path (activate + upload) must not clear the culler's flag.
+            fixture.RunUpdate(s_rendererProbeVerts, opaqueCount: 3, transparentCount: 0, fluidCount: 0);
+            allPassed &= MeshAssert.IsTrue("B28: non-empty update leaves forceRenderingOff untouched",
+                fixture.OcclusionCulled, "the externally-set occlusion flag survived a non-empty UpdateMeshNative");
+            allPassed &= MeshAssert.IsTrue("B28: non-empty update still activated the GameObject (has-geometry axis)",
+                fixture.IsActive, "the SetActive axis kept working alongside the occlusion flag");
+
+            // Leg 2 — the empty-section short-circuit (deactivate + early return). Re-stamped so this leg
+            // is independent of leg 1's outcome.
+            fixture.OcclusionCulled = true;
+            fixture.RunUpdate(Array.Empty<Vector3>(), opaqueCount: 0, transparentCount: 0, fluidCount: 0);
+            allPassed &= MeshAssert.IsTrue("B28: empty-section update leaves forceRenderingOff untouched",
+                fixture.OcclusionCulled, "the externally-set occlusion flag survived the vertexCount==0 path");
+            allPassed &= MeshAssert.IsTrue("B28: empty-section update still deactivated the GameObject (has-geometry axis)",
+                !fixture.IsActive, "the SetActive axis kept working alongside the occlusion flag");
+
+            return allPassed;
+        }
+
+        /// <summary>
+        /// B29 — MP-5 reset invariant (pool-recycle safety): <c>Clear()</c> is the recycle entry point, so
+        /// a section returned to the pool while occlusion-culled must come back un-culled — the conservative
+        /// direction is "render", never "hidden" (culling doc §7.5). Both axes are asserted, since
+        /// <c>Clear()</c> owns the reset of each. Positive control: the flag is asserted true immediately
+        /// before <c>Clear()</c>, so the post-condition cannot pass on a flag that was never set.
+        /// </summary>
+        private static bool B29_ClearResetsOcclusionFlag()
+        {
+            bool allPassed = true;
+
+            using SectionRendererTestFixture fixture = new SectionRendererTestFixture();
+
+            // Simulate a lifecycle that ended while the culler had this section hidden.
+            fixture.RunUpdate(s_rendererProbeVerts, opaqueCount: 3, transparentCount: 0, fluidCount: 0);
+            fixture.OcclusionCulled = true;
+            allPassed &= MeshAssert.IsTrue("B29 setup: section is active AND occlusion-culled before recycle",
+                fixture.IsActive && fixture.OcclusionCulled,
+                "both axes are in their non-default state, so the reset below has something to observe");
+
+            fixture.Renderer.Clear();
+
+            allPassed &= MeshAssert.IsTrue("B29: Clear() resets forceRenderingOff to false",
+                !fixture.OcclusionCulled, "a recycled section does not inherit the previous lifecycle's culled state");
+            allPassed &= MeshAssert.IsTrue("B29: Clear() deactivates the GameObject (has-geometry axis)",
+                !fixture.IsActive, "the pre-existing SetActive(false) reset is intact");
+
+            return allPassed;
+        }
+
+        /// <summary>
+        /// B30 — MP-5 axis separation: <see cref="SectionRenderer.SetOcclusionCulled"/> round-trips the
+        /// occlusion flag and never touches <c>activeSelf</c> (the "has geometry" axis belongs to
+        /// <c>UpdateMeshNative</c>/<c>Clear()</c>). Positive control: the two calls produce genuinely
+        /// different readings, so the round-trip cannot pass against a constant flag.
+        /// </summary>
+        private static bool B30_SetOcclusionCulledRoundTrips()
+        {
+            bool allPassed = true;
+
+            using SectionRendererTestFixture fixture = new SectionRendererTestFixture();
+
+            fixture.RunUpdate(s_rendererProbeVerts, opaqueCount: 3, transparentCount: 0, fluidCount: 0);
+            bool activeBefore = fixture.IsActive;
+            allPassed &= MeshAssert.IsTrue("B30 setup: a non-empty update leaves the section active and un-culled",
+                activeBefore && !fixture.OcclusionCulled, "both axes start in their rendered state");
+
+            fixture.Renderer.SetOcclusionCulled(true);
+            bool afterCull = fixture.OcclusionCulled;
+            allPassed &= MeshAssert.IsTrue("B30: SetOcclusionCulled(true) sets forceRenderingOff",
+                afterCull, "the occlusion axis followed the call");
+            allPassed &= MeshAssert.IsTrue("B30: SetOcclusionCulled(true) does not touch activeSelf",
+                fixture.IsActive == activeBefore, $"activeSelf stayed {activeBefore} (has-geometry axis untouched)");
+
+            fixture.Renderer.SetOcclusionCulled(false);
+            bool afterUncull = fixture.OcclusionCulled;
+            allPassed &= MeshAssert.IsTrue("B30: SetOcclusionCulled(false) clears forceRenderingOff",
+                !afterUncull, "the occlusion axis followed the call back");
+            allPassed &= MeshAssert.IsTrue("B30: SetOcclusionCulled(false) does not touch activeSelf",
+                fixture.IsActive == activeBefore, $"activeSelf stayed {activeBefore} (has-geometry axis untouched)");
+
+            // Positive control: the two calls were genuinely distinguishable (not a constant reading).
+            allPassed &= MeshAssert.IsTrue("B30 control: the culled and un-culled readings differ",
+                afterCull != afterUncull, "SetOcclusionCulled actually toggles the flag it reports");
 
             return allPassed;
         }

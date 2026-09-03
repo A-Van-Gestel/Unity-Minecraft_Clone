@@ -85,7 +85,7 @@ namespace Helpers
     /// gather, scan, and extract. Everything at/above the returned height is guaranteed — by the rules
     /// below — to be uniform air whose light the job can answer virtually and can never change, so
     /// skipping those rows is bit-identical to processing them. Shared by the production scheduler and the
-    /// editor validation harness (the <see cref="LightingScanDecision"/>/<c>LightingCompletionPass</c>
+    /// editor validation harness (the <see cref="LightingScanDecision"/>/<c>JobCompletionPass</c>
     /// shared-decision pattern), so the two can never disagree on a band.
     /// </summary>
     public static class LightingBandDecision
@@ -95,7 +95,7 @@ namespace Helpers
         /// <para>
         /// LOAD-BEARING INVARIANT (the vertical sibling of <c>ChunkMath.MAX_LIGHTING_BFS_REACH</c>): this
         /// must be ≥ the farthest any BFS wave can RAISE OR LOWER a light value above its source. Light
-        /// attenuates by at least 1 per step everywhere except the downward vertical-sunlight rule (which
+        /// attenuates by at least 1 per step everywhere except the downward vertical-skylight rule (which
         /// only travels down, away from the band top), so a wave from a source at <c>y</c> can alter
         /// values no higher than <c>y + 15</c> — one full section (16) covers it. If a future change lets
         /// light climb further per step (e.g. an upward no-attenuation rule), bump this and re-verify the
@@ -105,7 +105,7 @@ namespace Helpers
         public const int BandHeadroomVoxels = ChunkMath.SECTION_SIZE;
 
         /// <summary>Packed light of a full-sky (15, no blocklight) uniform region — the only center
-        /// top-region value under which the sunlight column-recalc's above-heightmap pass writes nothing.</summary>
+        /// top-region value under which the skylight column-recalc's above-heightmap pass writes nothing.</summary>
         private static readonly ushort s_fullSkyPacked = LightBitMapping.PackLightData(15, 0, 0, 0);
 
         /// <summary>
@@ -114,7 +114,7 @@ namespace Helpers
         /// Returns <c>ChunkMath.CHUNK_HEIGHT</c> (full height, banding disabled) whenever a rule cannot
         /// prove the skipped region inert:
         /// <list type="bullet">
-        /// <item><b>Column-recalc rule:</b> a queued sunlight column recalculation walks the sky region
+        /// <item><b>Column-recalc rule:</b> a queued skylight column recalculation walks the sky region
         /// above the heightmap; skipping it is only valid when the center's top region is uniform
         /// full-sky (the walk would write nothing there). Any other top value → full height.</item>
         /// <item><b>Cross-seam consistency rule:</b> for each cardinal neighbor, the mutual uniform region
@@ -135,10 +135,10 @@ namespace Helpers
         /// <param name="northWest">North-west diagonal neighbor summary.</param>
         /// <param name="southEast">South-east diagonal neighbor summary.</param>
         /// <param name="northEast">North-east diagonal neighbor summary.</param>
-        /// <param name="maxQueuedNodeY">Highest Y of any queued sun/block BFS node for this job, or −1
+        /// <param name="maxQueuedNodeY">Highest Y of any queued sky/block BFS node for this job, or −1
         /// when the queues are empty (column-recalc entries are covered by the column-recalc rule and the
         /// heightmap's containment in an occupied section, not by this term).</param>
-        /// <param name="hasColumnRecalcs">Whether any sunlight column recalculations are queued.</param>
+        /// <param name="hasColumnRecalcs">Whether any skylight column recalculations are queued.</param>
         /// <param name="performEdgeCheck">Whether the job will run the border edge-consistency check.</param>
         /// <returns>The band height in rows, in <c>(0, ChunkMath.CHUNK_HEIGHT]</c>; the full chunk height
         /// disables banding for this job.</returns>
@@ -193,7 +193,7 @@ namespace Helpers
         /// gathers/scans/extracts only <c>[bandMinY, bandHeight)</c>. Returns 0 (no bottom banding)
         /// whenever a rule cannot prove the skipped rows inert:
         /// <list type="bullet">
-        /// <item><b>Column-recalc rule:</b> a queued sunlight column recalculation walks from the
+        /// <item><b>Column-recalc rule:</b> a queued skylight column recalculation walks from the
         /// heightmap down to Y=0, reading and writing every row — unlike the top side there is no
         /// escape condition, so any recalc forces the bottom to 0.</item>
         /// <item><b>Inert-dark coverage:</b> rows below the returned Y must be inert-dark in all nine
@@ -207,7 +207,7 @@ namespace Helpers
         /// <item><b>Wave coverage:</b> the band keeps <see cref="BandHeadroomVoxels"/> rows below the
         /// lowest queued BFS node (attenuating waves lose ≥1 level per step, so a wave from
         /// <c>y</c> can neither write nor read below <c>y − headroom</c>).</item>
-        /// <item><b>Descending-sunlight rule:</b> the vertical no-attenuation sunlight rule travels
+        /// <item><b>Descending-skylight rule:</b> the vertical no-attenuation skylight rule travels
         /// DOWN — toward the bottom band — and headroom does not bound it. A sky-15 descent only runs
         /// down CENTER columns (halo cells are never re-enqueued) and stops at that column's heightmap
         /// block (the highest block with any opacity), continuing at most one attenuating headroom below
@@ -226,9 +226,9 @@ namespace Helpers
         /// <param name="northWest">North-west diagonal neighbor summary.</param>
         /// <param name="southEast">South-east diagonal neighbor summary.</param>
         /// <param name="northEast">North-east diagonal neighbor summary.</param>
-        /// <param name="minQueuedNodeY">Lowest Y of any queued sun/block BFS node for this job, or
+        /// <param name="minQueuedNodeY">Lowest Y of any queued sky/block BFS node for this job, or
         /// <c>int.MaxValue</c> when the queues are empty.</param>
-        /// <param name="hasColumnRecalcs">Whether any sunlight column recalculations are queued.</param>
+        /// <param name="hasColumnRecalcs">Whether any skylight column recalculations are queued.</param>
         /// <param name="minCenterHeightmapY">The center chunk's lowest heightmap entry
         /// (<c>ChunkData.GetHeightmapMinY()</c>).</param>
         /// <returns>The band's first gathered row, in <c>[0, ChunkMath.CHUNK_HEIGHT)</c>; 0 disables
@@ -263,7 +263,7 @@ namespace Helpers
             floor = math.min(floor, southEast.InertUpToY);
             floor = math.min(floor, northEast.InertUpToY);
 
-            // Wave coverage + descending-sunlight rules.
+            // Wave coverage + descending-skylight rules.
             floor = math.min(floor, minQueuedNodeY - BandHeadroomVoxels);
             floor = math.min(floor, minCenterHeightmapY - BandHeadroomVoxels);
 
@@ -387,8 +387,8 @@ namespace Helpers
 
             // Uniform regions are air (opacity 0), so the cross-seam expectation in both directions is
             // the plain 1-step attenuation; uniform regions carry zero blocklight, so only sky matters.
-            int centerSky = LightBitMapping.GetSkyLight(center.UniformLight);
-            int neighborSky = LightBitMapping.GetSkyLight(neighbor.UniformLight);
+            int centerSky = LightBitMapping.GetSkylight(center.UniformLight);
+            int neighborSky = LightBitMapping.GetSkylight(neighbor.UniformLight);
 
             // Center→neighbor halo writes (PropagateLight's cross-seam arm) — checked unconditionally:
             // a virtualized halo cell does not retain the write, so a repeatable write would re-fire and

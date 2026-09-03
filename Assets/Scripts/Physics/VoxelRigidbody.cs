@@ -1,3 +1,7 @@
+// ReSharper disable CompareOfFloatsByEqualityOperator
+
+using System;
+using Helpers;
 using UnityEngine;
 
 namespace Physics
@@ -16,6 +20,24 @@ namespace Physics
         // evaluating to exactly equal with the block boundary on subsequent frames.
         private const float COLLISION_EPSILON = 0.001f;
         private const float COLLISION_JITTER_TOLERANCE = 0.001f;
+
+        /// <summary>
+        /// How far below the feet a surface may sit and still count as supporting the body.
+        /// </summary>
+        /// <remarks>
+        /// The overlap test in <c>World.CheckPhysicsCollision</c> is strict, so a body resting on a surface —
+        /// which the vertical resolve parks <c>COLLISION_EPSILON</c> above it — does NOT overlap that surface.
+        /// Probing the un-extended AABB therefore only ever detects an <i>embedded</i> body, and a
+        /// correctly-standing one reads as airborne. Must stay above <c>COLLISION_EPSILON</c> (or it cannot span
+        /// the stand-off) and far below the thinnest collision volume (0.25) so it never grounds a genuinely
+        /// falling body.
+        /// <para>
+        /// Public because "what is this body standing on" is asked outside the solver too — the footstep audio
+        /// resolves which cell carries the feet with this same tolerance, so a slab reads as the support to the
+        /// ear exactly when it does to the solver. One definition, or the two answers drift.
+        /// </para>
+        /// </remarks>
+        public const float GroundProbeSkin = COLLISION_EPSILON * 2f;
 
         [Tooltip("The padding added to the player bounds to avoid snagging flush walls.")]
         [Min(0.1f)]
@@ -39,6 +61,10 @@ namespace Physics
         public float CollisionHalfWidthX => collisionWidthX * 0.5f;
         public float CollisionHalfDepthZ => collisionDepthZ * 0.5f;
 
+        // TF-14: extra gap (in voxels) kept between the player collider and the world border,
+        // so the body doesn't visually clip through the border wall. Added to the collision half-extent.
+        private const float BORDER_MARGIN = 0.5f;
+
         [Header("Movement Settings")]
         [Tooltip("Jump velocity applied when jumping.")]
         public float jumpForce = 5.7f;
@@ -61,15 +87,40 @@ namespace Physics
         public bool isNoclipping = false;
         public bool isSprinting = false;
 
+        /// <summary>
+        /// True while a teleport arrival hold suspends this body (CMD-2 §3.3): gravity and movement
+        /// freeze until the destination chunk is ready. Set/cleared exclusively by
+        /// <see cref="World.TeleportPlayer"/> and its hold poll.
+        /// </summary>
+        [NonSerialized]
+        public bool IsTeleportHeld;
+
         public bool IsGrounded { get; private set; }
         public Vector3 Velocity { get; private set; }
         public float MoveSpeed { get; private set; }
+
+        /// <summary>
+        /// How many jumps this body has taken. Increments on the fixed step that applies the jump impulse.
+        /// </summary>
+        /// <remarks>
+        /// A counter rather than a "jumped this step" flag so a reader polling from <c>Update</c> cannot miss
+        /// one: two fixed steps can run between renders, which would clear a flag before anyone saw it.
+        /// Readers keep the last value they observed and compare. The audio layer uses this to tell a jump
+        /// from walking off a ledge, which look identical from outside the solver.
+        /// </remarks>
+        public uint JumpCount { get; private set; }
 
         private float _verticalMomentum;
         private Vector3 _movementIntent;
         private float _verticalFlyingIntent;
         private bool _jumpRequest;
         private float _lastMoveSpeed;
+
+        /// <summary>
+        /// PH-1: this body's gathered voxel neighborhood, refilled once per resolve and read by every sweep.
+        /// Per-instance rather than shared, so entities do not clobber each other's gather.
+        /// </summary>
+        private readonly PhysicsCellBuffer _cellBuffer = new PhysicsCellBuffer();
 
         private World _world;
 
@@ -120,8 +171,9 @@ namespace Physics
 
         private void FixedUpdate()
         {
-            // Wait for world to finish initial load and meshing to prevent falling through terrain
-            if (!_world.IsWorldLoaded) return;
+            // Wait for world to finish initial load and meshing to prevent falling through terrain,
+            // and freeze while a teleport arrival hold waits for its destination chunk (CMD-2 §3.3).
+            if (!_world.IsWorldLoaded || IsTeleportHeld) return;
 
             CalculateVelocity();
 
@@ -130,9 +182,50 @@ namespace Physics
                 _verticalMomentum = jumpForce;
                 IsGrounded = false;
                 _jumpRequest = false;
+                JumpCount++;
             }
 
             transform.Translate(Velocity, Space.World);
+
+            ClampToWorldBorder();
+        }
+
+        /// <summary>
+        /// Hard-clamps the player's horizontal position inside the per-world gameplay border —
+        /// a square AABB centered on the world origin. No-op when the border is disabled
+        /// (<see cref="World.BorderRadius"/> is 0). Player-only: the voxel pipeline (generation,
+        /// lighting, meshing, storage) is deliberately border-blind, so terrain still exists past
+        /// the fence; only the player is stopped.
+        /// </summary>
+        private void ClampToWorldBorder()
+        {
+            int radius = _world.BorderRadius;
+            if (radius <= 0) return;
+
+            // The border is a voxel-space AABB centered on the WORLD origin while the transform is Unity space, so
+            // the limits shift by the origin instead of staying symmetric about the render origin. The border edge
+            // and origin resolve in integer math FIRST (both can be huge; near the border they cancel to a small
+            // number), and only then does the small fractional collider inset apply in float — subtracting two large
+            // floats instead would round the bound off the true border line past ±2²⁴.
+            Vector3Int ov = WorldOrigin.OriginVoxel;
+            float minX = (-(long)radius - ov.x) + CollisionHalfWidthX + BORDER_MARGIN;
+            float maxX = ((long)radius - ov.x) - CollisionHalfWidthX - BORDER_MARGIN;
+            float minZ = (-(long)radius - ov.z) + CollisionHalfDepthZ + BORDER_MARGIN;
+            float maxZ = ((long)radius - ov.z) - CollisionHalfDepthZ - BORDER_MARGIN;
+
+            // Guard tiny radii from inverting the bounds: pin the player to the border's center line instead.
+            if (maxX < minX) minX = maxX = (minX + maxX) * 0.5f;
+            if (maxZ < minZ) minZ = maxZ = (minZ + maxZ) * 0.5f;
+
+            Vector3 pos = transform.position;
+            float clampedX = Mathf.Clamp(pos.x, minX, maxX);
+            float clampedZ = Mathf.Clamp(pos.z, minZ, maxZ);
+
+            // Exact comparison is intended: Mathf.Clamp returns the value itself when it is in range, so this asks
+            // "did the clamp change anything" to skip a redundant transform write. A tolerance here would swallow
+            // small-but-real clamps right at the border line.
+            if (clampedX != pos.x || clampedZ != pos.z)
+                transform.position = new Vector3(clampedX, pos.y, clampedZ);
         }
 
         private void CalculateVelocity()
@@ -180,8 +273,9 @@ namespace Physics
             // COLLISION (Sub-voxel AABB physics solver)
             if (!isNoclipping)
             {
+                PhysicsQueryStats.CountTick();
                 const float MIN_COLLISION_THICKNESS = 0.25f; // Quarter-slab
-                float maxStep = MIN_COLLISION_THICKNESS * 0.5f; // 0.125m
+                const float maxStep = MIN_COLLISION_THICKNESS * 0.5f; // 0.125m
 
                 // Velocity here is actually the intended displacement for this frame
                 float displacementMag = Velocity.magnitude;
@@ -192,13 +286,19 @@ namespace Physics
                     Vector3 remainingDisplacement = Velocity;
                     Vector3 subMove = remainingDisplacement / substeps;
 
+                    // PH-2: the running position is a local, not the transform. Each substep must resolve against
+                    // where the previous one left the body, but staging that on the transform would leave it holding
+                    // a not-yet-final position mid-tick — and a throw inside the loop would leave it there for good,
+                    // since the revert that used to undo the staging could never run.
+                    Vector3 runningPos = transform.position;
+
                     for (int i = 0; i < substeps; i++)
                     {
                         // Use the corrected subMove from the previous step as a baseline,
                         // but re-evaluate against current world position.
                         Vector3 currentSubMove = subMove;
-                        ResolveMovement(ref currentSubMove);
-                        transform.position += currentSubMove; // Move temporarily to test next substeps accurately
+                        ResolveMovement(ref currentSubMove, runningPos);
+                        runningPos += currentSubMove;
                         totalDisplacement += currentSubMove;
 
                         // Carry over velocity blocks (if an axis stopped, it stays stopped)
@@ -207,23 +307,27 @@ namespace Physics
                         if (currentSubMove.z == 0) subMove.z = 0;
                     }
 
-                    // Revert the temporary position changes because `VoxelRigidbody`
-                    // expects `transform.Translate(Velocity)` to be called externally later.
-                    transform.position -= totalDisplacement;
                     Velocity = totalDisplacement;
                 }
                 else
                 {
                     Vector3 tempVelocity = Velocity;
-                    ResolveMovement(ref tempVelocity);
+                    ResolveMovement(ref tempVelocity, transform.position);
                     Velocity = tempVelocity;
                 }
             }
         }
 
-        private void ResolveMovement(ref Vector3 movement)
+        /// <summary>
+        /// Resolves one displacement against the voxel world — the step-up pre-pass, the per-axis horizontal
+        /// resolve in Z → X order, and the vertical resolve that sets <see cref="IsGrounded"/>.
+        /// </summary>
+        /// <param name="movement">The intended displacement, corrected in place.</param>
+        /// <param name="pos">The feet-center position to resolve from. Passed in rather than read from the
+        /// transform so the substep chain can advance it in a local (<c>PH-2</c>); callers resolving a single
+        /// displacement pass <c>transform.position</c>.</param>
+        private void ResolveMovement(ref Vector3 movement, Vector3 pos)
         {
-            Vector3 pos = transform.position;
             float extX = CollisionHalfWidthX - collisionPadding; // Keeping slight inset to avoid snagging flush walls
             float extZ = CollisionHalfDepthZ - collisionPadding;
             float h = collisionHeight;
@@ -234,6 +338,8 @@ namespace Physics
                 new Vector3(pos.x - extX, pos.y, pos.z - extZ),
                 new Vector3(pos.x + extX, pos.y + h, pos.z + extZ)
             );
+
+            GatherCells(currentAABB, movement);
 
             // Predict horizontal future AABB (NO Y movement, slightly shrunk on Y to avoid floor/ceiling snags)
             Bounds horizontalFutureAABB = currentAABB;
@@ -252,13 +358,13 @@ namespace Physics
             if (movement.z != 0f)
             {
                 zSign = movement.z > 0 ? 1 : -1;
-                zBlocked = _world.CheckPhysicsCollision(horizontalFutureAABB, axis: 2, zSign, out _);
+                zBlocked = Probe(horizontalFutureAABB, axis: 2, zSign, out _);
             }
 
             if (movement.x != 0f)
             {
                 xSign = movement.x > 0 ? 1 : -1;
-                xBlocked = _world.CheckPhysicsCollision(horizontalFutureAABB, axis: 0, xSign, out _);
+                xBlocked = Probe(horizontalFutureAABB, axis: 0, xSign, out _);
             }
 
             bool horizontalBlocked = zBlocked || xBlocked;
@@ -271,9 +377,9 @@ namespace Physics
 
                 bool clearsAtStep = true;
                 if (movement.x != 0f)
-                    clearsAtStep &= !_world.CheckPhysicsCollision(liftedAABB, axis: 0, xSign, out _);
+                    clearsAtStep &= !Probe(liftedAABB, axis: 0, xSign, out _);
                 if (movement.z != 0f)
-                    clearsAtStep &= !_world.CheckPhysicsCollision(liftedAABB, axis: 2, zSign, out _);
+                    clearsAtStep &= !Probe(liftedAABB, axis: 2, zSign, out _);
 
                 if (clearsAtStep)
                 {
@@ -282,7 +388,7 @@ namespace Physics
                     sweepAABB.Expand(new Vector3(0, stepHeight, 0));
                     sweepAABB.center -= new Vector3(0, stepHeight * 0.5f, 0);
 
-                    if (_world.CheckPhysicsCollision(sweepAABB, axis: 1, -1, out var groundContact))
+                    if (Probe(sweepAABB, axis: 1, -1, out var groundContact))
                     {
                         // Found support
                         float newY = groundContact.ContactFace;
@@ -316,7 +422,7 @@ namespace Physics
                 if (movement.z != 0f)
                 {
                     sweepAABB.center += new Vector3(0, 0, movement.z);
-                    _world.CheckPhysicsCollision(sweepAABB, axis: 2, zSign, out var zContact);
+                    Probe(sweepAABB, axis: 2, zSign, out var zContact);
                     if (zContact.Hit)
                     {
                         float epsilon = Mathf.Sign(zContact.Correction) * COLLISION_EPSILON;
@@ -331,7 +437,7 @@ namespace Physics
                 if (movement.x != 0f)
                 {
                     sweepAABB.center += new Vector3(movement.x, 0, 0);
-                    _world.CheckPhysicsCollision(sweepAABB, axis: 0, xSign, out var xContact);
+                    Probe(sweepAABB, axis: 0, xSign, out var xContact);
                     if (xContact.Hit)
                     {
                         float epsilon = Mathf.Sign(xContact.Correction) * COLLISION_EPSILON;
@@ -353,7 +459,7 @@ namespace Physics
             if (movement.y != 0f)
             {
                 int ySign = movement.y > 0 ? 1 : -1;
-                _world.CheckPhysicsCollision(verticalFutureAABB, axis: 1, ySign, out var yContact);
+                Probe(verticalFutureAABB, axis: 1, ySign, out var yContact);
 
                 if (yContact.Hit)
                 {
@@ -375,11 +481,72 @@ namespace Physics
             }
             else
             {
-                // Explicitly check ground when vertical movement is 0
-                _world.CheckPhysicsCollision(verticalFutureAABB, axis: 1, -1, out var groundContact);
-                if (groundContact.Hit && groundContact.Correction > -0.01f)
+                // Explicitly check ground when vertical movement is 0, probing GroundProbeSkin below the feet so a
+                // body already resting on a surface registers — flush contact is not overlap, so an un-extended probe
+                // would only ever find ground under a body embedded in it.
+                Bounds groundProbeAABB = verticalFutureAABB;
+                groundProbeAABB.SetMinMax(
+                    new Vector3(verticalFutureAABB.min.x, verticalFutureAABB.min.y - GroundProbeSkin,
+                        verticalFutureAABB.min.z),
+                    verticalFutureAABB.max);
+
+                if (Probe(groundProbeAABB, axis: 1, -1, out _))
                     IsGrounded = true;
             }
+        }
+
+        /// <summary>
+        /// PH-1: resolves the voxel neighborhood this resolve's sweeps will read, <b>once</b>, instead of letting
+        /// each of the nine sweeps rescan it.
+        /// </summary>
+        /// <param name="currentAABB">The body's AABB before this resolve's movement.</param>
+        /// <param name="movement">The intended displacement being resolved.</param>
+        private void GatherCells(Bounds currentAABB, Vector3 movement)
+        {
+            Bounds destination = currentAABB;
+            destination.center += movement;
+
+            Bounds envelope = currentAABB;
+            envelope.Encapsulate(destination);
+
+            // The body's own box is not enough: the step-up pre-pass reads LIFTED boxes and the ground probe reads
+            // BELOW the feet. Upward, stepHeight bounds it — the lifted box must be clear for the step to proceed,
+            // so the support its downward sweep then finds sits at or below that lift, and the post-step-up box
+            // cannot rise further. The stand-offs are added because the solver parks bodies an epsilon off contact.
+            envelope.SetMinMax(
+                new Vector3(envelope.min.x, envelope.min.y - GroundProbeSkin, envelope.min.z),
+                new Vector3(envelope.max.x, envelope.max.y + stepHeight + collisionPadding + COLLISION_EPSILON,
+                    envelope.max.z));
+
+            _world.GatherPhysicsCells(envelope, _cellBuffer);
+        }
+
+        /// <summary>
+        /// Issues one collision sweep, answered from <see cref="_cellBuffer"/> when it covers the sweep and by a
+        /// direct world scan when it does not.
+        /// <para>
+        /// <b>The fallback is a correctness device, not an optimization.</b> A horizontal correction can shift the
+        /// cumulative sweep box outside the gathered envelope — most sharply for a body resolving from inside
+        /// geometry (<c>PLAYER_BUGS</c> §05, corrections of a block or more). Falling back there is what makes the
+        /// gathered path's result identical to the direct scan's for every input, rather than only for the inputs
+        /// the envelope happens to bound.
+        /// </para>
+        /// </summary>
+        /// <param name="bounds">The sweep's entity AABB.</param>
+        /// <param name="axis">The movement axis to resolve (0=X, 1=Y, 2=Z).</param>
+        /// <param name="directionSign">+1 for positive movement, -1 for negative.</param>
+        /// <param name="contact">The resolved contact, when the sweep hits.</param>
+        /// <returns>True if the AABB overlaps solid collision geometry on that axis.</returns>
+        private bool Probe(Bounds bounds, int axis, int directionSign, out CollisionContact contact)
+        {
+            if (_cellBuffer.TryQuery(bounds, axis, directionSign, out contact, out bool hitAnything))
+            {
+                PhysicsQueryStats.CountSweep(false);
+                return hitAnything;
+            }
+
+            PhysicsQueryStats.CountSweep(true);
+            return _world.CheckPhysicsCollision(bounds, axis, directionSign, out contact);
         }
 
 
@@ -392,7 +559,7 @@ namespace Physics
         }
 
         // In development builds, we use LateUpdate to draw the debug lines continuously if toggled on
-#if DEVELOPMENT_BUILD || UNITY_EDITOR
+#if UNITY_INCLUDE_INSTRUMENTATION
         private void LateUpdate()
         {
             if (showBoundingBox)

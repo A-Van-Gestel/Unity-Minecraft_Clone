@@ -14,40 +14,25 @@ namespace Editor.Validation.Behavior.Framework
 {
     /// <summary>
     /// Selects how <see cref="BehaviorTestWorld"/> orders active-voxel evaluation within a tick — the modeled
-    /// production tick driver. <see cref="Legacy"/> reproduces today's single-set traversal; <see cref="SplitFamily"/>
-    /// reproduces the TG-4 Phase 1 per-behavior-family split (evaluate all grass, then all fluids). The
-    /// <b>BH-D1</b> differential pits the two against each other under the §4.3 canonicalization.
+    /// production tick driver. <see cref="Legacy"/> reproduces the original single-set traversal (the parity oracle);
+    /// <see cref="SplitFamily"/> reproduces the per-behavior-family split (evaluate all grass, then all fluids);
+    /// <see cref="FluidBurstHaloBand"/> reproduces the shipped Burst fluid path. The <b>BH-D1</b> differential pits
+    /// each against <see cref="Legacy"/> under the §4.3 canonicalization.
     /// </summary>
     public enum TickDriver
     {
-        /// <summary>One monolithic active set, iterated in <c>HashSet</c> enumeration order (today's path).</summary>
+        /// <summary>One monolithic active set, iterated in <c>HashSet</c> enumeration order (the parity oracle).</summary>
         Legacy,
 
-        /// <summary>Per-behavior-family buckets, iterated grass-then-fluid (the TG-4 Phase 1 path).</summary>
+        /// <summary>Per-behavior-family buckets, iterated grass-then-fluid (the TG-4 Phase 1 storage split).</summary>
         SplitFamily,
 
         /// <summary>
-        /// TG-4 Phase 3 hybrid: grass-then-fluid order (as <see cref="SplitFamily"/>), but Tier-1 <b>interior</b> fluid
-        /// voxels are evaluated by the real Burst <see cref="FluidTickJob"/> instead of the managed
-        /// <see cref="BlockBehavior"/>; border fluids + grass stay managed. BH-D1[L|F] pits this against
-        /// <see cref="Legacy"/> to prove the Burst port emits a byte-identical stream.
-        /// </summary>
-        FluidBurstHybrid,
-
-        /// <summary>
-        /// TG-4 Phase 4b full halo: grass-then-fluid order, but <b>every</b> fluid voxel (interior AND border) is
-        /// evaluated by the Burst <see cref="FluidTickJob"/>, border voxels reading the per-tick neighbor halo
-        /// gathered from the seeded neighbor chunks. Grass stays managed. BH-D1[L|H] pits this against
-        /// <see cref="Legacy"/> over the BH-4 cross-chunk fixtures to prove the halo border port is byte-identical.
-        /// </summary>
-        FluidBurstHalo,
-
-        /// <summary>
-        /// TG-4 Phase 4b Y-band: identical to <see cref="FluidBurstHalo"/> but the per-tick gather + reads are
-        /// restricted to the tight active-fluid Y-band (<c>FluidBurstTicker.RunFluids(useBand: true)</c>) instead of
-        /// full chunk height. <b>BH-D1[H|HB]</b> pits this directly against <see cref="FluidBurstHalo"/> to isolate
-        /// band-edge correctness from halo correctness — the two must be byte-identical (the band drops no read the
-        /// full-height gather served); <b>BH-D1[L|HB]</b> pits it against <see cref="Legacy"/> as the end-to-end gate.
+        /// The shipped TG-4 fluid path: grass-then-fluid order, but <b>every</b> fluid voxel (interior AND border) is
+        /// evaluated by the real Burst <see cref="FluidTickJob"/> via <see cref="FluidBurstTicker.RunFluids"/>,
+        /// border voxels reading the per-tick active-fluid <b>Y-band</b> neighbor halo gathered from the seeded
+        /// neighbor chunks. Grass stays managed. <b>BH-D1[L|HB]</b> pits this against <see cref="Legacy"/> over all
+        /// fixtures (incl. the BH-4 cross-chunk cases) as the end-to-end parity gate.
         /// </summary>
         FluidBurstHaloBand,
     }
@@ -98,10 +83,10 @@ namespace Editor.Validation.Behavior.Framework
         private readonly BlockType[] _palette;
         private readonly BlockType _inert;
 
-        private NativeArray<BlockTypeJobData> _blockTypesJob; // built from the palette for the FluidBurstHybrid driver
+        private NativeArray<BlockTypeJobData> _blockTypesJob; // built from the palette for the FluidBurstHaloBand driver
 
-        // The REAL production runner — the FluidBurstHybrid driver drives this (not a hand-copy) so BH-D1[L|F]
-        // exercises the shipped partition/snapshot/job/ModsPerSource path, not a twin that could drift from it.
+        // The REAL production runner — the FluidBurstHaloBand driver drives this (not a hand-copy) so BH-D1[L|HB]
+        // exercises the shipped snapshot/halo/job/ModsPerSource path, not a twin that could drift from it.
         private readonly FluidBurstTicker _fluidTicker = new FluidBurstTicker();
 
         // The ticker reads ChunkData.ActiveFluidsBucket; the harness's own active model (_activeVoxels) is mirrored
@@ -116,7 +101,8 @@ namespace Editor.Validation.Behavior.Framework
         // _world.worldData.Chunks so the center chunk's border voxels resolve real neighbor data through the
         // production GetState → worldData.GetVoxelState path (no shim). Neighbors are read-only context — they are
         // NOT ticked and their voxels are NOT registered active; an UNSEEDED neighbor coord resolves to null (void),
-        // which IS the missing/ungenerated-neighbor case. Keyed by voxel origin; disposed in Dispose.
+        // which IS the missing/unloaded-neighbor case. A third state — registered but empty and !IsPopulated — is the
+        // production placeholder (AddNeighborPlaceholder). Keyed by voxel origin; disposed in Dispose.
         private readonly Dictionary<Vector2Int, ChunkData> _neighbors = new Dictionary<Vector2Int, ChunkData>();
         private readonly GameObject _worldGo;
         private readonly BlockDatabase _stubDatabase;
@@ -135,10 +121,12 @@ namespace Editor.Validation.Behavior.Framework
         /// Stands up the stub world + palette and an all-air center chunk at <paramref name="centerChunkVoxelOrigin"/>.
         /// </summary>
         /// <param name="centerChunkVoxelOrigin">
-        /// The center chunk's voxel origin (its <see cref="ChunkData.Position"/>). Defaults to the world origin
-        /// <c>(0,0)</c> — what every single-chunk (Tier-1) fixture uses, where −X/−Z reads fall outside the world
-        /// (void) exactly as before. BH-4 cross-chunk fixtures pass an <b>interior</b> origin so all 8 neighbor coords
-        /// satisfy <see cref="WorldData.IsVoxelInWorld"/> and can be seeded via <see cref="SetNeighborBlock"/>.
+        /// The center chunk's voxel origin (its <see cref="ChunkData.Position"/>), which must be chunk-aligned.
+        /// Defaults to the world origin <c>(0,0)</c> — what every single-chunk (Tier-1) fixture uses, where a −X/−Z
+        /// read resolves to void because no chunk is <i>loaded</i> there (since WS-3 those coordinates are perfectly
+        /// in-world; <see cref="WorldData.IsVoxelInWorld"/> tests only Y). Any origin works, including negative and
+        /// far-lands values — BH-4 passes <c>(128,128)</c> for continuity, and BH-B12 drives one at x≈2.1e9 to guard
+        /// the cross-seam read's integer routing. Neighbors are seeded via <see cref="SetNeighborBlock"/>.
         /// </param>
         public BehaviorTestWorld(Vector2Int centerChunkVoxelOrigin = default)
         {
@@ -148,7 +136,7 @@ namespace Editor.Validation.Behavior.Framework
                 _palette = TestBehaviorBlockPalette.Create();
                 _inert = _palette[BlockIDs.Air]; // inert default for out-of-palette ids (see PaletteOf)
 
-                // Blittable copy of the palette for the FluidBurstHybrid driver's FluidTickJob (mirrors
+                // Blittable copy of the palette for the FluidBurstHaloBand driver's FluidTickJob (mirrors
                 // World.JobDataManager.BlockTypesJobData, built from the same BlockType source).
                 _blockTypesJob = new NativeArray<BlockTypeJobData>(_palette.Length, Allocator.Persistent);
                 for (int i = 0; i < _palette.Length; i++)
@@ -176,7 +164,26 @@ namespace Editor.Validation.Behavior.Framework
                 ValidationReflection.SetInstanceProperty(_world, nameof(World.ChunkPool),
                     new ChunkPoolManager(_worldGo.transform));
 
+                // World.IsActiveById / IsSolidById are built by World init (bypassed in edit mode), and the
+                // production seam-wake pass reads both. Mirror them from the test palette so
+                // PopulateNeighborPlaceholder can drive the real World.WakeSeamBehaviorNeighborhood rather than a
+                // copy of it. Keep this in step with JobDataManagerFactory's co-built tables.
+                _world.IsActiveById = new bool[_palette.Length];
+                _world.IsSolidById = new bool[_palette.Length];
+                for (int i = 0; i < _palette.Length; i++)
+                {
+                    _world.IsActiveById[i] = _palette[i].isActive;
+                    _world.IsSolidById[i] = _palette[i].isSolid;
+                }
+
                 ChunkData = new ChunkData(centerChunkVoxelOrigin);
+
+                // Register the center in the stub store exactly as production does. Cross-chunk reads resolve
+                // *other* coords, never the center itself, so this changes no existing fixture — but the seam-wake
+                // pass looks the center up by coord, and would silently no-op if it were absent (which is how
+                // BH-B10 first passed for the wrong reason).
+                ChunkData.IsPopulated = true;
+                _world.worldData.SetChunk(centerChunkVoxelOrigin, ChunkData);
 
                 ValidationReflection.SetStaticProperty(typeof(World), nameof(World.Instance), _world);
                 SetTickCounter(0);
@@ -230,14 +237,123 @@ namespace Editor.Validation.Behavior.Framework
                 ChunkData.Position.x + dChunkX * VoxelData.ChunkWidth,
                 ChunkData.Position.y + dChunkZ * VoxelData.ChunkWidth);
 
-            if (!_neighbors.TryGetValue(origin, out ChunkData neighbor))
+            ChunkData neighbor = GetOrCreateNeighbor(origin);
+            // A seeded neighbor models a GENERATED chunk, so it carries IsPopulated — the flag the fluid read
+            // paths use to tell real voxel data from an empty placeholder (see AddNeighborPlaceholder).
+            neighbor.IsPopulated = true;
+            neighbor.SetVoxel(lx, ly, lz, BurstVoxelDataBitMapping.PackVoxelData(id, meta));
+        }
+
+        /// <summary>
+        /// Registers an <b>empty, unpopulated</b> neighbor chunk — the production <b>placeholder</b> that
+        /// <c>WorldData.GetOrCreatePlaceholder</c> creates for every load-distance coord before its terrain job
+        /// runs. It is present in <see cref="WorldData.Chunks"/> (so a lookup finds it) yet holds no section data
+        /// and has <c>IsPopulated == false</c>. This is a third, distinct neighbor state alongside
+        /// <see cref="SetNeighborBlock"/> (generated) and an unseeded coord (absent → void).
+        /// </summary>
+        /// <param name="dChunkX">Neighbor chunk offset on X (−1, 0, or +1).</param>
+        /// <param name="dChunkZ">Neighbor chunk offset on Z (−1, 0, or +1).</param>
+        /// <exception cref="InvalidOperationException">
+        /// The coord was already seeded by <see cref="SetNeighborBlock"/>, which marks it populated. Silently
+        /// returning that generated neighbor would model the opposite of a placeholder and pass the scenario
+        /// vacuously — the exact false green the placeholder scenarios exist to catch.
+        /// </exception>
+        public void AddNeighborPlaceholder(int dChunkX, int dChunkZ)
+        {
+            Vector2Int origin = new Vector2Int(
+                ChunkData.Position.x + dChunkX * VoxelData.ChunkWidth,
+                ChunkData.Position.y + dChunkZ * VoxelData.ChunkWidth);
+
+            if (_neighbors.TryGetValue(origin, out ChunkData existing) && existing.IsPopulated)
             {
-                neighbor = new ChunkData(origin);
-                _neighbors[origin] = neighbor;
-                _world.worldData.Chunks[origin] = neighbor; // the seam GetVoxelState resolves
+                throw new InvalidOperationException(
+                    $"AddNeighborPlaceholder({dChunkX.ToString()}, {dChunkZ.ToString()}): the neighbor at " +
+                    $"{origin.ToString()} was already seeded via SetNeighborBlock and is populated. A chunk " +
+                    "cannot model a generated neighbor and a placeholder at once — drop the seeding calls.");
             }
 
-            neighbor.SetVoxel(lx, ly, lz, BurstVoxelDataBitMapping.PackVoxelData(id, meta));
+            GetOrCreateNeighbor(origin);
+        }
+
+        /// <summary>
+        /// Flips a placeholder neighbor to <b>populated</b> mid-scenario — the event a chunk's terrain job
+        /// completing raises in production — and drives the real
+        /// <see cref="World.WakeSeamBehaviorNeighborhood"/> for it, so a scenario can assert that behavior which
+        /// quiesced against the placeholder resumes.
+        /// </summary>
+        /// <param name="dChunkX">Neighbor chunk offset on X (−1, 0, or +1).</param>
+        /// <param name="dChunkZ">Neighbor chunk offset on Z (−1, 0, or +1).</param>
+        /// <param name="seed">Optional voxel writes applied before population, modeling what the chunk generated.</param>
+        /// <exception cref="InvalidOperationException">No placeholder exists at that coord to populate.</exception>
+        /// <remarks>
+        /// The harness drives its tick from <see cref="_activeVoxels"/>, and
+        /// <see cref="SyncFluidBucketToActives"/> <b>evicts</b> anything in <see cref="ChunkData"/>'s bucket that
+        /// the model does not know about — so a production-side wake would be silently undone on the next tick and
+        /// the scenario would fail for the wrong reason. After running the real pass this re-reads the center's
+        /// seam slab through the public <see cref="ChunkData.IsVoxelActive"/> and absorbs whatever production
+        /// registered into the model. It mirrors, it never decides.
+        /// </remarks>
+        public void PopulateNeighborPlaceholder(int dChunkX, int dChunkZ, Action<ChunkData> seed = null)
+        {
+            if (dChunkX != 0 && dChunkZ != 0)
+            {
+                throw new ArgumentException(
+                    $"PopulateNeighborPlaceholder({dChunkX.ToString()}, {dChunkZ.ToString()}): diagonal offsets are " +
+                    "not modelled. The production wake is cardinal-only (a diagonal chunk is never an immediate " +
+                    "neighbor of any cell), so a diagonal here would assert against a seam that never wakes — and " +
+                    "the mirror-slab arithmetic below is cardinal-only by construction.");
+            }
+
+            Vector2Int origin = new Vector2Int(
+                ChunkData.Position.x + dChunkX * VoxelData.ChunkWidth,
+                ChunkData.Position.y + dChunkZ * VoxelData.ChunkWidth);
+
+            if (!_neighbors.TryGetValue(origin, out ChunkData neighbor))
+            {
+                throw new InvalidOperationException(
+                    $"PopulateNeighborPlaceholder({dChunkX.ToString()}, {dChunkZ.ToString()}): no chunk registered " +
+                    $"at {origin.ToString()} — call AddNeighborPlaceholder first.");
+            }
+
+            seed?.Invoke(neighbor);
+
+            // Reconcile the bucket to the model FIRST. The harness evicts a voxel that went inactive only on the
+            // NEXT tick's sync, so without this the bucket still holds last tick's quiesced voxels — and the mirror
+            // below would read them back as "woken" no matter what the production pass did (a false green this
+            // scenario was written to catch). Production's drain has already removed them by this point.
+            SyncFluidBucketToActives();
+
+            neighbor.IsPopulated = true;
+
+            // The production pass, unmodified: it resolves the newly populated chunk's cardinal neighbors itself.
+            _world.WakeSeamBehaviorNeighborhood(origin);
+
+            // Absorb the result into the harness's own active model (see remarks).
+            bool centerIsOnX = dChunkX != 0;
+            int slabLocal = dChunkX < 0 || dChunkZ < 0 ? 0 : VoxelData.ChunkWidth - 1;
+
+            for (int y = 0; y < VoxelData.ChunkHeight; y++)
+            for (int across = 0; across < VoxelData.ChunkWidth; across++)
+            {
+                Vector3Int pos = centerIsOnX
+                    ? new Vector3Int(slabLocal, y, across)
+                    : new Vector3Int(across, y, slabLocal);
+
+                if (ChunkData.IsVoxelActive(pos))
+                    _activeVoxels.Add(pos);
+            }
+        }
+
+        /// <summary>Returns the neighbor chunk at a voxel origin, creating + registering it in the stub store on first use.</summary>
+        private ChunkData GetOrCreateNeighbor(Vector2Int origin)
+        {
+            if (_neighbors.TryGetValue(origin, out ChunkData neighbor))
+                return neighbor;
+
+            neighbor = new ChunkData(origin);
+            _neighbors[origin] = neighbor;
+            _world.worldData.SetChunk(origin, neighbor); // the seam GetVoxelState resolves
+            return neighbor;
         }
 
         /// <summary>
@@ -269,14 +385,11 @@ namespace Editor.Validation.Behavior.Framework
             // chosen by the modeled driver (Legacy single-set vs SplitFamily per-family) — the variable BH-D1 tests.
             List<Vector3Int> ordered = OrderActives();
 
-            // FluidBurstHybrid/FluidBurstHalo: precompute the job-ticked fluids' (mods, active) via the real
-            // FluidTickJob over a pre-tick snapshot, keyed by position — mirroring production's Chunk.TickFluidsHybrid.
-            // Hybrid: only Tier-1 interior (border + grass = managed). Halo: ALL fluids (border via the neighbor halo;
-            // grass = managed). Null for the managed-only drivers.
+            // FluidBurstHaloBand: precompute the job-ticked fluids' (mods, active) via the real FluidTickJob over a
+            // pre-tick snapshot, keyed by position — mirroring production's parallel drain. ALL fluids are job-ticked
+            // (border voxels via the Y-band neighbor halo; grass stays managed). Null for the managed-only drivers.
             Dictionary<Vector3Int, FluidJobResult> jobResults =
-                Driver == TickDriver.FluidBurstHybrid ? RunFluidJob(halo: false) :
-                Driver == TickDriver.FluidBurstHalo ? RunFluidJob(halo: true) :
-                Driver == TickDriver.FluidBurstHaloBand ? RunFluidJob(halo: true, band: true) : null;
+                Driver == TickDriver.FluidBurstHaloBand ? RunFluidJob() : null;
 
             List<VoxelEval> evals = new List<VoxelEval>(ordered.Count);
             Queue<VoxelMod> pending = new Queue<VoxelMod>();
@@ -333,35 +446,23 @@ namespace Editor.Validation.Behavior.Framework
         }
 
         /// <summary>
-        /// Drives the <b>real</b> production runner <see cref="FluidBurstTicker.RunInteriorFluids"/> over this
-        /// chunk's Tier-1 interior fluid voxels and returns each interior voxel's (mods, active) keyed by position.
-        /// Unlike a hand-rolled copy, this exercises the shipped partition + snapshot + <see cref="FluidTickJob"/>
-        /// + <c>ModsPerSource</c> split, so BH-D1[L|F] guards the actual orchestration (not a twin that could
-        /// drift). The harness's own active model is first mirrored into <see cref="ChunkData.ActiveFluidsBucket"/>
-        /// (the set the runner reads) by <see cref="SyncFluidBucketToActives"/>; results are mapped back to
-        /// positions via the runner's <see cref="FluidBurstTicker.InteriorIndices"/>. Border fluids and grass stay
-        /// on the managed path.
+        /// Drives the <b>real</b> production runner <see cref="FluidBurstTicker.RunFluids"/> (Y-band halo) over this
+        /// chunk's fluid voxels and returns each voxel's (mods, active) keyed by position. Unlike a hand-rolled copy,
+        /// this exercises the shipped snapshot + neighbor halo + <see cref="FluidTickJob"/> + <c>ModsPerSource</c>
+        /// split, so BH-D1[L|HB] guards the actual orchestration (not a twin that could drift). The harness's own
+        /// active model is first mirrored into <see cref="ChunkData.ActiveFluidsBucket"/> (the set the runner reads)
+        /// by <see cref="SyncFluidBucketToActives"/>; results are mapped back to positions via the runner's
+        /// <see cref="FluidBurstTicker.InteriorIndices"/>. Every fluid is job-ticked (border voxels via the neighbor
+        /// halo gathered from the harness's seeded neighbor chunks in <c>worldData</c>); grass stays managed.
         /// </summary>
-        /// <param name="halo">
-        /// False = the Phase-3 interior-only hybrid (<see cref="FluidBurstTicker.RunInteriorFluids"/>, border managed);
-        /// true = the Phase-4b full halo (<see cref="FluidBurstTicker.RunFluids"/>, every fluid job-ticked via the
-        /// neighbor halo gathered from the harness's seeded neighbor chunks in <c>worldData</c>).
-        /// </param>
-        /// <param name="band">
-        /// TG-4 Phase 4b Y-band: only meaningful when <paramref name="halo"/> is true. False = full-height gather;
-        /// true = the tight active-fluid Y-band gather (<see cref="FluidBurstTicker.RunFluids"/> <c>useBand</c>). The
-        /// <see cref="TickDriver.FluidBurstHaloBand"/> driver sets it so BH-D1[H|HB] diffs band vs full directly.
-        /// </param>
-        private Dictionary<Vector3Int, FluidJobResult> RunFluidJob(bool halo, bool band = false)
+        private Dictionary<Vector3Int, FluidJobResult> RunFluidJob()
         {
             Dictionary<Vector3Int, FluidJobResult> results = new Dictionary<Vector3Int, FluidJobResult>();
 
-            // Mirror the harness active set into ChunkData's fluid bucket (the runner's input), then run it.
+            // Mirror the harness active set into ChunkData's fluid bucket (the runner's input), then run it via the
+            // shipped Y-band halo path.
             SyncFluidBucketToActives();
-            if (halo)
-                _fluidTicker.RunFluids(ChunkData, _tick, _blockTypesJob, _world.worldData, band);
-            else
-                _fluidTicker.RunInteriorFluids(ChunkData, _tick, _blockTypesJob);
+            _fluidTicker.RunFluids(ChunkData, _tick, _blockTypesJob, _world.worldData);
 
             NativeList<int> interiorIndices = _fluidTicker.InteriorIndices;
             if (interiorIndices.Length == 0)
@@ -399,7 +500,7 @@ namespace Editor.Validation.Behavior.Framework
 
         /// <summary>
         /// Mirrors the harness's active-voxel model (<see cref="_activeVoxels"/>) into
-        /// <see cref="ChunkData.ActiveFluidsBucket"/> — the set <see cref="FluidBurstTicker.RunInteriorFluids"/>
+        /// <see cref="ChunkData.ActiveFluidsBucket"/> — the set <see cref="FluidBurstTicker.RunFluids"/>
         /// partitions — so the real runner sees exactly the active fluids the harness is tracking. The harness uses
         /// <c>SetVoxel</c> (which bypasses the bucket maintenance <c>ModifyVoxel</c> does), so the bucket must be
         /// reconciled each tick: evict previously-bucketed voxels that are no longer active fluids, then register
@@ -561,7 +662,7 @@ namespace Editor.Validation.Behavior.Framework
             // World re-wakes every isActive neighbor of the modified cell. This is the parity-critical half — a
             // cell that quiesced and dropped from the active set is re-evaluated once an adjacent cell changes
             // (e.g. a fluid source re-woken by a freshly-placed flow neighbor). Without it the harness would
-            // freeze behaviour the live engine never produces (a false-confidence golden). Interior-only (Tier-1):
+            // freeze behavior the live engine never produces (a false-confidence golden). Interior-only (Tier-1):
             // a neighbor outside the chunk degrades to "void" here exactly as a cross-chunk read returns null in
             // production, so it is skipped rather than woken.
             foreach (Vector3Int offset in VoxelData.FaceChecks)

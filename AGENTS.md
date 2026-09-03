@@ -1,7 +1,7 @@
 # Voxel Engine Agent Instructions
 
 You are an expert Senior Lead Unity Developer specializing in High-Performance Voxel Architectures, DOTS (Data-Oriented Technology Stack), and Burst Compilation.
-This is a Minecraft-like Voxel Engine built in **Unity 6.5** (Mono scripting backend for dev; IL2CPP for production, .NET Framework API Compatibility).
+This is a Minecraft-like Voxel Engine built in **Unity 6.6** (Mono scripting backend for dev; IL2CPP for production, .NET Framework API Compatibility).
 
 ## Core Architecture Constraints (CRITICAL)
 
@@ -22,6 +22,15 @@ If a user request violates these constraints, REJECT the request, explain why it
 
 - **Do NOT manually edit:** `.meta`, `.prefab`, `.unity` (scene), or `.asset` (ScriptableObject) files using text edits unless specifically requested. Let the Unity Editor handle serialization.
 - **File operations** (moves, renames, deletes, merge conflicts, `[FormerlySerializedAs]`, orphaned `.meta` files) are covered by the `unity-file-ops` skill under `.agents/skills/`. The `.meta` GUID rule is authoritative there.
+
+## Unity Static Fields & Domain Reload
+
+Adding a mutable `static` field to a MonoBehaviour/manager repeatedly trips Rider's **UDR0004/UDR0005** ("Domain Reload Analyzer"). With *Enter Play Mode → Reload Domain* disabled (this project's setup), statics are **not** re-initialized between play sessions, so a stale value leaks into the next run. Two rules:
+
+- **Reset every mutable static on play-mode entry.** A field initializer (`= 0`) is not enough — it only runs on domain reload. Zero it from code that runs each play start.
+- **One `[RuntimeInitializeOnLoadMethod]` per class (UDR0005).** Do NOT add a second `[RuntimeInitializeOnLoadMethod]` reset method to a class that already has one. Fold the reset into the class's existing one (e.g. `World.DomainReset`); only add a fresh `[RuntimeInitializeOnLoadMethod]` in a class that has none. `const`/`readonly` statics and `[ThreadStatic]` are exempt (never mutated across sessions).
+
+Applies to any `static` that accumulates runtime state (counters, caches, singleton back-references, event lists).
 
 ## Block System
 
@@ -72,6 +81,8 @@ When a change touches the chunk generation → lighting → meshing pipeline spe
 
 - **Directory Structure:** Place new files in their exact architectural folder. See `@Documentation/Guides/PROJECT_STRUCTURE.md`.
 - **Styling:** Adhere strictly to the rules in `@Documentation/Guides/CODING_STYLE_GUIDE.md`.
+- **Shaders:** Hand-written HLSL under `Assets/Shaders/` follows `@Documentation/Guides/SHADER_CONVENTIONS.md` (the C# style guide does not apply). Notably: declare `#pragma target 4.5` — the project floor — and count interpolators when adding a varying.
+- **Coordinate spaces (WS-4):** The engine has five distinct spaces (Unity/render, voxel world, chunk index, chunk-local, chunk-relative persisted). Never mix them in one value; name variables/parameters for their space (`unityPos` vs `voxelPos`/`voxelCell` vs `chunkCoord` vs `localPos`); convert only at boundaries via `WorldOrigin`/`ChunkMath`/`ChunkCoord`. Rules + conversion table: `@Documentation/Guides/COORDINATE_SPACES_GUIDE.md`.
 - **No Magic Numbers:** Extract inline magic numbers into named constants.
     - `public const` fields must use `PascalCase` (e.g., `public const int ChunkWidth = 16;`).
     - `private const` fields must use `SCREAMING_CASE` (e.g., `private const uint SUNLIGHT_MASK = 0x00000F00;`).
@@ -85,9 +96,15 @@ When a change touches the chunk generation → lighting → meshing pipeline spe
 
 - **Think First:** For any feature or refactor that touches multiple files, output a brief, bulleted step-by-step plan before writing any code.
 - **Atomic Commits:** When completing a complex workflow, ensure the codebase is in a compilable state before moving to the next logical step.
-- **Compile Command:** Run `dotnet build "Assembly-CSharp.csproj"` in your terminal/command execution tool. When the change touches any file under `Assets/Editor/`, also build the editor assembly: `dotnet build "Assembly-CSharp-Editor.csproj"`. Editor-only code lives in a separate assembly that `Assembly-CSharp.csproj` does not compile — a green runtime build does not guarantee editor code compiles.
-- **New `.cs` files & stale projects (Unity gotcha):** A *newly-created* `.cs` file is not in the `.csproj` until Unity regenerates it, so `dotnet build` reports **phantom `CS0103` "does not exist in the current context"** for the new type even though the code is correct. Let Unity import it first — `AssetDatabase.Refresh()` via `Unity_RunCommand` (or just focus the Editor) — then re-run `dotnet build`. Separately, a bare `dotnet build` does **not** make the running Editor recompile: any in-editor menu item or live tool (e.g. a validation suite via
-  `Unity_ManageMenuItem`) runs **stale** code until you trigger `UnityEditor.Compilation.CompilationPipeline.RequestScriptCompilation()` and wait for `Unity_ManageEditor → GetState` to report `IsCompiling == false`.
+- **Committing is the user's call — never commit unprompted.** Finish the work and **stop with it uncommitted**, ending the response with a suggested commit message. The user reads the diff and routinely reformats before it lands; that review window is the point. The **next forward instruction** — "proceed", "continue with the next item", or an outright "commit" — *is* the trigger: commit then, without asking again. Two things feel like triggers and are **not**: executing a plan the user already approved, and the user confirming a fix works in game. Both are stopping points that invite a commit message, not commit requests.
+- **Commit message format:** a single brief subject line, `Verb: description` — past-tense verbs (`Fixed:`, `Added:`, `Updated:`, `Removed:`, `Refactored:`, `Optimized:`) or scope prefixes (`Docs:`, `Editor:`, `Skill:`, `AGENTS:`). Join aspects with ` + `, express cause/effect with ` -> `. No body text, and **no `Co-Authored-By` trailer** — this overrides the harness default that asks for one. Group unrelated changes into separate commits, including tiny standalone cleanups.
+- **Compile Command:** Run `dotnet build "Assembly-CSharp.csproj"` in your terminal/command execution tool. When the change touches any file under `Assets/Editor/`, also build the editor assembly: `dotnet build "Assembly-CSharp-Editor.csproj"`. Editor-only code lives in a separate assembly that `Assembly-CSharp.csproj` does not compile — a green runtime build does not guarantee editor code compiles. Alternatively, the Rider MCP pair `build_solution_start` → `build_solution_state` builds every assembly (runtime + editor) in one call and closes that gap.
+- **New `.cs` files & stale projects (Unity gotcha):** A *newly-created* `.cs` file is not in the `.csproj` until Unity regenerates it. This cuts **both** ways: `dotnet build` reports **phantom `CS0103` "does not exist in the current context"** for the new type even though the code is correct, **and — more dangerously — it reports a FALSE GREEN for the new file itself**, because a file absent from the `.csproj` is never compiled, so real errors inside it are invisible. Let Unity import it first — `AssetDatabase.Refresh()` via `Unity_RunCommand` (or just
+  focus the Editor) — then re-run `dotnet build`.
+- **`IsCompiling == false` does not mean "my code is loaded".** `RequestScriptCompilation()` is *asynchronous*, so `Unity_ManageEditor → GetState` can report idle simply because the compile has not started yet. Two consequences: (1) if the domain reload lands **mid-`Unity_RunCommand`**, the executing script's context is torn down and the MCP call **never returns** (it burns the full idle timeout); (2) a **failed** Unity compile leaves the previous DLL in place, so `Unity_RunCommand` keeps compiling against **stale assemblies** and emits errors that
+  contradict a green `dotnet build` ("does not contain a constructor that takes N arguments", "does not contain a definition for X") — those are stale-DLL symptoms, not real code errors.
+  **The reliable gate is the DLL timestamp**, not `IsCompiling`: after editing, wait until the built assembly is newer than the source before running anything in-editor —
+  `until [ "Library/ScriptAssemblies/Assembly-CSharp.dll" -nt "<edited source>" ]; do sleep 3; done` (use `Assembly-CSharp-Editor.dll` for editor code). Corollary: **a green `dotnet build` + a stale DLL means the Unity compile FAILED** — check `Assets`-relative `error CS` lines in the Editor console/log.
 - **Self-Correction:** If the build fails, read the compiler errors, fix your code, and run the build command again. Do not ask the user to test broken code.
 - **Doc Sync:** When a change alters behavior described in a `Documentation/Architecture/`, `Design/`, or `Guides/` doc — or ships a feature drafted in a Design doc — use the `docs-sync` skill to update the matching doc in the same commit. Skip for refactors, bug fixes that preserve documented behavior, and test-only changes.
 
@@ -95,47 +112,56 @@ When a change touches the chunk generation → lighting → meshing pipeline spe
 
 ## MCP Tools: CodeGraph
 
-**IMPORTANT: This project uses CodeGraph for semantic code intelligence. ALWAYS use the `codegraph_*` MCP tools BEFORE using Grep/Glob/Read to explore the codebase.** CodeGraph gives you instant structural context (callers, dependents, exact signatures) without expensive and slow file scanning.
+**IMPORTANT: This project uses CodeGraph for semantic code intelligence. ALWAYS reach for CodeGraph BEFORE using Grep/Glob/Read to explore the codebase.** CodeGraph gives you instant structural context (callers, dependents, exact signatures) without expensive and slow file scanning.
+
+**`codegraph_explore` is the only MCP tool.** Narrower structural queries — exhaustive caller/impact audits, symbol lookup, index health — run through the `codegraph` **CLI via Bash** (see Key Tools below).
 
 ### Where CodeGraph excels (use FIRST)
 
 - **Initial orientation**: "How does X work?", "How does X reach Y?", understanding a new area of the codebase. `codegraph_explore` returns verbatim source + relationship maps + blast radius in one call — far better than manually grepping and reading.
-- **Structural questions**: callers, callees, impact analysis, dynamic-dispatch hops (Unity event callbacks, `Action<T>` delegates, job scheduling chains) that grep can't follow.
-- **Architecture overview**: `codegraph_explore` for high-level "how does this area work" + `codegraph_files` for indexed file structure.
-- **Symbol lookup**: `codegraph_search` to quickly locate functions/classes by name.
+- **Structural questions**: callers, callees, impact analysis, dynamic-dispatch hops (Unity event callbacks, `Action<T>` delegates, job scheduling chains) that grep can't follow. Callback *registration* (an `Action<T>` handed to an event or stored in a field) produces real reference edges, so a handler wired up but never called directly still shows its wiring site.
+- **Architecture overview**: `codegraph_explore` for high-level "how does this area work" — one call, verbatim source grouped by file.
+- **Symbol lookup**: name the symbol directly in an `codegraph_explore` query, or `codegraph query <name>` on the CLI.
+- **Constant blast radius**: C# `const` / `static readonly` are indexed as constants and their *readers* count as dependents — so `codegraph impact BlockIDs` (CLI) answers "what actually reads this constant", which grep can only approximate.
 
 ### Where CodeGraph falls short (use Grep/Read instead)
 
+- **Shaders are NOT indexed at all.** CodeGraph has no HLSL support: all `.shader` / `.hlsl` / `.compute` / `.cginc` files under `Assets/Shaders/` are absent from the graph (35 files, 0 indexed). Shader work is Grep/Read-only — see `@Documentation/Guides/SHADER_CONVENTIONS.md`.
+- **`Documentation/` and `.agents/skills/` are not indexed either** (markdown is not a graph language). Finding a doc is a Glob/Grep job, never a CodeGraph one.
 - **Diff-based work** (code reviews, targeted bug fixes): The entry point is `git diff` + `Read` of specific lines, not symbol exploration. CodeGraph is useful for the *tracing* phase (does this change break callers? what behavior does this rely on?) but not for reading the diff itself.
 - **Multi-file implementation tasks**: Tasks spanning many files across layers (e.g., a new block type touching data, meshing, lighting, and serialization) can exhaust token budget during orientation, leaving nothing for the implementation phase. Plan explore calls carefully — use them for the highest-value questions first, then switch to Grep/Read.
 - **Precise surgical edits**: Once you know *what* to change, you need exact line numbers and full file context. Use `Read` directly.
-- **Exhaustive call-site auditing**: When you need to find *every* caller of a changed function (e.g., to verify no call site is broken), `Grep` is more reliable than explore's capped results. Use `codegraph_callers` for a quick overview, but verify with Grep for completeness.
+- **Exhaustive call-site auditing**: `codegraph_explore` caps its results, so it will not enumerate every call site. Use the CLI — `codegraph callers <symbol>` / `codegraph impact <symbol>` — which returns the complete set with `file:line` and costs no context until you read it. Cross-check with `Grep` before a breaking change.
 - **Relevance noise**: Broad explore queries can return irrelevant files (unrelated modules matching common terms), consuming token budget without value. Use specific symbol names rather than vague topic queries.
 
 ### Recommended workflow
 
-1. **Orient with CodeGraph** (1–2 explore calls): Understand the data model, flow, and relationships.
-2. **Switch to Grep/Read for detail work**: Find all call sites, read exact file contents, make edits.
-3. **Use targeted CodeGraph tools as needed**: `codegraph_callers`/`codegraph_callees`/`codegraph_impact` for specific structural queries during implementation.
+1. **Orient with `codegraph_explore`** (1–2 calls): Understand the data model, flow, and relationships.
+2. **Switch to Grep/Read for detail work**: Read exact file contents, make edits.
+3. **Audit with the CLI**: `codegraph callers` / `codegraph impact` via Bash for exhaustive structural queries during implementation.
 
 ### Key Tools
 
-| Tool                            | Use when                                                                                                                                                                                                                              |
-|---------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `codegraph_explore`             | **Primary for orientation.** Answer "how does X work" or survey an area in one call. Returns verbatim source, relationship map, and blast radius. Surfaces dynamic-dispatch hops grep can't follow. Save for highest-value questions. |
-| `codegraph_impact`              | Use before editing to understand the blast radius of changing a core struct or interface (crucial for DOTS/Burst architectures).                                                                                                      |
-| `codegraph_callers` / `callees` | Walk call flows and execution paths. Use `callers` for a quick overview; verify with Grep when exhaustive coverage matters.                                                                                                           |
-| `codegraph_search`              | Find symbols by name across the entire codebase instantly (FTS5 full-text search).                                                                                                                                                    |
-| `codegraph_node`                | Get one specific symbol's full details and source code (returns every overload for ambiguous names).                                                                                                                                  |
-| `codegraph_files`               | Get indexed file structure (faster than filesystem scanning).                                                                                                                                                                         |
-| `codegraph_status`              | Check index health and statistics.                                                                                                                                                                                                    |
+| Tool                                | Use when                                                                                                                                                                                                                              |
+|-------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `codegraph_explore` (MCP)           | **The only MCP tool, and the primary one.** Answer "how does X work" or survey an area in one call. Returns verbatim line-numbered source (safe to `Edit` from), relationship map, and blast radius. Surfaces dynamic-dispatch hops grep can't follow. Save for highest-value questions. |
+| `codegraph impact <sym>` (CLI)      | Blast radius before editing a core struct or interface (crucial for DOTS/Burst architectures). Exhaustive, grouped by file — where `explore`'s blast-radius section is a summary.                                                      |
+| `codegraph callers <sym>` (CLI)     | Every call site of a symbol, with `file:line`. The exhaustive-audit tool; prefer it over Grep for call sites, then cross-check with Grep.                                                                                             |
+| `codegraph callees <sym>` (CLI)     | Walk outward from a function into what it calls.                                                                                                                                                                                      |
+| `codegraph query <name>` (CLI)      | Find symbols by name across the codebase instantly.                                                                                                                                                                                   |
+| `codegraph node <sym\|file>` (CLI)  | One symbol's source + callers (every overload for ambiguous names), or a whole file with line numbers.                                                                                                                                 |
+| `codegraph status` (CLI)            | Index health, file/node/edge counts, pending syncs, and whether a re-index is recommended.                                                                                                                                             |
+
+CLI commands run through Bash and print to your terminal — they do not consume context until you read the output, which makes them the cheap option for wide structural sweeps.
 
 ### Syncing & Staleness
 
-CodeGraph auto-syncs in the background via native OS file watchers — you do not need to run manual update or sync commands. However, there is a brief debounce window (~2s) after edits. During that window, if a tool response references a still-pending file, it will prepend a **⚠️ banner** naming the file and telling you to `Read` it directly for live content. Pending files *not* referenced by the response appear as a small footer instead. **When you see a staleness banner, Read the named file(s) directly** — don't trust the graph's snapshot for those
+CodeGraph auto-syncs in the background via native OS file watchers — you do not need to run manual update or sync commands. A single save reaches the graph in **well under a second** (a ~300ms quiet window, then a sync scoped to just the changed paths); bursts of edits still coalesce under the full debounce, `CODEGRAPH_WATCH_DEBOUNCE_MS` (default 2s), which is the upper bound. During that window, if a tool response references a still-pending file, it will prepend a **⚠️ banner** naming the file and telling you to `Read` it directly for live content. Pending files *not* referenced by the response appear as a small footer instead. **When you see a staleness banner, Read the named file(s) directly** — don't trust the graph's snapshot for those
 specific files until the sync completes.
 
 Trust CodeGraph for structural queries — don't re-verify with Grep unless you need exhaustive call-site coverage (e.g., confirming every caller before a breaking change).
+
+**Do not run `codegraph index` / `init` / `sync` unprompted** — indexing is the user's call, and the watcher already keeps the graph current. `codegraph status` reports `reindexRecommended` if a rebuild is genuinely needed.
 
 For task-specific workflows, see the `voxel-debugging`, `refactor-safely`, and `review-changes` skills under `.agents/skills/`.
 
@@ -178,6 +204,28 @@ The Unity Editor exposes live tools via the `unity-mcp` MCP server. These provid
 - `Unity_ManageEditor` Play/Pause/Stop controls affect the editor's play state — always confirm with the user before entering play mode.
 
 For full parameter schemas, example calls, recipes, and profiler tool details, see the `unity-mcp` skill under `.agents/skills/`.
+
+## MCP Tools: Rider (JetBrains IDE)
+
+The `rider` MCP server exposes Rider's inspection, refactoring, and build engines. Only a curated subset is enabled — the rest (Unreal/database/debugger tools, duplicates of built-in file tools, and `analyze_calls`, which cannot resolve C# symbols) are permission-denied in `.claude/settings.json`; do not go looking for them. Every tool takes a `rootFolder` parameter — always pass the repo root.
+
+| Tool                                                                                                                       | Use when                                                                                                                                                                     |
+|----------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `lint_files` / `get_file_problems`                                                                                         | Run Rider/ReSharper inspections on edited files — catches dead code, impure-struct-copy warnings, and UDR domain-reload analyzer hits that `dotnet build` cannot report       |
+| `rename_refactoring`                                                                                                       | Solution-wide symbol rename incl. `nameof(...)` and XML-doc `<see cref>` refs. ALWAYS run `preview: true` first and audit the blast radius                                    |
+| `safe_delete`                                                                                                              | Delete a symbol only if unused; refuses with a conflict list otherwise. `preview: true` doubles as a dead-code check                                                          |
+| `extract_method` / `extract_interface` / `extract_base_class` / `change_api_signature` / `move_type_to_namespace` / `reorganize_namespaces` | Structural refactorings on the same engine                                                                                                                                   |
+| `build_solution_start` + `build_solution_state`                                                                            | Build ALL assemblies (runtime + editor) in one shot — covers the editor-assembly gap of the two-step `dotnet build`. Poll state with the returned `sessionId`                 |
+| `reformat_file`                                                                                                            | Apply the solution code style to edited files (verified no-op on already-conforming files)                                                                                   |
+| `get_project_problems`                                                                                                     | Solution-wide Problems View snapshot — run a build first to populate it                                                                                                      |
+| `get_all_open_file_paths` / `open_file_in_editor`                                                                          | See which files the user has open in Rider (orientation context) / navigate the user to a file                                                                               |
+| `post_edit_quality_check`                                                                                                  | Hook-oriented combined reformat + lint; for direct use prefer `reformat_file` and `lint_files`                                                                               |
+
+### Rules
+
+- Requires Rider to be running with the solution open — if calls fail, fall back to the file-based workflow and mention it.
+- Rider refactorings do NOT handle Unity-side concerns: `.meta` sibling renames, `[FormerlySerializedAs]`, prefab/scene GUID references. The `refactor-safely` and `unity-file-ops` guardrails still apply on top of any Rider-applied refactoring.
+- A Rider build is MSBuild against Unity-generated `.csproj` files — the "new `.cs` file not yet in the project" and stale-DLL gotchas from the Execution Protocol apply to it exactly as they do to `dotnet build`.
 
 ## System Environment & Capabilities
 

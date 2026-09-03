@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Runtime.Serialization;
 using Data;
+using Editor.Dev;
 using Editor.Validation.Framework;
 using Helpers;
 using UnityEditor;
@@ -28,7 +29,7 @@ namespace Editor.Validation.MeshQueue
         /// <see cref="ValidationSuiteRunner"/>. Baseline failures mark the suite red; known-bug
         /// reproductions are reported as warnings.
         /// </summary>
-        [MenuItem("Minecraft Clone/Dev/Validate Mesh Build Queue")]
+        [MenuItem("Minecraft Clone/Dev/Validate Mesh Build Queue", priority = DevMenuPriority.Validation)]
         public static void RunAll() => Execute();
 
         /// <summary>

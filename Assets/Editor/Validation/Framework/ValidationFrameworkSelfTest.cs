@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Xml;
+using Editor.Dev;
 using UnityEditor;
 using UnityEngine;
 
@@ -17,7 +18,7 @@ namespace Editor.Validation.Framework
     public static class ValidationFrameworkSelfTest
     {
         /// <summary>Menu entry — runs the framework self-tests and logs the categorized summary.</summary>
-        [MenuItem("Minecraft Clone/Dev/Validate Validation Framework")]
+        [MenuItem("Minecraft Clone/Dev/Validate Validation Framework", priority = DevMenuPriority.Validation)]
         public static void RunAll() => Execute();
 
         /// <summary>Builds and runs the framework self-test scenarios (all baselines).</summary>

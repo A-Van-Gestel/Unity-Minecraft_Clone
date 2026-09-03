@@ -31,7 +31,7 @@ namespace Helpers
         public static Color32 BuildFlatLight(ushort lightData)
         {
             return new Color32(
-                (byte)(LightBitMapping.GetSkyLight(lightData) * 17),
+                (byte)(LightBitMapping.GetSkylight(lightData) * 17),
                 (byte)(LightBitMapping.GetBlocklightR(lightData) * 17),
                 (byte)(LightBitMapping.GetBlocklightG(lightData) * 17),
                 (byte)(LightBitMapping.GetBlocklightB(lightData) * 17)
@@ -106,13 +106,31 @@ namespace Helpers
         /// <summary>
         /// Calculates and appends the precise UV coordinates for a given texture ID to the UV list.
         /// Accounts for the normalized texture atlas size and origin alignment.
-        /// The ZW components are zeroed; they are only meaningful for fluid top faces (shore push).
+        /// The ZW components are zeroed; per-submesh they carry fluid shore push (fluid top faces)
+        /// or foliage sway weight/phase (cross meshes, via the sway overload).
         /// </summary>
         /// <param name="textureID">The index of the texture within the atlas.</param>
         /// <param name="uv">The local UV offset for the current vertex.</param>
         /// <param name="uvs">The native list of UVs to append to.</param>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         private static void AddTexture(int textureID, Vector2 uv, ref NativeList<half4> uvs)
+        {
+            AddTexture(textureID, uv, swayWeight: 0f, swayPhase: 0f, ref uvs);
+        }
+
+        /// <summary>
+        /// Sway-aware variant of <see cref="AddTexture(int, Vector2, ref NativeList{half4})"/>:
+        /// writes the atlas UV to XY and foliage sway data to ZW (FL-1). The transparent block
+        /// shader reads Z as the vertex's sway displacement weight and W as its per-voxel wind
+        /// phase; every non-sway emission path keeps ZW at zero via the plain overload.
+        /// </summary>
+        /// <param name="textureID">The index of the texture within the atlas.</param>
+        /// <param name="uv">The local UV offset for the current vertex.</param>
+        /// <param name="swayWeight">Sway displacement weight in [0, 1] (0 = vertex never moves).</param>
+        /// <param name="swayPhase">Per-voxel wind phase in [0, 1), from <see cref="VoxelHash01"/>.</param>
+        /// <param name="uvs">The native list of UVs to append to.</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void AddTexture(int textureID, Vector2 uv, float swayWeight, float swayPhase, ref NativeList<half4> uvs)
         {
             float y = Mathf.FloorToInt((float)textureID / VoxelData.TextureAtlasSizeInBlocks);
             float x = textureID - y * VoxelData.TextureAtlasSizeInBlocks;
@@ -125,7 +143,53 @@ namespace Helpers
             x += VoxelData.NormalizedBlockTextureSize * uv.x;
             y += VoxelData.NormalizedBlockTextureSize * uv.y;
 
-            uvs.Add((half4)new float4(x, y, 0f, 0f)); // MR-2: Float16×4. zw = 0; shore push is fluid-only
+            uvs.Add((half4)new float4(x, y, swayWeight, swayPhase)); // MR-2: Float16×4
+        }
+
+        /// <summary>
+        /// Deterministic per-voxel hash mapped to [0, 1) (lowbias32-style avalanche). Hash the
+        /// <b>voxel-space</b> cell, never a Unity-space position: the result then survives
+        /// floating-origin re-anchors and chunk re-meshes bit-identically (WS-4 rule).
+        /// Used for the foliage sway phase (FL-1); FL-4's per-voxel variation reuses it.
+        /// </summary>
+        /// <param name="x">Voxel-space cell X.</param>
+        /// <param name="y">Voxel-space cell Y.</param>
+        /// <param name="z">Voxel-space cell Z.</param>
+        /// <returns>A deterministic pseudo-random value in [0, 1).</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static float VoxelHash01(int x, int y, int z)
+        {
+            uint h = (uint)x * 0x9E3779B1u ^ (uint)y * 0x85EBCA77u ^ (uint)z * 0xC2B2AE3Du;
+            h ^= h >> 16;
+            h *= 0x7FEB352Du;
+            h ^= h >> 15;
+            h *= 0x846CA68Bu;
+            h ^= h >> 16;
+            return h * (1f / 4294967296f);
+        }
+
+        /// <summary>
+        /// Raw (un-normalized) salted variant of <see cref="VoxelHash01"/>: same avalanche over the
+        /// <b>voxel-space</b> cell, mixed with a caller-chosen salt so independent per-voxel decisions
+        /// stay de-correlated, and returning all 32 bits so one call can be bit-sliced into several
+        /// values (FL-4). Deliberately a separate function — <see cref="VoxelHash01"/>'s output is
+        /// pinned by the shipped FL-1/FL-2 sway phases and must stay bit-identical.
+        /// </summary>
+        /// <param name="x">Voxel-space cell X.</param>
+        /// <param name="y">Voxel-space cell Y.</param>
+        /// <param name="z">Voxel-space cell Z.</param>
+        /// <param name="salt">Per-use-site salt; distinct salts give uncorrelated streams for one cell.</param>
+        /// <returns>The full 32-bit avalanche result.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static uint VoxelHashU32(int x, int y, int z, uint salt)
+        {
+            uint h = (uint)x * 0x9E3779B1u ^ (uint)y * 0x85EBCA77u ^ (uint)z * 0xC2B2AE3Du ^ salt;
+            h ^= h >> 16;
+            h *= 0x7FEB352Du;
+            h ^= h >> 15;
+            h *= 0x846CA68Bu;
+            h ^= h >> 16;
+            return h;
         }
 
         /// <summary>
@@ -211,7 +275,7 @@ namespace Helpers
 
                 vertices.Add(world);
                 normals.Add(BurstVoxelData.FaceChecks.Data[faceIndex]);
-                colors.Add(new Color32(255, 255, 255, 255));
+                colors.Add(new Color32(255, 255, 255, 0));
 
                 // Use the FaceUvOrder array to get the correct UV for this vertex.
                 int uvIndex = s_faceUvOrder[faceIndex * 4 + i];
@@ -225,6 +289,197 @@ namespace Helpers
             }
 
             // Write per-vertex light data (outside the vertex loop for clarity).
+            lightData.Add(light0);
+            lightData.Add(light1);
+            lightData.Add(light2);
+            lightData.Add(light3);
+
+            NativeList<int> targetTris = isTransparent ? ref transparentTriangles : ref triangles;
+            EmitQuadTriangles(light0, light1, light2, light3, vertexIndex, ref targetTris);
+
+            vertexIndex += 4;
+        }
+
+        /// <summary>
+        /// VO-9b: a face's four emitted corners — positions and tile-space UVs — in the mesh's vertex
+        /// order, which is also the <c>l0..l3</c> corner-light order.
+        /// </summary>
+        public struct FaceQuad
+        {
+            /// <summary>Corner 0 position (parameter <c>(0, 0)</c>).</summary>
+            public float3 P0;
+
+            /// <summary>Corner 1 position (parameter <c>(0, 1)</c>).</summary>
+            public float3 P1;
+
+            /// <summary>Corner 2 position (parameter <c>(1, 0)</c>).</summary>
+            public float3 P2;
+
+            /// <summary>Corner 3 position (parameter <c>(1, 1)</c>).</summary>
+            public float3 P3;
+
+            /// <summary>Corner 0 tile-space UV.</summary>
+            public float2 T0;
+
+            /// <summary>Corner 1 tile-space UV.</summary>
+            public float2 T1;
+
+            /// <summary>Corner 2 tile-space UV.</summary>
+            public float2 T2;
+
+            /// <summary>Corner 3 tile-space UV.</summary>
+            public float2 T3;
+        }
+
+        /// <summary>
+        /// VO-9b: resolves a standard cube face's four emitted corners without emitting anything, so a
+        /// caller can subdivide the face and still land on exactly the geometry
+        /// <see cref="GenerateStandardCubeFace"/> would have produced.
+        /// </summary>
+        /// <param name="faceIndex">Geometry face index (0-5).</param>
+        /// <param name="position">Block position in chunk-local space.</param>
+        /// <param name="rotation">Y-axis rotation in degrees; 0 for the unrotated case.</param>
+        /// <param name="uvQuarterTurnsCW">Number of 90° clockwise UV rotations to apply (0-3).</param>
+        /// <param name="quad">The face's four corner positions and tile-space UVs.</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void GetStandardCubeFaceQuad(int faceIndex, in Vector3Int position, float rotation,
+            int uvQuarterTurnsCW, out FaceQuad quad)
+        {
+            bool isRotated = rotation != 0f;
+            float3 center = BurstVoxelData.BlockCenter;
+            float3x3 yRotation = isRotated ? BurstCustomMeshRotationUtility.GetYRotationMatrix(rotation) : default;
+            float3 origin = new float3(position.x, position.y, position.z);
+
+            quad = default;
+            for (int i = 0; i < 4; i++)
+            {
+                int vertIndex = BurstVoxelData.VoxelTris.Data[faceIndex * 4 + i];
+                float3 vertPos = BurstVoxelData.VoxelVerts.Data[vertIndex];
+                float3 world = isRotated
+                    ? origin + math.mul(yRotation, vertPos - center) + center
+                    : origin + vertPos;
+
+                Vector2 uv = BurstVoxelData.VoxelUvs.Data[s_faceUvOrder[faceIndex * 4 + i]];
+                if ((uvQuarterTurnsCW & 3) != 0) uv = RotateUvQuarterTurnsCW(uv, uvQuarterTurnsCW);
+
+                switch (i)
+                {
+                    case 0:
+                        quad.P0 = world;
+                        quad.T0 = uv;
+                        break;
+                    case 1:
+                        quad.P1 = world;
+                        quad.T1 = uv;
+                        break;
+                    case 2:
+                        quad.P2 = world;
+                        quad.T2 = uv;
+                        break;
+                    default:
+                        quad.P3 = world;
+                        quad.T3 = uv;
+                        break;
+                }
+            }
+        }
+
+        /// <summary>
+        /// VO-9b: carves the axis-aligned parameter rectangle <c>[u0, u1] × [v0, v1]</c> out of a face,
+        /// bilinearly interpolating both positions and tile UVs. Interpolating the UVs is what keeps a
+        /// subdivided face sampling its own slice of the atlas tile instead of repeating the whole tile
+        /// per sub-quad.
+        /// </summary>
+        /// <param name="quad">The full face.</param>
+        /// <param name="u0">Low edge of the sub-rectangle on the first parameter axis.</param>
+        /// <param name="v0">Low edge on the second parameter axis.</param>
+        /// <param name="u1">High edge on the first parameter axis.</param>
+        /// <param name="v1">High edge on the second parameter axis.</param>
+        /// <param name="sub">The resulting sub-quad, in the same corner order.</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static void GetSubQuad(in FaceQuad quad, float u0, float v0, float u1, float v1,
+            out FaceQuad sub)
+        {
+            sub = default;
+            sub.P0 = BilerpPosition(in quad, u0, v0);
+            sub.P1 = BilerpPosition(in quad, u0, v1);
+            sub.P2 = BilerpPosition(in quad, u1, v0);
+            sub.P3 = BilerpPosition(in quad, u1, v1);
+            sub.T0 = BilerpUv(in quad, u0, v0);
+            sub.T1 = BilerpUv(in quad, u0, v1);
+            sub.T2 = BilerpUv(in quad, u1, v0);
+            sub.T3 = BilerpUv(in quad, u1, v1);
+        }
+
+        /// <summary>Bilinearly interpolates a face's corner positions, in the l0..l3 weighting convention.</summary>
+        /// <param name="quad">The face.</param>
+        /// <param name="u">First parameter axis coordinate.</param>
+        /// <param name="v">Second parameter axis coordinate.</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static float3 BilerpPosition(in FaceQuad quad, float u, float v)
+        {
+            return quad.P0 * ((1f - u) * (1f - v)) + quad.P1 * ((1f - u) * v)
+                                                   + quad.P2 * (u * (1f - v)) + quad.P3 * (u * v);
+        }
+
+        /// <summary>Bilinearly interpolates a face's corner tile UVs, in the l0..l3 weighting convention.</summary>
+        /// <param name="quad">The face.</param>
+        /// <param name="u">First parameter axis coordinate.</param>
+        /// <param name="v">Second parameter axis coordinate.</param>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static float2 BilerpUv(in FaceQuad quad, float u, float v)
+        {
+            return quad.T0 * ((1f - u) * (1f - v)) + quad.T1 * ((1f - u) * v)
+                                                   + quad.T2 * (u * (1f - v)) + quad.T3 * (u * v);
+        }
+
+        /// <summary>
+        /// VO-9b: emits one explicitly-positioned quad — the sub-quad primitive the tessellated
+        /// smooth-lighting path builds a face out of. Winding, atlas mapping and the anisotropy-aware
+        /// diagonal split are the same ones <see cref="GenerateStandardCubeFace"/> uses, so a
+        /// single-quad call through here is indistinguishable from an ordinary face.
+        /// </summary>
+        /// <param name="quad">The quad's four corner positions and tile-space UVs.</param>
+        /// <param name="textureID">Atlas texture index.</param>
+        /// <param name="normal">Face normal shared by all four vertices.</param>
+        /// <param name="light0">Light at corner 0.</param>
+        /// <param name="light1">Light at corner 1.</param>
+        /// <param name="light2">Light at corner 2.</param>
+        /// <param name="light3">Light at corner 3.</param>
+        /// <param name="vertexIndex">Running vertex counter, advanced by 4.</param>
+        /// <param name="vertices">Vertex position stream.</param>
+        /// <param name="triangles">Opaque triangle index stream.</param>
+        /// <param name="transparentTriangles">Transparent triangle index stream.</param>
+        /// <param name="uvs">UV stream.</param>
+        /// <param name="colors">Vertex color stream.</param>
+        /// <param name="normals">Normal stream.</param>
+        /// <param name="lightData">Per-vertex light stream.</param>
+        /// <param name="isTransparent">Routes the triangles to the transparent submesh.</param>
+        [BurstCompile]
+        [SkipLocalsInit]
+        public static void EmitFaceQuad(in FaceQuad quad, int textureID, in Vector3 normal,
+            Color32 light0, Color32 light1, Color32 light2, Color32 light3,
+            ref int vertexIndex,
+            ref NativeList<Vector3> vertices, ref NativeList<int> triangles, ref NativeList<int> transparentTriangles,
+            ref NativeList<half4> uvs, ref NativeList<Color32> colors, ref NativeList<Vector3> normals,
+            ref NativeList<Color32> lightData, bool isTransparent)
+        {
+            vertices.Add(quad.P0);
+            vertices.Add(quad.P1);
+            vertices.Add(quad.P2);
+            vertices.Add(quad.P3);
+
+            for (int i = 0; i < 4; i++)
+            {
+                normals.Add(normal);
+                colors.Add(new Color32(255, 255, 255, 0));
+            }
+
+            AddTexture(textureID, quad.T0, ref uvs);
+            AddTexture(textureID, quad.T1, ref uvs);
+            AddTexture(textureID, quad.T2, ref uvs);
+            AddTexture(textureID, quad.T3, ref uvs);
+
             lightData.Add(light0);
             lightData.Add(light1);
             lightData.Add(light2);
@@ -354,7 +609,7 @@ namespace Helpers
                 vertices.Add(position + direction + center);
 
                 normals.Add(BurstVoxelData.FaceChecks.Data[faceIndex]);
-                colors.Add(new Color32(255, 255, 255, 255));
+                colors.Add(new Color32(255, 255, 255, 0));
                 lightData.Add(flatLight);
                 AddTexture(textureID, vertData.UV, ref uvs);
             }
@@ -416,7 +671,7 @@ namespace Helpers
 
                 vertices.Add(position + direction + center);
                 normals.Add(BurstVoxelData.FaceChecks.Data[faceIndex]);
-                colors.Add(new Color32(255, 255, 255, 255));
+                colors.Add(new Color32(255, 255, 255, 0));
 
                 GetCornerUV(worldFaceIndex, blockLocal, out float u, out float v);
                 lightData.Add(BilinearLerpLight(l0, l1, l2, l3, u, v));
@@ -484,7 +739,7 @@ namespace Helpers
                 vertices.Add(position + (Vector3)rotated);
 
                 normals.Add(rotatedNormal);
-                colors.Add(new Color32(255, 255, 255, 255));
+                colors.Add(new Color32(255, 255, 255, 0));
                 lightData.Add(flatLight);
                 AddTexture(textureID, vertData.UV, ref uvs);
             }
@@ -545,7 +800,7 @@ namespace Helpers
                 vertices.Add(position + (Vector3)rotated);
 
                 normals.Add(rotatedNormal);
-                colors.Add(new Color32(255, 255, 255, 255));
+                colors.Add(new Color32(255, 255, 255, 0));
 
                 GetCornerUV(worldFaceIndex, rotated, out float u, out float v);
                 lightData.Add(BilinearLerpLight(l0, l1, l2, l3, u, v));
@@ -571,6 +826,7 @@ namespace Helpers
         private static void AddCrossQuad(
             Vector3 bl, Vector3 tl, Vector3 br, Vector3 tr, Vector3 normal, int textureID, Color32 vertexColor,
             Color32 lightBL, Color32 lightTL, Color32 lightBR, Color32 lightTR, in Vector3Int position,
+            float swayPhase, bool mirrorU,
             ref int vertexIndex, ref NativeList<Vector3> vertices, ref NativeList<int> transparentTriangles,
             ref NativeList<half4> uvs, ref NativeList<Color32> colors, ref NativeList<Vector3> normals,
             ref NativeList<Color32> lightData)
@@ -595,10 +851,17 @@ namespace Helpers
             lightData.Add(lightBR);
             lightData.Add(lightTR);
 
-            AddTexture(textureID, new Vector2(0, 0), ref uvs); // BL
-            AddTexture(textureID, new Vector2(0, 1), ref uvs); // TL
-            AddTexture(textureID, new Vector2(1, 0), ref uvs); // BR
-            AddTexture(textureID, new Vector2(1, 1), ref uvs); // TR
+            // FL-4: a mirrored voxel swaps the texture's U extremes, so one atlas tile reads as two
+            // different plants. Geometry is untouched — the cross already contains both diagonals.
+            float uLeft = mirrorU ? 1f : 0f;
+            float uRight = mirrorU ? 0f : 1f;
+
+            // FL-1: grass bends from the root — only the two top verts carry sway weight,
+            // so the base stays planted and the mesh can never displace into the ground.
+            AddTexture(textureID, new Vector2(uLeft, 0), swayWeight: 0f, swayPhase, ref uvs); // BL
+            AddTexture(textureID, new Vector2(uLeft, 1), swayWeight: 1f, swayPhase, ref uvs); // TL
+            AddTexture(textureID, new Vector2(uRight, 0), swayWeight: 0f, swayPhase, ref uvs); // BR
+            AddTexture(textureID, new Vector2(uRight, 1), swayWeight: 1f, swayPhase, ref uvs); // TR
 
             EmitQuadTriangles(lightBL, lightTL, lightBR, lightTR, vertexIndex, ref transparentTriangles);
 
@@ -606,22 +869,51 @@ namespace Helpers
         }
 
         /// <summary>
+        /// Applies a voxel's FL-4 variation to one unit-cube cross corner: scale is uniform and
+        /// centred in XZ but anchored at y = 0 (the plant grows upward, never into the ground),
+        /// then the hashed XZ offset shifts the whole plant within — and slightly beyond — its cell.
+        /// </summary>
+        /// <param name="x">Unit corner X (0 or 1).</param>
+        /// <param name="y">Unit corner Y (0 or 1).</param>
+        /// <param name="z">Unit corner Z (0 or 1).</param>
+        /// <param name="variation">The voxel's variation.</param>
+        /// <returns>The varied cell-local corner position.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static Vector3 VaryCrossCorner(float x, float y, float z, in CrossMeshVariation variation)
+        {
+            const float CELL_CENTER = 0.5f;
+            return new Vector3(
+                CELL_CENTER + (x - CELL_CENTER) * variation.Scale + variation.OffsetX,
+                y * variation.Scale,
+                CELL_CENTER + (z - CELL_CENTER) * variation.Scale + variation.OffsetZ);
+        }
+
+        /// <summary>
         /// Generates a cross mesh for minor flora (two intersecting diagonal planes).
         /// Bypasses standard neighbor culling and uses diagonal normals.
         /// Per-vertex light values are read from <paramref name="cornerLights"/>, which is pre-populated
         /// by the caller with either smooth corner-averaged values or uniform flat values.
+        /// Sway data rides the UV ZW channels (FL-1): top verts get weight 1, bottom verts 0, and
+        /// every vert carries <paramref name="swayPhase"/> so the shader can de-synchronize tufts.
+        /// <paramref name="variation"/> (FL-4) jitters the plant's position, size, and texture mirror
+        /// per voxel; pass <see cref="CrossMeshVariation.Identity"/> for an unvaried, centred cross.
         /// </summary>
+        /// <param name="textureID">Atlas index of the flora texture.</param>
+        /// <param name="cornerLights">Pre-resolved per-corner light values (top and bottom levels).</param>
+        /// <param name="position">The voxel's chunk-local cell.</param>
+        /// <param name="swayPhase">Per-voxel wind phase in [0, 1), from <see cref="VoxelHash01"/>.</param>
+        /// <param name="variation">Per-voxel offset / scale / mirror (FL-4).</param>
         [BurstCompile]
         [SkipLocalsInit]
         public static void GenerateCrossMesh(
             int textureID, in CrossMeshCornerLights cornerLights,
-            in Vector3Int position,
+            in Vector3Int position, float swayPhase, in CrossMeshVariation variation,
             ref int vertexIndex,
             ref NativeList<Vector3> vertices, ref NativeList<int> transparentTriangles,
             ref NativeList<half4> uvs, ref NativeList<Color32> colors, ref NativeList<Vector3> normals,
             ref NativeList<Color32> lightData)
         {
-            Color32 vertexColor = new Color32(255, 255, 255, 255);
+            Color32 vertexColor = new Color32(255, 255, 255, 0);
 
             // Resolve per-vertex light values from the precomputed struct.
             // Corner layout: L0=(x=0,z=0), L1=(x=0,z=1), L2=(x=1,z=0), L3=(x=1,z=1).
@@ -635,40 +927,41 @@ namespace Helpers
             Color32 light_1_0_1 = cornerLights.BotL3;
             Color32 light_1_1_1 = cornerLights.TopL3;
 
-            // Plane 1: (0,0,0) to (1,1,1)
-            Vector3 p1_bl = new Vector3(0, 0, 0);
-            Vector3 p1_tl = new Vector3(0, 1, 0);
-            Vector3 p1_br = new Vector3(1, 0, 1);
-            Vector3 p1_tr = new Vector3(1, 1, 1);
+            // Plane 1: (0,0,0) to (1,1,1) — corners are varied per voxel (FL-4); normals are not,
+            // because a uniform scale plus a translation leaves face directions unchanged.
+            Vector3 p1_bl = VaryCrossCorner(0, 0, 0, in variation);
+            Vector3 p1_tl = VaryCrossCorner(0, 1, 0, in variation);
+            Vector3 p1_br = VaryCrossCorner(1, 0, 1, in variation);
+            Vector3 p1_tr = VaryCrossCorner(1, 1, 1, in variation);
             Vector3 normal1_front = new Vector3(-0.7071f, 0f, 0.7071f);
             Vector3 normal1_back = new Vector3(0.7071f, 0f, -0.7071f);
 
             // Plane 2: (1,0,0) to (0,1,1)
-            Vector3 p2_bl = new Vector3(1, 0, 0);
-            Vector3 p2_tl = new Vector3(1, 1, 0);
-            Vector3 p2_br = new Vector3(0, 0, 1);
-            Vector3 p2_tr = new Vector3(0, 1, 1);
+            Vector3 p2_bl = VaryCrossCorner(1, 0, 0, in variation);
+            Vector3 p2_tl = VaryCrossCorner(1, 1, 0, in variation);
+            Vector3 p2_br = VaryCrossCorner(0, 0, 1, in variation);
+            Vector3 p2_tr = VaryCrossCorner(0, 1, 1, in variation);
             Vector3 normal2_front = new Vector3(0.7071f, 0f, 0.7071f);
             Vector3 normal2_back = new Vector3(-0.7071f, 0f, -0.7071f);
 
             // Plane 1 front: bl=(0,0,0), tl=(0,1,0), br=(1,0,1), tr=(1,1,1)
             AddCrossQuad(p1_bl, p1_tl, p1_br, p1_tr, normal1_front, textureID, vertexColor,
-                light_0_0_0, light_0_1_0, light_1_0_1, light_1_1_1, in position,
+                light_0_0_0, light_0_1_0, light_1_0_1, light_1_1_1, in position, swayPhase, variation.MirrorU,
                 ref vertexIndex, ref vertices, ref transparentTriangles, ref uvs, ref colors, ref normals, ref lightData);
 
             // Plane 1 back: bl=(1,0,1), tl=(1,1,1), br=(0,0,0), tr=(0,1,0)
             AddCrossQuad(p1_br, p1_tr, p1_bl, p1_tl, normal1_back, textureID, vertexColor,
-                light_1_0_1, light_1_1_1, light_0_0_0, light_0_1_0, in position,
+                light_1_0_1, light_1_1_1, light_0_0_0, light_0_1_0, in position, swayPhase, variation.MirrorU,
                 ref vertexIndex, ref vertices, ref transparentTriangles, ref uvs, ref colors, ref normals, ref lightData);
 
             // Plane 2 front: bl=(1,0,0), tl=(1,1,0), br=(0,0,1), tr=(0,1,1)
             AddCrossQuad(p2_bl, p2_tl, p2_br, p2_tr, normal2_front, textureID, vertexColor,
-                light_1_0_0, light_1_1_0, light_0_0_1, light_0_1_1, in position,
+                light_1_0_0, light_1_1_0, light_0_0_1, light_0_1_1, in position, swayPhase, variation.MirrorU,
                 ref vertexIndex, ref vertices, ref transparentTriangles, ref uvs, ref colors, ref normals, ref lightData);
 
             // Plane 2 back: bl=(0,0,1), tl=(0,1,1), br=(1,0,0), tr=(1,1,0)
             AddCrossQuad(p2_br, p2_tr, p2_bl, p2_tl, normal2_back, textureID, vertexColor,
-                light_0_0_1, light_0_1_1, light_1_0_0, light_1_1_0, in position,
+                light_0_0_1, light_0_1_1, light_1_0_0, light_1_1_0, in position, swayPhase, variation.MirrorU,
                 ref vertexIndex, ref vertices, ref transparentTriangles, ref uvs, ref colors, ref normals, ref lightData);
         }
 
@@ -678,7 +971,7 @@ namespace Helpers
         /// and the levels of its neighbors. This method uses pre-computed vertex height templates for high performance.
         /// When <paramref name="smoothLighting"/> is enabled, per-vertex corner-averaged light values from
         /// <paramref name="cornerLights"/> are used with direct assignment (top/bottom) or bilinear
-        /// interpolation (sides). Otherwise, flat lighting with separate sun/block channels is applied.
+        /// interpolation (sides). Otherwise, flat lighting with separate sky/block channels is applied.
         /// </summary>
         [SkipLocalsInit] // Optimization: Fluid generation uses many local floats/vectors. Skipping init saves cycles.
         public static void GenerateFluidMeshData(
@@ -757,7 +1050,7 @@ namespace Helpers
 
                 // --- Top face lighting ---
                 // Smooth: direct corner assignment (vertices sit at XZ block corners).
-                // Flat: single value from the block above, with separate sun/block channels.
+                // Flat: single value from the block above, with separate sky/block channels.
                 Color32 topLight0, topLight1, topLight2, topLight3;
                 if (smoothLighting)
                 {
@@ -928,7 +1221,7 @@ namespace Helpers
 
                 // --- Side face lighting ---
                 // Smooth: bilinear interpolation — vertices have sub-block Y from height override.
-                // Flat: single value from the side neighbor, with separate sun/block channels.
+                // Flat: single value from the side neighbor, with separate sky/block channels.
                 Color32 sideLight1, sideLight2, sideLight3, sideLight4;
                 if (smoothLighting)
                 {
@@ -1013,7 +1306,7 @@ namespace Helpers
 
                 // --- Bottom face lighting ---
                 // Smooth: direct corner assignment (vertices sit at XZ block corners at y=0).
-                // Flat: single value from the block below, with separate sun/block channels.
+                // Flat: single value from the block below, with separate sky/block channels.
                 // Bottom face LUT corners are X-mirrored vs the vertex emission order:
                 //   LUT corner 0 = (1,0,0)=BR, 1 = (1,0,1)=TR, 2 = (0,0,0)=BL, 3 = (0,0,1)=TL
                 //   Vertices emitted: BL, TL, BR, TR

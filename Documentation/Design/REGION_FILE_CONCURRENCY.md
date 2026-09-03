@@ -1,8 +1,36 @@
 # Architectural Analysis: Region File Thread Safety & Concurrency
 
-> **Tracked as `SL-4` in `PERFORMANCE_IMPROVEMENTS_REPORT.md`** (added 2026-07-02, fourth-pass
-> audit). This document remains the design authority; the report entry carries the
-> effort/risk/benefit rating and sequencing.
+**Version:** 1.0  
+**Date:** 2026-07-26  
+**Status:** **Proposed design — not implemented.** `RegionFile` still serializes *all* I/O behind one
+exclusive lock; none of the strategies below has been built.  
+**Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
+
+> Why `RegionFile`'s single global lock is a load-path bottleneck, and the options for relaxing it
+> without risking save corruption. **The recommended direction (§Conclusion): split the read and write
+> locks — concurrent reads via `FileStream` pooling or `RandomAccess`, writes kept serialized** — because
+> writes must mutate shared metadata (`_offsets`, `_sectorUsage`) and can resize the file, so fully
+> concurrent writes buy little and risk much. Reads are what block gameplay; writes already run async.
+
+**Audited:** 2026-07-26, at commit `3f579e44` (branch `feat/world-scaling`). The premise was
+re-verified in code, not assumed: `Assets/Scripts/Serialization/RegionFile.cs` holds a single
+`private readonly object _fileLock` (:25) taken by **all five** I/O paths (:39, :117, :197, :312, :380),
+its own comment stating "exclusive locking for BOTH reads and writes" (:24). The `FileStream` is opened
+`FileShare.Read` (:63); there is no stream pool, no `SafeFileHandle`/`RandomAccess` use, and no
+separate write lock anywhere in the file.
+
+**Relationship to other documents:**
+
+- [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](PERFORMANCE_IMPROVEMENTS_REPORT.md) — **tracked as `SL-4`**
+  (added 2026-07-02, fourth-pass audit). That entry carries the effort/risk/benefit rating and the
+  sequencing; **this document remains the design authority** for the approach.
+- [`../Architecture/INFINITE_WORLD_STORAGE_AND_SERIALIZATION_ARCHITECTURE.md`](../Architecture/INFINITE_WORLD_STORAGE_AND_SERIALIZATION_ARCHITECTURE.md)
+  — the region-file format and storage layer this concurrency work sits under.
+- [`../Architecture/AOT_WORLD_MIGRATION_SYSTEM.md`](../Architecture/AOT_WORLD_MIGRATION_SYSTEM.md) — not
+  engaged: every option here changes *access scheduling only*, never the on-disk layout, so no save
+  format bump or migration step is implied.
+
+---
 
 ## Background
 
@@ -34,7 +62,7 @@ If we want to allow concurrent writes to different parts of the region file, we 
 
 ### 3. The Hybrid Approach: Concurrent Reads + Queued/Serialized Writes (Best Balance)
 
-Given that writes involve metadata updates (Sector map, offsets table) and potentially expanding the file's length, fully concurrent writes are highly complex and prone to edge-case corruption (e.g., two chunks requesting free sectors simultaneously).
+Given that writes involve metadata updates (Sector map, offsets table) and potentially expanding the file's length, fully concurrent writes are highly complex and prone to edge-case corruption (e.g., two chunks requesting free sectors simultaneously).  
 **The most robust solution:**
 
 - **Reads:** Fully concurrent using a pool of `FileStream` objects (or `FileOptions.Asynchronous` with `RandomAccess` in newer .NET versions).
@@ -59,3 +87,29 @@ If moving to a multi-lock/concurrent system, the following MUST be guaranteed:
 ## Conclusion & Next Steps
 
 The most performant and safest immediate step is to **split the Read and Write locks**, employing `FileStream` pooling for concurrent reads, while keeping writes serialized. This tackles the biggest performance bottleneck (loading stalls) while avoiding the immense complexity and corruption risks of fully concurrent writes.
+
+---
+
+## Document History
+
+*Entries before v1.0 are reconstructed from git history — this document predates the project's
+Document History convention, so they record what the commits changed, not contemporaneous notes.*
+
+* **v1.0** - Mandatory header added (2026-07-26): `Version`/`Date`/`Status`/`Target`, summary
+  blockquote, `Audited` line, and the relationship list. Status set to **Proposed design — not
+  implemented** after re-verifying in code that `RegionFile` still takes one exclusive `_fileLock` on
+  all five I/O paths. The pre-existing "tracked as `SL-4`" note moved into the relationship list. No
+  analysis or recommendation was changed — this was a header-only pass. First versioned edition.
+* *(2026-07-02, `7f75338a`)* - Cross-linked into the performance backlog as **`SL-4`** by the
+  fourth-pass perf audit; that report took ownership of the effort/risk/benefit rating and sequencing,
+  leaving this document as the design authority.
+* *(2026-04-16, `cb787249`)* - Moved into the restructured `Documentation/` tree.
+* *(2026-03-07, `7dfda83c`)* - Initial analysis: why the global `_fileLock` bottlenecks I/O, the four
+  candidate strategies, the corruption-prevention requirements, and the split-read/write-lock verdict.
+
+---
+
+**Last Updated:** 2026-07-26 (header added; premise re-verified against `RegionFile.cs`)  
+**Next Review:** when `SL-4` is scheduled — re-verify the §Background lock inventory against
+`RegionFile.cs` first, and confirm whether `System.IO.RandomAccess` is actually available on the
+project's API compatibility level (§4 assumes it may be, and never confirmed it).

@@ -14,6 +14,12 @@ namespace Jobs.Helpers
     [BurstCompile(FloatPrecision.Standard, FloatMode.Default)]
     public static class BiomeBlender
     {
+        /// <summary>Wrap period mask (2²² − 1 blocks) for the float-only wiggle snoise on the Precise64 path.</summary>
+        private const int WIGGLE_WRAP_MASK = (1 << 22) - 1;
+
+        /// <summary>Half the wiggle wrap period — offsets the wrap seams away from the spawn region.</summary>
+        private const int WIGGLE_WRAP_HALF = 1 << 21;
+
         /// <summary>
         /// Calculates the blended terrain height at a global (x, z) column using Multi-Noise splines.
         /// Returns float (not int) to preserve sub-block precision for the Dynamic Density Band.
@@ -45,7 +51,7 @@ namespace Jobs.Helpers
             BlendCurve* curves = stackalloc BlendCurve[N];
             for (int i = 0; i < N; i++)
             {
-                b[i] = GetBiomeIndex(edgeData.Hashes[i], biomes.Length);
+                b[i] = BiomeSelection.IndexFromCellHash(edgeData.Hashes[i], biomes.Length);
                 rad[i] = biomes[b[i]].BlendRadius;
                 bw[i] = biomes[b[i]].BlendWeight;
                 curves[i] = biomes[b[i]].BlendCurve;
@@ -66,7 +72,12 @@ namespace Jobs.Helpers
 
             // Organic wiggle using continuous simplex noise (not Cellular — CellValue has step discontinuities).
             // Prime offsets prevent axis-alignment with terrain noise; frequency ~0.001 matches the original 0.25x Cellular scale.
-            float wiggle = noise.snoise(new float2(globalX * 0.001f + 7919f, globalZ * 0.001f + 6271f)) * 0.5f * localBlendRadius;
+            // Precise64: snoise is float-only, so its inputs wrap to a 2^22-block period (seams half-period
+            // offset from spawn) — the wiggle pattern repeats invisibly instead of flattening far out.
+            bool preciseNoise = selectionNoise.GetCoordinatePrecision() == FastNoiseLite.CoordinatePrecision.Precise64;
+            int wgx = preciseNoise ? ((globalX + WIGGLE_WRAP_HALF) & WIGGLE_WRAP_MASK) - WIGGLE_WRAP_HALF : globalX;
+            int wgz = preciseNoise ? ((globalZ + WIGGLE_WRAP_HALF) & WIGGLE_WRAP_MASK) - WIGGLE_WRAP_HALF : globalZ;
+            float wiggle = noise.snoise(new float2(wgx * 0.001f + 7919f, wgz * 0.001f + 6271f)) * 0.5f * localBlendRadius;
             float activeRadius = math.max(0.001f, localBlendRadius + wiggle);
 
             // Border fade: how deep we are inside the primary Voronoi cell.
@@ -104,18 +115,6 @@ namespace Jobs.Helpers
             }
 
             return finalHeight;
-        }
-
-        private static int GetBiomeIndex(int hash, int biomesLength)
-        {
-            // FastNoiseLite natively maps cellular hash to a [-1, 1] interval.
-            float noiseValue = hash * (1.0f / 2147483648.0f);
-
-            // Replicate FastNoiseConfig.normalizeToZeroOne = true
-            noiseValue = (noiseValue + 1.0f) * 0.5f;
-
-            int idx = (int)math.floor(noiseValue * biomesLength);
-            return math.clamp(idx, 0, biomesLength - 1);
         }
 
         /// <summary>

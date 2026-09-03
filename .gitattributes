@@ -1,0 +1,126 @@
+# Markdown hard line breaks are encoded as TWO TRAILING SPACES: without them the renderer
+# joins a stacked metadata block (**Version:** / **Date:** / **Status:** / **Target:**) into
+# one run-on line. `.editorconfig` already stops editors trimming them ([*.md]
+# trim_trailing_whitespace = false); this stops git from doing the same:
+#
+#   * `git diff --check` no longer reports every field line as an error.
+#   * `git apply --whitespace=fix` (and `git am`) no longer SILENTLY STRIP them, which is
+#     verified behaviour, not a precaution.
+#
+# Scoped to the one check that matters — space-before-tab and friends stay active on .md, and
+# every other file type is untouched. Deliberately NO text/eol attribute here: adding one would
+# rewrite line endings across the whole worktree.
+#
+# Convention + rationale: .agents/skills/create-design-doc/SKILL.md (Step 3).
+# Verify with: python Tools/Python/check_markdown_breaks.py
+*.md whitespace=-blank-at-eol
+
+# NOTE ON SYNTAX (verified 2026-08-07, the hard way): every line is `pattern attr...` with
+# exactly ONE pattern. Grouping patterns — `*.png *.jpg binary` — does not merely fail for the
+# later patterns, it discards the WHOLE line: git rejects `*.jpg` as an invalid attribute name,
+# so even `*.png` comes back `binary: unspecified`. Silent no-op. Keep one pattern per line.
+
+# --- Line endings ---------------------------------------------------------------
+# The index already stores LF throughout (core.autocrlf=true normalized on every commit), so
+# this changes only what git writes at CHECKOUT. It makes the worktree consistent across clones
+# regardless of each machine's core.autocrlf, and matches both .editorconfig (end_of_line = lf)
+# and what Unity itself writes for YAML/.meta.
+#
+# ORDER IS LOAD-BEARING (verified 2026-08-07): this block must stay ABOVE the binary section.
+# The last matching line wins PER ATTRIBUTE, so putting `* text=auto` after `*.png binary`
+# overrides the macro's `-text` and leaves binaries at `text: auto` — back to content sniffing,
+# the exact misdetection the binary net exists to prevent. Above it, binaries keep `text: unset`.
+#
+# `text=auto` CAN SILENTLY SKIP A FILE: a single lone CR (a CR not part of a CRLF) makes git's
+# auto-detection classify the content as binary, after which it normalizes nothing. That is not
+# hypothetical — GenerationJobData.cs ended `}<CR>` with no trailing newline and was the sole
+# CRLF survivor of the 2026-08-07 conversion, reported by git as `i/-text w/-text` while every
+# other file converted. An explicit `diff=` driver still forces a readable diff for such a file,
+# so the only visible symptom is that its line endings never change. Audit with
+# `git ls-files --eol` and look for `-text` on anything that is not genuinely binary.
+* text=auto eol=lf
+
+# Windows batch files are the one format that genuinely needs CRLF. None exist today; this is a
+# guard for future additions. Below the `*` line so the more specific rule wins.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# --- Diff hunk headers (built-in drivers; verified 2026-08-05) -------------------
+*.cs    diff=csharp
+*.md    diff=markdown
+
+# --- Binary safety net ----------------------------------------------------------
+# Git guesses binary from NUL bytes in the first 8 KB; a file that looks textual can be
+# misdetected and EOL-mangled. `binary` == `-diff -merge -text`.
+*.png           binary
+*.jpg           binary
+*.jpeg          binary
+*.gif           binary
+*.tga           binary
+*.psd           binary
+*.tif           binary
+*.tiff          binary
+*.exr           binary
+*.hdr           binary
+*.fbx           binary
+*.blend         binary
+*.obj           binary
+*.dae           binary
+*.3ds           binary
+*.wav           binary
+*.mp3           binary
+*.ogg           binary
+*.aiff          binary
+*.aif           binary
+*.ttf           binary
+*.ttc           binary
+*.otf           binary
+*.dll           binary
+*.so            binary
+*.dylib         binary
+*.a             binary
+*.bundle        binary
+*.pdb           binary
+*.mdb           binary
+*.unitypackage  binary
+*.pdf           binary
+*.cubemap       binary
+
+# --- Unity YAML smart merge -----------------------------------------------------
+# Safe to declare before configuring the driver: an UNDEFINED merge driver falls back to git's
+# default text merge with normal conflict markers (verified in a sandbox repo). Wiring
+# merge.unityyamlmerge.driver to Unity's UnityYAMLMerge.exe is a separate, per-machine step.
+#
+# These are YAML, NOT binary — asset serialization is Force Text (m_SerializationMode: 2).
+# NEVER give *.unity/*.prefab/*.asset/*.meta the `binary` or `-text` attribute: it destroys
+# their diffs and makes scene/prefab merge conflicts unresolvable. That is the real corruption
+# risk with these types — not their mere presence in this file.
+*.unity           merge=unityyamlmerge
+*.prefab          merge=unityyamlmerge
+*.asset           merge=unityyamlmerge
+*.mat             merge=unityyamlmerge
+*.anim            merge=unityyamlmerge
+*.controller      merge=unityyamlmerge
+*.physicMaterial  merge=unityyamlmerge
+
+# --- Git LFS: deliberately absent — do NOT add filter=lfs entries here ----------
+# LFS was installed on this repo once and scrubbed on 2026-08-07. It never tracked a single
+# file: `git lfs ls-files` was empty, and no pointer was ever committed on any branch
+# (`git log --all -S 'version https://git-lfs.github.com'` and `git grep` in HEAD both empty).
+# The residue was purely local — 4 hooks, 2 `lfs.*` keys in .git/config, and 60 KB of lock
+# caches holding ZERO objects — so `git lfs uninstall --local` removed all of it. No
+# `git lfs migrate` and no history rewrite were needed then, and none would be needed now.
+#
+# The 4 `filter.lfs.*` keys in the machine's GLOBAL ~/.gitconfig were deliberately LEFT IN
+# PLACE: they are machine-wide and may serve other repositories. They are inert here precisely
+# because this file declares no `filter=lfs` pattern — adding one is what would wake them up.
+#
+# If a large-asset problem appears, solve it some other way. Re-adding LFS re-creates the
+# pre-push hook that aborts every push whenever git-lfs is off PATH, which is what it cost
+# last time.
+#
+# Verification trap: ANY `git lfs ...` command — including `git lfs ls-files`, the natural way
+# to check the scrub held — rewrites `lfs.repositoryformatversion=0` into .git/config as a side
+# effect. Seeing that key again does NOT mean LFS came back; it means someone ran a `git lfs`
+# command. It is inert on its own, and hooks and .git/lfs/ are NOT recreated. Check with
+# `git config --local --get-regexp '^lfs\.'` instead, which does not perturb what it measures.

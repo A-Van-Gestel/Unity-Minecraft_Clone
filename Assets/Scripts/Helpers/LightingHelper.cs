@@ -17,10 +17,10 @@ namespace Helpers
         /// Stamps sky light=15 on every entry in a ushort light data array.
         /// Used when lighting is disabled to ensure full brightness.
         /// </summary>
-        public static void StampFullBrightSunlight(NativeArray<ushort> lightMap)
+        public static void StampFullBrightSkylight(NativeArray<ushort> lightMap)
         {
             for (int v = 0; v < lightMap.Length; v++)
-                lightMap[v] = LightBitMapping.SetSkyLight(lightMap[v], 15);
+                lightMap[v] = LightBitMapping.SetSkylight(lightMap[v], 15);
         }
 
         /// <summary>
@@ -29,7 +29,7 @@ namespace Helpers
         /// </summary>
         /// <param name="lightData">The managed ushort array to fill.</param>
         /// <param name="skyLevel">The uniform sky light level (0-15).</param>
-        public static void FillUniformSkyLight(ushort[] lightData, byte skyLevel)
+        public static void FillUniformSkylight(ushort[] lightData, byte skyLevel)
         {
             ushort packed = LightBitMapping.PackLightData(skyLevel, 0, 0, 0);
             Array.Fill(lightData, packed);
@@ -43,7 +43,7 @@ namespace Helpers
         /// <param name="offset">Start index in the array.</param>
         /// <param name="count">Number of elements to fill.</param>
         /// <param name="skyLevel">The uniform sky light level (0-15).</param>
-        public static void FillUniformSkyLight(NativeArray<ushort> lightMap, int offset, int count, byte skyLevel)
+        public static void FillUniformSkylight(NativeArray<ushort> lightMap, int offset, int count, byte skyLevel)
         {
             ushort packed = LightBitMapping.PackLightData(skyLevel, 0, 0, 0);
             for (int i = 0; i < count; i++)

@@ -1,4 +1,5 @@
 using System.Text;
+using Editor.Dev;
 using Editor.Validation.Lighting.Framework;
 using UnityEditor;
 using UnityEngine;
@@ -290,7 +291,7 @@ namespace Editor.Validation.Lighting
         /// fast). The failing iteration logs its own phase-specific diagnosis (classifier / oscillation
         /// probe); this wrapper adds the case description and the reproduction pointer.
         /// </summary>
-        [MenuItem("Minecraft Clone/Dev/Validate Lighting Engine (Border Height Fuzz)")]
+        [MenuItem("Minecraft Clone/Dev/Validate Lighting Engine (Border Height Fuzz)", priority = DevMenuPriority.DeepValidation)]
         public static void RunBorderHeightFuzzNightly()
         {
             Debug.Log($"--- Border-heightmap fuzz: {BORDER_FUZZ_NIGHTLY_ITERATIONS} randomized seam-geometry seeds ---");

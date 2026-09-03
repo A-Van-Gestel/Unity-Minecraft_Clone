@@ -109,62 +109,29 @@ namespace Data
         }
 
         [NonSerialized]
-        private bool _needsInitialLighting;
+        private LightingWork _lightingWork;
 
-        [NonSerialized]
-        private bool _hasLightChangesToProcess;
+        /// <summary>The set of lighting work kinds pending for this chunk.</summary>
+        public LightingWork Work => _lightingWork;
 
-        [NonSerialized]
-        private bool _needsEdgeCheck;
+        /// <summary>Whether any kind of lighting work is pending — the "is this chunk quiet" question.</summary>
+        public bool HasAnyLightingWork => _lightingWork != LightingWork.None;
 
         /// <summary>
         /// A transient flag indicating that the chunk's data has been populated, but it has not yet undergone its initial, mandatory lighting calculation.
         /// </summary>
-        public bool NeedsInitialLighting
-        {
-            get => _needsInitialLighting;
-            set
-            {
-                if (_needsInitialLighting == value) return;
-                _needsInitialLighting = value;
-                if (value) OnLightWorkFlagged?.Invoke(Position);
-            }
-        }
+        public bool NeedsInitialLighting => (_lightingWork & LightingWork.InitialLighting) != 0;
 
         /// <summary>
         /// A transient flag indicating that the chunk has pending general light changes that need to be processed on the main thread.
         /// </summary>
-        public bool HasLightChangesToProcess
-        {
-            get => _hasLightChangesToProcess;
-            set
-            {
-                if (_hasLightChangesToProcess == value) return;
-                _hasLightChangesToProcess = value;
-                if (value) OnLightWorkFlagged?.Invoke(Position);
-            }
-        }
+        public bool HasLightChangesToProcess => (_lightingWork & LightingWork.LightChanges) != 0;
 
         /// <summary>
         /// A transient flag indicating that this chunk needs an edge consistency check against its neighbors.
         /// Set after initial lighting stabilizes; requires all neighbors to be lit before scheduling.
         /// </summary>
-        public bool NeedsEdgeCheck
-        {
-            get => _needsEdgeCheck;
-            set
-            {
-                if (_needsEdgeCheck == value) return;
-                _needsEdgeCheck = value;
-                if (value) OnLightWorkFlagged?.Invoke(Position);
-            }
-        }
-
-        /// <summary>
-        /// A transient flag indicating that a lighting job for this chunk has completed, but its results (e.g., cross-chunk modifications) are still pending processing on the main thread.
-        /// </summary>
-        [NonSerialized]
-        public bool IsAwaitingMainThreadProcess = false;
+        public bool NeedsEdgeCheck => (_lightingWork & LightingWork.EdgeCheck) != 0;
 
         /// <summary>
         /// Tracks the number of post-generation edge check rounds remaining for this chunk.
@@ -182,16 +149,97 @@ namespace Data
         // cardinal neighbors, add-only) is enough to heal it — see ModifyVoxel.
         private const int BORDER_EDIT_EDGE_CHECK_ROUNDS = 1;
 
+        #region Lighting work transitions
+
+        /// <summary>
+        /// The single write funnel for <see cref="Work"/>. Fires <see cref="OnLightWorkFlagged"/> when any
+        /// bit transitions 0→1 — clears and no-op writes never notify, matching the per-property setters
+        /// this replaces.
+        /// <para>
+        /// <b>Ownership.</b> Mutation is main-thread-only, with one sanctioned exception: deserialization
+        /// (<c>ChunkSerializer.ReadChunkInternal</c>, on a <c>Task.Run</c> worker) fills a pool instance
+        /// that has not been published to <c>WorldData</c> yet, so no other thread can see it. Because the
+        /// three work kinds now share one field, two threads writing the same <i>published</i> instance
+        /// would lose an update where three independent bools could not — publishing a chunk before its
+        /// background writer is done would break this, and nothing enforces it but this contract.
+        /// </para>
+        /// </summary>
+        /// <param name="next">The complete work set to store.</param>
+        private void SetWork(LightingWork next)
+        {
+            LightingWork previous = _lightingWork;
+            if (previous == next) return;
+
+            _lightingWork = next;
+            if ((next & ~previous) != LightingWork.None) OnLightWorkFlagged?.Invoke(Position);
+        }
+
+        /// <summary>Flags the chunk for its initial, mandatory lighting pass (census rows 1, 2, 16).</summary>
+        public void FlagInitialLighting() => SetWork(_lightingWork | LightingWork.InitialLighting);
+
+        /// <summary>Flags the chunk as having light changes to process (census rows 3, 4, 4b, 9, 11).</summary>
+        public void FlagLightWork() => SetWork(_lightingWork | LightingWork.LightChanges);
+
+        /// <summary>Flags the chunk for a neighbor edge-consistency check (census row 3).</summary>
+        public void FlagEdgeCheck() => SetWork(_lightingWork | LightingWork.EdgeCheck);
+
+        /// <summary>
+        /// Arms a neighbor's edge check on this chunk (census row 10b's cardinal triggers). Sets both bits
+        /// in one call so the chunk can reschedule under <b>either</b> scan arm — the strict edge arm
+        /// (<c>AreNeighborsReadyAndLit</c>) or the relaxed regular arm (<c>AreNeighborsDataReady</c>, the
+        /// weak-gate fallback) — which is what the two separate writes this replaced did.
+        /// A lone <c>EdgeCheck</c> is a legal state (disk-load-stable arms one deliberately); it simply
+        /// waits on the strict arm, which pre-sets the companion itself before scheduling.
+        /// </summary>
+        public void FlagNeighborEdgeCheck() =>
+            SetWork(_lightingWork | LightingWork.EdgeCheck | LightingWork.LightChanges);
+
+        /// <summary>
+        /// Spends one post-generation edge-check round, optionally re-arming this chunk's own edge check
+        /// (census rows 10a/10b). The caller supplies the outcome from
+        /// <c>EdgeCheckCascadeDecision.Evaluate</c> rather than this method re-deriving it — a spent-but-not
+        /// re-armed round is a legal, load-bearing P9-2 state.
+        /// </summary>
+        /// <param name="rearm">True to also arm the self edge check and its light-changes companion.</param>
+        public void SpendEdgeCheckRound(bool rearm)
+        {
+            RemainingEdgeCheckRounds--;
+            if (rearm) SetWork(_lightingWork | LightingWork.EdgeCheck | LightingWork.LightChanges);
+        }
+
+        /// <summary>
+        /// Re-grants a bounded edge-check budget after an opacity-changing border-column edit (census row 5,
+        /// Bug 05). Add-only and bounded, so it cannot livelock.
+        /// </summary>
+        public void RegrantBorderEditEdgeRound() =>
+            RemainingEdgeCheckRounds = Math.Max(RemainingEdgeCheckRounds, BORDER_EDIT_EDGE_CHECK_ROUNDS);
+
+        /// <summary>Clears the initial-lighting bit after a successful initial schedule (census row 6).</summary>
+        public void ClearInitialLighting() => SetWork(_lightingWork & ~LightingWork.InitialLighting);
+
+        /// <summary>
+        /// The atomic schedule-clear: drops the light-changes and edge-check bits together once a lighting
+        /// job is on the wire (census rows 6, 7, 8). Both readers of the edge-check bit — the job's
+        /// <c>PerformEdgeCheck</c> and LI-2's band derivation — run before this fires.
+        /// </summary>
+        public void OnLightingJobScheduled() =>
+            SetWork(_lightingWork & ~(LightingWork.LightChanges | LightingWork.EdgeCheck));
+
+        /// <summary>Clears every pending work kind (census rows 13, 14 — lighting disabled, pool recycle).</summary>
+        public void ClearAllLightingWork() => SetWork(LightingWork.None);
+
+        #endregion
+
         [NonSerialized]
-        private readonly Queue<LightQueueNode> _sunlightBfsQueue = new Queue<LightQueueNode>();
+        private readonly Queue<LightQueueNode> _skylightBfsQueue = new Queue<LightQueueNode>();
 
         [NonSerialized]
         private readonly Queue<LightQueueNode> _blocklightBfsQueue = new Queue<LightQueueNode>();
 
-        public int SunLightQueueCount => _sunlightBfsQueue.Count;
-        public int BlockLightQueueCount => _blocklightBfsQueue.Count;
+        public int SkylightQueueCount => _skylightBfsQueue.Count;
+        public int BlocklightQueueCount => _blocklightBfsQueue.Count;
 
-        public Queue<LightQueueNode> SunlightBfsQueue => _sunlightBfsQueue;
+        public Queue<LightQueueNode> SkylightBfsQueue => _skylightBfsQueue;
         public Queue<LightQueueNode> BlocklightBfsQueue => _blocklightBfsQueue;
 
 
@@ -224,7 +272,7 @@ namespace Data
 
         private void InitializeSections()
         {
-            const int sectionCount = VoxelData.ChunkHeight / ChunkMath.SECTION_SIZE;
+            const int sectionCount = ChunkMath.SECTIONS_PER_CHUNK;
             sections = new ChunkSection[sectionCount];
             SectionUniformSkyLevel = new byte[sectionCount];
             Array.Fill(SectionUniformSkyLevel, UNIFORM_SKY_NONE);
@@ -234,6 +282,17 @@ namespace Data
 
         #region Pooling Support
 
+        [NonSerialized]
+        private int _lifecycleEpoch;
+
+        /// <summary>
+        /// Monotonic pool-lifecycle counter, bumped by every <see cref="Reset"/>. Lets async code that
+        /// captured this instance detect a recycle in between — reference equality alone is defeated by
+        /// the pool handing the same object back for the same coord (ABA); the CP-3 load-arm fault path
+        /// compares this before clearing <see cref="IsLoading"/>. Its "reset" IS the increment.
+        /// </summary>
+        public int LifecycleEpoch => _lifecycleEpoch;
+
         /// <summary>
         /// Resets the ChunkData for reuse.
         /// Returns all contained ChunkSections to the pool and clears internal state.
@@ -241,20 +300,19 @@ namespace Data
         /// <param name="pos">The new voxel-space world origin for the recycled chunk.</param>
         public void Reset(Vector2Int pos)
         {
+            _lifecycleEpoch++; // pool-reset-safety: the epoch's reset is the bump itself (see property doc)
+
             Position = pos;
             IsPopulated = false;
             IsLoading = false;
             Chunk = null; // Unlink visual
 
             // Lighting flags
-            NeedsInitialLighting = false;
-            HasLightChangesToProcess = false;
-            IsAwaitingMainThreadProcess = false;
-            NeedsEdgeCheck = false;
+            ClearAllLightingWork();
             RemainingEdgeCheckRounds = 2;
 
             // Clear Queues (retains capacity)
-            _sunlightBfsQueue.Clear();
+            _skylightBfsQueue.Clear();
             _blocklightBfsQueue.Clear();
 
             // Clear active-voxel buckets (retains native capacity; no-op until first registration allocates them).
@@ -313,7 +371,7 @@ namespace Data
 
             sections[sectionIndex] ??= GetNewSection();
 
-            LightingHelper.FillUniformSkyLight(sections[sectionIndex].LightData, sky);
+            LightingHelper.FillUniformSkylight(sections[sectionIndex].LightData, sky);
         }
 
         #endregion
@@ -394,7 +452,7 @@ namespace Data
         /// <param name="loadedData">The chunk data object loaded from disk.</param>
         public void PopulateFromSave(ChunkData loadedData)
         {
-#if DEVELOPMENT_BUILD || UNITY_EDITOR
+#if UNITY_INCLUDE_INSTRUMENTATION
             if (World.Instance.settings.enableSaveSystemDiagnosticLogs)
                 Debug.Log($"[PopulateFromSave] Starting for chunk {Position}");
 #endif
@@ -429,12 +487,12 @@ namespace Data
 
             // Copy Queues
             // We move the queues from the loaded object (temp) to this object (live)
-            foreach (LightQueueNode node in loadedData.SunlightBfsQueue) AddToSunLightQueue(node.Position, node.OldLightLevel);
-            foreach (LightQueueNode node in loadedData.BlocklightBfsQueue) AddToBlockLightQueue(node.Position, node.OldLightLevel, node.OldBlockR, node.OldBlockG, node.OldBlockB);
+            foreach (LightQueueNode node in loadedData.SkylightBfsQueue) AddToSkylightQueue(node.Position, node.OldLightLevel);
+            foreach (LightQueueNode node in loadedData.BlocklightBfsQueue) AddToBlocklightQueue(node.Position, node.OldLightLevel, node.OldBlockR, node.OldBlockG, node.OldBlockB);
 
             // If loaded data had flags, transfer them
-            if (loadedData.HasLightChangesToProcess) HasLightChangesToProcess = true;
-            if (loadedData.NeedsInitialLighting) NeedsInitialLighting = true;
+            if (loadedData.HasLightChangesToProcess) FlagLightWork();
+            if (loadedData.NeedsInitialLighting) FlagInitialLighting();
 
 
             // Recalculate counts
@@ -446,7 +504,7 @@ namespace Data
 
             IsPopulated = true;
 
-#if DEVELOPMENT_BUILD || UNITY_EDITOR
+#if UNITY_INCLUDE_INSTRUMENTATION
             if (World.Instance.settings.enableSaveSystemDiagnosticLogs)
                 Debug.Log($"[PopulateFromSave] Completed for chunk {Position}");
 #endif
@@ -491,7 +549,7 @@ namespace Data
             // --- Capture Old State for Lighting ---
             ushort oldId = BurstVoxelDataBitMapping.GetId(oldPackedData);
             ushort oldLightData = GetLightData(localPos.x, localPos.y, localPos.z);
-            byte oldSkyLight = LightBitMapping.GetSkyLight(oldLightData);
+            byte oldSkylight = LightBitMapping.GetSkylight(oldLightData);
             byte oldBlocklight = LightBitMapping.GetMaxBlocklight(oldLightData);
             byte oldBlockR = LightBitMapping.GetBlocklightR(oldLightData);
             byte oldBlockG = LightBitMapping.GetBlocklightG(oldLightData);
@@ -504,18 +562,23 @@ namespace Data
             // When lighting is disabled, stamp sky=15 so the mesh job renders full brightness.
             // Light data lives exclusively in the ushort LightData array (the uint carries no light bits).
             if (!lightingEnabled)
-                SetLightData(localPos.x, localPos.y, localPos.z, LightBitMapping.SetSkyLight(0, 15));
+                SetLightData(localPos.x, localPos.y, localPos.z, LightBitMapping.SetSkylight(0, 15));
 
             // --- MAINTAIN HEIGHTMAP ---
             // Shared Case 1 / Case 2 logic (also run by the editor lighting validation harness).
+            NativeArray<BlockTypeJobData> blockJobData = World.Instance.JobDataManager.BlockTypesJobData;
+            bool oldObstructsSkyColumn = LightAttenuation.ObstructsSkyColumn(
+                blockJobData[oldId], BurstVoxelDataBitMapping.GetMeta(oldPackedData));
+            bool newObstructsSkyColumn = LightAttenuation.ObstructsSkyColumn(blockJobData[mod.ID], mod.Meta);
+
             UpdateColumnHeightAfterEdit(localPos.x, localPos.z, localPos.y,
-                newProps.IsLightObstructing, new ManagedBlockObstruction(World.Instance.BlockTypes));
+                newObstructsSkyColumn, new JobDataBlockObstruction(blockJobData));
 
             // --- Queue Lighting Updates ---
 
             // 1. Queue the modified block itself for light REMOVAL.
-            AddToSunLightQueue(localPos, oldSkyLight);
-            AddToBlockLightQueue(localPos, oldBlocklight, oldBlockR, oldBlockG, oldBlockB);
+            AddToSkylightQueue(localPos, oldSkylight);
+            AddToBlocklightQueue(localPos, oldBlocklight, oldBlockR, oldBlockG, oldBlockB);
 
             // 2. "WAKE UP" NEIGHBORS to fill any new empty space with their light.
             for (int i = 0; i < 6; i++)
@@ -525,22 +588,31 @@ namespace Data
                 {
                     ushort neighborLight = GetLightData(neighborPos.x, neighborPos.y, neighborPos.z);
 
-                    byte neighborSkyLight = LightBitMapping.GetSkyLight(neighborLight);
-                    if (neighborSkyLight > 0)
-                        AddToSunLightQueue(neighborPos, 0);
+                    byte neighborSkylight = LightBitMapping.GetSkylight(neighborLight);
+                    if (neighborSkylight > 0)
+                        AddToSkylightQueue(neighborPos, 0);
 
                     byte neighborBlocklight = LightBitMapping.GetMaxBlocklight(neighborLight);
                     if (neighborBlocklight > 0)
-                        AddToBlockLightQueue(neighborPos, 0, 0, 0, 0);
+                        AddToBlocklightQueue(neighborPos, 0, 0, 0, 0);
                 }
             }
 
-            // 3. If opacity changed, queue a full vertical sunlight recalculation.
+            // 3. If the column's light transport changed, queue a full vertical skylight recalculation.
             //    Gated by enableLighting: without the lighting engine, no job will ever process
             //    the recalculation queue or clear HasLightChangesToProcess, permanently blocking meshing.
-            if (lightingEnabled && newProps.opacity != oldProps.opacity)
+            //
+            //    Two triggers, because opacity alone is not enough (_FIXED_BUGS.md Lighting #25). Opacity
+            //    catches a changed attenuation cost. Obstruction catches a changed SHAPE at equal opacity:
+            //    sealing a vertical half slab — by rotating it, or replacing it with any other opacity-15
+            //    block — ends the undimmed column it was carrying while leaving `opacity` at 15 the whole
+            //    time. Without this the column recalculation, which is the only authority for sky-light
+            //    removal, never runs and the orphaned column stays lit forever. Strictly additive: every
+            //    edit that queued a recalculation before still does.
+            if (lightingEnabled && (newProps.opacity != oldProps.opacity
+                                    || newObstructsSkyColumn != oldObstructsSkyColumn))
             {
-                World.Instance.worldData.QueueSunlightRecalculation(new Vector2Int(localPos.x + Position.x, localPos.z + Position.y));
+                World.Instance.worldData.QueueSkylightRecalculation(new Vector2Int(localPos.x + Position.x, localPos.z + Position.y));
 
                 // Bug 05: an opacity edit in a border column can under-report cross-seam sky light, and
                 // after generation both edge-check rounds are already spent — leaving no round to
@@ -551,7 +623,7 @@ namespace Data
                 bool isBorderColumn = localPos.x == 0 || localPos.x == VoxelData.ChunkWidth - 1
                                                       || localPos.z == 0 || localPos.z == VoxelData.ChunkWidth - 1;
                 if (isBorderColumn)
-                    RemainingEdgeCheckRounds = Math.Max(RemainingEdgeCheckRounds, BORDER_EDIT_EDGE_CHECK_ROUNDS);
+                    RegrantBorderEditEdgeRound();
             }
 
             // --- Notify World and Handle Active Voxels ---
@@ -745,29 +817,35 @@ namespace Data
         /// <param name="localX">Local X of the edited column (0-15).</param>
         /// <param name="localZ">Local Z of the edited column (0-15).</param>
         /// <param name="localY">Local Y of the edited voxel.</param>
-        /// <param name="newIsLightObstructing">Whether the newly-placed block is light-obstructing.</param>
-        /// <param name="obstruction">Light-obstruction lookup for the downward rescan (Case 2).</param>
+        /// <param name="newObstructsSkyColumn">Whether the newly-placed voxel interrupts the sky column,
+        /// per <c>LightAttenuation.ObstructsSkyColumn</c> — orientation-dependent for partial blocks.</param>
+        /// <param name="obstruction">Sky-column obstruction lookup for the downward rescan (Case 2).</param>
         public void UpdateColumnHeightAfterEdit<TObstruction>(int localX, int localZ, int localY,
-            bool newIsLightObstructing, in TObstruction obstruction)
+            bool newObstructsSkyColumn, in TObstruction obstruction)
             where TObstruction : struct, IBlockObstruction
         {
             int heightmapIndex = localX + VoxelData.ChunkWidth * localZ;
             ushort currentHeight = heightMap[heightmapIndex];
 
-            // Case 1: A light-obstructing block was placed ABOVE the current highest block.
-            if (newIsLightObstructing && localY > currentHeight)
+            // Case 1: A sky-column-obstructing block was placed ABOVE the current highest block.
+            if (newObstructsSkyColumn && localY > currentHeight)
             {
                 heightMap[heightmapIndex] = (ushort)localY;
             }
-            // Case 2: The current highest light-obstructing block was removed or made fully transparent.
-            else if (!newIsLightObstructing && localY == currentHeight)
+            // Case 2: The current highest obstructing block was removed, made fully transparent, or —
+            // since Bug 21's fix — rotated into an orientation that no longer blocks the column.
+            else if (!newObstructsSkyColumn && localY == currentHeight)
             {
-                // Scan downwards from here to find the NEW highest light-obstructing block.
+                // Scan downwards from here to find the NEW highest obstructing block.
+                // Hoisted off the readonly parameter: the generic isn't readonly-constrained, so calling
+                // through `obstruction` directly would defensively copy it every iteration.
+                TObstruction obstructionLookup = obstruction;
                 ushort newHeight = 0;
                 for (int y = localY - 1; y >= 0; y--)
                 {
-                    ushort checkId = BurstVoxelDataBitMapping.GetId(GetVoxel(localX, y, localZ));
-                    if (obstruction.IsLightObstructing(checkId))
+                    uint checkVoxel = GetVoxel(localX, y, localZ);
+                    if (obstructionLookup.ObstructsSkyColumn(BurstVoxelDataBitMapping.GetId(checkVoxel),
+                            BurstVoxelDataBitMapping.GetMeta(checkVoxel)))
                     {
                         newHeight = (ushort)y;
                         break; // Found the new highest block, stop scanning.
@@ -779,16 +857,19 @@ namespace Data
         }
 
         /// <summary>
-        /// Allocation-free <see cref="IBlockObstruction"/> over the live managed block palette
-        /// (<c>World.Instance.BlockTypes</c>) used by <see cref="ModifyVoxel"/>'s heightmap maintenance.
+        /// Allocation-free <see cref="IBlockObstruction"/> over the live block job data
+        /// (<c>World.Instance.JobDataManager.BlockTypesJobData</c>) used by <see cref="ModifyVoxel"/>'s
+        /// heightmap maintenance. Job data rather than the managed palette because the sky-column test is
+        /// shape- and orientation-aware, and the bounds mirror lives on <see cref="BlockTypeJobData"/>.
         /// </summary>
-        private readonly struct ManagedBlockObstruction : IBlockObstruction
+        private readonly struct JobDataBlockObstruction : IBlockObstruction
         {
-            private readonly BlockType[] _blockTypes;
+            private readonly NativeArray<BlockTypeJobData> _blockTypes;
 
-            public ManagedBlockObstruction(BlockType[] blockTypes) => _blockTypes = blockTypes;
+            public JobDataBlockObstruction(NativeArray<BlockTypeJobData> blockTypes) => _blockTypes = blockTypes;
 
-            public bool IsLightObstructing(ushort blockId) => _blockTypes[blockId].IsLightObstructing;
+            public bool ObstructsSkyColumn(ushort blockId, byte meta)
+                => LightAttenuation.ObstructsSkyColumn(_blockTypes[blockId], meta);
         }
 
         #endregion
@@ -808,7 +889,7 @@ namespace Data
         /// <param name="x">Local X to validate.</param>
         /// <param name="y">Local Y to validate.</param>
         /// <param name="z">Local Z to validate.</param>
-        [Conditional("UNITY_EDITOR"), Conditional("DEVELOPMENT_BUILD")]
+        [Conditional("UNITY_ENABLE_CHECKS")]
         private void AssertLocalPositionInChunk(int x, int y, int z)
         {
             if ((uint)x >= VoxelData.ChunkWidth ||
@@ -875,6 +956,15 @@ namespace Data
 
             if (!wasOldEmissive && isNewEmissive) sections[sectionY].emissiveCount++;
             else if (wasOldEmissive && !isNewEmissive) sections[sectionY].emissiveCount--;
+
+            // Handle the S3 emitter-scan predicate, on the same palette-independent footing as the emissive
+            // count above. Tested on the whole packed value rather than the id: a fluid voxel becomes and
+            // stops being an emitter through its level nibble alone, with the id never changing.
+            bool wasOldFlowing = FluidBlockLookup.IsEmitterFluid(oldValue);
+            bool isNewFlowing = FluidBlockLookup.IsEmitterFluid(value);
+
+            if (!wasOldFlowing && isNewFlowing) sections[sectionY].emitterFluidCount++;
+            else if (wasOldFlowing && !isNewFlowing) sections[sectionY].emitterFluidCount--;
 
             // Set voxel
             sections[sectionY].voxels[index] = value;
@@ -1005,7 +1095,7 @@ namespace Data
             {
                 byte uniformSky = SectionUniformSkyLevel[i];
                 if (uniformSky != UNIFORM_SKY_NONE)
-                    LightingHelper.FillUniformSkyLight(jobArray, i * sectionSize, sectionSize, uniformSky);
+                    LightingHelper.FillUniformSkylight(jobArray, i * sectionSize, sectionSize, uniformSky);
                 else if (sections[i] != null)
                     NativeArray<ushort>.Copy(sections[i].LightData, 0, jobArray, i * sectionSize, sectionSize);
                 else
@@ -1095,7 +1185,7 @@ namespace Data
         }
 
         /// <summary>
-        /// The chunk's lowest heightmap entry — the input to the bottom-band descending-sunlight rule
+        /// The chunk's lowest heightmap entry — the input to the bottom-band descending-skylight rule
         /// (<see cref="LightingBandDecision.DeriveBandMinY"/>): a vertical sky-15 descent stops at each
         /// column's heightmap block, so no unbounded descent can pass below this Y.
         /// </summary>
@@ -1146,17 +1236,31 @@ namespace Data
         /// <param name="jobLightMap">The job's computed light map (section-contiguous, full chunk).</param>
         /// <param name="blockTypes">Block palette for section count recalculation, or null to recompute
         /// the non-air count only (the harness passes null — counts are meshing-only, light-irrelevant).</param>
-        public void ApplyJobLightMap(NativeArray<uint> jobVoxelMap, NativeArray<ushort> jobLightMap,
+        /// <returns>True if any voxel's effective light value differs from its pre-merge value. P9-2 uses
+        /// this to re-arm the edge-check cascade on effect rather than on stability; a pass that returns
+        /// false left every border byte-identical to what the neighbors already read.</returns>
+        public bool ApplyJobLightMap(NativeArray<uint> jobVoxelMap, NativeArray<ushort> jobLightMap,
             [CanBeNull] BlockType[] blockTypes)
         {
             int indexOffset = 0;
             const int sectionVolume = ChunkMath.SECTION_VOLUME;
+            bool changedAnyLight = false;
 
             for (int s = 0; s < sections.Length; s++)
             {
                 ChunkSection section = sections[s];
                 bool sectionHasData = false;
                 bool isNewSection = false;
+
+                // P9-2: the section's EFFECTIVE pre-merge light, captured before the compact flag is
+                // cleared below. A compacted section reads as its uniform sky level whether or not the
+                // section object survived compaction (GetLightData shadows LightData with it), so the
+                // comparison has to apply the same precedence rather than trusting LightData.
+                byte oldUniformSky = SectionUniformSkyLevel[s];
+                bool oldIsUniform = oldUniformSky != UNIFORM_SKY_NONE;
+                ushort oldUniformLight = oldIsUniform
+                    ? LightBitMapping.PackLightData(oldUniformSky, 0, 0, 0)
+                    : (ushort)0;
 
                 // Clear any stale compact flag — the lighting job will provide fresh data.
                 SectionUniformSkyLevel[s] = UNIFORM_SKY_NONE;
@@ -1179,6 +1283,11 @@ namespace Data
                         sections[s] = section;
                         isNewSection = true;
                     }
+                    else if (oldUniformLight != 0)
+                    {
+                        // Stays absent, so every voxel now reads 0 — a change iff it read non-zero before.
+                        changedAnyLight = true;
+                    }
                 }
 
                 if (section != null)
@@ -1189,6 +1298,16 @@ namespace Data
                     {
                         // Overwrite the ushort light array with the job's computed values.
                         ushort lightVal = jobLightMap[indexOffset + i];
+
+                        // A freshly rented section read as 0 (or as the uniform level) before this merge;
+                        // its pooled LightData contents are not the pre-merge state.
+                        ushort oldVal = oldIsUniform
+                            ? oldUniformLight
+                            : isNewSection
+                                ? (ushort)0
+                                : section.LightData[i];
+                        if (oldVal != lightVal) changedAnyLight = true;
+
                         section.LightData[i] = lightVal;
 
                         if (section.voxels[i] != 0) sectionHasData = true;
@@ -1212,6 +1331,8 @@ namespace Data
 
                 indexOffset += sectionVolume;
             }
+
+            return changedAnyLight;
         }
 
         /// <summary>
@@ -1278,7 +1399,7 @@ namespace Data
         /// <param name="oldR">The old red blocklight channel (0-15).</param>
         /// <param name="oldG">The old green blocklight channel (0-15).</param>
         /// <param name="oldB">The old blue blocklight channel (0-15).</param>
-        public void AddToBlockLightQueue(Vector3Int localPos, byte oldLightLevel, byte oldR, byte oldG, byte oldB)
+        public void AddToBlocklightQueue(Vector3Int localPos, byte oldLightLevel, byte oldR, byte oldG, byte oldB)
         {
             if (World.Instance.settings.enableLighting)
             {
@@ -1287,21 +1408,21 @@ namespace Data
                     Position = localPos, OldLightLevel = oldLightLevel,
                     OldBlockR = oldR, OldBlockG = oldG, OldBlockB = oldB,
                 });
-                HasLightChangesToProcess = true;
+                FlagLightWork();
             }
         }
 
         /// <summary>
-        /// Adds a sunlight update request to the internal queue for the next lighting pass.
+        /// Adds a skylight update request to the internal queue for the next lighting pass.
         /// </summary>
         /// <param name="localPos">The local position of the modified voxel.</param>
-        /// <param name="oldLightLevel">The sunlight level the voxel had before modification (needed for darkness propagation).</param>
-        public void AddToSunLightQueue(Vector3Int localPos, byte oldLightLevel)
+        /// <param name="oldLightLevel">The skylight level the voxel had before modification (needed for darkness propagation).</param>
+        public void AddToSkylightQueue(Vector3Int localPos, byte oldLightLevel)
         {
             if (World.Instance.settings.enableLighting)
             {
-                _sunlightBfsQueue.Enqueue(new LightQueueNode { Position = localPos, OldLightLevel = oldLightLevel });
-                HasLightChangesToProcess = true;
+                _skylightBfsQueue.Enqueue(new LightQueueNode { Position = localPos, OldLightLevel = oldLightLevel });
+                FlagLightWork();
             }
         }
 
@@ -1321,7 +1442,7 @@ namespace Data
             minNodeY = int.MaxValue;
 
             // Dequeue each item from the managed queue and enqueue it into the native one.
-            while (BlockLightQueueCount > 0)
+            while (BlocklightQueueCount > 0)
             {
                 LightQueueNode node = _blocklightBfsQueue.Dequeue();
                 if (node.Position.y > maxNodeY) maxNodeY = node.Position.y;
@@ -1334,7 +1455,7 @@ namespace Data
         }
 
         /// <summary>
-        /// Flushes the managed sunlight queue into a NativeQueue for Burst Job processing.
+        /// Flushes the managed skylight queue into a NativeQueue for Burst Job processing.
         /// </summary>
         /// <param name="allocator">The memory allocator to use (e.g., Allocator.TempJob).</param>
         /// <param name="maxNodeY">Highest node Y flushed, or −1 when the queue was empty — an LI-2
@@ -1342,16 +1463,16 @@ namespace Data
         /// <param name="minNodeY">Lowest node Y flushed, or <c>int.MaxValue</c> when the queue was
         /// empty — the LI-2 bottom-band mirror of <paramref name="maxNodeY"/>.</param>
         /// <returns>A populated NativeQueue containing the light nodes.</returns>
-        public NativeQueue<LightQueueNode> GetSunlightQueueForJob(Allocator allocator, out int maxNodeY, out int minNodeY)
+        public NativeQueue<LightQueueNode> GetSkylightQueueForJob(Allocator allocator, out int maxNodeY, out int minNodeY)
         {
             NativeQueue<LightQueueNode> nativeQueue = new NativeQueue<LightQueueNode>(allocator);
             maxNodeY = -1;
             minNodeY = int.MaxValue;
 
             // Dequeue each item from the managed queue and enqueue it into the native one.
-            while (SunLightQueueCount > 0)
+            while (SkylightQueueCount > 0)
             {
-                LightQueueNode node = _sunlightBfsQueue.Dequeue();
+                LightQueueNode node = _skylightBfsQueue.Dequeue();
                 if (node.Position.y > maxNodeY) maxNodeY = node.Position.y;
                 if (node.Position.y < minNodeY) minNodeY = node.Position.y;
                 nativeQueue.Enqueue(node);
@@ -1362,9 +1483,10 @@ namespace Data
         }
 
         /// <summary>
-        /// Recalculates the sunlight for this chunk.
+        /// Enqueues all 256 of this chunk's columns for sky light recalculation. The recalculation
+        /// itself runs later, in the lighting job.
         /// </summary>
-        public void RecalculateSunLightLight()
+        public void RecalculateSkylight()
         {
             WorldData worldData = World.Instance.worldData;
 
@@ -1373,7 +1495,7 @@ namespace Data
                 for (int z = 0; z < VoxelData.ChunkWidth; z++)
                 {
                     // The global position of the column.
-                    worldData.QueueSunlightRecalculation(new Vector2Int(Position.x + x, Position.y + z));
+                    worldData.QueueSkylightRecalculation(new Vector2Int(Position.x + x, Position.y + z));
                 }
             }
         }
@@ -1453,9 +1575,14 @@ namespace Data
                 return new VoxelState(packedData);
             }
 
-            // If it's not in this chunk, ask the world.
-            Vector3 globalPos = new Vector3(localPos.x + Position.x, localPos.y, localPos.z + Position.y);
-            return World.Instance.worldData.GetVoxelState(globalPos);
+            // If it's not in this chunk, ask the world — through the integer fast path, never a Vector3. Forming a
+            // float here rounded the cell away past ±2²⁴ (Bug 19 class), which silently made every cross-chunk
+            // behavior read resolve the wrong voxel in the far lands. TryGetVoxel's false return is exactly this
+            // method's null (out-of-world Y, chunk absent, or chunk present-but-unpopulated).
+            return World.Instance.worldData.TryGetVoxel(
+                localPos.x + Position.x, localPos.y, localPos.z + Position.y, out VoxelState state)
+                ? state
+                : null;
         }
 
         /// <summary>

@@ -10,4 +10,26 @@
     assembly list.
   -->
   <assembly fullname="netstandard" preserve="all" />
+
+  <!--
+    Managed stripping roots for the reflection-driven settings UI.
+
+    SettingsUIGenerator builds the entire settings menu by reflecting over Settings/DevSettings:
+    it enumerates fields (including PRIVATE ones, resolved BY NAME in GetWatchedFieldValue),
+    reads marker attributes off them, invokes [SettingAction] methods, and instantiates
+    IDropdownProvider implementations through Activator.CreateInstance. None of that produces a
+    static reference the linker can see, so at stripping levels above Low these members are
+    removed and the menu silently loses controls at runtime rather than failing at build time.
+
+    Provider classes are rooted with [Preserve] on the class itself rather than listed here, so
+    the root travels with the type through renames and moves. Add [Preserve] to any new
+    IDropdownProvider implementation.
+  -->
+  <assembly fullname="Assembly-CSharp">
+    <type fullname="Settings" preserve="all" />
+    <type fullname="DevSettings" preserve="all" />
+    <type fullname="UI.SettingsMenuController" preserve="all" />
+    <type fullname="UI.SettingsUIGenerator" preserve="all" />
+    <namespace fullname="UI.Attributes" preserve="all" />
+  </assembly>
 </linker>

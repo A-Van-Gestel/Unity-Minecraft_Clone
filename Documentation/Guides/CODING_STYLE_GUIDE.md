@@ -19,6 +19,21 @@ Consistency in naming is one of the fastest ways to make code understandable.
 | Constants (`const`)               | `PascalCase`     | N/A    | `public const int ChunkWidth = 16;`              |
 | private Constants (`const`)       | `SCREAMING_CASE` | N/A    | `private const uint SUNLIGHT_MASK = 0x00000F00;` |
 
+### Spelling: American English
+
+**Use American English everywhere** — identifiers, comments, XML docstrings, `[Tooltip]` text, log
+messages and player-facing strings alike. `color` not `colour`, `center` not `centre`, `neighbor`
+not `neighbour`, `initialize` not `initialise`, `canceled` not `cancelled`, `behavior` not
+`behaviour`.
+
+This is not a stylistic preference so much as an interop one: the .NET and Unity APIs this codebase
+sits on are American throughout (`Color`, `Vector3.center`, `Initialize`), so British spellings put
+a seam through every identifier that touches them — `centreX` beside `bounds.center` reads as two
+different concepts.
+
+The one unavoidable exception is a framework name that is itself British: `MonoBehaviour` and
+anything deriving its name from it stay as Unity spells them.
+
 ## 2. Formatting
 
 ### Braces
@@ -61,6 +76,8 @@ for(int i=0;i<VoxelData.ChunkWidth;i++)
 ## 3. Commenting
 
 Comments explain the **why** — the intent, the constraint, the non-obvious reason a line exists. They must not restate the **what** that the code already makes obvious. A comment that only narrates the next statement is noise; delete it.
+
+Comment prose follows the same American-English rule as identifiers (§1).
 
 ### XML Documentation Comments (`///`)
 
@@ -110,11 +127,48 @@ Comments and doc comments document the code **as it stands now** — never how i
 // Bad: war story — describes history, not current behavior.
 // NOTE: used to read from the wrong neighbor and leak light across the seam;
 // fixed 2026-06-21 by clamping to the local section.
-skyLight = SampleLocalSection(pos);
+skylight = SampleLocalSection(pos);
 
 // Good: describes what the code does now, and why.
-skyLight = SampleLocalSection(pos); // Clamp to the local section so light never crosses the chunk seam.
+skylight = SampleLocalSection(pos); // Clamp to the local section so light never crosses the chunk seam.
 ```
+
+### Document what a thing is, never who uses it
+
+A docstring describes the type or member it sits on: what it is, what it guarantees, why it is
+shaped that way. It must **not** name the code that consumes it — no callers, no consumers, no
+"the X screen uses this", no "production passes false and the harness passes true".
+
+A consumer named in a docstring is a fact about the *rest* of the codebase, parked in the one place
+nobody updates when that codebase changes. It goes stale the first time a second consumer appears,
+and it couples a low-level type's documentation to a high-level one — so reading `ToastVariant`
+teaches you about the music player, and deleting the music player leaves a lie behind.
+
+```csharp
+// Bad: names a consumer. Stale the moment a second one exists.
+/// <summary>Neutral notice. The default, and what the now-playing card uses.</summary>
+
+// Good: says what the value is.
+/// <summary>Neutral notice, carrying no accent coloring. The default.</summary>
+```
+
+What a consumer roster is usually reaching for is a real property — state that instead:
+
+- roster → **invariant**: "this is the sole arm-selection rule; a second implementation defeats it".
+- "caller X does A, caller Y does B" → **obligation**: "a caller that keeps ready/waiting sets must
+  implement all three bullets identically".
+- a named exception → **shape**, not identity: "a caller that keeps no sets treats Park and Remove
+  as no-ops" survives a second such caller; "the startup coroutine does X" does not.
+
+Three things this rule does **not** forbid, because they are not consumers:
+
+- A type documenting **itself** — `NowPlayingToastPresenter` may say it raises now-playing cards.
+- A **dependency** the code reads, and the reason it reads it.
+- An **owner** in a lifecycle sense — "pooled by `ToastManager`" is structural, not a usage roster.
+
+Narrow exceptions where consumer awareness is the point: a **coverage limit** on a type whose
+consumers are unbaselined (keep it a pointer to the design doc, not a caller count), and a
+**baseline/test docstring** stating what the test does not cover.
 
 ## 4. Attributes
 

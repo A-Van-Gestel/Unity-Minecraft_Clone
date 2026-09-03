@@ -22,6 +22,12 @@ namespace Benchmarks
 
         private BenchmarkController _controller;
         private TextMeshProUGUI _statusText;
+
+        /// <summary>
+        /// The panel's blur material instance, owned by this component so its lifetime matches the
+        /// hierarchy that uses it. Null when the HUD was built on the flat-color fallback path.
+        /// </summary>
+        private Material _ownedBlurMaterial;
         private readonly StringBuilder _sb = new StringBuilder(512);
         private float _updateTimer;
         private const float UPDATE_RATE = DEFAULT_UPDATE_RATE;
@@ -31,10 +37,19 @@ namespace Benchmarks
         /// </summary>
         /// <param name="controller">The benchmark controller to read live state from.</param>
         /// <param name="statusText">The TMP component to write formatted text into.</param>
-        public void Initialize(BenchmarkController controller, TextMeshProUGUI statusText)
+        /// <param name="ownedBlurMaterial">Blur material instance to take ownership of, or null on the flat fallback path.</param>
+        public void Initialize(BenchmarkController controller, TextMeshProUGUI statusText,
+            Material ownedBlurMaterial = null)
         {
             _controller = controller;
             _statusText = statusText;
+            _ownedBlurMaterial = ownedBlurMaterial;
+        }
+
+        private void OnDestroy()
+        {
+            if (_ownedBlurMaterial != null)
+                Destroy(_ownedBlurMaterial);
         }
 
         private void Update()

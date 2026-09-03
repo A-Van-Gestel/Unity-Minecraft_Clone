@@ -2,14 +2,14 @@
 
 This document outlines **open** bugs related to world generation, seed handling, and voxel data management. Resolved bugs are archived in [`_FIXED_BUGS.md`](./_FIXED_BUGS.md).
 
-> **Last reviewed:** June 2026 (full codebase audit)
+> **Last reviewed:** August 2026 (documentation audit — every code-checkable claim re-verified against current source)
 
 ---
 
 ## 01. Seed calculation uses `Mathf.Abs(hashCode) / 10000` hack
 
 **Severity:** Bug  
-**Files:** `VoxelData.cs` — `CalculateSeed` (lines 115–144)
+**Files:** `VoxelData.cs` — `CalculateSeed` (line ~151)
 
 > [!CAUTION]
 > **SEED BREAKING:** Fixing this will change the computed seed for all worlds created with **string names** or **random seeds**. Existing save files are unaffected (they store the already-computed integer seed), but the same seed string in a new world would generate entirely different terrain. Only worlds created with a **raw integer seed** remain reproducible.
@@ -28,9 +28,9 @@ This document outlines **open** bugs related to world generation, seed handling,
 
 ## 04. Large integer seeds silently degrade float-precision noise offsets (biome dithering)
 
-**Severity:** Bug (visual / generation quality)
-**Confidence:** Medium-High (mechanism verified by inspection; in-game visual impact not yet reproduced)
-**Files:** `StandardChunkGenerationJob.cs` — surface biome dithering (lines ~238–241); any other site that adds `BaseSeed` directly to a float noise coordinate
+**Severity:** Bug (visual / generation quality)  
+**Confidence:** Medium-High (mechanism verified by inspection; in-game visual impact not yet reproduced)  
+**Files:** `StandardChunkGenerationJob.cs` — surface biome dithering (lines ~250–251); any other site that adds `BaseSeed` directly to a float noise coordinate
 
 > [!CAUTION]
 > **SEED BREAKING (partial):** Fixing this changes surface-biome dithering (and any other affected noise) for worlds whose seed magnitude exceeds float precision (~16.7M). Terrain shape from `FastNoiseLite` (which takes seed as an `int`, not a coordinate offset) is unaffected.
@@ -40,12 +40,14 @@ collapse to a constant → biome boundary dithering is effectively **disabled** 
 
 **Proposed fix:** Never feed the raw seed into float coordinates. Either hash the seed into a small bounded offset (`seed & 0xFFFF`), or migrate these `snoise` call sites to seeded `FastNoiseLite.CreateSimple(seed, freq)` instances (see `LIBRARY_BUGS.md` → "Remaining noise.snoise Migration", which lists these exact call sites).
 
+**2026-07-13 (world-scaling OQ-7 audit):** Mechanism re-verified in code. One additional seed-as-coordinate site: `Legacy/LegacyNoise.cs` (`position.x += offset + VoxelData.Seed + 0.1f` and siblings) — left as-is deliberately, the Legacy generator is frozen for save compatibility. Decision: **no fix now**; the proper fix is world-version-gated and rides WS-3's seed-hygiene item (see `Design/WORLD_SCALING_IMPLEMENTATION.md` §5 / OQ-7 — fixing this per Bug 01's warning is seed-breaking by definition).
+
 ---
 
 ## 05. Generation pipeline truncates block IDs to `byte` (latent 255-block ceiling)
 
-**Severity:** Latent constraint (not currently triggerable — block database is far below 255 entries)
-**Confidence:** High
+**Severity:** Latent constraint (not currently triggerable — block database is far below 255 entries)  
+**Confidence:** High  
 **Files:** `StandardChunkGenerationJob.cs` — `voxelValue` (byte), `StandardBiomeAttributesJobData` / `StandardTerrainLayerJobData` / `StandardLodeJobData` block ID fields, `WorldJobManager.GetVoxel` (returns `byte`), `IChunkGenerator.GetVoxel`
 
 The packed voxel format reserves a full `ushort` for block IDs (`BurstVoxelDataBitMapping.GetId` returns `ushort`), but the generation job pipeline carries IDs as `byte` (`byte voxelValue`, `(byte)BlockIDs.Air` casts, byte-typed job-data fields, `byte GetVoxel(...)`). The moment the block database passes ID 255, generation (and the per-voxel `BlockTypes[voxelValue]` lookups) silently truncates IDs — placing wrong blocks with no error. Worth fixing opportunistically (mechanical `byte` → `ushort` sweep through the generator data structs) before the
@@ -55,8 +57,8 @@ database grows; it does not affect the save format.
 
 ## 06. Section bitmask and serializer assume ≤ 32 sections (blocks world-height scaling)
 
-**Severity:** Latent constraint (fine at ChunkHeight 128 = 8 sections)
-**Confidence:** High
+**Severity:** Latent constraint (fine at ChunkHeight 128 = 8 sections)  
+**Confidence:** High  
 **Files:** `ChunkSerializer.cs` — `int sectionBitmask` / `1 << i`, `WORLD_SCALING_ANALYSIS.md` (design)
 
 `WriteChunkInternal`/`ReadChunkInternal` encode section presence in a single `int` bitmask via `1 << i`. At 16-block sections this caps `ChunkHeight` at 512 (32 sections); beyond that, `1 << i` wraps around (C# masks the shift count) and the format corrupts silently. If the world-height scaling explored in `Documentation/Design/WORLD_SCALING_ANALYSIS.md` ever raises the height, this needs a `long` bitmask or variable-length encoding **plus a chunk-format version bump and AOT migration step**.
@@ -66,7 +68,7 @@ database grows; it does not affect the save format.
 ## TODO: Noise Evaluation Duplication — Worm Carver Seek Is a 4th Unsynchronized Path
 
 **Severity:** Technical Debt / Latent Bug  
-**Files:** `Assets/Scripts/Jobs/StandardWormCarverJob.cs` — `EvaluateLayerNoise()` (line ~252)
+**Files:** `Assets/Scripts/Jobs/StandardWormCarverJob.cs` — `EvaluateLayerNoise()` (line ~363)
 
 The worm carver's noise-seeking logic (`EvaluateLayerNoise`) re-implements the Spaghetti2D 6-sample average, Noodle isoband formula, and Spaghetti3D dual zero-crossing formula that already exist in `StandardChunkGenerationJob.cs` and `StandardChunkGenerator.GetVoxel()`. The cave generation architecture doc ([CAVE_GENERATION.md §4.1](../Architecture/World%20Generation/CAVE_GENERATION.md)) identifies three evaluation paths that **must stay in sync** — the worm carver's seek evaluation is now effectively a **4th path** that is not listed there.
 

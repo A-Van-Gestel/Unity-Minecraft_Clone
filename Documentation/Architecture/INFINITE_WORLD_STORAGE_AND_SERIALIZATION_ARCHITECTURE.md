@@ -1,7 +1,6 @@
 # Design Document: Infinite World Storage & Serialization Architecture
 
-**Version:** 1.7
-**Date:** 2026-06-13  
+**Version:** 1.7 **Date:** 2026-06-13  
 **Status:** Implemented (Stable)  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
 
@@ -17,7 +16,7 @@ The core of this transition involves:
 4. **Custom Binary Serialization:** Abandoning `BinaryFormatter` for a high-performance, versioned binary writer/reader with **LZ4 Compression**.
 5. **Asynchronous I/O Pipeline:** Ensuring saving and loading never stalls the Main Thread.
 6. **Lighting State Preservation:** Critical system to prevent "black spots" by preserving lighting calculation state across save/load cycles.
-7. **Versioned Save Format with AOT Migration:** Every save carries a version number (`level.dat`, currently v11) and is upgraded offline before the world opens — see `AOT_WORLD_MIGRATION_SYSTEM.md`.
+7. **Versioned Save Format with AOT Migration:** Every save carries a version number (`level.dat`, currently v15) and is upgraded offline before the world opens — see `AOT_WORLD_MIGRATION_SYSTEM.md`.
 
 ---
 
@@ -86,16 +85,16 @@ Three separate managers handle state that exists outside individual chunk blobs:
 
 **Purpose:** Preserves lighting calculation state to prevent "black spots" and ghost-light bugs.
 
-**Files:** `pending_lighting.bin` (sunlight columns), `pending_blocklight.bin` (blocklight modifications)  
+**Files:** `pending_lighting.bin` (skylight columns), `pending_blocklight.bin` (blocklight modifications)  
 **Location:** `Assets/Scripts/Serialization/LightingStateManager.cs`  
 **Saves:**
 
-* Columns from `WorldData.SunlightRecalculationQueue` that belong to unloaded chunks.
-* Cross-chunk **blocklight** modifications (local position + RGB + removal flag) targeting unloaded chunks. A sunlight column recalc cannot restore RGB data — without this store, blocklight removals (broken lamps) and uplifts that crossed into an unloaded chunk were permanently lost, leaving ghost light baked into saved data (Bug 08, path 1).
+* Columns from `WorldData.SkylightRecalculationQueue` that belong to unloaded chunks.
+* Cross-chunk **blocklight** modifications (local position + RGB + removal flag) targeting unloaded chunks. A skylight column recalc cannot restore RGB data — without this store, blocklight removals (broken lamps) and uplifts that crossed into an unloaded chunk were permanently lost, leaving ghost light baked into saved data (Bug 08, path 1).
 
 **Key Methods:**
 
-* `AddPending(ChunkCoord, HashSet<Vector2Int>)` - Save pending sunlight columns for a chunk
+* `AddPending(ChunkCoord, HashSet<Vector2Int>)` - Save pending skylight columns for a chunk
 * `TryGetAndRemove(ChunkCoord, out HashSet<Vector2Int>)` - Restore pending columns on load
 * `AddPendingBlocklight(ChunkCoord, Vector3Int, r, g, b, isRemoval)` - Save one pending blocklight modification (last write per voxel wins)
 * `TryGetAndRemovePendingBlocklight(ChunkCoord, out Dictionary<Vector3Int, PendingBlocklightMod>)` - Restore pending blocklight mods on load
@@ -110,7 +109,7 @@ Three separate managers handle state that exists outside individual chunk blobs:
 
 1. Chunk loads from disk via `LoadChunkAsync()`
 2. `World.LoadOrGenerateChunk()` checks `LightingStateManager`
-3. If pending columns exist, they're converted to global coordinates and re-injected into `WorldData.SunlightRecalculationQueue`
+3. If pending columns exist, they're converted to global coordinates and re-injected into `WorldData.SkylightRecalculationQueue`
 4. If pending blocklight mods exist, each is replayed through `CrossChunkLightModApplier.ComputeBlocklight` against the loaded light data — exactly like the live cross-chunk apply path — writing the new value and enqueueing a BFS wake-up node
 5. Chunk's `HasLightChangesToProcess` flag is set
 6. Lighting job is scheduled in the next Update cycle
@@ -211,7 +210,7 @@ JSON file at save folder root containing world metadata and player state.
 
 ```json
 {
-  "version": 11,
+  "version": 14,
   "worldName": "My World",
   "seed": 12345,
   "chunkHeight": 128,
@@ -227,16 +226,36 @@ JSON file at save folder root containing world metadata and player state.
       "z": 0.0
     }
   },
+  // 0 = disabled (unbounded). Added in v12; a player-only fence, see TF-14.
+  "borderRadius": 0,
   "creationDate": 638400000000000000,
   "lastPlayed": 638400000000000000,
+  // Every piece of mutable world state, grouped into sub-sections by concern.
   "worldState": {
-    "timeOfDay": 0.5
+    // Ambient environment state; RF-7's weather fields land here. Added in v14 at the document
+    // root, re-parented under worldState in v15.
+    "environment": {
+      "windX": -0.6,
+      "windZ": 0.0
+    },
+    // Added in v15 (RF-1) — the day/night clock. Total elapsed ticks (24000/day, tick 0 = sunrise),
+    // not a day fraction plus a day counter: one exact integer carries both and cannot drift.
+    // Replaces the v1–v14 "timeOfDay" field, which stored a LIGHT LEVEL because no clock existed.
+    "time": {
+      "ticks": 6000,
+      "frozen": false
+    }
   },
   "player": {
+    // Chunk-relative since v13 (WS-4c) — an absolute Vector3 before that.
     "position": {
-      "x": 10.5,
-      "y": 70.0,
-      "z": -5.5
+      "_chunkX": 0,
+      "_chunkZ": -1,
+      "localPosition": {
+        "x": 10.5,
+        "y": 70.0,
+        "z": 10.5
+      }
     },
     "rotation": {
       "x": 0.0,
@@ -269,7 +288,7 @@ JSON file at save folder root containing world metadata and player state.
 }
 ```
 
-**Implementation:** `SaveSystem.SaveWorld()` serializes a `WorldSaveData` DTO (`Assets/Scripts/Serialization/SaveDataTypes.cs`) via Unity's `JsonUtility` and writes it on world exit and on manual saves. The `version` field (currently **11** — `SaveSystem.CURRENT_VERSION`) drives the AOT migration system; the per-version changelog lives as comments above that constant and in `AOT_WORLD_MIGRATION_SYSTEM.md`.
+**Implementation:** `SaveSystem.SaveWorld()` serializes a `WorldSaveData` DTO (`Assets/Scripts/Serialization/SaveDataTypes.cs`) via Unity's `JsonUtility` and writes it on world exit and on manual saves. The `version` field (currently **14** — `SaveSystem.CURRENT_VERSION`) drives the AOT migration system; the per-version changelog lives as comments above that constant and in `AOT_WORLD_MIGRATION_SYSTEM.md`.
 
 ### 4.2. Chunk Blob Format (Inside Region File)
 
@@ -313,7 +332,7 @@ JSON file at save folder root containing world metadata and player state.
 ├──────────────────────────────────────────────┤
 │ Lighting Queues:                             │
 │   ┌────────────────────────────────────────┐ │
-│   │ int: Sunlight Queue Count              │ │
+│   │ int: Skylight Queue Count              │ │
 │   │ FOR EACH NODE (16 bytes):              │ │
 │   │   int: Position.x                      │ │
 │   │   int: Position.y                      │ │
@@ -325,7 +344,7 @@ JSON file at save folder root containing world metadata and player state.
 │   └────────────────────────────────────────┘ │
 │   ┌────────────────────────────────────────┐ │
 │   │ int: Blocklight Queue Count            │ │
-│   │ (same node structure as sunlight)      │ │
+│   │ (same node structure as skylight)      │ │
 │   └────────────────────────────────────────┘ │
 └──────────────────────────────────────────────┘
 ```
@@ -347,7 +366,7 @@ JSON file at save folder root containing world metadata and player state.
    Must be saved and restored. If a chunk is unloaded before initial lighting completes, this flag ensures it will be re-lit on reload. Without this, chunks appear completely dark.
 
 2. **Lighting Queues:**  
-   Represent in-progress BFS propagation. Saving these allow lighting calculations to resume exactly where they left off. Queue nodes contain the voxel position, the *old* sunlight level, and the *old* RGB blocklight channels (needed for removal propagation).
+   Represent in-progress BFS propagation. Saving these allow lighting calculations to resume exactly where they left off. Queue nodes contain the voxel position, the *old* skylight level, and the *old* RGB blocklight channels (needed for removal propagation).
 
 3. **Active Voxels Not Saved:**  
    Fluids, grass, and other "active" blocks are recalculated via `Chunk.OnDataPopulated()` on load. This reduces save file size by ~10% and ensures behavior updates apply retroactively.
@@ -388,7 +407,7 @@ Save version v5 collapsed the previous `(Orientation, FluidLevel)` byte pair int
 
 ### 4.4. Pending Lighting Format (`pending_lighting.bin`)
 
-Binary file storing columns that need sunlight recalculation. (The filename was standardized from the older `lighting_pending.bin` by `Migration_v6_to_v7_SaveFormatExtensibility`.)
+Binary file storing columns that need skylight recalculation. (The filename was standardized from the older `lighting_pending.bin` by `Migration_v6_to_v7_SaveFormatExtensibility`.)
 
 **Structure:**
 
@@ -466,8 +485,11 @@ Main Thread                            Background Thread (ThreadPool)
                                     6. Lock region file (_fileLock)
                                     7. Write sector-aligned record to disk
                                     8. Update location table entry
-9. Return buffer + snapshot
-   to their pools (finally)
+9. Return buffer to its pool
+   (finally); snapshot → pool on
+   Written/FailedPermanent, →
+   failed-save retry registry on
+   Failed/Canceled (CP-6)
 ```
 
 **Memory Management:**  
@@ -475,6 +497,20 @@ Uses `SerializationBufferPool` to recycle byte arrays, and `ChunkStorageManager.
 
 **Cancellation:**  
 `SaveChunkAsync` takes a `CancellationToken` (the world's shutdown token) so in-flight async saves abort cleanly on quit instead of racing the synchronous shutdown flush.
+
+**Failure Handling (CP-6 durability contract):**  
+`SaveChunkAsync` returns `Task<ChunkSaveResult>` (`Written` / `Canceled` / `Failed` / `FailedPermanent`) instead of swallowing exceptions. On `Failed` **or `Canceled`**, the serialization snapshot — the edits' only surviving copy once the live `ChunkData` is pool-recycled by `UnloadChunks` (or cleared from `ModifiedChunks` by a manual save) — transfers to the storage manager's **failed-save retry registry** (coord-keyed; a newer entry for the same coord supersedes the older snapshot) rather than returning to the pool. Staging `Canceled` matters because
+cancellation only comes from the quit token: without it, a save canceled mid-quit after its chunk left `ModifiedChunks` would lose the edits silently. `FailedPermanent` (zero-length serialization, or a chunk exceeding the 255-sector region record limit — `RegionFile.SaveChunkData` throws the typed `ChunkTooLargeException` so no path can report a false `Written` — deterministic, retrying can never succeed) releases the snapshot with a loud per-chunk error instead of entering the retry loop. The registry is drained three ways:
+
+1. **Per-frame retry** — `World.Update` calls `DrainFailedSaveRetries()` (one due entry per frame, exponential backoff 1→30 s, loud error per failed attempt; retryable entries are never dropped mid-session, deterministic ones are dropped loudly).
+2. **Reload guard** — `LoadChunkAsync` synchronously flushes a pending retry for its coord before reading disk, so a returning player never loads pre-edit bytes. (Known window: a save still *in flight* for that coord is invisible to the guard — closing it would need per-coord in-flight tracking.)
+3. **Quit flush** — the synchronous `SaveAllModifiedChunks` path calls `FlushFailedSavesSync()` **first — before the per-chunk live saves and regardless of whether `ModifiedChunks` is empty** (the registry can hold edits for chunks long gone from the set, and snapshots are never fresher than live data, so flushing first means the newest bytes always land last); recovered and deterministic entries are removed, **retryably-failing entries are retained** (moot at real quit; preserves recoverability when the same path runs from a live-session force-unload).
+   `StorageManager.Dispose` additionally makes one final write attempt per remaining entry before closing the regions, so a manager teardown (world switch) can never silently discard retained edits.
+
+**Supersede rule:** every save is stamped with a monotonic **data-freshness sequence at capture time** (snapshot creation / sync serialize). Every *successful* write (sync or async) stages a supersede op for its coord into the shared staging queue; when drained, it drops a pending registry entry only if that entry's sequence is **older** — a stale snapshot must never be replayed over newer bytes — while a newer failure survives regardless of the order completions arrive in (overlapping same-coord saves with inverted completion order resolve correctly;
+baseline B10). The **sync** `SaveChunk` path shares the durability contract: a failed sync save snapshots the still-live data and stages it for retry (baseline B12).
+
+All three save paths (sync, async, retry) share one write core (`WriteToRegion`), which also hosts the dev-only fault seams. The contract is guarded by `Minecraft Clone/Dev/Validate Save Durability` (B1–B13) with dev-only injection seams (`ChunkStorageManager.InjectSaveFaults`, `InjectZeroLengthSerializes`, `InjectTooLargeSaves`).
 
 **Thread Safety:**  
 Each region file takes an exclusive private `_fileLock` for both reads and writes (`FileStream` position is not thread-safe). Multiple chunks in different regions can save concurrently.
@@ -529,14 +565,14 @@ public void PopulateFromSave(ChunkData loadedData)
     Array.Copy(loadedData.SectionUniformSkyLevel, SectionUniformSkyLevel, SectionUniformSkyLevel.Length);
 
     // Copy lighting queues (RGB-aware)
-    foreach (var node in loadedData.SunlightBfsQueue)
-        AddToSunLightQueue(node.Position, node.OldLightLevel);
+    foreach (var node in loadedData.SkylightBfsQueue)
+        AddToSkylightQueue(node.Position, node.OldLightLevel);
     foreach (var node in loadedData.BlocklightBfsQueue)
-        AddToBlockLightQueue(node.Position, node.OldLightLevel, node.OldBlockR, node.OldBlockG, node.OldBlockB);
+        AddToBlocklightQueue(node.Position, node.OldLightLevel, node.OldBlockR, node.OldBlockG, node.OldBlockB);
 
     // Transfer pending flags
-    if (loadedData.HasLightChangesToProcess) HasLightChangesToProcess = true;
-    if (loadedData.NeedsInitialLighting) NeedsInitialLighting = true;
+    if (loadedData.HasLightChangesToProcess) FlagLightWork();
+    if (loadedData.NeedsInitialLighting) FlagInitialLighting();
 
     // Active blocks (fluids/grass) recalculated via RecalculateCounts, not saved
     foreach (ChunkSection section in sections)
@@ -560,14 +596,28 @@ if (LightingStateManager.TryGetAndRemove(coord, out HashSet<Vector2Int> localCol
     }
     
     // Re-inject into global queue
-    if (worldData.SunlightRecalculationQueue.ContainsKey(pos))
-        worldData.SunlightRecalculationQueue[pos].UnionWith(globalCols);
+    if (worldData.SkylightRecalculationQueue.ContainsKey(pos))
+        worldData.SkylightRecalculationQueue[pos].UnionWith(globalCols);
     else
-        worldData.SunlightRecalculationQueue[pos] = globalCols;
+        worldData.SkylightRecalculationQueue[pos] = globalCols;
     
-    data.HasLightChangesToProcess = true;
+    data.FlagLightWork();
 }
 ```
+
+**Failure Handling (CP-3 load-boundary contract):**  
+The load pipeline distinguishes three outcomes, and the distinction is load-bearing — collapsing a fault into the null result would regenerate terrain over the player's saved data:
+
+1. **Not on disk / corrupt payload → null.** `RegionFile.LoadChunkData` returns null for its explicit corrupt-shape branches (missing entry, invalid length, truncated record, unknown compression byte), and `ChunkSerializer.Deserialize` catches any parse failure (truncated / garbage / wrong-version payload), **returns the pooled shell and its already-attached sections to the concurrent pools** (no leak — the mid-parse acquisition is unwound), and returns null. The caller regenerates the chunk — the deliberate corrupt-file escape hatch.
+2. **Transient I/O fault → throw.** Unexpected exceptions in `LoadChunkData` rethrow, and a faulted `Lazy<RegionFile>` in `GetRegion` is evicted before the rethrow (a `Lazy` caches its factory exception forever — without eviction one transient open fault would poison the whole region for the session). The fault crosses the `Task` boundary and lands in
+   `World.LoadOrGenerateChunk`'s CP-3 contract: one error log → `IsLoading` cleared (identity-guarded) → natural retry on the next boundary crossing.
+3. **Success → hydrate.** Unchanged (§ Step 9 below).
+
+The write side shares the loud-failure rule: `RegionFile.SaveChunkData` rethrows unexpected write faults instead of swallowing them, so `SaveChunkAsync` reports `Failed` (→ CP-6 retry registry)
+rather than a false `Written`; its deterministic "chunk too big" arm throws the typed
+`ChunkTooLargeException`, which every save path maps to `FailedPermanent` (B13). A partially initialized `RegionFile` disposes its `FileStream` before rethrowing, so a transient open fault never leaks the exclusive handle (which would turn every eviction-retry re-open into a sharing violation). Migration reads (`MigrationManager`) wrap `LoadChunkData` in a small bounded retry so a transient fault doesn't drop a healthy chunk from the migrated world as "corrupted". The CP-6 reload guard (`FlushPendingRetryFor`) stays in `LoadChunkAsync`'s synchronous
+prefix, ahead of everything above. Guarded by `Minecraft Clone/Dev/Validate Deserialization
+Robustness` (NS-1 seed, B1–B7) with the dev-only `ChunkStorageManager.InjectLoadFaults` seam.
 
 **Performance Target:**  
 < 5ms from disk read to chunk ready for meshing (measured: ~3ms typical)
@@ -580,7 +630,7 @@ if (LightingStateManager.TryGetAndRemove(coord, out HashSet<Vector2Int> localCol
 
 Lighting propagation is multi-frame and cross-chunk. A chunk can be in several states:
 
-1. **Newly Generated** - Needs initial sunlight calculation
+1. **Newly Generated** - Needs initial skylight calculation
 2. **Lighting In Progress** - Job running, results not yet applied
 3. **Lighting Awaiting Neighbors** - Waiting for adjacent chunks to load
 4. **Cross-Chunk Propagation** - Light from this chunk affecting neighbors
@@ -602,16 +652,13 @@ If a chunk unloads during states 1-4, critical data is lost, resulting in "black
 public bool NeedsInitialLighting { get => ...; set { ...; if (value) OnLightWorkFlagged?.Invoke(Position); } }
 public bool HasLightChangesToProcess { get => ...; set { ...; if (value) OnLightWorkFlagged?.Invoke(Position); } }
 public bool NeedsEdgeCheck { get => ...; set { ...; if (value) OnLightWorkFlagged?.Invoke(Position); } }
-
-[NonSerialized]
-public bool IsAwaitingMainThreadProcess = false; // Job done, waiting for apply (plain field — no callback)
 ```
 
 **Layer 2: Per-Chunk Queues (Serialized)**
 
 ```csharp
 // In ChunkData.cs - These ARE saved to disk
-public Queue<LightQueueNode> SunlightBfsQueue;
+public Queue<LightQueueNode> SkylightBfsQueue;
 public Queue<LightQueueNode> BlocklightBfsQueue;
 ```
 
@@ -619,14 +666,14 @@ public Queue<LightQueueNode> BlocklightBfsQueue;
 
 ```csharp
 // In WorldData.cs - NOT automatically saved
-public Dictionary<Vector2Int, HashSet<Vector2Int>> SunlightRecalculationQueue;
+public Dictionary<Vector2Int, HashSet<Vector2Int>> SkylightRecalculationQueue;
 
 // LightingStateManager extracts and persists relevant entries on unload
 ```
 
 ### 6.3. Unload Safety Protocol
 
-**In World.UnloadChunks():**
+**In World.UnloadChunks ():**
 
 ```csharp
 // Step 1: Check for active work
@@ -634,8 +681,7 @@ bool isJobRunning = JobManager.generationJobs.ContainsKey(coord)
                     || JobManager.meshJobs.ContainsKey(coord)
                     || JobManager.lightingJobs.ContainsKey(coord);
 
-bool isProcessingLight = data.IsAwaitingMainThreadProcess || 
-                        data.HasLightChangesToProcess;
+bool isProcessingLight = data.HasLightChangesToProcess;
 
 if (isJobRunning || isProcessingLight)
 {
@@ -643,7 +689,7 @@ if (isJobRunning || isProcessingLight)
 }
 
 // Step 2: Rescue orphaned global queue data
-if (worldData.SunlightRecalculationQueue.TryGetValue(pos, out var globalCols))
+if (worldData.SkylightRecalculationQueue.TryGetValue(pos, out var globalCols))
 {
     if (globalCols != null && globalCols.Count > 0)
     {
@@ -658,7 +704,7 @@ if (worldData.SunlightRecalculationQueue.TryGetValue(pos, out var globalCols))
         LightingStateManager.AddPending(coord, localCols);
     }
     
-    worldData.SunlightRecalculationQueue.Remove(pos);
+    worldData.SkylightRecalculationQueue.Remove(pos);
 }
 
 // Step 3: Save chunk (includes per-chunk queues and NeedsInitialLighting flag)
@@ -672,7 +718,7 @@ if (worldData.ModifiedChunks.Contains(data))
 
 ### 6.4. Load Restoration Protocol
 
-**In World.LoadOrGenerateChunk():**
+**In World.LoadOrGenerateChunk ():**
 
 ```csharp
 ChunkData loaded = await StorageManager.LoadChunkAsync(pos);
@@ -685,7 +731,7 @@ if (loaded != null)
     if (LightingStateManager.TryGetAndRemove(coord, out var localCols))
     {
         // Re-inject into global queue (see code in section 5.2)
-        data.HasLightChangesToProcess = true;
+        data.FlagLightWork();
     }
 
     // 2b. Replay pending cross-chunk blocklight mods. Each mod runs through
@@ -705,8 +751,8 @@ if (loaded != null)
         if (AreNeighborsDataReady(coord))
         {
             // Trigger lighting immediately
-            data.RecalculateSunLightLight();
-            data.NeedsInitialLighting = false;
+            data.RecalculateSkylight();
+            data.ClearInitialLighting();
             
             if (data.Chunk != null)
             {
@@ -729,7 +775,7 @@ During lighting job execution, neighbor chunks may unload. Light updates targeti
 
 **Solution - Batched Deferred Updates (per channel):**
 
-**In WorldJobManager.ProcessLightingJobs():**
+**In WorldJobManager.ProcessLightingJobs ():**
 
 ```csharp
 foreach (LightModification mod in jobData.Mods)
@@ -740,9 +786,9 @@ foreach (LightModification mod in jobData.Mods)
     if (neighborChunk == null || !neighborChunk.IsPopulated) 
     {
         // Neighbor unloaded — degrade per channel:
-        if (mod.Channel == LightChannel.Sun)
+        if (mod.Channel == LightChannel.Sky)
         {
-            // Sunlight: the affected COLUMN is batched into _droppedLightUpdates and
+            // Skylight: the affected COLUMN is batched into _droppedLightUpdates and
             // saved to LightingStateManager at the end of the pass — a column recalc
             // is authoritative for the sky channel.
         }
@@ -762,7 +808,7 @@ foreach (LightModification mod in jobData.Mods)
     // Otherwise apply to the loaded neighbor via CrossChunkLightModApplier.
 }
 
-// Batch save all vanishing neighbor sunlight columns
+// Batch save all vanishing neighbor skylight columns
 foreach (var kvp in _droppedLightUpdates)
 {
     _world.LightingStateManager.AddPending(kvp.Key, kvp.Value);
@@ -887,11 +933,11 @@ An edge chunk at (0, 50) only waits for its in-world neighbors. Out-of-bounds ne
 
 | Operation                      | Target  | Measured | Status |
 |--------------------------------|---------|----------|--------|
-| Chunk Save (Main Thread)       | < 1ms   | ~0.3ms   | ✅      |
-| Chunk Load (Async)             | < 5ms   | ~3ms     | ✅      |
-| Lighting Restoration           | < 2ms   | ~1ms     | ✅      |
-| Memory (Active Chunks)         | < 1000  | ~500-800 | ✅      |
-| File Size (Per Chunk, Deflate) | < 100KB | ~50KB    | ✅      |
+| Chunk Save (Main Thread)       | < 1ms   | ~0.3ms   | ✅     |
+| Chunk Load (Async)             | < 5ms   | ~3ms     | ✅     |
+| Lighting Restoration           | < 2ms   | ~1ms     | ✅     |
+| Memory (Active Chunks)         | < 1000  | ~500-800 | ✅     |
+| File Size (Per Chunk, Deflate) | < 100KB | ~50KB    | ✅     |
 
 ### 9.2. Bottleneck Analysis
 
@@ -926,7 +972,7 @@ Batching all updates for a single neighbor chunk into one `AddPending()` call re
 **Root Cause:** Three separate issues:
 
 1. `NeedsInitialLighting` flag not preserved during `PopulateFromSave()`
-2. Global `SunlightRecalculationQueue` entries lost when chunks unloaded
+2. Global `SkylightRecalculationQueue` entries lost when chunks unloaded
 3. Cross-chunk light propagation dropped when target neighbor unloaded
 
 **Resolution:**
@@ -940,10 +986,10 @@ Extensive testing with circular flying patterns (worst-case scenario). No black 
 
 **Files Modified:**
 
-* `ChunkData.cs` - PopulateFromSave()
+* `ChunkData.cs` - PopulateFromSave ()
 * `LightingStateManager.cs` - New file
-* `World.cs` - UnloadChunks(), LoadOrGenerateChunk()
-* `WorldJobManager.cs` - ProcessLightingJobs()
+* `World.cs` - UnloadChunks (), LoadOrGenerateChunk ()
+* `WorldJobManager.cs` - ProcessLightingJobs ()
 
 ### 10.2. Logging Spam ✅ RESOLVED
 
@@ -976,12 +1022,11 @@ Load a world, fly to edge (0,0) or (99,99), verify no permanent dark strips.
 **Root Cause:**
 
 1. **Race Condition:** `EnsureChunkExists` in `WorldData` was implicitly scheduling a Generation Job. In `StartWorld`, this job raced against the async `LoadChunk` task. Often, the Generation Job would finish *after* the disk load, overwriting the saved data with fresh terrain.
-2. **Flush Failure:** `OnApplicationQuit` was writing chunk bytes to the `FileStream` but not explicitly Disposing/Flushing the `StorageManager`. This meant the Region File's **Header Table (Offsets)** was not updated on disk. On reload, the game read the old offsets (0), assumed
-   the chunk didn't exist, and regenerated it.
+2. **Flush Failure:** `OnApplicationQuit` was writing chunk bytes to the `FileStream` but not explicitly Disposing/Flushing the `StorageManager`. This meant the Region File's **Header Table (Offsets)** was not updated on disk. On reload, the game read the old offsets (0), assumed the chunk didn't exist, and regenerated it.
 
 **Resolution:**
 
-1. Refactored `EnsureChunkExists` to only create the data placeholder, moving the responsibility of scheduling generation to `LoadOrGenerateChunk`.
+1. Refactored `EnsureChunkExists` to only create the data placeholder, moving the responsibility of scheduling generation to `LoadOrGenerateChunk`. *(`EnsureChunkExists` has since been retired — CP-4 consolidated the placeholder-only behavior into `WorldData.GetOrCreatePlaceholder`.)*
 2. Added explicit `StorageManager.Dispose()` in `OnApplicationQuit` to force-flush file buffers to physical disk.
 
 ### 10.4. Seed Mismatch ✅ RESOLVED
@@ -1092,7 +1137,7 @@ Before each major release:
 - [x] **LZ4 Compression Support**
 - [x] **Seed Mismatch Fix**
 - [x] **Quit/Flush Reliability Fix**
-- [x] **AOT World Migration System** (save versions v1 → v11; see `AOT_WORLD_MIGRATION_SYSTEM.md`)
+- [x] **AOT World Migration System** (save versions v1 → v14; see `AOT_WORLD_MIGRATION_SYSTEM.md`)
 - [x] **Versioned region addressing** (`RegionAddressCodec` V1/V2 + region repack migration)
 - [x] **PlayerStateManager** (position, rotation, capabilities, inventory, cursor item)
 - [x] **Pending blocklight store** (`pending_blocklight.bin`, Bug 08)
@@ -1142,7 +1187,7 @@ Saves/
 └── My World/
     ├── level.dat                    (JSON metadata + player state)
     ├── pending_mods.bin             (VoxelMod queue)
-    ├── pending_lighting.bin         (Sunlight column queue)
+    ├── pending_lighting.bin         (Skylight column queue)
     ├── pending_blocklight.bin       (Cross-chunk blocklight mods; absent if nothing pending)
     └── Region/
         ├── r.0.0.bin                (up to 1024 chunks)
@@ -1177,8 +1222,14 @@ Pre-migration backups are created as sibling world folders named `{WorldName}_Ba
 * **v1.6** - Added LZ4 Compression implementation details and documented resolution of Chunk Regeneration bugs
 * **v1.7** - Synced with codebase: sector-based region file layout, versioned region addressing (`RegionAddressCodec` V1/V2), chunk format v7 (flag-based sections, uniform-sky optimization, RGB light queues), v5+ pending mods Meta byte, `pending_lighting.bin` rename + `pending_blocklight.bin` format, save snapshotting/cancellation, 8-neighbor data-ready gate, completed player state & AOT migration checklist items
 * **v1.8** - Renamed `CompressionAlgorithm.GZip` → `Deflate` for accuracy (value 1 has always been raw headerless DEFLATE, not GZip). On-disk value 1 unchanged, so existing saves stay byte-compatible — source-only rename, no format bump/migration (MT-6)
+* **v1.9** - CP-6 save-boundary durability: `SaveChunkAsync` surfaces `ChunkSaveResult`, failed saves route their snapshot to the failed-save retry registry (per-frame drain + reload guard + quit flush) instead of silently losing session edits (F5). Review hardening in the same change: quit-canceled saves stage their snapshot too (closes the manual-save-then-quit hole), zero-length serialization is `FailedPermanent` (no retry loop), flush retains retryable entries, single shared write core. No format change — failure-path bookkeeping only
+* **v1.10** - CP-6 second review round: quit flush moved BEFORE the live sync saves and outside the ModifiedChunks-empty early return (empty set no longer skips pending registry entries; stale snapshots can no longer overwrite just-synced newer bytes); successful writes stage supersede ops that drop older pending entries (B10); `Dispose` makes a final attempt on remaining entries (B11)
+* **v1.11** - CP-6 third review round: supersede decisions moved from queue order to a **data-freshness sequence** stamped at capture time (closes the overlapping-saves completion-order inversion); sync `SaveChunk` failures now snapshot-and-stage (B12); Dispose flush is bounded multi-pass for late-staging stragglers. Suite B1–B12
+* **v1.12** - CP-3 load-boundary failure contract: corrupt payload → null + pooled-shell return (no leak) → regenerate; transient I/O fault → throw (+ faulted-`Lazy` region eviction) → load-arm retry; `SaveChunkData` write faults rethrow instead of reporting a false `Written`; latent `Serialize`-with-`None` dispose bug fixed. New `Validate Deserialization Robustness` suite (NS-1 seed, B1–B7). No format change — read-path behavior on invalid data only
+* **v1.13** - CP-3 review hardening: too-large chunk writes are the typed `ChunkTooLargeException` → `FailedPermanent` on every save path (closes the last false-`Written` hole; `InjectTooLargeSaves` seam + Save Durability B13); `RegionFile` disposes its `FileStream` on partial-init throw (no leaked handle poisoning retries); `ChunkData.LifecycleEpoch` closes the load-arm fault path's pool-ABA window (round 2: the mid-await unload guard too); migration reads gain a bounded transient retry and the v1→v2 repack per-chunk fault isolation (skip-one-chunk, not
+  abort); shared `StorageValidationFixture` + one `TryConsumeInjection` core for all four seams
 
 ---
 
-**Last Updated:** 2026-07-01  
+**Last Updated:** 2026-07-22  
 **Next Review:** Chunk prioritization or Defragmentation

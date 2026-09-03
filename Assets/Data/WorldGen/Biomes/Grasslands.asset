@@ -13,6 +13,16 @@ MonoBehaviour:
   m_Name: Grasslands
   m_EditorClassIdentifier: Assembly-CSharp::Data.WorldTypes.StandardBiomeAttributes
   biomeName: Grasslands
+  ambientTracks:
+  - clip: {fileID: 8300000, guid: 154dc9ed34e6e76479c4c2a060e2f68d, type: 3}
+    yRange: {x: 0, y: 128}
+    playChance: 1
+    volume: 1
+  - clip: {fileID: 8300000, guid: 23c70f7cc91d1944388db3f315fab233, type: 3}
+    yRange: {x: 0, y: 128}
+    playChance: 0.25
+    volume: 0.2511887
+  musicTracks: []
   debugPreviewColor: {r: 0.3, g: 0.7, b: 0.3, a: 1}
   biomeWeightNoiseConfig:
     seedOffset: 250

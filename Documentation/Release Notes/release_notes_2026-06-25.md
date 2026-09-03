@@ -67,7 +67,7 @@ This release includes the following major new features and improvements:
     - `Mathf` Burst violation in `NeighborhoodLightingJob`.
     - `ChunkPreview3DWindow` and `LightingJobBenchmark` blocklight apply ignoring `IsRemoval` → delegated to `CrossChunkLightModApplier.Compute`.
     - Failing IL2CPP builds due to "netstandard" code stripping.
-    - Unity 6.5 UAC1001 warnings → `[NonSerialized]` on 9 runtime-only public fields.
+    - Unity 6.6 UAC1001 warnings → `[NonSerialized]` on 9 runtime-only public fields.
     - Active-voxel scan bounds guard for out-of-range block IDs.
 - **Refactors**: Extracted `CrossChunkLightModApplier`, `LightingScheduleDecision`, `LightingJobProcessor`, `LightingModPersister`, `LightingHelper`, `LightAttenuation`, `SeededVoxelRandom`, and `ValidationReflection` shared helpers. Renamed "neighbour" → "neighbor" codebase-wide.
 - **Unity Upgrade**: Updated to Unity 6000.5.1f1 (from 6000.4.10f1) via 6000.4.11f1 → 6000.5.0f1 → 6000.5.1f1 + built-in package stripping and unused module pruning.

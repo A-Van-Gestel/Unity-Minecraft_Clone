@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Editor.Dev;
 using Editor.Validation.Framework;
 using UnityEditor;
 
@@ -24,7 +25,7 @@ namespace Editor.Validation.Behavior
         /// <see cref="ValidationSuiteRunner"/>. Baseline failures mark the suite red; known-bug
         /// reproductions are reported as warnings.
         /// </summary>
-        [MenuItem("Minecraft Clone/Dev/Validate Behavior")]
+        [MenuItem("Minecraft Clone/Dev/Validate Behavior", priority = DevMenuPriority.Validation)]
         public static void RunAll() => Execute();
 
         /// <summary>
@@ -44,7 +45,7 @@ namespace Editor.Validation.Behavior
         /// <summary>Registers the baseline regression scenarios (implemented in BehaviorValidationSuite.Baseline.cs).</summary>
         static partial void AddBaselineScenarios(List<Scenario> scenarios);
 
-        /// <summary>Registers the known-bug reproduction scenarios (none yet).</summary>
+        /// <summary>Registers the known-bug reproduction scenarios (none open — K18a/K18b were promoted to BH-B8/BH-B9).</summary>
         static partial void AddKnownBugScenarios(List<Scenario> scenarios);
     }
 }

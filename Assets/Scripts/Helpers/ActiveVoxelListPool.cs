@@ -70,7 +70,9 @@ namespace Helpers
 
             if (_isDisposed || _pool.Count >= MaxRetained)
             {
-                list.Dispose();
+                // Hoisted off the readonly parameter so Dispose() runs without a hidden defensive copy.
+                NativeList<int> disposable = list;
+                disposable.Dispose();
                 return;
             }
 

@@ -15,10 +15,8 @@ namespace Legacy
     public class LegacyBiomeAttributes : BiomeBase
     {
         [Header("Biome Terrain")]
-        [Tooltip("Name of the biome.")]
-        public string biomeName;
-
         public int offset;
+
         public float scale;
 
         [Tooltip("Additional height the terrain should go, starting from the solid terrain.")]

@@ -3,6 +3,11 @@
 One template per **anchor type**. Match the situation to a template; fill the `{PLACEHOLDERS}`;
 verify against the SKILL.md Step 3 checklist (templates cover the structure, not the thinking).
 
+When the arc has live **non-git state** (uncommitted/stashed/unpushed/local-only work, or an
+in-editor result) or a **disproved earlier claim**, append a `Non-git state` / `Corrections` block
+to whichever template you use — see those sections in SKILL.md. The templates below omit them
+because not every handoff needs them; when it does, they are not optional.
+
 **Accretion rule:** add a new template only after a real handoff prompt of that shape has been
 written and accepted/run. Genericize the actual prompt (keep placeholders structural — never bake
 in current doc names or item IDs), and record provenance: date + one line on the originating case.

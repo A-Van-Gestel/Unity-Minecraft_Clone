@@ -14,9 +14,6 @@ namespace Data.WorldTypes
     [CreateAssetMenu(fileName = "New Standard Biome", menuName = "Minecraft/Standard Biome Attributes")]
     public class StandardBiomeAttributes : BiomeBase
     {
-        [Tooltip("The name of the biome, mostly for debug purposes.")]
-        public string biomeName = "New Biome";
-
         [Tooltip("Color used in editor preview tools and the in-game terrain debug overlay to identify this biome.")]
         public Color debugPreviewColor = Color.green;
 

@@ -1,12 +1,10 @@
 # Debugging Tools & Diagnostic Methods
 
-This document archives powerful debug methods developed during the implementation of the Voxel Engine.
-**Do not keep these in production code (`World.cs`)**. Copy-paste them back in only when diagnosing specific issues.
+This document archives powerful debug methods developed during the implementation of the Voxel Engine. **Do not keep these in production code (`World.cs`)**. Copy-paste them back in only when diagnosing specific issues.
 
 ## 1. Invisible Chunk Diagnosis (`DebugRaycastChunkState`)
 
-**Use Case:** You are standing in the world, and a chunk is invisible (mesh not rendering), but you suspect the data exists.
-**Usage:** Add to `World.cs`. Bind a key (e.g., F8) to call `World.Instance.DebugRaycastChunkState()`. Point your crosshair at the empty space.
+**Use Case:** You are standing in the world, and a chunk is invisible (mesh not rendering), but you suspect the data exists. **Usage:** Add to `World.cs`. Bind a key (e.g., F8) to call `World.Instance.DebugRaycastChunkState()`. Point your crosshair at the empty space.
 
 ```csharp
 /// <summary>
@@ -104,8 +102,7 @@ public void DebugRaycastChunkState()
 
 ## 2. Stuck Generation Diagnosis (`DebugAnalyzeStuckChunks`)
 
-**Use Case:** The mesh build queue (`_meshBuildQueue`) is not emptying. Chunks stay at the edge of view and never load.
-**Usage:** Add to `World.cs`. Call when queue count > 0 for extended periods.
+**Use Case:** The mesh build queue (`_meshBuildQueue`) is not emptying. Chunks stay at the edge of view and never load. **Usage:** Add to `World.cs`. Call when queue count > 0 for extended periods.
 
 ```csharp
 public void DebugAnalyzeStuckChunks()
@@ -158,9 +155,7 @@ public void DebugAnalyzeStuckChunks()
 > Inactive / Destroyed / Null breakdown this section produced is now available live in the debug
 > overlay via `World.AppendMeshQueueDebugInfo` (→ `MeshBuildQueue.AppendDebugInfo`).
 
-**Usage:** Call `DebugLogMeshQueueState` to check health. Dead entries are already dropped by the
-scheduling drain and removed by coordinate on unload, so `DebugCleanMeshQueue` is rarely needed — use
-it only to force an immediate purge during a diagnostic session.
+**Usage:** Call `DebugLogMeshQueueState` to check health. Dead entries are already dropped by the scheduling drain and removed by coordinate on unload, so `DebugCleanMeshQueue` is rarely needed — use it only to force an immediate purge during a diagnostic session.
 
 ```csharp
 /// <summary>
@@ -205,15 +200,15 @@ public void DebugCleanMeshQueue()
 }
 ```
 
-## 4. Sunlight Cross-Section Diagnosis (`DebugLogSunlightCrossSection`)
+## 4. Skylight Cross-Section Diagnosis (`DebugLogSunlightCrossSection`)
 
-**Use Case:** Debugging "shadow wall" artifacts or incorrect light propagation across chunk boundaries. It provides a visual 11x11 cross-section of sunlight values and heightmap data around the targeted block, centered on the nearest chunk boundary.  
+**Use Case:** Debugging "shadow wall" artifacts or incorrect light propagation across chunk boundaries. It provides a visual 11x11 cross-section of skylight values and heightmap data around the targeted block, centered on the nearest chunk boundary.  
 **Usage:** Add to `World.cs`. Call `_world.DebugLogSunlightCrossSection()`, typically tied to a debug key like `F8` in `Player.cs`. Aim your crosshair closely at a block experiencing lighting artifacts.
 
 **Example Output:**
 
 ```text
-<color=cyan>--- SUNLIGHT CROSS-SECTION ---</color>
+<color=cyan>--- SKYLIGHT CROSS-SECTION ---</color>
 Hit: (560, 53, 1438) | Local: (0, 14)
 Scanning along: X axis | Border at X=560
 Chunk border between [559] and [560]
@@ -243,9 +238,9 @@ Water block opacity: 2
 
 ```csharp
 /// <summary>
-/// A diagnostic tool for analyzing the sunlight values spanning across chunk boundaries.
+/// A diagnostic tool for analyzing the skylight values spanning across chunk boundaries.
 /// Raycasts to the nearest targeted block, identifies the cross section perpendicular to
-/// the nearest chunk border, and prints a cross-section of sunlight values spanning
+/// the nearest chunk border, and prints a cross-section of skylight values spanning
 /// 5 voxels on each side of the border across 11 Y levels (5 above, the hit level, 5 below).
 /// </summary>
 public void DebugLogSunlightCrossSection()
@@ -293,7 +288,7 @@ public void DebugLogSunlightCrossSection()
     const int Y_RANGE = 5;
 
     System.Text.StringBuilder sb = new System.Text.StringBuilder();
-    sb.AppendLine($"<color=cyan>--- SUNLIGHT CROSS-SECTION ---</color>");
+    sb.AppendLine($"<color=cyan>--- SKYLIGHT CROSS-SECTION ---</color>");
     sb.AppendLine($"Hit: ({hitPos.x}, {hitPos.y}, {hitPos.z}) | Local: ({localX}, {localZ})");
     sb.AppendLine($"Scanning along: {(scanAlongX ? "X" : "Z")} axis | Border at {(scanAlongX ? "X" : "Z")}={borderWorldCoord}");
     sb.AppendLine($"Chunk border between [{borderWorldCoord - 1}] and [{borderWorldCoord}]");
@@ -341,7 +336,7 @@ public void DebugLogSunlightCrossSection()
                 continue;
             }
 
-            byte sl = state.Value.Sunlight;
+            byte sl = state.Value.Skylight;
             ushort id = state.Value.id;
             string blockChar;
 
@@ -793,8 +788,7 @@ private float GetDebugSmoothHeight(byte centerLevel, VoxelState? n1, VoxelState?
 
 ## 6. Mesh Queue Deadlock Detector (`DiagnosticStuckChunkScan`)
 
-**Use Case:** Chunks remain in the mesh build queue (`_meshBuildQueue`) for extended periods (5+ seconds) without being scheduled for meshing. Produces a detailed per-chunk report showing exactly which flags and which neighbors are blocking `ScheduleMeshing`.
-**Usage:** Add to `World.cs`. Runs automatically every 5 seconds when `settings.enableDiagnosticLogs = true`. Call from `Update()` after the mesh scheduling loop.
+**Use Case:** Chunks remain in the mesh build queue (`_meshBuildQueue`) for extended periods (5+ seconds) without being scheduled for meshing. Produces a detailed per-chunk report showing exactly which flags and which neighbors are blocking `ScheduleMeshing`. **Usage:** Add to `World.cs`. Runs automatically every 5 seconds when `settings.enableDiagnosticLogs = true`. Call from `Update()` after the mesh scheduling loop.
 
 **Key insights this tool revealed:**
 
@@ -877,8 +871,7 @@ private void DiagnosticStuckChunkScan()
         report.AppendLine($"  Center Flags: " +
                           $"HasLightChanges={data.HasLightChangesToProcess}, " +
                           $"NeedsInitialLighting={data.NeedsInitialLighting}, " +
-                          $"NeedsEdgeCheck={data.NeedsEdgeCheck}, " +
-                          $"IsAwaitingMainThread={data.IsAwaitingMainThreadProcess}");
+                          $"NeedsEdgeCheck={data.NeedsEdgeCheck}");
         report.AppendLine($"  Active Jobs: " +
                           $"LightingJob={JobManager.LightingJobs.ContainsKey(coord)}, " +
                           $"GenJob={JobManager.GenerationJobs.ContainsKey(coord)}, " +
@@ -944,7 +937,7 @@ private void DiagnosticStuckChunkScan()
 }
 ```
 
-**Call site (in `Update()`, after the mesh scheduling loop and `ChunksToDraw` dequeue):**
+**Call site (in `Update()`, after the mesh scheduling loop):**
 
 ```csharp
 if (settings.enableDiagnosticLogs)
@@ -970,8 +963,7 @@ if (settings.enableDiagnosticLogs)
 
 ## 7. Unload Stranding Detector
 
-**Use Case:** Detecting when `UnloadChunks()` removes a chunk while a neighbor still has `HasLightChangesToProcess = true` or `NeedsInitialLighting = true`, potentially stranding that neighbor in a deadlock.
-**Usage:** Add to `UnloadChunks()` in `World.cs`, just before the chunk data is actually removed. Logs a warning for each stranding event.
+**Use Case:** Detecting when `UnloadChunks()` removes a chunk while a neighbor still has `HasLightChangesToProcess = true` or `NeedsInitialLighting = true`, potentially stranding that neighbor in a deadlock. **Usage:** Add to `UnloadChunks()` in `World.cs`, just before the chunk data is actually removed. Logs a warning for each stranding event.
 
 > **Note:** This bug was fixed by adding a neighbor-aware unload guard that defers unloads when neighbors have pending work. The diagnostic below is the logging-only version for future investigation.
 

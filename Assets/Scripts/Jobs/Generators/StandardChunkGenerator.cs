@@ -3,6 +3,7 @@ using Data;
 using Data.JobData;
 using Data.Structures;
 using Data.WorldTypes;
+using Helpers;
 using Jobs.BurstData;
 using Jobs.Data;
 using Jobs.Helpers;
@@ -348,7 +349,7 @@ namespace Jobs.Generators
         }
 
         /// <inheritdoc />
-        public GenerationJobData ScheduleGeneration(ChunkCoord coord, global::Helpers.ActiveVoxelListPool activeVoxelPool = null)
+        public GenerationJobData ScheduleGeneration(ChunkCoord coord, ActiveVoxelListPool activeVoxelPool = null)
         {
             Vector2Int chunkVoxelPos = coord.ToVoxelOrigin();
 
@@ -384,6 +385,8 @@ namespace Jobs.Generators
                     CaveZoneNoises = _caveZoneNoises,
                     IsSingleBiomeMode = _isSingleBiomeMode,
                     ForceBiomeIndex = _forceBiomeIndex,
+                    UseCellLocalFrame = FastNoiseFactory.GlobalCoordinatePrecision
+                                        == FastNoiseLite.CoordinatePrecision.Precise64,
                     MultiNoise = new MultiNoiseData
                     {
                         ContinentalnessNoises = _biomeContinentalnessNoises,
@@ -514,17 +517,9 @@ namespace Jobs.Generators
             if (y == 0) return 8;
 
             // Biome selection
-            int biomeIndex;
-            if (_isSingleBiomeMode)
-            {
-                biomeIndex = _forceBiomeIndex;
-            }
-            else
-            {
-                float biomeNoise = _biomeSelectionNoise.GetNoise(globalPos.x, globalPos.z);
-                biomeIndex = (int)math.floor(biomeNoise * _biomesJobData.Length);
-                biomeIndex = math.clamp(biomeIndex, 0, _biomesJobData.Length - 1);
-            }
+            int biomeIndex = BiomeSelection.SelectIndex(
+                ref _biomeSelectionNoise, globalPos.x, globalPos.z, _biomesJobData.Length,
+                _isSingleBiomeMode, _forceBiomeIndex);
 
             StandardBiomeAttributesJobData biome = _biomesJobData[biomeIndex];
 
@@ -607,7 +602,7 @@ namespace Jobs.Generators
 
                     if (caveLayer.Mode == CaveMode.Spaghetti2D)
                     {
-                        float bound = caveNoise.GetNoise(globalPos.x * 0.25f, y * 0.25f, globalPos.z * 0.25f);
+                        float bound = caveNoise.GetNoise(globalPos.x * 0.25, y * 0.25, globalPos.z * 0.25);
                         if (bound < effectiveThreshold - 0.2f) continue;
 
                         noiseVal = (caveNoise.GetNoise(globalPos.x, y) + caveNoise.GetNoise(y, globalPos.z) +
@@ -660,18 +655,50 @@ namespace Jobs.Generators
         }
 
         /// <inheritdoc />
+        public bool TryGetBiomeAt(int voxelX, int voxelZ, out BiomeSample sample)
+        {
+            if (_standardBiomes == null || _standardBiomes.Length == 0)
+            {
+                sample = default;
+                return false;
+            }
+
+            int index = BiomeSelection.SelectIndex(
+                ref _biomeSelectionNoise, voxelX, voxelZ, _standardBiomes.Length,
+                _isSingleBiomeMode, _forceBiomeIndex);
+
+            int surfaceIndex = BiomeSelection.SelectSurfaceIndex(
+                ref _biomeSelectionNoise, voxelX, voxelZ, _standardBiomes.Length,
+                _biomesJobData[index].SurfaceBlockDitheringWidth, _seed,
+                _isSingleBiomeMode, _forceBiomeIndex);
+
+            sample = new BiomeSample(index, surfaceIndex, _standardBiomes[index]);
+            return true;
+        }
+
+        /// <inheritdoc />
+        public bool TryGetBiomeWeights(int voxelX, int voxelZ, float falloffRadius, out BiomeWeights weights,
+            out BiomeDirections directions)
+        {
+            if (_standardBiomes == null || _standardBiomes.Length == 0)
+            {
+                weights = default;
+                directions = default;
+                return false;
+            }
+
+            BiomeSelection.SelectWeightsDirectional(
+                ref _biomeSelectionNoise, voxelX, voxelZ, _standardBiomes.Length, falloffRadius,
+                _isSingleBiomeMode, _forceBiomeIndex, out weights, out directions);
+            return true;
+        }
+
+        /// <inheritdoc />
         public TerrainDebugInfo GetTerrainDebugInfo(int globalX, int globalZ)
         {
-            int biomeIndex;
-            if (_isSingleBiomeMode)
-            {
-                biomeIndex = _forceBiomeIndex;
-            }
-            else
-            {
-                float biomeNoise = _biomeSelectionNoise.GetNoise(globalX, globalZ);
-                biomeIndex = math.clamp((int)math.floor(biomeNoise * _biomesJobData.Length), 0, _biomesJobData.Length - 1);
-            }
+            int biomeIndex = BiomeSelection.SelectIndex(
+                ref _biomeSelectionNoise, globalX, globalZ, _biomesJobData.Length,
+                _isSingleBiomeMode, _forceBiomeIndex);
 
             StandardBiomeAttributesJobData biome = _biomesJobData[biomeIndex];
 
@@ -730,16 +757,9 @@ namespace Jobs.Generators
                 int gx = originX + px * scale;
                 int gz = originZ + pz * scale;
 
-                int biomeIndex;
-                if (_isSingleBiomeMode)
-                {
-                    biomeIndex = _forceBiomeIndex;
-                }
-                else
-                {
-                    float biomeNoise = _biomeSelectionNoise.GetNoise(gx, gz);
-                    biomeIndex = math.clamp((int)math.floor(biomeNoise * _biomesJobData.Length), 0, _biomesJobData.Length - 1);
-                }
+                int biomeIndex = BiomeSelection.SelectIndex(
+                    ref _biomeSelectionNoise, gx, gz, _biomesJobData.Length,
+                    _isSingleBiomeMode, _forceBiomeIndex);
 
                 byte r, g, b;
                 switch (mode)
@@ -797,7 +817,7 @@ namespace Jobs.Generators
                         if (biome.Enable3DDensity)
                         {
                             float effAmp = biome.DensityAmplitude * borderFade;
-                            float dx = gx, dy = sliceY, dz = gz;
+                            double dx = gx, dy = sliceY, dz = gz;
                             if (biome.EnableDensityWarp)
                                 _biomeDensityWarpNoises[biomeIndex].DomainWarp(ref dx, ref dy, ref dz);
                             density += _biomeDensityNoises[biomeIndex].GetNoise(dx, dy, dz) * effAmp;

@@ -1,7 +1,11 @@
 # <Area> Feature Improvements Report <!-- or: <Area> <Analysis|Validation> Report -->
 
-**Version:** 1.0
-**Date:** <YYYY-MM-DD>
+<!-- The three field lines below end in TWO TRAILING SPACES (invisible, easily stripped by an
+     editor). Without them Markdown joins Version/Date/Status into one run-on line. Same in the
+     footer. Rule: two trailing spaces on any line whose NEXT line starts a new **Label:** field
+     — never on ordinary wrapped prose, which is meant to rejoin. See the skill's Step 3. -->
+**Version:** 1.0  
+**Date:** <YYYY-MM-DD>  
 **Status:** Open backlog. Items are removed (archived) when implemented and verified.
 
 > The master backlog for **<area>** in the VoxelEngine — <one line on scope>. Sibling report to
@@ -39,6 +43,12 @@ code, not assumed** — see each item's "What exists today".
 
 ## Master summary table
 
+**This table is the report's ID index — the whole ID space, open and closed.** A completed item
+keeps its row (marked ✅) even after its detail section is archived, and an abandoned one is marked
+⛔ rather than deleted. IDs are never recycled and never dropped: commit messages and code comments
+cite them, so this table is what keeps those backlinks resolvable. It is also the part that must
+survive if the report is ever merged into an Architecture doc.
+
 | ID     | Finding            | Effort | Risk | Benefit | Seed | Save |
 |--------|--------------------|:------:|:----:|:-------:|:----:|:----:|
 | <ID>-1 | <One-line finding> |   🟡   |  🟢  |   🟢    |  ✅   |  ✅   |
@@ -71,5 +81,5 @@ an explicit verdict when a real choice exists.>
 
 ---
 
-**Last Updated:** <YYYY-MM-DD>
+**Last Updated:** <YYYY-MM-DD>  
 **Next Review:** <event trigger, e.g. "next gap sweep" / "after <ID>-1 ships">

@@ -11,7 +11,7 @@
 > This is the **shippable capture** the LI-2b screening report
 > ([`LIGHTING_LI2B_BOTTOM_BAND_2026-07-11_BENCHMARK.md`](LIGHTING_LI2B_BOTTOM_BAND_2026-07-11_BENCHMARK.md)) deferred to
 > the user's player builds — the LI-2b sibling of
-> [`LIGHTING_LI2_INGAME_IL2CPP_2026-07-11_BENCHMARK.md`](LIGHTING_LI2_INGAME_IL2CPP_2026-07-11_BENCHMARK.md).
+> [`LIGHTING_LI2_INGAME_IL2CPP_2026-07-11_BENCHMARK.md`](LIGHTING_LI2_INGAME_IL2CPP_2026-07-11_BENCHMARK.md).  
 > **Framing caveat:** the OFF leg is *full height* (the flag disables the whole band), so this A/B measures
 > **LI-2 + LI-2b combined vs no banding** — the LI-2b increment cannot be isolated at the frame level from these two
 > legs alone. Cross-session comparison against the LI-2 capture's legs is indicative only (the same scenario's OFF leg

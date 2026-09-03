@@ -1,3 +1,4 @@
+using Jobs.Helpers;
 using System.Collections.Generic;
 using Data;
 using Data.JobData;
@@ -91,6 +92,34 @@ namespace Jobs.Generators
         /// Contains the global position and the pool entry index.</param>
         /// <returns>An enumerable of VoxelMods representing the full structure.</returns>
         IEnumerable<VoxelMod> ExpandStructure(StructureSpawnMarker marker);
+
+        /// <summary>
+        /// Resolves the biome at a column on the main thread, through the same selection the
+        /// generation job uses. Cheap enough for a ~1 Hz sampler; not for a per-voxel loop.
+        /// </summary>
+        /// <param name="voxelX">Voxel-space X of the column.</param>
+        /// <param name="voxelZ">Voxel-space Z of the column.</param>
+        /// <param name="sample">The resolved biome, or <c>default</c> when this generator has no
+        /// biome selection to answer with.</param>
+        /// <returns>True when <paramref name="sample"/> was populated.</returns>
+        bool TryGetBiomeAt(int voxelX, int voxelZ, out BiomeSample sample);
+
+        /// <summary>
+        /// Resolves how strongly each nearby biome influences a column — the surroundings, where
+        /// <see cref="TryGetBiomeAt"/> gives the single biome the column sits in.
+        /// </summary>
+        /// <param name="voxelX">Voxel-space X of the column.</param>
+        /// <param name="voxelZ">Voxel-space Z of the column.</param>
+        /// <param name="falloffRadius">How far past the nearest cell a cell still contributes.</param>
+        /// <param name="weights">The contributing biomes and their normalized weights, nearest first.</param>
+        /// <param name="directions">Each contributor's offset from the column, in blocks, index-aligned.</param>
+        /// <returns>True when <paramref name="weights"/> was populated.</returns>
+        /// <remarks>A separate method rather than more fields on <see cref="BiomeSample"/>: the readout and
+        /// the weather system want one biome, and widening the shared answer would make both pay for a
+        /// cellular neighborhood walk they never read. The bearings ride along on this one because they
+        /// fall out of the same walk — answering them separately would walk the neighborhood twice.</remarks>
+        bool TryGetBiomeWeights(int voxelX, int voxelZ, float falloffRadius, out BiomeWeights weights,
+            out BiomeDirections directions);
 
         /// <summary>
         /// Returns terrain generation diagnostic data at the given column.

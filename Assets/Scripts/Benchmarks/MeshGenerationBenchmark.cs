@@ -21,6 +21,10 @@ namespace Benchmarks
     /// A dedicated benchmark utility for measuring the performance of the MeshGenerationJob.
     /// It can run a single test configuration or a full comparison of all available modes and data types,
     /// generating a detailed report of the findings.
+    /// <para>
+    /// Armed by <see cref="MicroBenchmarkGate"/> (default-off setting, read once in <c>Start</c>); otherwise
+    /// the component disables itself and the trigger key is inert.
+    /// </para>
     /// </summary>
     public class MeshGenerationBenchmark : MonoBehaviour
     {
@@ -80,10 +84,6 @@ namespace Benchmarks
         #region Serialized Fields
 
         [Header("Benchmark Configuration")]
-        [Tooltip("Whether the benchmark is enabled and allowed to run.")]
-        [SerializeField]
-        private bool _benchMarkEnabled = true;
-
         [Tooltip("If checked, runs all combinations of Mode and Data Type and generates a final report.")]
         [SerializeField]
         private bool _runFullComparison = true;
@@ -171,8 +171,8 @@ namespace Benchmarks
 
         private void Start()
         {
-            // Fully disable the benchmark script if benchmark mode is disabled
-            if (!_benchMarkEnabled)
+            // Fully disable the benchmark script if the micro-benchmark harnesses are not armed
+            if (!MicroBenchmarkGate.IsArmed())
             {
                 enabled = false;
                 return;
@@ -195,7 +195,7 @@ namespace Benchmarks
 
         private void Update()
         {
-            if (Keyboard.current[_triggerKey].wasPressedThisFrame)
+            if (InputManager.Instance != null && InputManager.Instance.DebugKeyPressed(_triggerKey))
             {
                 TriggerBenchmark();
             }
@@ -398,14 +398,14 @@ namespace Benchmarks
             MeshProbeInput input = new MeshProbeInput
             {
                 Center = data.Center,
-                Back = data.Back,
-                Front = data.Front,
-                Left = data.Left,
-                Right = data.Right,
-                FrontRight = data.FrontRight,
-                BackRight = data.BackRight,
-                BackLeft = data.BackLeft,
-                FrontLeft = data.FrontLeft,
+                NeighborS = data.NeighborS,
+                NeighborN = data.NeighborN,
+                NeighborW = data.NeighborW,
+                NeighborE = data.NeighborE,
+                NeighborNE = data.NeighborNE,
+                NeighborSE = data.NeighborSE,
+                NeighborSW = data.NeighborSW,
+                NeighborNW = data.NeighborNW,
                 IncludeDiagonals = mode == BenchmarkMode.WithDiagonals,
             };
 
@@ -848,19 +848,19 @@ namespace Benchmarks
         private struct BenchmarkVoxelData
         {
             private const int MAP_SIZE = VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth;
-            public NativeArray<uint> Center, Back, Front, Left, Right, FrontRight, BackRight, BackLeft, FrontLeft;
+            public NativeArray<uint> Center, NeighborS, NeighborN, NeighborW, NeighborE, NeighborNE, NeighborSE, NeighborSW, NeighborNW;
 
             public BenchmarkVoxelData(Allocator allocator)
             {
                 Center = new NativeArray<uint>(MAP_SIZE, allocator);
-                Back = new NativeArray<uint>(MAP_SIZE, allocator);
-                Front = new NativeArray<uint>(MAP_SIZE, allocator);
-                Left = new NativeArray<uint>(MAP_SIZE, allocator);
-                Right = new NativeArray<uint>(MAP_SIZE, allocator);
-                FrontRight = new NativeArray<uint>(MAP_SIZE, allocator);
-                BackRight = new NativeArray<uint>(MAP_SIZE, allocator);
-                BackLeft = new NativeArray<uint>(MAP_SIZE, allocator);
-                FrontLeft = new NativeArray<uint>(MAP_SIZE, allocator);
+                NeighborS = new NativeArray<uint>(MAP_SIZE, allocator);
+                NeighborN = new NativeArray<uint>(MAP_SIZE, allocator);
+                NeighborW = new NativeArray<uint>(MAP_SIZE, allocator);
+                NeighborE = new NativeArray<uint>(MAP_SIZE, allocator);
+                NeighborNE = new NativeArray<uint>(MAP_SIZE, allocator);
+                NeighborSE = new NativeArray<uint>(MAP_SIZE, allocator);
+                NeighborSW = new NativeArray<uint>(MAP_SIZE, allocator);
+                NeighborNW = new NativeArray<uint>(MAP_SIZE, allocator);
             }
 
             /// <summary>
@@ -869,14 +869,14 @@ namespace Benchmarks
             public void CopyFrom(BenchmarkVoxelData source)
             {
                 NativeArray<uint>.Copy(source.Center, Center);
-                NativeArray<uint>.Copy(source.Back, Back);
-                NativeArray<uint>.Copy(source.Front, Front);
-                NativeArray<uint>.Copy(source.Left, Left);
-                NativeArray<uint>.Copy(source.Right, Right);
-                NativeArray<uint>.Copy(source.FrontRight, FrontRight);
-                NativeArray<uint>.Copy(source.BackRight, BackRight);
-                NativeArray<uint>.Copy(source.BackLeft, BackLeft);
-                NativeArray<uint>.Copy(source.FrontLeft, FrontLeft);
+                NativeArray<uint>.Copy(source.NeighborS, NeighborS);
+                NativeArray<uint>.Copy(source.NeighborN, NeighborN);
+                NativeArray<uint>.Copy(source.NeighborW, NeighborW);
+                NativeArray<uint>.Copy(source.NeighborE, NeighborE);
+                NativeArray<uint>.Copy(source.NeighborNE, NeighborNE);
+                NativeArray<uint>.Copy(source.NeighborSE, NeighborSE);
+                NativeArray<uint>.Copy(source.NeighborSW, NeighborSW);
+                NativeArray<uint>.Copy(source.NeighborNW, NeighborNW);
             }
 
             /// <summary>
@@ -885,14 +885,14 @@ namespace Benchmarks
             public void FillAll(int index, uint value)
             {
                 Center[index] = value;
-                Back[index] = value;
-                Front[index] = value;
-                Left[index] = value;
-                Right[index] = value;
-                FrontRight[index] = value;
-                BackRight[index] = value;
-                BackLeft[index] = value;
-                FrontLeft[index] = value;
+                NeighborS[index] = value;
+                NeighborN[index] = value;
+                NeighborW[index] = value;
+                NeighborE[index] = value;
+                NeighborNE[index] = value;
+                NeighborSE[index] = value;
+                NeighborSW[index] = value;
+                NeighborNW[index] = value;
             }
 
             /// <summary>
@@ -901,14 +901,14 @@ namespace Benchmarks
             public void Dispose()
             {
                 if (Center.IsCreated) Center.Dispose();
-                if (Back.IsCreated) Back.Dispose();
-                if (Front.IsCreated) Front.Dispose();
-                if (Left.IsCreated) Left.Dispose();
-                if (Right.IsCreated) Right.Dispose();
-                if (FrontRight.IsCreated) FrontRight.Dispose();
-                if (BackRight.IsCreated) BackRight.Dispose();
-                if (BackLeft.IsCreated) BackLeft.Dispose();
-                if (FrontLeft.IsCreated) FrontLeft.Dispose();
+                if (NeighborS.IsCreated) NeighborS.Dispose();
+                if (NeighborN.IsCreated) NeighborN.Dispose();
+                if (NeighborW.IsCreated) NeighborW.Dispose();
+                if (NeighborE.IsCreated) NeighborE.Dispose();
+                if (NeighborNE.IsCreated) NeighborNE.Dispose();
+                if (NeighborSE.IsCreated) NeighborSE.Dispose();
+                if (NeighborSW.IsCreated) NeighborSW.Dispose();
+                if (NeighborNW.IsCreated) NeighborNW.Dispose();
             }
         }
 

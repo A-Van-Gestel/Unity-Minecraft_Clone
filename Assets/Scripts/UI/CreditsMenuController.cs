@@ -37,6 +37,8 @@ namespace UI
             CreditCategory.UIElement,
             CreditCategory.Font,
             CreditCategory.Shader,
+            CreditCategory.Audio,
+            CreditCategory.Reference,
         };
 
         /// <summary>
@@ -49,6 +51,8 @@ namespace UI
             { CreditCategory.UIElement, "UI Elements" },
             { CreditCategory.Font, "Fonts" },
             { CreditCategory.Shader, "Shaders & Technical Art" },
+            { CreditCategory.Audio, "Audio & Music" },
+            { CreditCategory.Reference, "References & Further Reading" },
         };
 
         private void OnEnable()

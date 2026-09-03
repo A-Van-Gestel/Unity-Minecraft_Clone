@@ -1,14 +1,51 @@
 using UI.Enums;
 using UnityEngine;
+using UnityEngine.Rendering;
+using UnityEngine.Rendering.Universal;
 
 namespace UI
 {
     /// <summary>
-    /// Applies window mode, resolution, FOV, VSync, Max FPS, fluid quality, and fluid refraction settings at startup and whenever they change.
+    /// Applies window mode, resolution, FOV, VSync, Max FPS, render scale, anti-aliasing, fluid quality,
+    /// fluid refraction, and bloom settings at startup and whenever they change.
     /// Subscribes to <see cref="SettingsManager.OnSettingChanged"/> for live updates.
     /// </summary>
     public class GraphicsSettingsController : MonoBehaviour
     {
+        /// <summary>Render scale is authored and stored as a percentage; URP wants a multiplier.</summary>
+        private const float PERCENT_TO_SCALE = 0.01f;
+
+        /// <summary>
+        /// Render scale and MSAA level as authored in the URP asset, captured before the first override.
+        /// </summary>
+        /// <remarks>
+        /// The URP asset is a project asset, not scene state, so play mode does not revert it: the loaded
+        /// instance keeps whatever the last session wrote, for the editor's own rendering and for the next
+        /// session's capture. (It is not marked dirty, so the override does not reach disk on its own — the
+        /// leak is per editor session, and a re-import will not clear it.) These hold what the asset looked
+        /// like before the settings took it over, so <see cref="RestoreAuthoredPipelineDefaults"/> can hand
+        /// it back on quit.
+        /// </remarks>
+        private static bool s_authoredCaptured;
+
+        private static float s_authoredRenderScale;
+
+        private static int s_authoredMsaaSampleCount;
+
+        // Must match the global declared in VoxelLighting.hlsl.
+        private static readonly int s_emissiveBoostId = Shader.PropertyToID("_EmissiveBoost");
+
+        /// <summary>
+        /// How far above full brightness a maximum-emission block renders when bloom is on.
+        /// </summary>
+        /// <remarks>
+        /// A level-15 emitter is already lit to ~1.0 by its own blocklight, so this is the headroom the
+        /// bloom threshold (1.1) actually sees — a full emitter lands at roughly 2.0. Chosen against the
+        /// RF-3 reference captures; too low and only the brightest emitters glow, too high and lava
+        /// blows out into a featureless white blob.
+        /// </remarks>
+        private const float EMISSIVE_BOOST = 1.0f;
+
         // Must match the keywords in UberLiquidShader.shader: #pragma multi_compile _ _FLUID_QUALITY_LOW _FLUID_QUALITY_MED
         private const string KEYWORD_FLUID_QUALITY_LOW = "_FLUID_QUALITY_LOW";
         private const string KEYWORD_FLUID_QUALITY_MED = "_FLUID_QUALITY_MED";
@@ -25,6 +62,25 @@ namespace UI
         private static readonly int s_distortionAmountId = Shader.PropertyToID("_DistortionAmount");
         private static readonly int s_heatDistortionAmountId = Shader.PropertyToID("_HeatDistortionAmount");
 
+        /// <summary>
+        /// Clears the authored-default snapshot and re-arms the quit handler for a new play session.
+        /// </summary>
+        /// <remarks>
+        /// With Reload Domain off, statics and event subscriptions both survive into the next session: a
+        /// stale snapshot would restore the <i>previous</i> run's overrides, and a bare <c>+=</c> would
+        /// stack a second handler every time. Unsubscribing first makes both idempotent.
+        /// </remarks>
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetStatics()
+        {
+            s_authoredCaptured = false;
+            s_authoredRenderScale = 0f;
+            s_authoredMsaaSampleCount = 0;
+
+            Application.quitting -= RestoreAuthoredPipelineDefaults;
+            Application.quitting += RestoreAuthoredPipelineDefaults;
+        }
+
         private void Start()
         {
             Settings settings = SettingsManager.LoadSettings();
@@ -32,8 +88,11 @@ namespace UI
             ApplyResolution(settings.resolution);
             ApplyFieldOfView(settings.fieldOfView);
             ApplyFrameRate(settings);
+            ApplyRenderScale(settings.renderScalePercent);
+            ApplyMsaa(settings.msaa);
             ApplyFluidQuality(settings.fluidQuality);
             ApplyFluidRefraction(settings.fluidRefraction);
+            ApplyBloom(settings.bloom);
         }
 
         private void OnEnable()
@@ -68,13 +127,131 @@ namespace UI
                 case nameof(Settings.vSync) or nameof(Settings.unlimitedFps) or nameof(Settings.maxFps):
                     ApplyFrameRate(settings);
                     break;
+                case nameof(Settings.renderScalePercent):
+                    ApplyRenderScale(settings.renderScalePercent);
+                    break;
+                case nameof(Settings.msaa):
+                    ApplyMsaa(settings.msaa);
+                    break;
                 case nameof(Settings.fluidQuality):
                     ApplyFluidQuality(settings.fluidQuality);
                     break;
                 case nameof(Settings.fluidRefraction):
                     ApplyFluidRefraction(settings.fluidRefraction);
                     break;
+                case nameof(Settings.bloom):
+                    ApplyBloom(settings.bloom);
+                    break;
             }
+        }
+
+        /// <summary>
+        /// Turns the post-processing stack and the HDR emissive path on or off together.
+        /// </summary>
+        /// <remarks>
+        /// The two are deliberately one setting. Emissive output above 1.0 is only meaningful because
+        /// bloom catches it; with the post stack off it would simply clip to white and make emitters look
+        /// flat and blown out. Pushing the boost as a global (rather than per-material) also covers the
+        /// opaque, transparent and liquid shaders in one write.
+        /// </remarks>
+        /// <param name="enabled">True to enable bloom and HDR emissives.</param>
+        public static void ApplyBloom(bool enabled)
+        {
+            Shader.SetGlobalFloat(s_emissiveBoostId, enabled ? EMISSIVE_BOOST : 0f);
+
+            Camera cam = Camera.main;
+            if (cam == null) return;
+
+            UniversalAdditionalCameraData data = cam.GetUniversalAdditionalCameraData();
+            if (data == null) return;
+
+            // A scene with no Volume (the main menu) has nothing for the post stack to render, but
+            // enabling it would still cost a full-screen pass and an intermediate target — exactly the
+            // cost this setting's tooltip warns about, for no visual effect.
+            data.renderPostProcessing = enabled && FindAnyObjectByType<Volume>() != null;
+        }
+
+        /// <summary>
+        /// Snapshots the URP asset's authored render scale and MSAA level, once per session.
+        /// </summary>
+        /// <remarks>
+        /// Capturing only on the first call is load-bearing: a second capture would read values this
+        /// controller itself wrote, which turns the restore into a permanent no-op and leaves the last
+        /// session's settings standing in as the asset's authored defaults.
+        /// </remarks>
+        /// <returns>The active URP asset, or null when URP is not the active pipeline.</returns>
+        private static UniversalRenderPipelineAsset CaptureAuthoredDefaults()
+        {
+            UniversalRenderPipelineAsset asset = UniversalRenderPipeline.asset;
+            if (asset == null) return null;
+
+            if (!s_authoredCaptured)
+            {
+                s_authoredRenderScale = asset.renderScale;
+                s_authoredMsaaSampleCount = asset.msaaSampleCount;
+                s_authoredCaptured = true;
+            }
+
+            return asset;
+        }
+
+        /// <summary>
+        /// Puts the URP asset's render scale and MSAA level back the way they were authored.
+        /// </summary>
+        /// <remarks>
+        /// Runs on <see cref="Application.quitting"/> rather than a component teardown so that exiting
+        /// play mode during a scene load — when no controller is alive — still hands the asset back.
+        /// </remarks>
+        private static void RestoreAuthoredPipelineDefaults()
+        {
+            if (!s_authoredCaptured) return;
+
+            UniversalRenderPipelineAsset asset = UniversalRenderPipeline.asset;
+            if (asset != null)
+            {
+                asset.renderScale = s_authoredRenderScale;
+                asset.msaaSampleCount = s_authoredMsaaSampleCount;
+            }
+
+            s_authoredCaptured = false;
+        }
+
+        /// <summary>
+        /// Applies the world render scale.
+        /// </summary>
+        /// <remarks>
+        /// URP clamps render scale to [0.1, 3.0] internally, so the setting's 30–200 % range always lands
+        /// verbatim. Screen-space overlay UI is composited after the upscale and is unaffected.
+        /// </remarks>
+        /// <param name="percent">Render resolution as a percentage of the window resolution.</param>
+        public static void ApplyRenderScale(int percent)
+        {
+            UniversalRenderPipelineAsset asset = CaptureAuthoredDefaults();
+            if (asset == null) return;
+
+            asset.renderScale = percent * PERCENT_TO_SCALE;
+        }
+
+        /// <summary>
+        /// Applies the anti-aliasing level to both the URP asset and the main camera.
+        /// </summary>
+        /// <remarks>
+        /// Both terms are required: URP only resolves MSAA when
+        /// <c>camera.allowMSAA &amp;&amp; asset.msaaSampleCount &gt; 1</c>, and the World scene's camera ships with
+        /// <c>allowMSAA</c> off. Driving the camera flag from here rather than editing the scene keeps one
+        /// source of truth. Also called by <see cref="World.Start"/>, since this controller's
+        /// <c>Start()</c> can run before <see cref="Camera.main"/> exists.
+        /// </remarks>
+        /// <param name="level">The desired anti-aliasing level.</param>
+        public static void ApplyMsaa(MsaaLevel level)
+        {
+            UniversalRenderPipelineAsset asset = CaptureAuthoredDefaults();
+            if (asset != null)
+                asset.msaaSampleCount = (int)level.ToMsaaQuality();
+
+            Camera cam = Camera.main;
+            if (cam != null)
+                cam.allowMSAA = level != MsaaLevel.Off;
         }
 
         /// <summary>

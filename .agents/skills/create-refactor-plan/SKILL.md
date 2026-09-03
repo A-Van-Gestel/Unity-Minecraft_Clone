@@ -1,6 +1,6 @@
 ---
 name: create-refactor-plan
-description: Analyze a whole engine system/pipeline for cleanup + refactor opportunities and author an execution-ready, phased design doc (the LP-*/MP-*/CP-* trilogy pattern) — doc+code census at a pinned commit, verified findings table, steelmanned decision sections, and per-phase executor packets (scope, prove-red, suite gates, doc-sync, serialization tripwires) that cold future sessions execute one phase at a time. Use when the user asks for a "clean-up / refactor analysis", an "execution-ready design doc", a "phased implementation plan" for a system, or "do the same for <system X>". Analysis + report ONLY — no production code. Layers on create-design-doc (which owns the doc format); for executing a planned rename/move use refactor-safely; for updating existing docs use docs-sync.
+description: Analyze a whole engine system/pipeline for cleanup + refactor opportunities and author an execution-ready, phased design doc whose per-phase packets cold future sessions execute one at a time. Use when the user asks for a "clean-up / refactor analysis", an "execution-ready design doc", a "phased implementation plan" for a system, or "do the same for <system X>". Analysis + report ONLY — no production code. Layers on create-design-doc (which owns the doc format); for executing a planned rename/move use refactor-safely; for updating existing docs use docs-sync.
 ---
 
 # Create Refactor Plan

@@ -6,17 +6,17 @@ using Scenario = Editor.Validation.Framework.Scenario;
 namespace Editor.Validation.Lighting
 {
     /// <summary>
-    /// Baseline regression scenarios for finding <b>C3</b> — cross-chunk <b>sunlight darkening</b>, the
+    /// Baseline regression scenarios for finding <b>C3</b> — cross-chunk <b>skylight darkening</b>, the
     /// quadrant of the dynamic cross-chunk matrix that had no deterministic baseline (see
     /// Documentation/Architecture/Testing Framework/LIGHTING_VALIDATION_HARNESS_FIDELITY.md). The matrix's
     /// other quadrants were already covered: <b>B7</b> (blocklight removal, neighbor in flight), <b>B13</b>
-    /// (sunlight <i>uplift</i>, neighbor in flight), <b>B12</b> (blocklight cross-border re-spread after a
+    /// (skylight <i>uplift</i>, neighbor in flight), <b>B12</b> (blocklight cross-border re-spread after a
     /// removal). The steady-state half of darkening is covered by the Bug-12 family (<b>B51</b> asymmetric
     /// two-shaft, <b>B53</b> mutually-lit seam loop); these two add the still-missing pieces explicitly:
     /// <list type="bullet">
-    /// <item><b>B54</b> — the <b>race</b> quadrant: a sunlight removal mod deferred into an <b>in-flight</b>
-    /// neighbor (the sunlight-removal twin of B7/B13). Guards the defer/drain for the
-    /// <c>LightChannel.Sun</c>, <c>LightLevel == 0</c> route, which no scenario exercised.</item>
+    /// <item><b>B54</b> — the <b>race</b> quadrant: a skylight removal mod deferred into an <b>in-flight</b>
+    /// neighbor (the skylight-removal twin of B7/B13). Guards the defer/drain for the
+    /// <c>LightChannel.Sky</c>, <c>LightLevel == 0</c> route, which no scenario exercised.</item>
     /// <item><b>B55</b> — the canonical <b>steady-state</b> single-shaft case: sealing one offset sky shaft
     /// in chunk (1,1) re-darkens the spill that crossed into chunk (2,1), to the borderless oracle. A simpler,
     /// explicit representative of the darkening-across-a-border path than the Bug-12 loop geometries.</item>
@@ -24,7 +24,7 @@ namespace Editor.Validation.Lighting
     /// Self-registered via the <see cref="AddCrossChunkDarkeningBaselineScenarios"/> hook called from
     /// <c>AddBaselineScenarios</c> (the <c>Baselines/</c> group-partial pattern). Both reuse the existing
     /// flight/convergence primitives — no new harness capability was needed. This is also the same
-    /// neighborhood Bug 11 lived in (<c>CrossChunkLightModApplier.ComputeSunlight</c> removal path), so a
+    /// neighborhood Bug 11 lived in (<c>CrossChunkLightModApplier.ComputeSkylight</c> removal path), so a
     /// regression there flips these red as well.
     /// </summary>
     public static partial class LightingValidationSuite
@@ -53,8 +53,8 @@ namespace Editor.Validation.Lighting
         /// <param name="scenarios">The scenario list to append to.</param>
         static partial void AddCrossChunkDarkeningBaselineScenarios(List<Scenario> scenarios)
         {
-            scenarios.Add(new Scenario("B54: A cross-chunk sunlight REMOVAL deferred into an in-flight neighbor darkens the spill to the oracle — the sunlight-removal twin of B7/B13 (finding C3, race quadrant)", Baseline_CrossChunkSunlightDarkeningInFlightRace));
-            scenarios.Add(new Scenario("B55: Sealing an offset sky shaft re-darkens the spill that crossed into the neighbor chunk, to the borderless oracle (finding C3, steady-state)", Baseline_CrossChunkSunlightDarkeningSteadyState));
+            scenarios.Add(new Scenario("B54: A cross-chunk skylight REMOVAL deferred into an in-flight neighbor darkens the spill to the oracle — the skylight-removal twin of B7/B13 (finding C3, race quadrant)", Baseline_CrossChunkSkylightDarkeningInFlightRace));
+            scenarios.Add(new Scenario("B55: Sealing an offset sky shaft re-darkens the spill that crossed into the neighbor chunk, to the borderless oracle (finding C3, steady-state)", Baseline_CrossChunkSkylightDarkeningSteadyState));
         }
 
         /// <summary>
@@ -90,7 +90,7 @@ namespace Editor.Validation.Lighting
         /// <summary>
         /// Seals the single sky shaft by placing one stone block just above the corridor at the shaft column,
         /// via the player-edit path (<see cref="LightingTestWorld.PlaceBlock"/>) so the opacity change queues
-        /// a sunlight column recalc in chunk (1,1) exactly as production. After this the corridor has no sky
+        /// a skylight column recalc in chunk (1,1) exactly as production. After this the corridor has no sky
         /// source, so the borderless oracle is fully dark throughout the tube.
         /// </summary>
         /// <param name="world">The darkening world to seal.</param>
@@ -100,15 +100,15 @@ namespace Editor.Validation.Lighting
         }
 
         /// <summary>
-        /// B54 (finding C3, race quadrant): the sunlight-removal twin of B7 (blocklight removal in flight) and
-        /// B13 (sunlight uplift in flight). After the spill is established, chunk (2,1) has a lighting job IN
+        /// B54 (finding C3, race quadrant): the skylight-removal twin of B7 (blocklight removal in flight) and
+        /// B13 (skylight uplift in flight). After the spill is established, chunk (2,1) has a lighting job IN
         /// FLIGHT (inputs already snapshotted at the bright pre-seal state) when the shaft is sealed in chunk
-        /// (1,1). (1,1)'s job runs the darkness wave to the seam and emits a cross-chunk sunlight <b>removal</b>
-        /// mod (<c>LightChannel.Sun</c>, <c>LightLevel == 0</c>) toward (2,1) — which, because (2,1) is in
+        /// (1,1). (1,1)'s job runs the darkness wave to the seam and emits a cross-chunk skylight <b>removal</b>
+        /// mod (<c>LightChannel.Sky</c>, <c>LightLevel == 0</c>) toward (2,1) — which, because (2,1) is in
         /// flight, must be <b>deferred</b> and drained right after (2,1)'s merge, not applied to live data and
         /// then silently reverted by the stale full-LightMap overwrite. Without the defer/drain the removal
         /// would be lost and (2,1) would stay permanently brighter than the oracle (the Bug-08-class failure,
-        /// here on the previously-untested sunlight-removal route).
+        /// here on the previously-untested skylight-removal route).
         /// <para>
         /// Asserts the removal mod was actually deferred (<c>ModsDeferred &gt; 0</c> — the race really exercised
         /// the defer path, not an incidental direct apply), that a voxel lit by the spill in (2,1)
@@ -116,7 +116,7 @@ namespace Editor.Validation.Lighting
         /// oracle after wave-parallel reconciliation.
         /// </para>
         /// </summary>
-        private static bool Baseline_CrossChunkSunlightDarkeningInFlightRace()
+        private static bool Baseline_CrossChunkSkylightDarkeningInFlightRace()
         {
             using LightingTestWorld world = BuildCrossChunkDarkeningWorld();
 
@@ -126,13 +126,13 @@ namespace Editor.Validation.Lighting
 
             // Precondition: the shaft's sky spill has crossed the seam and lit the observation voxel in (2,1).
             Vector3Int observe = new Vector3Int(C3_DARK_OBSERVE_X, C3_DARK_CORRIDOR_Y, C3_DARK_CORRIDOR_Z);
-            byte litBefore = world.GetSkyLight(observe);
+            byte litBefore = world.GetSkylight(observe);
             passed &= LightingAssert.IsTrue(litBefore > 0,
                 "B54: the sky spill crosses the seam and lights the observation voxel in chunk (2,1) before the seal",
                 $"Expected sky > 0 at x{C3_DARK_OBSERVE_X} in (2,1), got {litBefore}");
 
             // Put chunk (2,1)'s job IN FLIGHT (snapshots the bright pre-seal state), THEN seal the shaft in
-            // (1,1) and run (1,1)'s job — its cross-chunk sunlight removal mod targets (2,1) mid-flight.
+            // (1,1) and run (1,1)'s job — its cross-chunk skylight removal mod targets (2,1) mid-flight.
             LightingTestWorld.LightingJobFlight inFlight = world.BeginLightingJob(s_c3DarkChunkB);
 
             SealCrossChunkDarkeningShaft(world);
@@ -140,20 +140,20 @@ namespace Editor.Validation.Lighting
             // Coarse liveness check that the defer route fired at all (the darkness wave emits several
             // cross-chunk removal mods along the seam, so the exact count is not pinned here — it would be a
             // brittle magic number). This only proves the in-flight defer path was exercised; the ACTUAL
-            // correctness guard is the post-reconciliation GetSkyLight(observe) == 0 + MatchesOracle below,
+            // correctness guard is the post-reconciliation GetSkylight(observe) == 0 + MatchesOracle below,
             // which a lost/dropped removal cannot satisfy regardless of how many mods were deferred.
             passed &= LightingAssert.IsTrue(aResult.ModsDeferred > 0,
-                "B54: the cross-seam sunlight removal defer route fired while (2,1) was in flight",
-                $"Expected ModsDeferred > 0 (the Sun/removal defer route), got {aResult.ModsDeferred}");
+                "B54: the cross-seam skylight removal defer route fired while (2,1) was in flight",
+                $"Expected ModsDeferred > 0 (the Sky/removal defer route), got {aResult.ModsDeferred}");
 
             // The merge that would have overwritten a live-applied removal; the deferred removal drains right
             // after it, then the darkness wave reconciles wave-parallel (production's concurrent-job model).
             world.CompleteLightingJob(inFlight);
 
             passed &= LightingAssert.Converged(world.RunWaveToConvergence(), "B54: post-race reconciliation converges");
-            passed &= LightingAssert.IsTrue(world.GetSkyLight(observe) == 0,
+            passed &= LightingAssert.IsTrue(world.GetSkylight(observe) == 0,
                 "B54: the previously-lit (2,1) voxel re-darkens to 0 — the deferred removal crossed the seam",
-                $"Expected sky 0 at x{C3_DARK_OBSERVE_X} after the race (was {litBefore}), got {world.GetSkyLight(observe)}");
+                $"Expected sky 0 at x{C3_DARK_OBSERVE_X} after the race (was {litBefore}), got {world.GetSkylight(observe)}");
             passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world),
                 "B54: corridor darkens to the borderless oracle after the in-flight removal race");
 
@@ -168,7 +168,7 @@ namespace Editor.Validation.Lighting
         /// explicit representative of the darkening-across-a-border path than the Bug-12 loop geometries
         /// (B51/B53), which target the mutually-lit / asymmetric two-shaft seam-loop cases specifically.
         /// </summary>
-        private static bool Baseline_CrossChunkSunlightDarkeningSteadyState()
+        private static bool Baseline_CrossChunkSkylightDarkeningSteadyState()
         {
             using LightingTestWorld world = BuildCrossChunkDarkeningWorld();
 
@@ -177,7 +177,7 @@ namespace Editor.Validation.Lighting
                 "B55: initial spill field matches the borderless oracle");
 
             Vector3Int observe = new Vector3Int(C3_DARK_OBSERVE_X, C3_DARK_CORRIDOR_Y, C3_DARK_CORRIDOR_Z);
-            byte litBefore = world.GetSkyLight(observe);
+            byte litBefore = world.GetSkylight(observe);
             passed &= LightingAssert.IsTrue(litBefore > 0,
                 "B55: the sky spill crosses the seam and lights the observation voxel in chunk (2,1) before the seal",
                 $"Expected sky > 0 at x{C3_DARK_OBSERVE_X} in (2,1), got {litBefore}");
@@ -185,9 +185,9 @@ namespace Editor.Validation.Lighting
             SealCrossChunkDarkeningShaft(world);
 
             passed &= LightingAssert.Converged(world.RunToConvergence(), "B55: post-seal reconciliation converges");
-            passed &= LightingAssert.IsTrue(world.GetSkyLight(observe) == 0,
+            passed &= LightingAssert.IsTrue(world.GetSkylight(observe) == 0,
                 "B55: the previously-lit (2,1) voxel re-darkens to 0 — the darkness crossed the seam",
-                $"Expected sky 0 at x{C3_DARK_OBSERVE_X} after the seal (was {litBefore}), got {world.GetSkyLight(observe)}");
+                $"Expected sky 0 at x{C3_DARK_OBSERVE_X} after the seal (was {litBefore}), got {world.GetSkylight(observe)}");
             passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world),
                 "B55: corridor darkens to the borderless oracle after the shaft is sealed");
 

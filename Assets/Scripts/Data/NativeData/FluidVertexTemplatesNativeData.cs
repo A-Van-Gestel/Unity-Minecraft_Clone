@@ -29,8 +29,12 @@ namespace Data.NativeData
         /// </summary>
         public void Dispose()
         {
-            if (WaterVertexTemplates.IsCreated) WaterVertexTemplates.Dispose(); // TODO: Possibly impure struct method called on readonly variable: struct value always copied before invocation
-            if (LavaVertexTemplates.IsCreated) LavaVertexTemplates.Dispose(); // TODO: Possibly impure struct method called on readonly variable: struct value always copied before invocation
+            // Hoisted off the readonly fields so Dispose() runs without hidden defensive copies.
+            NativeArray<float> water = WaterVertexTemplates;
+            NativeArray<float> lava = LavaVertexTemplates;
+
+            if (water.IsCreated) water.Dispose();
+            if (lava.IsCreated) lava.Dispose();
         }
     }
 }

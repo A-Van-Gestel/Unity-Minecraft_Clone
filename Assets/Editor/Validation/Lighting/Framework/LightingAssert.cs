@@ -106,7 +106,7 @@ namespace Editor.Validation.Lighting.Framework
                         if (report != null && mismatches <= MAX_REPORTED_MISMATCHES)
                             AppendMismatch(report, pos, exp, actual);
 
-                        int skyDelta = LightBitMapping.GetSkyLight(actual) - LightBitMapping.GetSkyLight(exp);
+                        int skyDelta = LightBitMapping.GetSkylight(actual) - LightBitMapping.GetSkylight(exp);
                         if (skyDelta > worstSkyDelta)
                         {
                             worstSkyDelta = skyDelta;
@@ -244,7 +244,7 @@ namespace Editor.Validation.Lighting.Framework
                         litVoxels++;
                         if (litVoxels <= MAX_REPORTED_MISMATCHES)
                         {
-                            ushort expected = LightBitMapping.PackLightData(LightBitMapping.GetSkyLight(light), 0, 0, 0);
+                            ushort expected = LightBitMapping.PackLightData(LightBitMapping.GetSkylight(light), 0, 0, 0);
                             AppendMismatch(report, pos, expected, light);
                         }
                     }
@@ -293,12 +293,11 @@ namespace Editor.Validation.Lighting.Framework
                 // --- Dirty every transient surface a real lifecycle would touch ---
                 subject.IsPopulated = true;
                 subject.IsLoading = true;
-                subject.NeedsInitialLighting = true;
-                subject.HasLightChangesToProcess = true;
-                subject.NeedsEdgeCheck = true;
-                subject.IsAwaitingMainThreadProcess = true;
+                subject.FlagInitialLighting();
+                subject.FlagLightWork();
+                subject.FlagEdgeCheck();
                 subject.RemainingEdgeCheckRounds = 0; // the historical bug condition: counter exhausted
-                subject.SunlightBfsQueue.Enqueue(default);
+                subject.SkylightBfsQueue.Enqueue(default);
                 subject.BlocklightBfsQueue.Enqueue(default);
                 subject.SetLightData(2, 5, 3, 0x0ABC); // allocates a section + writes light
                 for (int i = 0; i < subject.heightMap.Length; i++) subject.heightMap[i] = 200;
@@ -309,10 +308,13 @@ namespace Editor.Validation.Lighting.Framework
                 foreach (FieldInfo f in transientPrimitives)
                 {
                     if (f.FieldType == typeof(bool)) f.SetValue(subject, true);
-                    else f.SetValue(subject, Convert.ChangeType(0x5A, f.FieldType));
+                    else if (f.FieldType.IsEnum)
+                        f.SetValue(subject, Enum.ToObject(f.FieldType, DIRTY_FILL_VALUE));
+                    else f.SetValue(subject, Convert.ChangeType(DIRTY_FILL_VALUE, f.FieldType));
                 }
 
                 // --- Recycle through the REAL production Reset() ---
+                int epochBefore = subject.LifecycleEpoch;
                 subject.Reset(pos);
 
                 // --- Verify no stale state remains ---
@@ -324,11 +326,12 @@ namespace Editor.Validation.Lighting.Framework
                 if (subject.NeedsInitialLighting) stale.Add("NeedsInitialLighting");
                 if (subject.HasLightChangesToProcess) stale.Add("HasLightChangesToProcess");
                 if (subject.NeedsEdgeCheck) stale.Add("NeedsEdgeCheck");
-                if (subject.IsAwaitingMainThreadProcess) stale.Add("IsAwaitingMainThreadProcess");
                 if (subject.RemainingEdgeCheckRounds != 2)
                     stale.Add($"RemainingEdgeCheckRounds={subject.RemainingEdgeCheckRounds} (expected 2)");
-                if (subject.SunLightQueueCount != 0) stale.Add("SunlightBfsQueue");
-                if (subject.BlockLightQueueCount != 0) stale.Add("BlocklightBfsQueue");
+                if (subject.LifecycleEpoch != epochBefore + 1)
+                    stale.Add($"LifecycleEpoch={subject.LifecycleEpoch} (expected {epochBefore + 1} — Reset must bump the recycle counter, CP-3 ABA guard)");
+                if (subject.SkylightQueueCount != 0) stale.Add("SkylightBfsQueue");
+                if (subject.BlocklightQueueCount != 0) stale.Add("BlocklightBfsQueue");
                 if (subject.GetLightData(2, 5, 3) != 0) stale.Add("light @ (2,5,3)");
 
                 foreach (ushort h in subject.heightMap)
@@ -437,11 +440,23 @@ namespace Editor.Validation.Lighting.Framework
         }
 
         /// <summary>
-        /// Returns the <c>[NonSerialized]</c> primitive (bool/integer) instance fields of
+        /// Returns the <c>[NonSerialized]</c> primitive (bool/integer) and enum instance fields of
         /// <see cref="ChunkData"/> — exactly the transient flag/counter family that
         /// <see cref="ChunkData.Reset"/> is responsible for clearing. Filtering to <c>[NonSerialized]</c>
         /// excludes on-disk save fields (whose reset is not Reset()'s job), avoiding false positives.
+        /// Enums are included explicitly: <c>Type.IsPrimitive</c> is false for them, so a flags byte such
+        /// as <c>LightingWork</c> would otherwise escape the sweep it most needs to be in.
         /// </summary>
+        /// <summary>Transient fields whose CONTRACT is monotonic across recycles — their "reset" is an
+        /// increment, not a return-to-default — so the fresh-instance comparison must exempt them.
+        /// Every entry here MUST have an explicit assertion in <see cref="AssertResetClearsTransientState"/>
+        /// (silence is never accidental): <c>_lifecycleEpoch</c> is asserted to BUMP on Reset (CP-3 ABA guard).</summary>
+        private static readonly HashSet<string> s_monotonicTransientFields = new HashSet<string> { "_lifecycleEpoch" };
+
+        // Non-zero, non-default filler stamped into every swept transient field before Reset() runs, so a
+        // field Reset() forgets stays visibly dirty. Small enough to fit a byte-backed enum or counter.
+        private const int DIRTY_FILL_VALUE = 0x5A;
+
         private static List<FieldInfo> NonSerializedPrimitiveFields()
         {
             List<FieldInfo> result = new List<FieldInfo>();
@@ -450,7 +465,9 @@ namespace Editor.Validation.Lighting.Framework
             {
                 if (!f.IsDefined(typeof(NonSerializedAttribute), false)) continue;
                 if (f.IsInitOnly) continue; // readonly (e.g. the BFS queues) — checked explicitly, not settable
-                if (!f.FieldType.IsPrimitive || f.FieldType == typeof(char)) continue;
+                if (f.FieldType == typeof(char)) continue;
+                if (!f.FieldType.IsPrimitive && !f.FieldType.IsEnum) continue;
+                if (s_monotonicTransientFields.Contains(f.Name)) continue; // asserted explicitly, not by equality
                 result.Add(f);
             }
 
@@ -461,7 +478,7 @@ namespace Editor.Validation.Lighting.Framework
         {
             report.AppendLine(
                 $"  {worldPos}: " +
-                $"sky {LightBitMapping.GetSkyLight(expected)}/{LightBitMapping.GetSkyLight(actual)}, " +
+                $"sky {LightBitMapping.GetSkylight(expected)}/{LightBitMapping.GetSkylight(actual)}, " +
                 $"R {LightBitMapping.GetBlocklightR(expected)}/{LightBitMapping.GetBlocklightR(actual)}, " +
                 $"G {LightBitMapping.GetBlocklightG(expected)}/{LightBitMapping.GetBlocklightG(actual)}, " +
                 $"B {LightBitMapping.GetBlocklightB(expected)}/{LightBitMapping.GetBlocklightB(actual)} " +

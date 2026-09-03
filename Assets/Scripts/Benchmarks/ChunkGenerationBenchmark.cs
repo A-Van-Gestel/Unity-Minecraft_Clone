@@ -48,16 +48,16 @@ namespace Benchmarks
     /// mutate the live world's generator. Requires a fully-started <c>World</c> of type
     /// <see cref="WorldTypeID.Standard"/> in the scene.
     /// </para>
+    /// <para>
+    /// Armed by <see cref="MicroBenchmarkGate"/> (default-off setting, read once in <c>Start</c>); otherwise
+    /// the component disables itself and the trigger key is inert.
+    /// </para>
     /// </summary>
     public class ChunkGenerationBenchmark : MonoBehaviour
     {
         #region Serialized Fields
 
         [Header("Benchmark Configuration")]
-        [Tooltip("Whether the benchmark is enabled and allowed to run.")]
-        [SerializeField]
-        private bool _benchmarkEnabled = true;
-
         [Tooltip("Chunks generated (and held in-flight) per run. Capped at the pool's MaxRetained so the " +
                  "pooled leg stays fully warm — a batch larger than the cap would force the pooled leg to " +
                  "partially fall back to fresh allocation, muddying the A/B.")]
@@ -106,7 +106,7 @@ namespace Benchmarks
 
         private void Start()
         {
-            if (!_benchmarkEnabled)
+            if (!MicroBenchmarkGate.IsArmed())
             {
                 enabled = false;
                 return;
@@ -126,7 +126,7 @@ namespace Benchmarks
 
         private void Update()
         {
-            if (Keyboard.current != null && Keyboard.current[_triggerKey].wasPressedThisFrame)
+            if (InputManager.Instance != null && InputManager.Instance.DebugKeyPressed(_triggerKey))
                 TriggerBenchmark();
         }
 
@@ -339,7 +339,7 @@ namespace Benchmarks
         /// a pooled active-voxel list is returned to the pool (and skipped by <c>Dispose</c> via
         /// <see cref="GenerationJobData.ActiveVoxelsFromPool"/>); everything else is disposed.
         /// </summary>
-        private static void ReleaseJob(in GenerationJobData jobData, ActiveVoxelListPool legPool)
+        private static void ReleaseJob(GenerationJobData jobData, ActiveVoxelListPool legPool)
         {
             if (legPool != null && jobData.ActiveVoxelsFromPool)
                 legPool.Return(jobData.ActiveVoxels);

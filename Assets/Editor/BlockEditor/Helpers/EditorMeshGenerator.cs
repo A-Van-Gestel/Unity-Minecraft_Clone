@@ -117,7 +117,11 @@ namespace Editor.BlockEditor.Helpers
                     TopL0 = fullBright, TopL1 = fullBright, TopL2 = fullBright, TopL3 = fullBright,
                     BotL0 = fullBright, BotL1 = fullBright, BotL2 = fullBright, BotL3 = fullBright,
                 };
-                VoxelMeshHelper.GenerateCrossMesh(textureID, in crossLights, Vector3Int.zero,
+                // swayPhase 0 + Identity variation: preview icons are static and centred — no wind
+                // phase, and none of FL-4's per-voxel jitter (there is no voxel cell here).
+                CrossMeshVariation previewVariation = CrossMeshVariation.Identity;
+                VoxelMeshHelper.GenerateCrossMesh(textureID, in crossLights, Vector3Int.zero, swayPhase: 0f,
+                    in previewVariation,
                     ref vertexIndex, ref nativeVertices, ref nativeTransparentTris, ref nativeUvs, ref nativeColors, ref nativeNormals,
                     ref nativeLightData);
             }

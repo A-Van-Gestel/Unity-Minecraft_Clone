@@ -23,7 +23,7 @@ namespace Data
     ///   <item><description><c>32-63</c> = experimental / editor-only schemas</description></item>
     ///   <item><description><c>64-255</c> = reserved for future use</description></item>
     /// </list>
-    /// <para>See <c>Documentation/Design/PER_BLOCK_METADATA_SCHEMAS.md</c>.</para>
+    /// <para>See <c>Documentation/Architecture/PER_BLOCK_METADATA_SCHEMAS.md</c>.</para>
     /// </remarks>
     public enum MetadataSchema : byte
     {

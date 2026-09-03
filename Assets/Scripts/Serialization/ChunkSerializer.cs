@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using Data;
 using Helpers;
 using UnityEngine;
@@ -29,6 +30,17 @@ namespace Serialization
         //          See Migration_v9_to_v10_StripLightBitsAndNewFlags.cs.
         private const byte CURRENT_CHUNK_VERSION = 7;
 
+        // CP-1 probe (F1 corruption signal): parse failures only — distinct from the benign "not on disk"
+        // null in ChunkStorageManager.LoadChunkAsync. Runs on the background deserialize thread.
+        private static long s_deserializeFailures;
+
+        /// <summary>Cumulative count of chunk payloads that failed to deserialize and returned null (CP-1 probe).</summary>
+        public static long DeserializeFailures => Interlocked.Read(ref s_deserializeFailures);
+
+        /// <summary>Resets the CP-1 deserialize-failure counter on each play-mode entry (safe when domain reload is disabled).</summary>
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetDeserializeProbeCounter() => s_deserializeFailures = 0;
+
         // Section type flags (v7).
         // 0x00: Voxels + uniform sky level (1B sky + 2B nonAirCount + voxels)
         // 0x01: Voxels + full LightData (2B nonAirCount + voxels + LightData)
@@ -52,13 +64,19 @@ namespace Serialization
             using MemoryStream memoryStream = new MemoryStream(outputBuffer);
 
             // Create wrapper. leaveOpen=true allows us to check position after flush.
-            using (Stream compressionStream = CompressionFactory.CreateOutputStream(memoryStream, algorithm, leaveOpen: true))
+            // For CompressionAlgorithm.None the factory returns memoryStream ITSELF — disposing it here
+            // would close the stream before the Position read below (the same identity guard Deserialize
+            // uses for its input wrapper).
+            Stream compressionStream = CompressionFactory.CreateOutputStream(memoryStream, algorithm, leaveOpen: true);
+            try
             {
                 // Use UTF8 and leaveOpen=true for the writer too.
-                using (BinaryWriter writer = new BinaryWriter(compressionStream, Encoding.UTF8, true))
-                {
-                    WriteChunkInternal(writer, data);
-                }
+                using BinaryWriter writer = new BinaryWriter(compressionStream, Encoding.UTF8, true);
+                WriteChunkInternal(writer, data);
+            }
+            finally
+            {
+                if (compressionStream != memoryStream) compressionStream.Dispose();
             }
 
             return (int)memoryStream.Position;
@@ -95,6 +113,7 @@ namespace Serialization
                     }
                     catch (Exception ex)
                     {
+                        Interlocked.Increment(ref s_deserializeFailures);
                         Debug.LogWarning($"[Deserialize] Chunk {debugCoord} deserialization failed ({algorithm}). Payload: {data.Length} bytes. Error: {ex.GetType().Name} - {ex.Message}");
                         return null;
                     }
@@ -177,13 +196,14 @@ namespace Serialization
 
             // --- Write Lighting Queues ---
             // Lock queues during serialization to prevent concurrent modification by the Main Thread
-            lock (data.SunlightBfsQueue) WriteLightQueue(writer, data.SunlightBfsQueue);
+            lock (data.SkylightBfsQueue) WriteLightQueue(writer, data.SkylightBfsQueue);
             lock (data.BlocklightBfsQueue) WriteLightQueue(writer, data.BlocklightBfsQueue);
         }
 
         // --- Internal Read Logic ---
         private static ChunkData ReadChunkInternal(BinaryReader reader, Vector2Int coord, int totalLen)
         {
+            ChunkData chunk = null; // hoisted so the catch can return the pooled shell on a mid-parse throw
             try
             {
                 // --- Chunk Header ---
@@ -200,10 +220,12 @@ namespace Serialization
                 if (x != coord.x || z != coord.y)
                     Debug.LogWarning($"[ReadChunkInternal] Chunk coord mismatch at {coord}. Read: {x},{z}");
 
-                ChunkData chunk = World.Instance.ChunkPool.GetChunkData(new Vector2Int(x, z)); // Get from POOL
+                chunk = World.Instance.ChunkPool.GetChunkData(new Vector2Int(x, z)); // Get from POOL
 
                 // --- State Flags ---
-                chunk.NeedsInitialLighting = reader.ReadBoolean();
+                // The chunk comes straight from the pool (Reset already ran), so its work set is empty
+                // and flagging on true reproduces the old unconditional assignment.
+                if (reader.ReadBoolean()) chunk.FlagInitialLighting();
 
                 // --- Height Map ---
                 byte[] hmBytes = reader.ReadBytes(VoxelData.ChunkWidth * VoxelData.ChunkWidth * sizeof(ushort));
@@ -237,13 +259,13 @@ namespace Serialization
                 }
 
                 // --- Lighting ---
-                ReadLightQueue(reader, chunk.SunlightBfsQueue);
+                ReadLightQueue(reader, chunk.SkylightBfsQueue);
                 ReadLightQueue(reader, chunk.BlocklightBfsQueue);
 
                 // If we loaded pending lights, flag the chunk for processing
-                if (chunk.SunLightQueueCount > 0 || chunk.BlockLightQueueCount > 0)
+                if (chunk.SkylightQueueCount > 0 || chunk.BlocklightQueueCount > 0)
                 {
-                    chunk.HasLightChangesToProcess = true;
+                    chunk.FlagLightWork();
                 }
 
                 chunk.IsPopulated = true;
@@ -253,6 +275,12 @@ namespace Serialization
             {
                 long curr = reader.BaseStream.CanSeek ? reader.BaseStream.Position : -1;
                 Debug.LogError($"[ReadChunkInternal] Deserialize Crash at stream pos {curr}. Expected Payload Size: {totalLen}");
+
+                // CP-3 (F1 sub-finding): a mid-parse throw must not strand the pooled shell or its
+                // already-attached sections — return them before Deserialize's catch turns this into
+                // the corrupt-payload null. Thread-safe: the data/section pools are concurrent.
+                if (chunk != null)
+                    World.Instance.ChunkPool.ReturnChunkData(chunk);
                 throw;
             }
         }

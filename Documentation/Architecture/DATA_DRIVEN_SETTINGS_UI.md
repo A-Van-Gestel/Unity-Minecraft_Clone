@@ -56,33 +56,35 @@ The canonical tab order is defined in `SettingsUIGenerator` as a private static 
 /// Defines the top-to-bottom order of tabs in the Settings UI.
 /// Every SettingsTab enum value MUST appear in this array.
 /// </summary>
-private static readonly SettingsTab[] TAB_ORDER =
+private static readonly SettingsTab[] s_tabOrder =
 {
     SettingsTab.General,
     SettingsTab.Controls,
     SettingsTab.Graphics,
     SettingsTab.World,
     SettingsTab.Performance,
-    SettingsTab.Dev
+    SettingsTab.Benchmark,
+    SettingsTab.DebugScreen,
+    SettingsTab.Dev,
 };
 ```
 
-On `Awake()`, the generator validates completeness:
+On generation, the generator validates completeness:
 
 ```csharp
 // Validate that every SettingsTab value has a defined order
 SettingsTab[] allTabs = (SettingsTab[])Enum.GetValues(typeof(SettingsTab));
 foreach (SettingsTab tab in allTabs)
 {
-    if (Array.IndexOf(TAB_ORDER, tab) == -1)
+    if (Array.IndexOf(s_tabOrder, tab) == -1)
     {
-        Debug.LogError($"[SettingsUIGenerator] SettingsTab.{tab} is missing from TAB_ORDER! " +
-                       "Add it to the TAB_ORDER array in SettingsUIGenerator.");
+        Debug.LogError($"[SettingsUIGenerator] SettingsTab.{tab} is missing from s_tabOrder! " +
+                       "Add it to the 's_tabOrder' array in SettingsUIGenerator.");
     }
 }
 ```
 
-This ensures that adding a new `SettingsTab` enum value without updating `TAB_ORDER` produces an immediate, actionable error message.
+This ensures that adding a new `SettingsTab` enum value without updating `s_tabOrder` produces an immediate, actionable error message.
 
 ---
 
@@ -193,6 +195,14 @@ public int maxFps = 120;
 | `float`    | *(no Range)*        | InputField (numeric)                                              |
 | `enum`     | —                   | Dropdown (populated from enum values, respects `[InspectorName]`) |
 | `string`   | —                   | InputField (text)                                                 |
+
+> ⚠ **Enum settings must be 0-based and contiguous.** The dropdown binds by *position*: the generator
+> seeds the control with `Convert.ToInt32(field.GetValue(...))` as an option index, and writes the
+> selected index straight back with `Enum.ToObject(fieldType, index)`. An enum with gaps or a non-zero
+> first value therefore desyncs the stored value from the shown option, silently. When a setting must
+> carry externally-defined numbers (URP sample counts, Unity mode constants), declare the enum 0-based
+> and convert in an extension method — `WindowMode.ToFullScreenMode()` and `MsaaLevel.ToMsaaQuality()`
+> are the two examples in the codebase.
 
 ---
 
@@ -516,7 +526,7 @@ The `Settings.EnablePersistence` property must be updated to reference `Dev.keep
 ```csharp
 [SettingField(SettingsTab.Graphics, Label = "View Distance", Format = "f0", Order = 0)]
 [Range(1, 32)]
-public int viewDistance = 5;
+public int viewDistance = 10;
 ```
 
 ### 8.5 Example: Fully Annotated Settings Class
@@ -547,7 +557,7 @@ public class Settings
 
     [SettingField(SettingsTab.Graphics, Label = "View Distance", Format = "f0", Order = 1)]
     [Range(1, 32)]
-    public int viewDistance = 5;
+    public int viewDistance = 10;
 
     [SubHeader("Fluids")]
     [SettingField(SettingsTab.Graphics, Label = "Fluid Quality", Order = 2)]
@@ -643,6 +653,48 @@ The reflection used in this system is limited to basic `System.Reflection` opera
 Additionally, `Activator.CreateInstance(Type)` is used once per `[DynamicDropdown]` field at generation time to instantiate the provider. All of these operations are fully supported by IL2CPP in Unity 6. No `MakeGenericMethod` or `MakeGenericType` is used.
 
 **Validation requirement:** The IL2CPP reflection path must be tested in an actual IL2CPP Development Build early in the implementation phase to catch any edge cases before they become blockers.
+
+### 9.1 Managed stripping
+
+AOT compatibility and managed stripping are separate hazards: the operations above compile fine
+under IL2CPP, but none of them creates a **static reference** the linker can see, so the members
+they reach are strip candidates. Standalone builds at stripping level **Medium**, above which the
+following are removed unless explicitly rooted:
+
+* The `Settings` / `DevSettings` fields the generator enumerates — including **private** fields,
+  which `GetWatchedFieldValue` resolves *by name*.
+* `[SettingAction]` methods, which are only ever invoked reflectively.
+* The `UI.Attributes` marker types read via `GetCustomAttribute<T>()`.
+* `IDropdownProvider` implementations, whose sole reference is a `typeof` argument on a
+  `[DynamicDropdown]` attribute.
+
+The first four are rooted in `Assets/link.xml`. Provider classes instead carry `[Preserve]` on the
+class itself so the root travels with the type — **add `[Preserve]` to any new `IDropdownProvider`
+implementation.**
+
+This failure mode is silent: stripping happens at build time but the missing member only surfaces
+when the menu is generated, as a control that quietly fails to appear (or an
+`Activator.CreateInstance` throw) in a player build that compiled and linked cleanly. It cannot be
+reproduced in the Editor or in any build below Medium.
+
+#### Which platforms this covers
+
+`managedStrippingLevel` is a **per-platform** setting, and only the `Standalone` entry was raised to
+Medium. Two consequences worth knowing before trusting the validation:
+
+* **`Standalone` is one shared value for Windows, macOS *and* Linux** — Unity offers no way to split
+  them. So macOS and Linux players already ship at Medium, while the manual settings-menu pass that
+  validated it has only ever run on **Windows**. Anything that roots a member for Windows roots it
+  everywhere, so this is a testing gap rather than a behavioural difference — but a first macOS or
+  Linux build should repeat the menu pass rather than inherit the Windows verdict.
+* **Android is deliberately still at `Low`.** The rooting work is already platform-agnostic
+  (`link.xml` applies to every platform and `[Preserve]` travels with the type), so raising Android
+  is a one-key change — but it must be paid for with the same manual menu pass on a device build
+  first, because nothing below Medium can reveal the failure.
+
+The `il2cppStacktraceInformation` setting is per-platform in the same way; both Standalone and
+Android are set to `MethodOnly`. It is independent of stripping and carries no reflection risk — the
+trade is smaller binaries against losing file and line numbers in managed stack traces.
 
 > **Future consideration:** If reflection proves problematic at scale, the system could be augmented with an editor-time "Bake" step that uses Roslyn source generators to emit concrete binding code. This would eliminate runtime reflection entirely but would require two test rounds (Editor reflection + Production baked). This optimization is deferred unless IL2CPP testing reveals issues.
 

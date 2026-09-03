@@ -85,7 +85,7 @@ namespace Editor.WorldTools
 
             _enableLighting = GUILayout.Toggle(
                 _enableLighting,
-                new GUIContent("Lighting", "Enable BFS sunlight + blocklight pass before meshing."),
+                new GUIContent("Lighting", "Enable BFS skylight + blocklight pass before meshing."),
                 EditorStyles.toolbarButton, GUILayout.Width(60));
 
             EditorGUI.BeginChangeCheck();

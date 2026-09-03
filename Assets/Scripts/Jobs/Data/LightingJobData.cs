@@ -76,9 +76,9 @@ namespace Jobs.Data
         // --- Output data ---
         public NativeArray<uint> Map; // The center chunk voxel snapshot (gather source + ApplyJobLightMap reference)
         public NativeArray<ushort> LightMap; // The center chunk light buffer (gather source + readback target)
-        public NativeQueue<LightQueueNode> SunLightQueue;
-        public NativeQueue<LightQueueNode> BlockLightQueue;
-        public NativeQueue<Vector2Int> SunLightRecalcQueue;
+        public NativeQueue<LightQueueNode> SkylightQueue;
+        public NativeQueue<LightQueueNode> BlocklightQueue;
+        public NativeQueue<Vector2Int> SkylightRecalcQueue;
         public NativeList<LightModification> Mods;
 
         // The job's snapshot-trusting cross-seam re-lights, re-verified against live neighbor data at
@@ -100,9 +100,9 @@ namespace Jobs.Data
             // --- Output data ---
             if (Map.IsCreated) Map.Dispose();
             if (LightMap.IsCreated) LightMap.Dispose();
-            if (SunLightQueue.IsCreated) SunLightQueue.Dispose();
-            if (BlockLightQueue.IsCreated) BlockLightQueue.Dispose();
-            if (SunLightRecalcQueue.IsCreated) SunLightRecalcQueue.Dispose();
+            if (SkylightQueue.IsCreated) SkylightQueue.Dispose();
+            if (BlocklightQueue.IsCreated) BlocklightQueue.Dispose();
+            if (SkylightRecalcQueue.IsCreated) SkylightRecalcQueue.Dispose();
             if (Mods.IsCreated) Mods.Dispose();
             if (PullBackClaims.IsCreated) PullBackClaims.Dispose();
             if (IsStable.IsCreated) IsStable.Dispose();

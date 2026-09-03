@@ -11,9 +11,11 @@ namespace UI.Enums
         General,
         Controls,
         Graphics,
+        Audio,
         World,
         Performance,
         Benchmark,
         Dev,
+        DebugScreen,
     }
 }

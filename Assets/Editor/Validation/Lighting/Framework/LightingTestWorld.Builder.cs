@@ -29,11 +29,11 @@ namespace Editor.Validation.Lighting.Framework
         /// </summary>
         /// <param name="worldPos">The world-space voxel position.</param>
         /// <param name="blockId">The palette block ID to write.</param>
-        public void SetBlock(Vector3Int worldPos, ushort blockId)
+        public void SetBlock(Vector3Int worldPos, ushort blockId, byte meta = 0)
         {
             TestChunk chunk = GetChunkForWorldPos(worldPos, out Vector3Int localPos);
             chunk.Data.SetVoxel(localPos.x, localPos.y, localPos.z,
-                BurstVoxelDataBitMapping.PackVoxelData(blockId, 0));
+                BurstVoxelDataBitMapping.PackVoxelData(blockId, meta));
         }
 
         /// <summary>
@@ -59,7 +59,9 @@ namespace Editor.Validation.Lighting.Framework
         public void FillSuperflatFloor(int surfaceY, ushort blockId)
         {
             int worldWidth = GridSize * VoxelData.ChunkWidth;
-            FillBox(new Vector3Int(0, 0, 0), new Vector3Int(worldWidth - 1, surfaceY, worldWidth - 1), blockId);
+            Vector2Int baseOrigin = GridToVoxelOrigin(Vector2Int.zero);
+            FillBox(new Vector3Int(baseOrigin.x, 0, baseOrigin.y),
+                new Vector3Int(baseOrigin.x + worldWidth - 1, surfaceY, baseOrigin.y + worldWidth - 1), blockId);
         }
 
         /// <summary>
@@ -78,8 +80,10 @@ namespace Editor.Validation.Lighting.Framework
                         ushort height = 0;
                         for (int y = VoxelData.ChunkHeight - 1; y >= 0; y--)
                         {
-                            ushort id = BurstVoxelDataBitMapping.GetId(chunk.Data.GetVoxel(x, y, z));
-                            if (_blockTypes[id].IsLightObstructing)
+                            uint voxel = chunk.Data.GetVoxel(x, y, z);
+                            if (LightAttenuation.ObstructsSkyColumn(
+                                    _blockTypes[BurstVoxelDataBitMapping.GetId(voxel)],
+                                    BurstVoxelDataBitMapping.GetMeta(voxel)))
                             {
                                 height = (ushort)y;
                                 break;
@@ -98,24 +102,28 @@ namespace Editor.Validation.Lighting.Framework
         /// Modifies a voxel with the production player-edit semantics, mirroring the lighting-relevant
         /// behavior of <c>ChunkData.ModifyVoxel</c>: captures old light values, writes the voxel,
         /// maintains the heightmap incrementally, seeds the removal nodes for the modified voxel,
-        /// wakes the six same-chunk neighbors, and queues a sunlight column recalculation when the
+        /// wakes the six same-chunk neighbors, and queues a skylight column recalculation when the
         /// opacity changed.
         /// </summary>
         /// <param name="worldPos">The world-space voxel position.</param>
         /// <param name="blockId">The palette block ID to place (use <see cref="TestBlockPalette.Air"/> to break).</param>
-        public void PlaceBlock(Vector3Int worldPos, ushort blockId)
+        /// <param name="meta">Raw metadata byte. Only meaningful for blocks whose
+        /// <see cref="MetadataSchema"/> uses it — for <see cref="TestBlockPalette.HalfSlab"/> it selects
+        /// which faces the partial volume covers, which is the whole point of the VO-* directional
+        /// occlusion scenarios. Defaults to 0, so every pre-VO-2 call site is unchanged.</param>
+        public void PlaceBlock(Vector3Int worldPos, ushort blockId, byte meta = 0)
         {
             TestChunk chunk = GetChunkForWorldPos(worldPos, out Vector3Int localPos);
 
             uint oldPackedData = chunk.Data.GetVoxel(localPos.x, localPos.y, localPos.z);
-            uint newPackedData = BurstVoxelDataBitMapping.PackVoxelData(blockId, 0);
+            uint newPackedData = BurstVoxelDataBitMapping.PackVoxelData(blockId, meta);
             if (oldPackedData == newPackedData)
                 return;
 
             // --- Capture Old State for Lighting (ChunkData.ModifyVoxel order) ---
             ushort oldId = BurstVoxelDataBitMapping.GetId(oldPackedData);
             ushort oldLightData = chunk.Data.GetLightData(localPos.x, localPos.y, localPos.z);
-            byte oldSkyLight = LightBitMapping.GetSkyLight(oldLightData);
+            byte oldSkylight = LightBitMapping.GetSkylight(oldLightData);
             byte oldBlocklight = LightBitMapping.GetMaxBlocklight(oldLightData);
             byte oldBlockR = LightBitMapping.GetBlocklightR(oldLightData);
             byte oldBlockG = LightBitMapping.GetBlocklightG(oldLightData);
@@ -127,12 +135,13 @@ namespace Editor.Validation.Lighting.Framework
 
             // --- Maintain heightmap via the shared ChunkData logic (same code as production ModifyVoxel) ---
             chunk.Data.UpdateColumnHeightAfterEdit(localPos.x, localPos.z, localPos.y,
-                newProps.IsLightObstructing, new JobDataBlockObstruction(_blockTypes));
+                LightAttenuation.ObstructsSkyColumn(in newProps, BurstVoxelDataBitMapping.GetMeta(newPackedData)),
+                new JobDataBlockObstruction(_blockTypes));
 
             // --- Queue lighting updates ---
 
             // 1. The modified voxel itself, for light removal (real old values).
-            chunk.SunQueue.Enqueue(new LightQueueNode { Position = localPos, OldLightLevel = oldSkyLight });
+            chunk.SkyQueue.Enqueue(new LightQueueNode { Position = localPos, OldLightLevel = oldSkylight });
             chunk.BlockQueue.Enqueue(new LightQueueNode
             {
                 Position = localPos, OldLightLevel = oldBlocklight,
@@ -150,19 +159,24 @@ namespace Editor.Validation.Lighting.Framework
 
                 ushort neighborLight = chunk.Data.GetLightData(neighborPos.x, neighborPos.y, neighborPos.z);
 
-                if (LightBitMapping.GetSkyLight(neighborLight) > 0)
-                    chunk.SunQueue.Enqueue(new LightQueueNode { Position = neighborPos, OldLightLevel = 0 });
+                if (LightBitMapping.GetSkylight(neighborLight) > 0)
+                    chunk.SkyQueue.Enqueue(new LightQueueNode { Position = neighborPos, OldLightLevel = 0 });
 
                 if (LightBitMapping.GetMaxBlocklight(neighborLight) > 0)
                     chunk.BlockQueue.Enqueue(new LightQueueNode { Position = neighborPos });
             }
 
-            // 3. Opacity change → full vertical sunlight recalculation of this column
-            //    (production routes this through WorldData.QueueSunlightRecalculation, which lands
-            //    in the owning chunk's column recalc queue).
-            if (newProps.Opacity != oldProps.Opacity)
+            // 3. Changed light transport → full vertical skylight recalculation of this column
+            //    (production routes this through WorldData.QueueSkylightRecalculation, which lands
+            //    in the owning chunk's column recalc queue). Mirrors ChunkData.ModifyVoxel's two
+            //    triggers exactly: a changed attenuation cost (opacity) OR a changed shape at equal
+            //    opacity (obstruction) — the second being Bug 21's, where sealing a vertical half slab
+            //    ends an undimmed column while leaving opacity at 15 throughout.
+            if (newProps.Opacity != oldProps.Opacity
+                || LightAttenuation.ObstructsSkyColumn(in newProps, BurstVoxelDataBitMapping.GetMeta(newPackedData))
+                != LightAttenuation.ObstructsSkyColumn(in oldProps, BurstVoxelDataBitMapping.GetMeta(oldPackedData)))
             {
-                chunk.SunColumnRecalcQueue.Enqueue(new Vector2Int(localPos.x, localPos.z));
+                chunk.SkyColumnRecalcQueue.Enqueue(new Vector2Int(localPos.x, localPos.z));
 
                 // Bug 05: mirror ChunkData.ModifyVoxel's border-column edge-check re-grant. An opacity
                 // edit in a border column can under-report cross-seam sky light with no edge-check round
@@ -175,7 +189,7 @@ namespace Editor.Validation.Lighting.Framework
                         Mathf.Max(chunk.Data.RemainingEdgeCheckRounds, 1);
             }
 
-            chunk.HasLightWork = true;
+            chunk.Data.FlagLightWork();
         }
 
         /// <summary>
@@ -189,8 +203,8 @@ namespace Editor.Validation.Lighting.Framework
         }
 
         /// <summary>
-        /// Seeds a sunlight removal BFS node directly into the owning chunk's queue, mirroring a chunk
-        /// loaded from a save whose persisted <c>SunlightBfsQueue</c> (<c>ChunkSerializer.ReadLightQueue</c>)
+        /// Seeds a skylight removal BFS node directly into the owning chunk's queue, mirroring a chunk
+        /// loaded from a save whose persisted <c>SkylightBfsQueue</c> (<c>ChunkSerializer.ReadLightQueue</c>)
         /// still held an in-flight darkness node — i.e. the chunk was serialized mid-darkness-wave, so on
         /// reload it carries a removal seed that the live light field has no source for. The job's
         /// queue-seeding (<c>NeighborhoodLightingJob</c>) turns this into an actual removal pass when the
@@ -199,26 +213,77 @@ namespace Editor.Validation.Lighting.Framework
         /// <param name="worldPos">The world-space voxel position of the seeded removal node.</param>
         /// <param name="oldLevel">The pre-removal sky level the node carries (the strength of the darkness wave);
         /// must exceed the voxel's current sky light for the node to launch a removal.</param>
-        public void SeedLoadedSunlightRemoval(Vector3Int worldPos, byte oldLevel)
+        public void SeedLoadedSkylightRemoval(Vector3Int worldPos, byte oldLevel)
         {
             TestChunk chunk = GetChunkForWorldPos(worldPos, out Vector3Int localPos);
-            chunk.SunQueue.Enqueue(new LightQueueNode { Position = localPos, OldLightLevel = oldLevel });
-            chunk.HasLightWork = true;
+            chunk.SkyQueue.Enqueue(new LightQueueNode { Position = localPos, OldLightLevel = oldLevel });
+            chunk.Data.FlagLightWork();
         }
 
         /// <summary>
-        /// Enqueues all 256 columns of a chunk for sunlight recalculation — the production seeding
-        /// for a freshly generated chunk's initial lighting pass (<c>RecalculateSunLightLight</c>).
+        /// Enqueues all 256 columns of a chunk for skylight recalculation — the production seeding
+        /// for a freshly generated chunk's initial lighting pass (<c>RecalculateSkylight</c>).
         /// </summary>
         /// <param name="chunkCoord">The grid coordinate of the chunk.</param>
-        public void QueueFullSunlightRecalc(Vector2Int chunkCoord)
+        public void QueueFullSkylightRecalc(Vector2Int chunkCoord)
         {
             TestChunk chunk = GetChunk(chunkCoord);
             for (int x = 0; x < VoxelData.ChunkWidth; x++)
             for (int z = 0; z < VoxelData.ChunkWidth; z++)
-                chunk.SunColumnRecalcQueue.Enqueue(new Vector2Int(x, z));
+                chunk.SkyColumnRecalcQueue.Enqueue(new Vector2Int(x, z));
 
-            chunk.HasLightWork = true;
+            chunk.Data.FlagLightWork();
+        }
+
+        /// <summary>
+        /// Enqueues all 256 columns of a chunk for skylight recalculation THROUGH the production
+        /// global-column routing seam — each column is expressed as a global voxel column, routed to
+        /// its owning chunk's bucket via <see cref="SkylightColumnRouting.RouteToChunkOrigin"/>, then
+        /// drained back to a chunk-local column via <see cref="SkylightColumnRouting.ToLocalColumn"/> —
+        /// exactly the round-trip production performs between
+        /// <c>WorldData.QueueSkylightRecalculation</c> and the <c>WorldJobManager</c> job-build drain.
+        /// Unlike <see cref="QueueFullSkylightRecalc"/> (which side-steps the seam with local columns),
+        /// this exercises the routing at the grid's true world coordinates, so a far-anchored world
+        /// (see the constructor's <c>anchorChunk</c>) reproduces far-coordinate routing defects.
+        /// No range clamp is applied to the drained local columns — production has none, so a
+        /// mis-routed column reaches the lighting job's heightmap lookup exactly as it does in-game.
+        /// </summary>
+        /// <param name="chunkCoord">The grid coordinate of the chunk whose columns are queued.</param>
+        /// <param name="outOfRangeLocals">The number of delivered columns whose drained local fell
+        /// outside [0, ChunkWidth)² — each one is a negative/overflowing heightmap index in the
+        /// lighting job (0 when the seam routes correctly).</param>
+        /// <returns>The number of columns whose bucket resolved to no grid chunk (lost in routing —
+        /// 0 when the seam routes correctly).</returns>
+        public int QueueFullSkylightRecalcViaGlobalRouting(Vector2Int chunkCoord, out int outOfRangeLocals)
+        {
+            TestChunk source = GetChunk(chunkCoord);
+            int lost = 0;
+            outOfRangeLocals = 0;
+
+            for (int x = 0; x < VoxelData.ChunkWidth; x++)
+            for (int z = 0; z < VoxelData.ChunkWidth; z++)
+            {
+                Vector2Int globalColumn = new Vector2Int(source.VoxelOrigin.x + x, source.VoxelOrigin.y + z);
+                Vector2Int bucketOrigin = SkylightColumnRouting.RouteToChunkOrigin(globalColumn);
+
+                // Deliver into the grid chunk whose voxel origin matches the bucket key — the mirror of
+                // production draining SkylightRecalculationQueue[chunkData.Position] into that chunk's job.
+                TestChunk target = FindChunkByVoxelOrigin(bucketOrigin);
+                if (target == null)
+                {
+                    lost++;
+                    continue;
+                }
+
+                Vector2Int local = SkylightColumnRouting.ToLocalColumn(globalColumn, target.VoxelOrigin);
+                if ((uint)local.x >= VoxelData.ChunkWidth || (uint)local.y >= VoxelData.ChunkWidth)
+                    outOfRangeLocals++;
+
+                target.SkyColumnRecalcQueue.Enqueue(local);
+                target.Data.FlagLightWork();
+            }
+
+            return lost;
         }
 
         // --- Queries ---
@@ -231,6 +296,18 @@ namespace Editor.Validation.Lighting.Framework
             return BurstVoxelDataBitMapping.GetId(chunk.Data.GetVoxel(localPos.x, localPos.y, localPos.z));
         }
 
+        /// <summary>
+        /// Returns the raw metadata byte at the given world position. The oracle needs it alongside the
+        /// block id because a partial block's occlusion depends on its orientation (VO-3).
+        /// </summary>
+        /// <param name="worldPos">The world-space voxel position.</param>
+        /// <returns>The voxel's raw metadata byte.</returns>
+        public byte GetBlockMeta(Vector3Int worldPos)
+        {
+            TestChunk chunk = GetChunkForWorldPos(worldPos, out Vector3Int localPos);
+            return BurstVoxelDataBitMapping.GetMeta(chunk.Data.GetVoxel(localPos.x, localPos.y, localPos.z));
+        }
+
         /// <summary>Returns the packed ushort light value at the given world position.</summary>
         /// <param name="worldPos">The world-space voxel position.</param>
         public ushort GetLightData(Vector3Int worldPos)
@@ -241,9 +318,9 @@ namespace Editor.Validation.Lighting.Framework
 
         /// <summary>Returns the sky light level (0-15) at the given world position.</summary>
         /// <param name="worldPos">The world-space voxel position.</param>
-        public byte GetSkyLight(Vector3Int worldPos)
+        public byte GetSkylight(Vector3Int worldPos)
         {
-            return LightBitMapping.GetSkyLight(GetLightData(worldPos));
+            return LightBitMapping.GetSkylight(GetLightData(worldPos));
         }
 
         /// <summary>Returns the RGB blocklight channels (each 0-15) at the given world position.</summary>
@@ -261,32 +338,49 @@ namespace Editor.Validation.Lighting.Framework
         /// </summary>
         /// <param name="worldPos">The world-space voxel position.</param>
         /// <param name="sky">The sky-light level (0-15) to write.</param>
-        public void SetSkyLightAt(Vector3Int worldPos, byte sky)
+        public void SetSkylightAt(Vector3Int worldPos, byte sky)
         {
             TestChunk chunk = GetChunkForWorldPos(worldPos, out Vector3Int localPos);
             ushort light = chunk.Data.GetLightData(localPos.x, localPos.y, localPos.z);
-            chunk.Data.SetLightData(localPos.x, localPos.y, localPos.z, LightBitMapping.SetSkyLight(light, sky));
+            chunk.Data.SetLightData(localPos.x, localPos.y, localPos.z, LightBitMapping.SetSkylight(light, sky));
         }
 
         /// <summary>
-        /// Test affordance over the production cross-chunk guard: the in-chunk sunlight support
-        /// (<see cref="CrossChunkLightModApplier.InChunkSunlightSupport"/>) computed for the voxel at
+        /// Test affordance over the production cross-chunk guard: the in-chunk skylight support
+        /// (<see cref="CrossChunkLightModApplier.InChunkSkylightSupport"/>) computed for the voxel at
         /// <paramref name="worldPos"/>, as if it had the given opacity. Lets finding-3 baselines assert the
         /// guard charges the <b>target voxel's</b> opacity (<c>max(1, opacity)</c>) on entry rather than a
         /// flat air step.
         /// </summary>
         /// <param name="worldPos">The world-space voxel position whose in-chunk neighbors are sampled.</param>
-        /// <param name="targetOpacity">The opacity to attenuate the neighbors' sky by (the entry cost).</param>
+        /// <param name="targetOpacity">The opacity to attenuate the neighbors' sky by (the entry cost),
+        /// charged in every direction — the whole-block form, which is what B49 varies.</param>
         /// <returns>The strongest opacity-attenuated sky a same-chunk neighbor supplies.</returns>
-        public byte InChunkSunlightSupportAt(Vector3Int worldPos, byte targetOpacity)
+        public byte InChunkSkylightSupportAt(Vector3Int worldPos, byte targetOpacity)
         {
             TestChunk chunk = GetChunkForWorldPos(worldPos, out Vector3Int localPos);
-            return CrossChunkLightModApplier.InChunkSunlightSupport(chunk.Data, localPos, targetOpacity, _isBlockFullyOpaque);
+            return CrossChunkLightModApplier.InChunkSkylightSupport(chunk.Data, localPos,
+                CrossChunkLightModApplier.TargetEntryCost.Flat(targetOpacity), _getBlockData);
+        }
+
+        /// <summary>
+        /// Test affordance over the production cross-chunk guard, using the target voxel's <b>real</b>
+        /// block and orientation for the entry cost rather than a synthetic flat opacity. This is the form
+        /// production uses since <c>VO-4</c>, and the only one that can express a partial block charging
+        /// its opacity on a covered face and nothing on an open one.
+        /// </summary>
+        /// <param name="worldPos">The world-space voxel position whose in-chunk neighbors are sampled.</param>
+        /// <returns>The strongest support a same-chunk neighbor supplies, entering through the real block.</returns>
+        public byte DirectionalInChunkSkylightSupportAt(Vector3Int worldPos)
+        {
+            TestChunk chunk = GetChunkForWorldPos(worldPos, out Vector3Int localPos);
+            return CrossChunkLightModApplier.InChunkSkylightSupport(chunk.Data, localPos,
+                TargetEntryCostFor(chunk.Data, localPos), _getBlockData);
         }
 
         /// <summary>
         /// Test affordance over the production decision logic: runs
-        /// <see cref="CrossChunkLightModApplier.ComputeSunlight"/> for a cross-chunk sunlight REMOVAL
+        /// <see cref="CrossChunkLightModApplier.ComputeSkylight"/> for a cross-chunk skylight REMOVAL
         /// (level 0) against a voxel currently holding <paramref name="currentSky"/>, given
         /// <paramref name="inChunkSupport"/>. Returns true when the removal is SKIPPED (vetoed because an
         /// in-chunk source still supports the current value).
@@ -294,10 +388,10 @@ namespace Editor.Validation.Lighting.Framework
         /// <param name="currentSky">The voxel's current sky light (0-15).</param>
         /// <param name="inChunkSupport">The in-chunk support the guard was given.</param>
         /// <returns>True when the removal is vetoed, false when it applies.</returns>
-        public static bool CrossChunkSunlightRemovalVetoed(byte currentSky, byte inChunkSupport)
+        public static bool CrossChunkSkylightRemovalVetoed(byte currentSky, byte inChunkSupport)
         {
-            ushort currentLight = LightBitMapping.SetSkyLight(0, currentSky);
-            return !CrossChunkLightModApplier.ComputeSunlight(currentLight, 0, inChunkSupport).ShouldApply;
+            ushort currentLight = LightBitMapping.SetSkylight(0, currentSky);
+            return !CrossChunkLightModApplier.ComputeSkylight(currentLight, 0, inChunkSupport).ShouldApply;
         }
 
         /// <summary>True if any chunk in the grid still has pending light work.</summary>
@@ -328,13 +422,16 @@ namespace Editor.Validation.Lighting.Framework
         /// <param name="chunkCoord">The grid coordinate to test.</param>
         public bool HasChunk(Vector2Int chunkCoord) => _chunks.ContainsKey(chunkCoord);
 
-        /// <summary>True if the world position lies inside the grid volume.</summary>
+        /// <summary>True if the world position lies inside the grid volume (anchor-aware).</summary>
         /// <param name="worldPos">The world-space voxel position.</param>
         public bool IsInWorld(Vector3Int worldPos)
         {
             int worldWidth = GridSize * VoxelData.ChunkWidth;
-            return worldPos.x >= 0 && worldPos.x < worldWidth &&
-                   worldPos.z >= 0 && worldPos.z < worldWidth &&
+            // long: a far-anchored grid subtracts a large origin — keep the range test overflow-free.
+            long relX = worldPos.x - (long)AnchorChunk.x * VoxelData.ChunkWidth;
+            long relZ = worldPos.z - (long)AnchorChunk.y * VoxelData.ChunkWidth;
+            return relX >= 0 && relX < worldWidth &&
+                   relZ >= 0 && relZ < worldWidth &&
                    worldPos.y >= 0 && worldPos.y < VoxelData.ChunkHeight;
         }
 
@@ -364,12 +461,24 @@ namespace Editor.Validation.Lighting.Framework
 
         // --- Private helpers ---
 
+        /// <summary>Resolves a grid chunk by its true world voxel origin, or null when no grid cell
+        /// sits at that origin (anchor-aware; origins are exact chunk multiples).</summary>
+        private TestChunk FindChunkByVoxelOrigin(Vector2Int voxelOrigin)
+        {
+            Vector2Int gridCoord = new Vector2Int(
+                ChunkMath.VoxelToChunk(voxelOrigin.x) - AnchorChunk.x,
+                ChunkMath.VoxelToChunk(voxelOrigin.y) - AnchorChunk.y);
+            return _chunks.GetValueOrDefault(gridCoord);
+        }
+
         private TestChunk GetChunkForWorldPos(Vector3Int worldPos, out Vector3Int localPos)
         {
             if (!IsInWorld(worldPos))
                 throw new ArgumentOutOfRangeException(nameof(worldPos), $"Position {worldPos} is outside the {GridSize}x{GridSize} test grid.");
 
-            Vector2Int chunkCoord = new Vector2Int(worldPos.x / VoxelData.ChunkWidth, worldPos.z / VoxelData.ChunkWidth);
+            Vector2Int chunkCoord = new Vector2Int(
+                ChunkMath.VoxelToChunk(worldPos.x) - AnchorChunk.x,
+                ChunkMath.VoxelToChunk(worldPos.z) - AnchorChunk.y);
             TestChunk chunk = GetChunk(chunkCoord);
             localPos = new Vector3Int(worldPos.x - chunk.VoxelOrigin.x, worldPos.y, worldPos.z - chunk.VoxelOrigin.y);
             return chunk;
@@ -394,7 +503,8 @@ namespace Editor.Validation.Lighting.Framework
 
             public JobDataBlockObstruction(BlockTypeJobData[] blockTypes) => _blockTypes = blockTypes;
 
-            public bool IsLightObstructing(ushort blockId) => _blockTypes[blockId].IsLightObstructing;
+            public bool ObstructsSkyColumn(ushort blockId, byte meta)
+                => LightAttenuation.ObstructsSkyColumn(_blockTypes[blockId], meta);
         }
     }
 }

@@ -29,6 +29,14 @@ generate benchmark noise for changes nobody will gate on.
 **Rule:** a benchmark that must run under IL2CPP belongs in the runtime assembly. Editor-only
 harnesses can *screen* candidates but cannot produce shippable numbers.
 
+**Arming the in-world harnesses:** `MeshGenerationBenchmark`, `LightingJobBenchmark`, and
+`ChunkGenerationBenchmark` sit on `BenchmarkRunner` in `World.unity` but are **default-off** —
+`MicroBenchmarkGate.IsArmed()` gates them on the Benchmark tab's "Enable Micro-Benchmarks" setting,
+read once in `Start()`. Turn it on and **reload the world**, then trigger with `C` / `M` / `L`.
+They are forced off under `WorldLaunchState.IsAutomatedMode`, so a route or fluid-stress capture
+never sees them. An inert trigger key means the setting is off or the world predates the change —
+not a broken harness.
+
 **World seam:** runtime benchmarks own their world (inert `World`, synthetic chunks, dedicated
 scene) and refuse to run against a live game world — follow `FluidTickBenchmark`'s pattern
 (`CreateInertWorld` + `RegisterSyntheticChunk`) when writing a new one, so the harness controls
@@ -57,6 +65,16 @@ first as its own commit.
   shippable capture is an **IL2CPP Development Build, Burst on** — and the user runs player
   builds, so ask for the capture rather than simulating it.
 - **Never compare across machines or backends.** Same machine, same backend, same session.
+- **State the Managed Code Variant (Unity 6.6+).** It is a Player Setting (`Debug`/`Checked`/
+  `Instrumented`/`Release`), settable per build profile, **defaulting to `Release`**, and it is
+  independent of the Development Build checkbox. At `Release` a Development Build carries **no**
+  `UNITY_INCLUDE_INSTRUMENTATION`, so URP's per-pass `ScriptableRenderPass.profilingSampler` and
+  Render Graph samplers are absent, and this project's own telemetry counters (migrated onto that
+  symbol) compile out. Use **`Checked`** to reproduce pre-6.6 Development Build behavior — the
+  **`Windows - Profiler` build profile already pins it**, so capture from that profile — and
+  record the variant in the capture header — a capture at `Release` is not comparable to a pre-6.6
+  one at the render-pass level. Full matrix: `Documentation/Performance/README.md` §"Managed Code
+  Variant governs instrumentation".
 
 ## Step 3 — Write the report
 

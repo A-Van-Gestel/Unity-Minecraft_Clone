@@ -47,7 +47,7 @@ We introduced a state flag `_isWorldLoaded`. The `Update()` loop is strictly blo
 The "Lighting Scheduling" phase took **41,000ms** (41 seconds) during the bad benchmark. Even after fixing the chunk count, it remained a bottleneck.
 
 **The Cause:**
-The system used a flat `HashSet<Vector2Int>` to store columns needing sunlight recalculation (approx. 100,000 items).
+The system used a flat `HashSet<Vector2Int>` to store columns needing skylight recalculation (approx. 100,000 items).
 When scheduling lighting for a chunk, the code did this:
 
 ```csharp
@@ -94,7 +94,7 @@ The CPU retrieves data from RAM in "cache lines." It loves reading data sequenti
 
 ### Loop Order (Cache Locality)
 
-To prevent "Cache Misses," your loops must strictly follow the memory layout.
+To prevent "Cache Misses," your loops must strictly follow the memory layout.  
 **Rule:** The **innermost** loop must match the variable with the *smallest multiplier* in your index formula.
 
 * **If Index = `x + (z * Width) + ...`**:

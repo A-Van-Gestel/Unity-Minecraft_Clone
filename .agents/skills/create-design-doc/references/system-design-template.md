@@ -1,8 +1,12 @@
 # <System Name> Design
 
-**Version:** 1.0
-**Date:** <YYYY-MM-DD>
-**Status:** Proposed design — not implemented. <!-- or: Draft — far-horizon (<gate>). Not scheduled. -->
+<!-- The field lines below end in TWO TRAILING SPACES (invisible, easily stripped by an editor).
+     Without them Markdown joins Version/Date/Status/Target into one run-on line. Same in the
+     footer. Rule: two trailing spaces on any line whose NEXT line starts a new **Label:** field
+     — never on ordinary wrapped prose, which is meant to rejoin. See the skill's Step 3. -->
+**Version:** 1.0  
+**Date:** <YYYY-MM-DD>  
+**Status:** Proposed design — not implemented. <!-- or: Draft — far-horizon (<gate>). Not scheduled. -->  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production) <!-- optional; keep for engine-touching designs -->
 
 > One-paragraph blockquote summary: what the system is, and the single most important
@@ -103,10 +107,14 @@ future features that will plug in without restructuring.>
 
 ## 7. Phased implementation plan
 
-| Phase                   | Scope                        | Effort | Depends on |
-|-------------------------|------------------------------|:------:|------------|
-| **<P>0 — <Foundation>** | <Data/foundation work first> |   🟢   | —          |
-| **<P>1 — <...>**        | <...>                        |   🟢   | <P>0       |
+| Phase                   | Scope                        | Effort | Depends on | Status |
+|-------------------------|------------------------------|:------:|------------|--------|
+| **<P>0 — <Foundation>** | <Data/foundation work first> |   🟢   | —          | —      |
+| **<P>1 — <...>**        | <...>                        |   🟢   | <P>0       | —      |
+
+<Status: `—` not started · `In progress` · `✅ YYYY-MM-DD` complete (dated at in-game
+confirmation) · `⏸️ YYYY-MM-DD` deliberately not implemented · `⛔ Superseded YYYY-MM-DD — <by
+what>`. Date every closed phase — an undated completed phase reads as present tense.>
 
 <State which minimal phase set delivers standalone value. For core systems:>
 
@@ -132,11 +140,27 @@ instead title this "Verification checklist (MUST re-verify before implementation
 
 ---
 
+## 9. Rejected alternatives
+
+<The standing "do not re-litigate this" list. Distinct from the §3 decision sections above: those
+capture one choice in its context, this is the doc's durable record of what was turned down and
+why — and it is the part that survives promotion to Architecture. Bottom placement is deliberate;
+it is reference material for a rare reader, not part of the current-state description.>
+
+| Alternative      | Why rejected                            | Date         |
+|------------------|-----------------------------------------|--------------|
+| <name/approach>  | <the reason, incl. anything measured>   | <YYYY-MM-DD> |
+
+<Include options refuted by measurement, not only design-time choices — a benchmarked NO-GO is the
+most expensive kind of knowledge to rediscover.>
+
+---
+
 ## Document History
 
 * **v1.0** - Initial design
 
 ---
 
-**Last Updated:** <YYYY-MM-DD>
+**Last Updated:** <YYYY-MM-DD>  
 **Next Review:** <event trigger, e.g. "when <P>0 starts" / "on promotion to Architecture">

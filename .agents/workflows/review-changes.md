@@ -1,77 +1,49 @@
 ---
 name: review-changes
-description: Run a complete pre-merge review of the current working tree against this voxel engine's project-specific gates (Burst compliance, hot-path GC, pool usage, architectural constraints, serialization compatibility). Produces a structured Blockers/High/Medium/Low report with a merge/hold recommendation.
+description: Run a project-aware review of the working diff against this voxel engine's invariants, then produce a numbered Blockers→Low report with a single verdict. Thin entry point — the gates, modes, delta rule, refute pass, and report format live in the review-changes skill.
 ---
 
 # Review Changes Workflow
 
-Execute a full, project-aware code review of the current working tree. Invoke with `/review-changes`.
+Entry point for `/review-changes`. The authoritative procedure — scope/mode
+selection, the delta rule, the twelve gates, the refute pass, and the numbered
+report — lives in the **`review-changes` skill** at
+`.agents/skills/review-changes/SKILL.md`. This workflow does not restate the
+gates, because a second copy drifts.
 
 ## Steps
 
-### 1. Gather scope
+1. **Load the skill.** Read `.agents/skills/review-changes/SKILL.md` and follow
+   it end to end. It routes you to the `references/gates-*.md` shards the diff
+   actually earns (core is always loaded; `jobs` / `serialization` / `pipeline`
+   load per the changed-file list).
 
-- Run `git status --short` to list all changed files (staged, unstaged, untracked).
-- Run `git diff HEAD` to see the full diff against the last commit.
-- Note which top-level directories are affected (`Assets/Scripts/Jobs/`, `Assets/Scripts/Serialization/`, `Documentation/`, etc.). This determines which gates apply.
-- If there are zero changes, report that and exit — do not fabricate findings.
+2. **Resolve the scope, then run it in the mode the scope implies.** The skill's
+   step 1 is the authority: the user's stated scope wins (e.g. "review all
+   unpushed commits from `<hash>`"); otherwise the default is chosen by branch
+   size against the parent (`main`), because branches here run long and the naive
+   whole-branch diff is often not the review unit.
+   - Mid-work (`git diff` / `--staged`) → **intermediate** mode, verdict
+     `CONTINUE` / `FIX FIRST`.
+   - Committed work aimed at a PR (the resolved range — the user's, or
+     `@{u}...HEAD` / `<base>...HEAD`) → **pre-merge** mode, verdict
+     `MERGE` / `HOLD`.
 
-### 2. Load project-specific criteria
+   Always run `git status --short` first — an untracked new `.cs` file produces
+   no `git diff` and would otherwise be skipped entirely.
 
-Load the `review-changes` skill from `.agents/skills/review-changes/SKILL.md`. It contains the authoritative gate definitions for this codebase. Apply every applicable gate below, using the skill for specific flag patterns and fix suggestions.
+3. **Produce the numbered report** exactly as the skill's step 5 defines it:
+   findings carry stable `#N` tokens, one root cause per number, a ten-finding
+   cap, uncertainty marked in place, empty sections omitted, and one verdict from
+   the mode's vocabulary. On repeat runs, carry settled findings forward in the
+   one-line `Carried:` summary rather than re-litigating them.
 
-### 3. Apply each gate
+4. **Do not commit.** The review produces findings only. Never stage, commit, or
+   push as part of it — that decision stays with the user. (This overlaps the
+   skill's scope note; it is repeated here because it is the one thing a workflow
+   invocation must not get wrong.)
 
-For every changed file, run the following checks. A finding in any gate downgrades the merge recommendation.
-
-- **Architectural constraint violations** (hard rejection): reference types per voxel, `BinaryFormatter`/JSON for terrain, monolithic-column meshing, bypassing the BFS flood-fill lighting queue. See `AGENTS.md` "Core Architecture Constraints".
-- **Burst compliance** (hard rejection for job code): any diff under `Assets/Scripts/Jobs/` must be 100% Burst-compatible. Flag managed refs, non-blittable types, `string` interpolation in `Debug.Log`, non-`Unity.Mathematics` math, `try/catch`, LINQ, virtual calls.
-- **Serialization compatibility**: changes to `Assets/Scripts/Serialization/**`, `Assets/Scripts/Data/ChunkData.cs`, or `ChunkStorageManager.cs` must include an AOT migration step. Reference `@Documentation/Architecture/AOT_WORLD_MIGRATION_SYSTEM.md`.
-- **Hot-path GC allocation**: flag `new`, `.ToArray()`, `.ToList()`, LINQ (`.Any()`, `.Where()`, `.Select()`), lambda captures inside `Update()`, `LateUpdate()`, `FixedUpdate()`, meshing paths, or job dispatch wrappers. Suggest pooled alternative (`DynamicPool<T>`, `ListPool<T>`, `HashSetPool<T>`, `ArrayPool<T>`, `stackalloc`).
-- **Pool usage**: `new List<T>()`, `new HashSet<T>()`, `new Dictionary<K,V>()` in frequently-called methods should route through a pool.
-- **Unity serialized-field safety**: renaming or deleting `[SerializeField] private` fields or public fields referenced by prefabs/scenes is a silent data break — flag unless `[FormerlySerializedAs]` is present.
-- **Known-bugs cross-check**: if the diff touches lighting, fluids, meshing, or chunk management, scan the relevant `Documentation/Bugs/*.md` file and `_FIXED_BUGS.md` to confirm the change doesn't reintroduce a known-fixed issue.
-- **Chunk pipeline invariants**: if `World.cs`, `WorldJobManager.cs`, `ChunkPoolManager.cs`, or `ChunkData.cs` changed — verify flag pairing, gate ordering (`AreNeighborsReadyAndLit`), pool recycle safety. Reference the `chunk-pipeline` rule and `chunk-lifecycle` skill.
-- **Coding standards**: magic numbers without named constants, `public` fields instead of `[SerializeField] private`, missing XML docstrings on new public API, incorrect constant casing (`public const` = PascalCase, `private const` = SCREAMING_CASE).
-- **Documentation sync**: if pipeline code changed, did `Documentation/Architecture/CHUNK_LIFECYCLE_PIPELINE.md` get updated in the same commit? Flag if not.
-
-### 4. Use the knowledge graph (if available)
-
-If the CodeGraph MCP is connected, use these tools to scope the review:
-
-- `codegraph_explore` on the core changed symbols to see how they fit into the broader system architecture.
-- `codegraph_impact` on modified classes/structs to see their blast radius.
-- `codegraph_callers` to verify if existing execution paths might break due to signature or logic changes.
-- `codegraph_callers` to find dependent test files to check if test coverage exists for the modified functions.
-
-If the MCP is unavailable, fall back to Grep/Read for the same information.
-
-### 5. Produce the report
-
-Output findings grouped by severity. Each finding includes: what changed, why it matters (1 sentence), specific fix or alternative.
-
-```
-## Review: <branch> @ <commit>
-
-### Blockers
-- [file:line] <finding> — <fix>
-
-### High
-- [file:line] <finding> — <fix>
-
-### Medium
-- [file:line] <finding> — <fix>
-
-### Low
-- [file:line] <finding> — <fix>
-
-### Test coverage
-<Affected tests based on codegraph_callers/codegraph_impact, or "not checked" if MCP unavailable>
-
-### Recommendation
-<one of: MERGE / HOLD — <brief reason>>
-```
-
-### 6. Do not commit
-
-The workflow produces findings only. Never stage, commit, or push as part of the review — leave that decision to the user.
+This layers on top of your tool's generic review (`/code-review`) and the
+compile/analyzer layer (the Execution Protocol's `dotnet build` + DLL-timestamp
+gate, Rider, `Unity_ValidateScript`) — it does not replace either. Reporting a
+`CS####` error or a ReSharper style hit here is noise.

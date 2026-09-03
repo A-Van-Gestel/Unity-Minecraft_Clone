@@ -30,9 +30,9 @@ namespace Editor.Benchmarking
     /// shapes (a buried lamp relight inside solid stone). Each leg runs THREE ways — full height,
     /// top-only (Derived with the bottom sabotaged to 0, i.e. exactly the shipped LI-2 behavior), and
     /// top+bottom (Derived) — so the bottom band's marginal win is isolated from LI-2's. <b>Editor Mono
-    /// numbers are SCREENING-ONLY</b> (per the perf-benchmark protocol) — the shippable capture is the
-    /// in-game IL2CPP flag A/B (<c>World.EnableLightingBandGather</c>). Editor-only; never compiled
-    /// into a build.
+    /// numbers are SCREENING-ONLY</b> (per the perf-benchmark protocol) — the shippable capture was the
+    /// in-game IL2CPP A/B that shipped LI-2 (the rollback flag has since been retired; the band gather is
+    /// now unconditional on the pooled steady-state path). Editor-only; never compiled into a build.
     /// </summary>
     internal static class LightingBandGatherBenchmark
     {

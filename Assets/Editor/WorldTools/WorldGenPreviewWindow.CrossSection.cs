@@ -675,6 +675,10 @@ namespace Editor.WorldTools
                     CaveZoneNoises = data.CaveZoneNoises,
                     IsSingleBiomeMode = forceBiomeIdx >= 0,
                     ForceBiomeIndex = math.max(0, forceBiomeIdx),
+                    // Mirror the generator's gating so the cross-section preview reflects what a
+                    // world of the current precision actually generates far from origin (WC-1).
+                    UseCellLocalFrame = FastNoiseFactory.GlobalCoordinatePrecision
+                                        == FastNoiseLite.CoordinatePrecision.Precise64,
                     MultiNoise = data.MultiNoise,
                     TrunkConfig = data.TrunkConfig,
                     FeatureFlags = GenerationFeatureFlags.Default,
@@ -1078,14 +1082,9 @@ namespace Editor.WorldTools
             floraSurfaceY = -1;
             bool floraHighestBlockFound = false;
 
-            int biomeIndex;
-            if (forceBiomeIdx >= 0)
-                biomeIndex = forceBiomeIdx;
-            else
-            {
-                float biomeNoise = data.SelectionNoise.GetNoise(globalX, globalZ);
-                biomeIndex = math.clamp((int)math.floor(biomeNoise * data.Biomes.Length), 0, data.Biomes.Length - 1);
-            }
+            int biomeIndex = BiomeSelection.SelectIndex(
+                ref data.SelectionNoise, globalX, globalZ, data.Biomes.Length,
+                forceBiomeIdx >= 0, forceBiomeIdx);
 
             floraBiomeIndex = biomeIndex;
             StandardBiomeAttributesJobData biome = data.Biomes[biomeIndex];
@@ -1138,7 +1137,7 @@ namespace Editor.WorldTools
 
                 if (biome.Enable3DDensity && y >= bandLow && y <= bandHigh)
                 {
-                    float dx = globalX, dy = y, dz = globalZ;
+                    double dx = globalX, dy = y, dz = globalZ;
                     if (biome.EnableDensityWarp)
                         data.DensityWarpNoises[biomeIndex].DomainWarp(ref dx, ref dy, ref dz);
                     density += data.DensityNoises[biomeIndex].GetNoise(dx, dy, dz) * effectiveDensityAmplitude;
@@ -1249,7 +1248,7 @@ namespace Editor.WorldTools
 
                         if (caveLayer.Mode == CaveMode.Cheese)
                         {
-                            float cx = globalX, cy = y, cz = globalZ;
+                            double cx = globalX, cy = y, cz = globalZ;
                             if (caveLayer.EnableWarp) data.CaveWarpNoises[cIdx].DomainWarp(ref cx, ref cy, ref cz);
                             if (caveNoise.GetNoise(cx, cy, cz) > effectiveThreshold)
                             {
@@ -1265,7 +1264,7 @@ namespace Editor.WorldTools
                         }
                         else if (caveLayer.Mode == CaveMode.Spaghetti2D)
                         {
-                            float bound = caveNoise.GetNoise(globalX * 0.25f, y * 0.25f, globalZ * 0.25f);
+                            float bound = caveNoise.GetNoise(globalX * 0.25, y * 0.25, globalZ * 0.25);
                             if (bound < effectiveThreshold - 0.2f) continue;
                             float noiseVal = (caveNoise.GetNoise(globalX, y) + caveNoise.GetNoise(y, globalZ) +
                                               caveNoise.GetNoise(globalX, globalZ) + caveNoise.GetNoise(y, globalX) +
@@ -1284,7 +1283,7 @@ namespace Editor.WorldTools
                         }
                         else if (caveLayer.Mode == CaveMode.Noodle)
                         {
-                            float cx = globalX, cy = y, cz = globalZ;
+                            double cx = globalX, cy = y, cz = globalZ;
                             if (caveLayer.EnableWarp) data.CaveWarpNoises[cIdx].DomainWarp(ref cx, ref cy, ref cz);
                             float raw = caveNoise.GetNoise(cx, cy, cz);
                             float noiseVal = 1.0f - (math.sqrt(raw * raw + StandardCaveLayerJobData.NoodleSmoothRadiusSq) - StandardCaveLayerJobData.NoodleSmoothOffset);
@@ -1302,7 +1301,7 @@ namespace Editor.WorldTools
                         }
                         else if (caveLayer.Mode == CaveMode.Spaghetti3D)
                         {
-                            float cx = globalX, cy = y, cz = globalZ;
+                            double cx = globalX, cy = y, cz = globalZ;
                             if (caveLayer.EnableWarp) data.CaveWarpNoises[cIdx].DomainWarp(ref cx, ref cy, ref cz);
                             float rawA = caveNoise.GetNoise(cx, cy, cz);
                             float rawB = data.CaveSpaghetti3DNoises[cIdx].GetNoise(cx, cy, cz);
@@ -1332,11 +1331,12 @@ namespace Editor.WorldTools
                     floraSurfaceY = y;
                 }
 
-                // Mirror the generation job's heightmap tracking: the job uses IsLightObstructing
-                // (Opacity > 0), but BlockTypeJobData is not available here. Using != Air is equivalent
-                // for all current generation-placed blocks (stone, water, bedrock, lodes — all have
-                // Opacity > 0). Would diverge only if a zero-opacity non-Air block were added to a
-                // biome's terrain layers or lode config.
+                // Mirror the generation job's heightmap tracking: the job uses
+                // LightAttenuation.ObstructsSkyColumn, but BlockTypeJobData is not available here. Using
+                // != Air is equivalent for all current generation-placed blocks (stone, water, bedrock,
+                // lodes — all full cubes with Opacity > 0, for which that predicate reduces to
+                // Opacity > 0). Would diverge if a zero-opacity block, or a partial block whose volume
+                // leaves the sky column open, were added to a biome's terrain layers or lode config.
                 if (!floraHighestBlockFound && voxelValue != BlockIDs.Air)
                 {
                     floraHighestBlockFound = true;

@@ -1,0 +1,14 @@
+# Variants deliberately excluded from this folder.
+#
+# convert_audio_pack.py reads this file and skips these outputs, so a re-import cannot silently
+# resurrect a clip that was auditioned out. Indices are the variant numbers in the output filename
+# (Footsteps_Grass_Run_003.ogg -> 3); the surviving clips KEEP their numbering, so existing .meta
+# GUIDs and every BlockSoundDatabase reference stay valid.
+#
+# Format:  <family>: <index>, <index>-<index>, ...      # trailing comments allowed
+# Override with --ignore-curated (re-creates everything; only for a fresh audition pass).
+
+# Auditioned out 2026-08-31: these read as walking through a leaf-strewn field rather than on grass
+# — harsh and out of place beside the rest of the family. See SOUND_ENGINE_DESIGN.md section 16.
+Footsteps_Walk_Grass_Mono: 002, 018-029, 035, 041
+Footsteps_Grass_Run: 003

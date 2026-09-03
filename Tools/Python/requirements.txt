@@ -1,0 +1,18 @@
+# External packages required by the committed scripts under Tools/Python/.
+# The stdlib is the default here; only add a line when a script genuinely needs more.
+#
+# One-time setup:
+#   python -m venv Tools/Python/.venv
+#   Tools/Python/.venv/Scripts/activate     (Windows)  |  source Tools/Python/.venv/bin/activate
+#   pip install -r Tools/Python/requirements.txt
+#
+# numpy — float32 models of shader/job arithmetic, used to prove precision properties.
+#   Needed by: verify_floordiv_parity.py, verify_liquid_noise_period.py
+#   Verified against numpy 2.5.2. Any 1.24+ works: these scripts rely only on IEEE-754
+#   binary32 semantics, which are stable across versions.
+numpy>=1.24
+
+# lz4 — decodes LZ4-frame chunk payloads straight out of region files.
+#   Needed by: inspect_save_chunks.py (optional — Deflate and None saves read on the stdlib alone,
+#   which covers the oldest worlds; without this package LZ4 saves report "undecodable").
+lz4>=4.0

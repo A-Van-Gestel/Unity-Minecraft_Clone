@@ -1,3 +1,4 @@
+using Jobs.Helpers;
 using System.Collections.Generic;
 using Data;
 using Data.JobData;
@@ -113,6 +114,29 @@ namespace Legacy
         public byte GetVoxel(Vector3Int globalPos)
         {
             return LegacyWorldGen.GetVoxel(globalPos, _seed, _biomesJobData, _allLodesJobData, _solidGroundHeight, _seaLevel);
+        }
+
+        /// <inheritdoc />
+        /// <remarks>
+        /// The legacy generator selects biomes by per-biome Perlin weight rather than a single
+        /// Voronoi sample, so it has no column-to-biome answer of the shape the query promises.
+        /// Callers fall back to "unknown" rather than being handed a differently-derived index.
+        /// </remarks>
+        public bool TryGetBiomeAt(int voxelX, int voxelZ, out BiomeSample sample)
+        {
+            sample = default;
+            return false;
+        }
+
+        /// <inheritdoc />
+        /// <remarks>Declines for the same reason <see cref="TryGetBiomeAt"/> does: this generator selects by
+        /// per-biome Perlin weight, so it has no cellular neighborhood to weigh.</remarks>
+        public bool TryGetBiomeWeights(int voxelX, int voxelZ, float falloffRadius, out BiomeWeights weights,
+            out BiomeDirections directions)
+        {
+            weights = default;
+            directions = default;
+            return false;
         }
 
         /// <inheritdoc />

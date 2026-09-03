@@ -8,7 +8,7 @@ using UnityEngine.Pool;
 namespace Serialization
 {
     /// <summary>
-    /// Manages the persistence of pending lighting work for unloaded chunks: sunlight column
+    /// Manages the persistence of pending lighting work for unloaded chunks: skylight column
     /// recalculations (<c>pending_lighting.bin</c>) and cross-chunk blocklight modifications
     /// (<c>pending_blocklight.bin</c>) awaiting their target chunk.
     /// </summary>
@@ -47,7 +47,7 @@ namespace Serialization
         // that exercise the real in-memory persist/replay logic without touching the filesystem.
         private readonly bool _inMemoryOnly;
 
-        // Pending sunlight recalculations for chunks that aren't loaded yet (or were saved while waiting).
+        // Pending skylight recalculations for chunks that aren't loaded yet (or were saved while waiting).
         // Key: Chunk Coordinate
         // Value: List of LOCAL column coordinates (0-15, 0-15) stored as Vector2Int
         private readonly Dictionary<ChunkCoord, HashSet<Vector2Int>> _pendingRecalcs = new Dictionary<ChunkCoord, HashSet<Vector2Int>>();
@@ -87,7 +87,7 @@ namespace Serialization
         public static LightingStateManager CreateInMemory() => new LightingStateManager();
 
         /// <summary>
-        /// Adds a set of local column coordinates that need sunlight recalculation to the pending store.
+        /// Adds a set of local column coordinates that need skylight recalculation to the pending store.
         /// </summary>
         /// <param name="chunkCoord">The chunk coordinate.</param>
         /// <param name="localColumns">A set of Vector2Ints where x/y are local 0-15 coordinates.</param>
@@ -118,7 +118,7 @@ namespace Serialization
         }
 
         /// <summary>
-        /// Attempts to retrieve and remove the pending local columns for sunlight recalculation in a specific chunk.
+        /// Attempts to retrieve and remove the pending local columns for skylight recalculation in a specific chunk.
         /// </summary>
         /// <param name="chunkCoord">The chunk coordinate to query.</param>
         /// <param name="localColumns">A set of local 0-15 coordinates needing recalculation, if any.</param>
@@ -135,7 +135,7 @@ namespace Serialization
 
         /// <summary>
         /// Records a cross-chunk blocklight modification targeting an unloaded/unpopulated chunk so
-        /// it can be replayed when the chunk is loaded from disk. Sunlight column recalculations
+        /// it can be replayed when the chunk is loaded from disk. Skylight column recalculations
         /// cannot restore RGB data — without this store, blocklight removals (broken lamps) and
         /// uplifts that crossed into an unloaded chunk would be permanently lost (Bug 08, path 1).
         /// </summary>
@@ -201,7 +201,7 @@ namespace Serialization
         }
 
         /// <summary>
-        /// Saves the pending sunlight recalculation queues and pending blocklight modifications to disk.
+        /// Saves the pending skylight recalculation queues and pending blocklight modifications to disk.
         /// </summary>
         public void Save()
         {
@@ -266,7 +266,7 @@ namespace Serialization
         }
 
         /// <summary>
-        /// Loads the pending sunlight recalculation queues and pending blocklight modifications from disk.
+        /// Loads the pending skylight recalculation queues and pending blocklight modifications from disk.
         /// </summary>
         public void Load()
         {
@@ -283,7 +283,7 @@ namespace Serialization
         }
 
         /// <summary>
-        /// Loads the pending sunlight recalculation queues from <c>pending_lighting.bin</c>.
+        /// Loads the pending skylight recalculation queues from <c>pending_lighting.bin</c>.
         /// </summary>
         private void LoadPendingColumns()
         {

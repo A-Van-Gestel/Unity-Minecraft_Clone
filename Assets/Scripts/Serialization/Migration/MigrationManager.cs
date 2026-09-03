@@ -34,10 +34,27 @@ namespace Serialization.Migration
             new MigrationV8ToV9LightDataSerialization(),
             new MigrationV9ToV10StripLightBitsAndNewFlags(),
             new MigrationV10ToV11SpawnPosition(),
+            new MigrationV11ToV12WorldBorder(),
+            new MigrationV12ToV13PlayerChunkRelativePosition(),
+            new MigrationV13ToV14EnvironmentWind(),
+            new MigrationV14ToV15TimeOfDay(),
         };
 
         // Track the path of the backup we create so we can roll it back if needed.
         private string _currentBackupPath;
+
+        // ── Progress bands ────────────────────────────────────────────────────
+        // The two region passes share one bar. A layout pass, when it runs, owns the first band and the
+        // per-chunk pass the second; with no layout pass the per-chunk pass starts at LAYOUT_PASS_START.
+
+        /// <summary>Fraction the bar sits at once metadata migration is done and region work begins.</summary>
+        private const float LAYOUT_PASS_START = 0.1f;
+
+        /// <summary>Fraction the bar sits at when the per-chunk pass begins.</summary>
+        private const float CHUNK_PASS_START = 0.5f;
+
+        /// <summary>Fraction the bar sits at while the final region swap runs.</summary>
+        private const float FINALISE_AT = 0.95f;
 
         // -------------------------------------------------------------------------
         // Public API
@@ -88,6 +105,14 @@ namespace Serialization.Migration
         /// <param name="onCorruptionDetected">Optional callback invoked when corrupted chunks are detected.
         /// Receives (corruptedCount, totalProcessed). Return true to continue (corrupted chunks will be
         /// regenerated), or false to abort and rollback.</param>
+        /// <remarks>
+        /// The region work is two independent passes, and a single path may need both: the layout pass (for any
+        /// step declaring <see cref="WorldMigrationStep.RequiresRegionLayoutMigration"/>) then the per-chunk pass.
+        /// Do not make them mutually exclusive again, and do not gate the per-chunk pass on the path containing a
+        /// step with a <see cref="WorldMigrationStep.TargetChunkFormatVersion"/> — that pass also recompresses,
+        /// defragments and detects corrupted chunks, so a metadata-only path still needs it. Both mistakes cause
+        /// silent whole-world data loss; see <c>Documentation/Bugs/_FIXED_BUGS.md</c> Serialization 07.
+        /// </remarks>
         public async Task RunAOTMigrationAsync(
             string worldName,
             bool useVolatilePath,
@@ -126,28 +151,32 @@ namespace Serialization.Migration
             string tempRegionPath = Path.Combine(savePath, "Region_TempMigration");
             int processedChunksTotal = 0;
 
+            // Both region passes can apply to one path and come from different steps: one restructures the
+            // region layout, another rewrites chunk payloads. Layout runs FIRST — the per-chunk pass walks the
+            // folder it swaps in — and skipping either leaves payloads a stamped-current world cannot load.
             bool needsLayoutMigration = migrationPath.Any(s => s.RequiresRegionLayoutMigration);
+            bool hasRegionFolder = Directory.Exists(regionPath);
 
-            if (!Directory.Exists(regionPath))
+            if (!hasRegionFolder)
             {
                 Debug.Log($"[MigrationManager] Region folder '{regionPath}' not found (world has no chunks generated). Skipping region migration.");
             }
-            else if (needsLayoutMigration)
+
+            if (hasRegionFolder && needsLayoutMigration)
             {
                 // ── Layout migration: chunks may move between region files ──────────
                 // A dedicated step reads the entire old Region folder and writes a
                 // fully restructured set of new region files into a temp directory.
                 // We then atomically swap the directories.
 
-                if (!Directory.Exists(tempRegionPath))
-                    Directory.CreateDirectory(tempRegionPath);
+                ResetTempRegionFolder(tempRegionPath);
 
                 foreach (WorldMigrationStep step in migrationPath.Where(s => s.RequiresRegionLayoutMigration))
                 {
                     progress?.Report(new MigrationProgress
                     {
                         CurrentTask = step.Description,
-                        PercentComplete = 0.1f,
+                        PercentComplete = LAYOUT_PASS_START,
                     });
 
                     int chunksFromStep = await Task.Run(() =>
@@ -159,7 +188,7 @@ namespace Serialization.Migration
                 progress?.Report(new MigrationProgress
                 {
                     CurrentTask = "Finalising region layout...",
-                    PercentComplete = 0.95f,
+                    PercentComplete = CHUNK_PASS_START,
                     ProcessedItems = processedChunksTotal,
                     TotalItems = processedChunksTotal,
                 });
@@ -175,12 +204,21 @@ namespace Serialization.Migration
                     Directory.Move(tempRegionPath, regionPath);
                 });
             }
-            else
+
+            if (hasRegionFolder)
             {
-                // ── Format-only migration: chunks stay in the same region files ────
+                // ── Per-chunk pass: chunks stay in the region files they occupy now ────
                 // Phase 1: Migrate all regions into temp files.
                 // Phase 2: Prompt user if corruption was detected.
                 // Phase 3: Selective-skip swap — only swap regions that have temp files.
+                // Runs for EVERY world with chunks, not only ones with a chunk-format step: it also
+                // recompresses to targetCompression, defragments, and detects corrupted chunks.
+                // After a layout pass it enumerates the folder that pass swapped in, and recreates
+                // tempRegionPath, which its Directory.Move consumed.
+
+                // The layout pass, when it ran, already counted these same chunks; report this pass's
+                // count rather than billing one chunk as two units of work.
+                processedChunksTotal = 0;
 
                 string[] regionFiles = Directory.GetFiles(regionPath, "r.*.*.bin");
                 int totalRegions = regionFiles.Length;
@@ -188,8 +226,12 @@ namespace Serialization.Migration
 
                 Debug.Log($"[MigrationManager] Found {totalRegions} region file(s) to migrate.");
 
-                if (!Directory.Exists(tempRegionPath))
-                    Directory.CreateDirectory(tempRegionPath);
+                ResetTempRegionFolder(tempRegionPath);
+
+                // When a layout pass ran it already consumed the first half of the bar; start after it so the
+                // bar never runs backwards.
+                float chunkPassStart = needsLayoutMigration ? CHUNK_PASS_START : LAYOUT_PASS_START;
+                float chunkPassSpan = FINALISE_AT - chunkPassStart;
 
                 // ── Phase 1: Migrate all regions into temp folder ──
                 for (int i = 0; i < totalRegions; i++)
@@ -201,17 +243,17 @@ namespace Serialization.Migration
                     progress?.Report(new MigrationProgress
                     {
                         CurrentTask = $"Migrating {fileName}... ({i + 1}/{totalRegions})",
-                        PercentComplete = totalRegions == 0 ? 1f : (float)i / totalRegions,
+                        PercentComplete = totalRegions == 0 ? FINALISE_AT : chunkPassStart + chunkPassSpan * i / totalRegions,
                         ProcessedItems = processedChunksTotal,
                         TotalItems = totalRegions,
                     });
 
                     // Process on a background thread; await ensures sequential writes.
-                    (int chunksInRegion, int corruptedInRegion, bool skipped) = await Task.Run(async () =>
+                    (int chunksInRegion, int corruptedInRegion, bool regionPreserved) = await Task.Run(async () =>
                         await MigrateSingleRegion(oldFile, tempFile, targetCompression, migrationPath)
                     );
 
-                    if (!skipped)
+                    if (!regionPreserved)
                     {
                         processedChunksTotal += chunksInRegion;
                         corruptedChunksTotal += corruptedInRegion;
@@ -244,7 +286,7 @@ namespace Serialization.Migration
                 progress?.Report(new MigrationProgress
                 {
                     CurrentTask = "Finalising region files...",
-                    PercentComplete = 0.95f,
+                    PercentComplete = FINALISE_AT,
                     ProcessedItems = processedChunksTotal,
                     TotalItems = processedChunksTotal,
                 });
@@ -311,101 +353,137 @@ namespace Serialization.Migration
         }
 
         // -------------------------------------------------------------------------
-        // Private: Format-Only Region Migration (single file)
+        // Private: Per-Chunk Region Migration (single file)
         // -------------------------------------------------------------------------
 
         /// <summary>
-        /// Migrates all chunks in a single region file from the old format to the new format.
-        /// Corrupted chunks are skipped (not written to the new region) and counted.
+        /// Rewrites every chunk in a single region file: applies each path step that declares a
+        /// <see cref="WorldMigrationStep.TargetChunkFormatVersion"/> the chunk has not reached yet, then
+        /// recompresses to <paramref name="targetCompression"/>. Runs even when no step changes the chunk
+        /// format, because it also defragments and surfaces corrupted chunks. Corrupted chunks are skipped
+        /// (not written to the new region) and counted.
         /// </summary>
-        /// <returns>A tuple of (chunksProcessed, corruptedChunks, skipped).</returns>
-        private static async Task<(int chunksProcessed, int corruptedChunks, bool skipped)> MigrateSingleRegion(
+        /// <returns>A tuple of (chunksProcessed, corruptedChunks, regionPreserved). <c>regionPreserved</c> is
+        /// currently always false: a region whose chunks all fail is still swapped out, because leaving the
+        /// original in place inside a world stamped current is what B8–B10 forbid. See the open decision in
+        /// <c>SERIALIZATION_BUGS.md</c> §13.</returns>
+        private static async Task<(int chunksProcessed, int corruptedChunks, bool regionPreserved)> MigrateSingleRegion(
             string oldFile,
             string tempFile,
             CompressionAlgorithm targetCompression,
             List<WorldMigrationStep> path)
         {
-            using RegionFile oldRegion = new RegionFile(oldFile);
-
-            // Writing into a fresh RegionFile defragments it: chunks are written
-            // sequentially with no dead sectors, reducing final file size at no extra cost.
-            using RegionFile newRegion = new RegionFile(tempFile);
             int chunksProcessed = 0;
             int corruptedChunks = 0;
             int throttleCounter = 0;
             string regionName = Path.GetFileName(oldFile);
 
-#if UNITY_EDITOR
-            bool simulateCorruption = SettingsManager.LoadSettings().Dev.simulateMigrationCorruption;
-#endif
-
-            foreach (Vector2Int localCoord in oldRegion.GetAllChunkCoords())
+            using (RegionFile oldRegion = new RegionFile(oldFile))
+                // Writing into a fresh RegionFile defragments it: chunks are written
+                // sequentially with no dead sectors, reducing final file size at no extra cost.
+            using (RegionFile newRegion = new RegionFile(tempFile))
             {
-                if (++throttleCounter % 50 == 0)
-                {
-                    await Task.Yield();
-                }
-
-                try
-                {
-                    (byte[] compressedData, CompressionAlgorithm oldCompression) = oldRegion.LoadChunkData(localCoord.x, localCoord.y);
-                    if (compressedData == null) continue;
-
 #if UNITY_EDITOR
-                    // Fault Injection for Development Testing
-                    if (simulateCorruption && Random.value < 0.01f)
-                        throw new Exception("Simulated migration corruption for testing.");
+                bool simulateCorruption = SettingsManager.LoadSettings().Dev.simulateMigrationCorruption;
 #endif
 
-                    // Decompress using the algorithm stored in the region file's chunk header.
-                    byte[] currentData = Decompress(compressedData, oldCompression);
-
-                    // Run through the migration chain.
-                    foreach (WorldMigrationStep step in path)
+                foreach (Vector2Int localCoord in oldRegion.GetAllChunkCoords())
+                {
+                    if (++throttleCounter % 50 == 0)
                     {
-                        if (!step.TargetChunkFormatVersion.HasValue)
-                            continue; // This world version bump didn't change chunk format. Skip.
-
-                        // Re-read the version byte from the live data each iteration.
-                        byte currentChunkVersion = currentData[0];
-
-                        if (currentChunkVersion < step.TargetChunkFormatVersion.Value)
-                        {
-                            currentData = step.MigrateChunk(currentData);
-
-                            // Fail fast: catch null/empty returns before the next array access.
-                            if (currentData == null || currentData.Length == 0)
-                                throw new InvalidDataException(
-                                    $"Migration step '{step.GetType().Name}' returned null or empty data.");
-
-                            // Fail fast: catch forgotten version bumps
-                            if (currentData[0] != step.TargetChunkFormatVersion.Value)
-                                throw new InvalidDataException(
-                                    $"Migration step '{step.GetType().Name}' ran but its output " +
-                                    $"version byte ({currentData[0]}) does not match its declared " +
-                                    $"TargetChunkFormatVersion ({step.TargetChunkFormatVersion.Value}). " +
-                                    "Ensure MigrateChunk writes the new version as byte 0 of the output.");
-                        }
+                        await Task.Yield();
                     }
 
-                    // Recompress using the player's current target algorithm.
-                    byte[] finalCompressedData = Compress(currentData, targetCompression);
-                    newRegion.SaveChunkData(localCoord.x, localCoord.y, finalCompressedData, finalCompressedData.Length, targetCompression);
+                    try
+                    {
+                        (byte[] compressedData, CompressionAlgorithm oldCompression) = LoadChunkDataWithRetry(oldRegion, localCoord);
+                        if (compressedData == null) continue;
 
-                    chunksProcessed++;
-                }
-                catch (Exception ex)
-                {
-                    // Chunk is corrupted or its migration threw an exception.
-                    // Skip writing it to the new region — the engine will regenerate it from seed.
-                    corruptedChunks++;
-                    Debug.LogWarning(
-                        $"[MigrationManager] Corrupted chunk at ({localCoord.x}, {localCoord.y}) in {regionName}: {ex.Message}");
+#if UNITY_EDITOR
+                        // Fault Injection for Development Testing
+                        if (simulateCorruption && Random.value < 0.01f)
+                            throw new Exception("Simulated migration corruption for testing.");
+#endif
+
+                        // Decompress using the algorithm stored in the region file's chunk header.
+                        byte[] currentData = Decompress(compressedData, oldCompression);
+
+                        // Run through the migration chain.
+                        foreach (WorldMigrationStep step in path)
+                        {
+                            if (!step.TargetChunkFormatVersion.HasValue)
+                                continue; // This world version bump didn't change chunk format. Skip.
+
+                            // Re-read the version byte from the live data each iteration.
+                            byte currentChunkVersion = currentData[0];
+
+                            if (currentChunkVersion < step.TargetChunkFormatVersion.Value)
+                            {
+                                currentData = step.MigrateChunk(currentData);
+
+                                // Fail fast: catch null/empty returns before the next array access.
+                                if (currentData == null || currentData.Length == 0)
+                                    throw new InvalidDataException(
+                                        $"Migration step '{step.GetType().Name}' returned null or empty data.");
+
+                                // Fail fast: catch forgotten version bumps
+                                if (currentData[0] != step.TargetChunkFormatVersion.Value)
+                                    throw new InvalidDataException(
+                                        $"Migration step '{step.GetType().Name}' ran but its output " +
+                                        $"version byte ({currentData[0]}) does not match its declared " +
+                                        $"TargetChunkFormatVersion ({step.TargetChunkFormatVersion.Value}). " +
+                                        "Ensure MigrateChunk writes the new version as byte 0 of the output.");
+                            }
+                        }
+
+                        // Recompress using the player's current target algorithm.
+                        byte[] finalCompressedData = Compress(currentData, targetCompression);
+                        newRegion.SaveChunkData(localCoord.x, localCoord.y, finalCompressedData, finalCompressedData.Length, targetCompression);
+
+                        chunksProcessed++;
+                    }
+                    catch (Exception ex)
+                    {
+                        // Chunk is corrupted or its migration threw an exception.
+                        // Skip writing it to the new region — the engine will regenerate it from seed.
+                        corruptedChunks++;
+                        Debug.LogWarning(
+                            $"[MigrationManager] Corrupted chunk at ({localCoord.x}, {localCoord.y}) in {regionName}: {ex.Message}");
+                    }
                 }
             }
 
-
             return (chunksProcessed, corruptedChunks, false);
+        }
+
+        /// <summary>Attempts within one region read (worst case blocks ~100 ms per faulted chunk).</summary>
+        private const int TRANSIENT_READ_RETRIES = 3;
+
+        /// <summary>Delay between region-read retry attempts.</summary>
+        private const int TRANSIENT_READ_RETRY_DELAY_MS = 50;
+
+        /// <summary>
+        /// Reads a chunk record with a small bounded retry: <see cref="RegionFile.LoadChunkData"/> throws
+        /// on transient I/O faults (CP-3 contract), and without a retry one AV-scan hiccup would drop a
+        /// healthy chunk from the migrated world as "corrupted" (regenerated from seed). Still-failing
+        /// reads rethrow into the caller's per-chunk corrupted-chunk handling.
+        /// </summary>
+        /// <param name="region">The source region file.</param>
+        /// <param name="localCoord">The chunk's local coordinates within the region.</param>
+        /// <returns>The raw record payload and its compression algorithm (null payload = not present).</returns>
+        private static (byte[] data, CompressionAlgorithm algorithm) LoadChunkDataWithRetry(RegionFile region, Vector2Int localCoord)
+        {
+            for (int attempt = 1;; attempt++)
+            {
+                try
+                {
+                    return region.LoadChunkData(localCoord.x, localCoord.y);
+                }
+                catch when (attempt < TRANSIENT_READ_RETRIES)
+                {
+                    System.Threading.Thread.Sleep(TRANSIENT_READ_RETRY_DELAY_MS);
+                }
+            }
         }
 
         // -------------------------------------------------------------------------
@@ -467,8 +545,14 @@ namespace Serialization.Migration
         // -------------------------------------------------------------------------
 
         /// <summary>
-        /// Creates a single rolling backup per world using a rename-based atomic swap.
+        /// Creates a pre-migration backup using a rename-based atomic swap (write to a temp path, then move it
+        /// into place) so a failure mid-copy cannot leave a partial backup at the canonical path.
         /// </summary>
+        /// <remarks>
+        /// The path is stamped with the source version and a UTC timestamp, so backups <b>accumulate</b> — the
+        /// migration system never deletes one. Pruning them is the player's job. <see cref="RollbackMigration"/>
+        /// is the only thing that consumes a backup, by moving it back over the save.
+        /// </remarks>
         private static void CreateAtomicBackup(string savePath, string backupPath)
         {
             Debug.Log($"[MigrationManager] Creating backup at: {backupPath}");
@@ -488,6 +572,19 @@ namespace Serialization.Migration
             // Step 3: Promote the new backup to the canonical path.
             Directory.Move(tempBackupPath, backupPath);
             Debug.Log("[MigrationManager] Backup created successfully.");
+        }
+
+        /// <summary>
+        /// Creates an empty temp region folder, discarding any orphan a crashed run left behind. Adopting one
+        /// would let stale region files — same names, older contents — be swapped over the live world.
+        /// </summary>
+        /// <param name="tempRegionPath">Folder to (re)create empty.</param>
+        private static void ResetTempRegionFolder(string tempRegionPath)
+        {
+            if (Directory.Exists(tempRegionPath))
+                Directory.Delete(tempRegionPath, recursive: true);
+
+            Directory.CreateDirectory(tempRegionPath);
         }
 
         private static void CopyDirectory(string sourceDir, string destinationDir)

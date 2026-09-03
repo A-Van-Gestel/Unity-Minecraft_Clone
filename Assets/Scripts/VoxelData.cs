@@ -32,7 +32,10 @@ public static class VoxelData
 
     public const int WorldSizeInVoxels = WorldSizeInChunks * ChunkWidth;
 
-    public const int WorldCentre = WorldSizeInVoxels / 2;
+    // WS-3: fresh worlds spawn at the origin (0,0). With negative quadrants now in-world, the origin is a
+    // central point rather than a corner. Existing worlds restore the player's saved position, so this only
+    // affects brand-new worlds. (Decoupled from the defunct world size since WS-2.)
+    public const int DefaultSpawnPosition = 0;
 
     public const int TextureAtlasSizeInBlocks = 16;
 
@@ -94,22 +97,9 @@ public static class VoxelData
     };
 
     /// <summary>
-    /// The four horizontal diagonal offsets (NE, NW, SE, SW).
-    /// These are NOT indices into FaceChecks — they are standalone Vector3Int offsets.
-    /// Used for stability checks that must account for all 8 neighbors, e.g. mesh or lighting readiness.
-    /// </summary>
-    public static readonly Vector3Int[] DiagonalNeighborOffsets =
-    {
-        new Vector3Int(1, 0, 1), // Front-Right (NE)
-        new Vector3Int(-1, 0, 1), // Front-Left  (NW)
-        new Vector3Int(1, 0, -1), // Back-Right  (SE)
-        new Vector3Int(-1, 0, -1), // Back-Left   (SW)
-    };
-
-    /// <summary>
-    /// All 8 horizontal neighbor offsets (4 cardinal + 4 diagonal).
-    /// Used by <see cref="World.AreNeighborsDataReady"/> to validate that the full
-    /// neighborhood is populated before scheduling lighting jobs.
+    /// All 8 horizontal neighbor offsets, <b>cardinals first</b> (indices 0–3), then diagonals (4–7).
+    /// Used by the three <c>World</c> neighbor-readiness gates to validate that the full neighborhood is
+    /// populated, lit, or mesh-ready (see <c>Helpers.NeighborReadinessDecision</c>).
     /// </summary>
     public static readonly Vector3Int[] AllNeighborOffsets =
     {

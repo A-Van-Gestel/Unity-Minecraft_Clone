@@ -173,6 +173,8 @@ MonoBehaviour:
   m_FlexibleWidth: -1
   m_FlexibleHeight: -1
   m_LayoutPriority: 1
+  m_MaxWidth: -1
+  m_MaxHeight: -1
 --- !u!1 &1130171518242607504
 GameObject:
   m_ObjectHideFlags: 0
@@ -452,6 +454,8 @@ MonoBehaviour:
   m_FlexibleWidth: -1
   m_FlexibleHeight: 1
   m_LayoutPriority: 1
+  m_MaxWidth: -1
+  m_MaxHeight: -1
 --- !u!1 &3427578321516504441
 GameObject:
   m_ObjectHideFlags: 0
@@ -518,9 +522,7 @@ MonoBehaviour:
   m_OnCullStateChanged:
     m_PersistentCalls:
       m_Calls: []
-  m_text: "<b>Name:</b> New World\n<b>Seed:</b> 0\n<b>Save Version:</b> v1\n\n<b>Created:</b>
-    2026-02-25 21:18\n<b>Last Played:</b> 2026-02-25 21:18\n\n<b>Region Files:</b>
-    1282\n<b>Generated Chunks:</b> 4\_855\n<b>Map Scale:</b> 1 Pixel = 6x6 Chunks"
+  m_text: "<b>Name:</b> New World\n<b>Seed:</b> 0\n<b>Save Version:</b> v1\n\n<b>Created:</b> 2026-02-25 21:18\n<b>Last Played:</b> 2026-02-25 21:18\n\n<b>Region Files:</b> 1282\n<b>Generated Chunks:</b> 4\_855\n<b>Map Scale:</b> 1 Pixel = 6x6 Chunks"
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 0628f761daa7d3842bf7ac95b8b62674, type: 2}
   m_sharedMaterial: {fileID: 2190747550536846853, guid: 0628f761daa7d3842bf7ac95b8b62674, type: 2}
@@ -570,7 +572,7 @@ MonoBehaviour:
   m_linkedTextComponent: {fileID: 0}
   parentLinkedComponent: {fileID: 0}
   m_enableKerning: 1
-  m_ActiveFontFeatures: 6e72656b
+  m_ActiveFontFeatures: 6e72656bu
   m_enableExtraPadding: 0
   checkPaddingRequired: 0
   m_isRichText: 1
@@ -612,6 +614,8 @@ MonoBehaviour:
   m_FlexibleWidth: -1
   m_FlexibleHeight: 1
   m_LayoutPriority: 1
+  m_MaxWidth: -1
+  m_MaxHeight: -1
 --- !u!1 &3470368086472374321
 GameObject:
   m_ObjectHideFlags: 0
@@ -999,6 +1003,8 @@ MonoBehaviour:
   m_FlexibleWidth: 0
   m_FlexibleHeight: 0
   m_LayoutPriority: 1
+  m_MaxWidth: -1
+  m_MaxHeight: -1
 --- !u!1 &7422918906544472128
 GameObject:
   m_ObjectHideFlags: 0
@@ -1115,7 +1121,7 @@ MonoBehaviour:
   m_linkedTextComponent: {fileID: 0}
   parentLinkedComponent: {fileID: 0}
   m_enableKerning: 1
-  m_ActiveFontFeatures: 6e72656b
+  m_ActiveFontFeatures: 6e72656bu
   m_enableExtraPadding: 0
   checkPaddingRequired: 0
   m_isRichText: 1
@@ -1157,6 +1163,8 @@ MonoBehaviour:
   m_FlexibleWidth: -1
   m_FlexibleHeight: 0
   m_LayoutPriority: 1
+  m_MaxWidth: -1
+  m_MaxHeight: -1
 --- !u!1 &7871408951489172358
 GameObject:
   m_ObjectHideFlags: 0

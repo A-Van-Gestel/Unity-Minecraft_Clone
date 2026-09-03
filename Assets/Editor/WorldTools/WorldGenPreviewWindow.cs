@@ -81,6 +81,10 @@ namespace Editor.WorldTools
             WorldGenPreviewSettings.OnSettingsChanged -= OnPreviewSettingsChanged;
             WorldGenPreviewSettings.OnSettingsChanged += OnPreviewSettingsChanged;
 #pragma warning restore UDR0004
+
+            // The Biome Editor's Audio sub-tab hosts play/stop buttons; without a repaint pump they would
+            // keep offering "stop" after a clip has already finished.
+            _previewRepaint = EditorAudioPreview.RepaintWhilePlaying(this);
         }
 
         private void OnPreviewSettingsChanged()
@@ -189,6 +193,10 @@ namespace Editor.WorldTools
 
         private void OnDisable()
         {
+            EditorAudioPreview.StopRepainting(_previewRepaint);
+            _previewRepaint = null;
+            EditorAudioPreview.StopAll();
+
             WorldGenPreviewSettings.OnSettingsChanged -= OnPreviewSettingsChanged;
             EditorApplication.update -= PollForAssetChanges;
             OnDisableBlendingTab();

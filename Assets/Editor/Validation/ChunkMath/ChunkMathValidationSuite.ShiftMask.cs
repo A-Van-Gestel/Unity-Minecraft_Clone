@@ -1,0 +1,510 @@
+using System;
+using System.Collections.Generic;
+using Data;
+using Editor.Validation.Framework;
+using Helpers;
+using UnityEngine;
+
+// ReSharper disable ConvertToConstant.Local
+// ReSharper disable HeuristicUnreachableCode
+
+namespace Editor.Validation
+{
+    /// <summary>
+    /// <see cref="ChunkMathValidationSuite"/> — WS-1 <see cref="ChunkMath"/> shift/mask equivalence sweep.
+    /// Guards the centralized voxel↔chunk↔region helpers against the old float-roundtrip / truncating idioms:
+    /// byte-identical for the reachable all-positive range, mathematically-correct floor into the negative
+    /// quadrants (where truncating <c>/</c> was silently wrong — the Tier B prerequisite).
+    /// </summary>
+    public static partial class ChunkMathValidationSuite
+    {
+        // Sweep bounds: a representative range straddling the origin, well past a couple of region files in
+        // both directions, and past chunk/region boundaries. Voxel coords are the widest scale.
+        private const int VOXEL_SWEEP_MIN = -2048;
+        private const int VOXEL_SWEEP_MAX = 2048;
+        private const int CHUNK_SWEEP_MIN = -128;
+        private const int CHUNK_SWEEP_MAX = 128;
+
+        static partial void AddShiftMaskScenarios(List<Scenario> scenarios)
+        {
+            scenarios.Add(new Scenario("ChunkMath Power-Of-Two Guard", RunChunkMathPow2Guard));
+            scenarios.Add(new Scenario("Section/Height Coupling Guard", RunSectionHeightCouplingGuard));
+            scenarios.Add(new Scenario("Section/Width Coupling Guard", RunSectionWidthCouplingGuard));
+            scenarios.Add(new Scenario("VoxelToChunk == Floor Div (sweep)", RunVoxelToChunkSweep));
+            scenarios.Add(new Scenario("VoxelToChunk == Legacy FloorToInt (positives)", RunVoxelToChunkLegacyParity));
+            scenarios.Add(new Scenario("VoxelToLocal Reconstructs Voxel (sweep)", RunVoxelToLocalSweep));
+            scenarios.Add(new Scenario("IsChunkAligned == (VoxelToLocal == 0) (sweep)", RunIsChunkAlignedSweep));
+            scenarios.Add(new Scenario("ChunkToRegion / RegionLocal Reconstructs Chunk (sweep)", RunRegionSweep));
+            scenarios.Add(new Scenario("WorldToChunk == Floor Div (float sweep)", RunWorldToChunkSweep));
+            scenarios.Add(new Scenario("Negative-Coordinate Teeth (truncation would fail)", RunNegativeTeeth));
+            scenarios.Add(new Scenario("Far-Coordinate Wake Routing (Bug 17 teeth)", RunFarWakeRoutingTeeth));
+            scenarios.Add(new Scenario("FloorDiv == Floor Div Oracle (sweep × spacings)", RunFloorDivOracleSweep));
+            scenarios.Add(new Scenario("FloorDiv == Float Idiom In-Band (banded parity)", RunFloorDivFloatParityBands));
+            scenarios.Add(new Scenario("FloorDiv Out-Of-Band Teeth (float idiom diverges)", RunFloorDivOutOfBandTeeth));
+        }
+
+        /// <summary>Reference floor-division in double precision, independent of the shift/mask implementation.</summary>
+        private static int RefFloorDiv(int value, int divisor) => (int)Math.Floor(value / (double)divisor);
+
+        /// <summary>
+        /// The shift/mask amounts are only correct because <see cref="ChunkMath.CHUNK_WIDTH"/> and the region
+        /// side are powers of two. This guard fails loudly if either constant is ever changed to a non-pow2
+        /// value, instead of letting <c>&gt;&gt;</c>/<c>&amp;</c> silently corrupt addressing.
+        /// </summary>
+        private static bool RunChunkMathPow2Guard()
+        {
+            bool widthOk = (ChunkMath.CHUNK_WIDTH & (ChunkMath.CHUNK_WIDTH - 1)) == 0 &&
+                           ChunkMath.VoxelToChunk(ChunkMath.CHUNK_WIDTH) == 1 &&
+                           ChunkMath.VoxelToLocal(ChunkMath.CHUNK_WIDTH - 1) == ChunkMath.CHUNK_WIDTH - 1;
+            bool regionOk = (ChunkMath.CHUNKS_PER_REGION_SIDE & (ChunkMath.CHUNKS_PER_REGION_SIDE - 1)) == 0 &&
+                            ChunkMath.ChunkToRegion(ChunkMath.CHUNKS_PER_REGION_SIDE) == 1 &&
+                            ChunkMath.ChunkToRegionLocal(ChunkMath.CHUNKS_PER_REGION_SIDE - 1) == ChunkMath.CHUNKS_PER_REGION_SIDE - 1;
+            if (widthOk && regionOk)
+            {
+                Debug.Log("[PASS] ChunkMath Power-Of-Two Guard");
+                return true;
+            }
+
+            Debug.LogError($"[FAIL] ChunkMath Power-Of-Two Guard — CHUNK_WIDTH={ChunkMath.CHUNK_WIDTH} " +
+                           $"CHUNKS_PER_REGION_SIDE={ChunkMath.CHUNKS_PER_REGION_SIDE} (both must be powers of two).");
+            return false;
+        }
+
+        /// <summary>
+        /// <see cref="ChunkMath.SECTIONS_PER_CHUNK"/> is an integer division that silently truncates if
+        /// <see cref="ChunkMath.CHUNK_HEIGHT"/> ever stops being an exact multiple of
+        /// <see cref="ChunkMath.SECTION_SIZE"/> (a Tier A height change is exactly the edit that could do
+        /// it) — section arrays would then under-cover the column with no error raised. This guard fails
+        /// loudly instead, and pins <see cref="ChunkMath.CHUNK_VOLUME"/> to the same coupling.
+        /// <para>The volume term is definitional — <see cref="ChunkMath.CHUNK_VOLUME"/> is <i>declared</i> as
+        /// sections × section volume — so <c>divides</c> and <c>reconstructs</c> are the load-bearing terms,
+        /// the only two a constant edit can actually break.</para>
+        /// </summary>
+        private static bool RunSectionHeightCouplingGuard()
+        {
+            bool divides = ChunkMath.CHUNK_HEIGHT % ChunkMath.SECTION_SIZE == 0;
+            bool reconstructs = ChunkMath.SECTIONS_PER_CHUNK * ChunkMath.SECTION_SIZE == ChunkMath.CHUNK_HEIGHT;
+            bool volumeOk = ChunkMath.CHUNK_VOLUME == ChunkMath.SECTIONS_PER_CHUNK * ChunkMath.SECTION_VOLUME;
+            if (divides && reconstructs && volumeOk)
+            {
+                Debug.Log("[PASS] Section/Height Coupling Guard");
+                return true;
+            }
+
+            Debug.LogError($"[FAIL] Section/Height Coupling Guard — CHUNK_HEIGHT={ChunkMath.CHUNK_HEIGHT} must be an " +
+                           $"exact multiple of SECTION_SIZE={ChunkMath.SECTION_SIZE} " +
+                           $"(SECTIONS_PER_CHUNK={ChunkMath.SECTIONS_PER_CHUNK}, CHUNK_VOLUME={ChunkMath.CHUNK_VOLUME}).");
+            return false;
+        }
+
+        /// <summary>
+        /// A <see cref="ChunkMath.SECTION_VOLUME"/> section is <see cref="ChunkMath.SECTION_SIZE"/> cubed, so
+        /// every section-local index (<c>x + y·S + z·S²</c>) silently assumes a section spans the chunk's <b>full
+        /// horizontal extent</b> — i.e. <see cref="ChunkMath.CHUNK_WIDTH"/> equals
+        /// <see cref="ChunkMath.SECTION_SIZE"/>. Nothing asserted that until now, yet
+        /// <c>Chunk.OnDataPopulated</c>, <c>ChunkData.PopulateFromFlattened</c> and
+        /// <c>SeamWakeDecision.WakeSeamSlab</c> all index sections that way; were the two constants to diverge,
+        /// each would read the wrong cells with no error raised.
+        /// <para>Companion to <see cref="RunSectionHeightCouplingGuard"/>, which pins the vertical half of the
+        /// same coupling. As there, the volume term is definitional — <see cref="ChunkMath.SECTION_VOLUME"/> is
+        /// <i>declared</i> as the cube — so <c>spansWidth</c> is the load-bearing term here.</para>
+        /// </summary>
+        private static bool RunSectionWidthCouplingGuard()
+        {
+            bool spansWidth = ChunkMath.CHUNK_WIDTH == ChunkMath.SECTION_SIZE;
+            bool volumeOk = ChunkMath.SECTION_VOLUME ==
+                            ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE;
+            if (spansWidth && volumeOk)
+            {
+                Debug.Log("[PASS] Section/Width Coupling Guard");
+                return true;
+            }
+
+            Debug.LogError($"[FAIL] Section/Width Coupling Guard — CHUNK_WIDTH={ChunkMath.CHUNK_WIDTH} must equal " +
+                           $"SECTION_SIZE={ChunkMath.SECTION_SIZE} for section-local x + y·S + z·S² indexing to " +
+                           $"address the full chunk width (SECTION_VOLUME={ChunkMath.SECTION_VOLUME}).");
+            return false;
+        }
+
+        /// <summary><see cref="ChunkMath.VoxelToChunk"/> must equal the reference floor-division across the sweep, both signs.</summary>
+        private static bool RunVoxelToChunkSweep()
+        {
+            for (int v = VOXEL_SWEEP_MIN; v <= VOXEL_SWEEP_MAX; v++)
+            {
+                int expected = RefFloorDiv(v, ChunkMath.CHUNK_WIDTH);
+                int actual = ChunkMath.VoxelToChunk(v);
+                if (actual != expected)
+                {
+                    Debug.LogError($"[FAIL] VoxelToChunk == Floor Div (sweep) — v={v} expected {expected}, got {actual}.");
+                    return false;
+                }
+            }
+
+            Debug.Log("[PASS] VoxelToChunk == Floor Div (sweep)");
+            return true;
+        }
+
+        /// <summary>
+        /// Non-regression: for the reachable all-positive range, the new helper must be byte-identical to the
+        /// old <c>Mathf.FloorToInt((float)v / ChunkWidth)</c> idiom it replaces at the migrated call sites.
+        /// </summary>
+        private static bool RunVoxelToChunkLegacyParity()
+        {
+            for (int v = 0; v <= VOXEL_SWEEP_MAX; v++)
+            {
+                int legacy = Mathf.FloorToInt((float)v / VoxelData.ChunkWidth);
+                int actual = ChunkMath.VoxelToChunk(v);
+                if (actual != legacy)
+                {
+                    Debug.LogError($"[FAIL] VoxelToChunk == Legacy FloorToInt (positives) — v={v} legacy {legacy}, got {actual}.");
+                    return false;
+                }
+            }
+
+            Debug.Log("[PASS] VoxelToChunk == Legacy FloorToInt (positives)");
+            return true;
+        }
+
+        /// <summary><see cref="ChunkMath.VoxelToLocal"/> must be in <c>[0, CHUNK_WIDTH)</c> and reconstruct the voxel with its chunk index.</summary>
+        private static bool RunVoxelToLocalSweep()
+        {
+            for (int v = VOXEL_SWEEP_MIN; v <= VOXEL_SWEEP_MAX; v++)
+            {
+                int local = ChunkMath.VoxelToLocal(v);
+                if (local < 0 || local >= ChunkMath.CHUNK_WIDTH)
+                {
+                    Debug.LogError($"[FAIL] VoxelToLocal Reconstructs Voxel (sweep) — v={v} local {local} out of [0,{ChunkMath.CHUNK_WIDTH}).");
+                    return false;
+                }
+
+                int reconstructed = ChunkMath.VoxelToChunk(v) * ChunkMath.CHUNK_WIDTH + local;
+                if (reconstructed != v)
+                {
+                    Debug.LogError($"[FAIL] VoxelToLocal Reconstructs Voxel (sweep) — v={v} reconstructed {reconstructed}.");
+                    return false;
+                }
+            }
+
+            Debug.Log("[PASS] VoxelToLocal Reconstructs Voxel (sweep)");
+            return true;
+        }
+
+        /// <summary>
+        /// <see cref="ChunkMath.IsChunkAligned"/> is definitionally "the local coordinate is zero" — pin the
+        /// equivalence against <see cref="ChunkMath.VoxelToLocal"/> across the signed sweep (CP-2 close-out;
+        /// guards the alignment helper the <c>GetOrCreatePlaceholder</c> assert and WorldOrigin suite adopted).
+        /// </summary>
+        private static bool RunIsChunkAlignedSweep()
+        {
+            for (int v = VOXEL_SWEEP_MIN; v <= VOXEL_SWEEP_MAX; v++)
+            {
+                bool aligned = ChunkMath.IsChunkAligned(v);
+                bool localZero = ChunkMath.VoxelToLocal(v) == 0;
+                if (aligned != localZero)
+                {
+                    Debug.LogError($"[FAIL] IsChunkAligned == (VoxelToLocal == 0) (sweep) — v={v} " +
+                                   $"IsChunkAligned={aligned}, VoxelToLocal==0 is {localZero}.");
+                    return false;
+                }
+            }
+
+            Debug.Log("[PASS] IsChunkAligned == (VoxelToLocal == 0) (sweep)");
+            return true;
+        }
+
+        /// <summary>
+        /// <see cref="ChunkMath.ChunkToRegion"/> / <see cref="ChunkMath.ChunkToRegionLocal"/> must match the
+        /// reference floor-division, keep the slot in <c>[0, CHUNKS_PER_REGION_SIDE)</c>, and reconstruct the chunk.
+        /// </summary>
+        private static bool RunRegionSweep()
+        {
+            for (int c = CHUNK_SWEEP_MIN; c <= CHUNK_SWEEP_MAX; c++)
+            {
+                int region = ChunkMath.ChunkToRegion(c);
+                int slot = ChunkMath.ChunkToRegionLocal(c);
+                int expectedRegion = RefFloorDiv(c, ChunkMath.CHUNKS_PER_REGION_SIDE);
+                if (region != expectedRegion || slot < 0 || slot >= ChunkMath.CHUNKS_PER_REGION_SIDE ||
+                    region * ChunkMath.CHUNKS_PER_REGION_SIDE + slot != c)
+                {
+                    Debug.LogError($"[FAIL] ChunkToRegion / RegionLocal Reconstructs Chunk (sweep) — c={c} " +
+                                   $"region {region} (expected {expectedRegion}) slot {slot}.");
+                    return false;
+                }
+            }
+
+            Debug.Log("[PASS] ChunkToRegion / RegionLocal Reconstructs Chunk (sweep)");
+            return true;
+        }
+
+        /// <summary>
+        /// <see cref="ChunkMath.WorldToChunk"/> must equal the reference floor-division over fractional world
+        /// coordinates (both signs), and match the legacy <c>Mathf.FloorToInt(world / ChunkWidth)</c> for positives.
+        /// </summary>
+        private static bool RunWorldToChunkSweep()
+        {
+            // Quarter-voxel steps exercise the fractional-boundary behavior the float floor must preserve.
+            for (int q = VOXEL_SWEEP_MIN * 4; q <= VOXEL_SWEEP_MAX * 4; q++)
+            {
+                float world = q * 0.25f;
+                int expected = (int)Math.Floor(world / ChunkMath.CHUNK_WIDTH);
+                int actual = ChunkMath.WorldToChunk(world);
+                if (actual != expected)
+                {
+                    Debug.LogError($"[FAIL] WorldToChunk == Floor Div (float sweep) — world={world} expected {expected}, got {actual}.");
+                    return false;
+                }
+
+                if (world >= 0f)
+                {
+                    int legacy = Mathf.FloorToInt(world / VoxelData.ChunkWidth);
+                    if (actual != legacy)
+                    {
+                        Debug.LogError($"[FAIL] WorldToChunk == Floor Div (float sweep) — world={world} legacy {legacy}, got {actual}.");
+                        return false;
+                    }
+                }
+            }
+
+            Debug.Log("[PASS] WorldToChunk == Floor Div (float sweep)");
+            return true;
+        }
+
+        /// <summary>
+        /// Teeth: fixed negative cases where the old truncating <c>/</c>/<c>%</c> gave the WRONG answer. These
+        /// assert the helpers changed something — the region-codec fix (commit 3) is only meaningful because
+        /// <c>VoxelToChunk(-8) == -1</c> (truncation gave 0, silently overwriting the mirror chunk's slot).
+        /// </summary>
+        private static bool RunNegativeTeeth()
+        {
+            (int input, Func<int, int> fn, int expected, int truncated, string name)[] cases =
+            {
+                (-8, ChunkMath.VoxelToChunk, -1, -8 / VoxelData.ChunkWidth, "VoxelToChunk(-8)"),
+                (-8, ChunkMath.VoxelToLocal, 8, -8 % VoxelData.ChunkWidth, "VoxelToLocal(-8)"),
+                (-1, ChunkMath.ChunkToRegion, -1, -1 / ChunkMath.CHUNKS_PER_REGION_SIDE, "ChunkToRegion(-1)"),
+                (-1, ChunkMath.ChunkToRegionLocal, 31, -1 % ChunkMath.CHUNKS_PER_REGION_SIDE, "ChunkToRegionLocal(-1)"),
+            };
+
+            foreach ((int input, Func<int, int> fn, int expected, int truncated, string name) in cases)
+            {
+                int actual = fn(input);
+                if (actual != expected)
+                {
+                    Debug.LogError($"[FAIL] Negative-Coordinate Teeth — {name} expected {expected}, got {actual}.");
+                    return false;
+                }
+
+                if (actual == truncated)
+                {
+                    Debug.LogError($"[FAIL] Negative-Coordinate Teeth — {name} matched the truncating result {truncated}; " +
+                                   "the fix has no teeth (this case must differ from truncating `/`/`%`).");
+                    return false;
+                }
+            }
+
+            Debug.Log("[PASS] Negative-Coordinate Teeth (truncation would fail)");
+            return true;
+        }
+
+        /// <summary>
+        /// Teeth for the cross-chunk neighbor-wake routing that <c>World.ApplyModifications</c> step 4 performs —
+        /// the sole path that re-activates a settled generation-time fluid or grass voxel when its neighbor is
+        /// broken (Fluid Bug 17). That step resolves a <b>chunk</b> (<see cref="ChunkCoord.FromVoxelPosition(Vector3Int)"/>,
+        /// behind <c>World.GetChunkFromVector3</c>) and a <b>chunk-local cell</b> (<see cref="ChunkMath.VoxelToLocal"/>,
+        /// behind <c>Chunk.GetVoxelPositionInChunkFromGlobalVector3</c>); both helpers formerly took a
+        /// <c>Vector3</c>, so the integer voxel cell converted implicitly to float and mis-resolved past ±2²⁴.
+        /// </summary>
+        /// <remarks>
+        /// Two assertions per case: the integer routing equals the exact oracle, AND the float routing it replaced
+        /// disagrees — a case where both agree has no teeth. The onset is <b>graded</b>, which is why the two
+        /// divergences are counted separately and each is required at least once: just past ±2²⁴ the float error is
+        /// one voxel, so only the <i>local cell</i> is wrong (the wake hits the wrong voxel in the right chunk),
+        /// while at the ±2.147×10⁹ magnitude Bug 17 was reported at the error reaches ±64 voxels and the
+        /// <i>chunk</i> itself resolves several chunks away.
+        /// </remarks>
+        private static bool RunFarWakeRoutingTeeth()
+        {
+            // Magnitudes spanning the graded onset: the ±2²⁴ float-exactness edge, a mid-magnitude, and the
+            // coordinate Bug 17 was reported at. Signed, because the wake routes negative coordinates too.
+            int[] farCells =
+            {
+                (1 << 24) + 1, -((1 << 24) + 1),
+                (1 << 28) + 17, -((1 << 28) + 17),
+                2147000000, -2147000000,
+            };
+
+            int chunkTeeth = 0;
+            int localTeeth = 0;
+
+            foreach (int cell in farCells)
+            {
+                // The wake resolves X and Z through the same helpers, so one axis exercises both.
+                Vector3Int voxelCell = new Vector3Int(cell, 0, cell);
+
+                // --- Chunk resolution: integer must match the exact oracle. ---
+                int expectedChunk = RefFloorDiv(cell, ChunkMath.CHUNK_WIDTH);
+                ChunkCoord actualChunk = ChunkCoord.FromVoxelPosition(voxelCell);
+                if (actualChunk.X != expectedChunk || actualChunk.Z != expectedChunk)
+                {
+                    Debug.LogError($"[FAIL] Far-Coordinate Wake Routing (Bug 17 teeth) — cell={cell} expected chunk " +
+                                   $"({expectedChunk}, {expectedChunk}), got ({actualChunk.X}, {actualChunk.Z}).");
+                    return false;
+                }
+
+                // --- Local cell: integer must match the exact positive-modulo oracle. ---
+                int expectedLocal = ((cell % ChunkMath.CHUNK_WIDTH) + ChunkMath.CHUNK_WIDTH) % ChunkMath.CHUNK_WIDTH;
+                int actualLocal = ChunkMath.VoxelToLocal(cell);
+                if (actualLocal != expectedLocal)
+                {
+                    Debug.LogError($"[FAIL] Far-Coordinate Wake Routing (Bug 17 teeth) — cell={cell} expected local " +
+                                   $"{expectedLocal}, got {actualLocal}.");
+                    return false;
+                }
+
+                // --- Teeth: the float routing these replaced must disagree at this magnitude. ---
+                int floatChunk = ChunkMath.WorldToChunk(cell);
+                int floatLocal = ChunkMath.VoxelToLocal(Mathf.FloorToInt(cell));
+                if (floatChunk != expectedChunk) chunkTeeth++;
+                if (floatLocal != expectedLocal) localTeeth++;
+            }
+
+            // Both failure shapes must be represented, or the scenario would still pass if the fix only covered
+            // one of the two helpers.
+            if (chunkTeeth == 0 || localTeeth == 0)
+            {
+                Debug.LogError("[FAIL] Far-Coordinate Wake Routing (Bug 17 teeth) — the float routing agreed with the " +
+                               $"integer routing too often (chunk teeth {chunkTeeth}, local teeth {localTeeth}; both " +
+                               "must be > 0). The scenario has no teeth — the far cells no longer straddle the ±2²⁴ " +
+                               "precision onset.");
+                return false;
+            }
+
+            Debug.Log("[PASS] Far-Coordinate Wake Routing (Bug 17 teeth)");
+            return true;
+        }
+
+        // Guards for ChunkMath.FloorDiv, the general (non-power-of-two divisor) floor division behind
+        // the structure grid-cell election (StandardChunkGenerationJob). Divisor range mirrors the
+        // StructurePoolEntry.spacing authoring range [1, 64].
+        private const int FLOOR_DIV_SPACING_MAX = 64;
+
+        /// <summary>
+        /// <see cref="ChunkMath.FloorDiv"/> must equal the double-precision reference floor-division across
+        /// the signed sweep for every authorable spacing, and at far/extreme fixed values where the float
+        /// idiom it replaces could not go (±2³⁰, the int edges).
+        /// </summary>
+        private static bool RunFloorDivOracleSweep()
+        {
+            int[] farValues =
+            {
+                1 << 30, -(1 << 30), (1 << 30) + 12345, -((1 << 30) + 12345),
+                (1 << 24) + 1, -((1 << 24) + 1), int.MaxValue, int.MinValue,
+            };
+
+            for (int s = 1; s <= FLOOR_DIV_SPACING_MAX; s++)
+            {
+                for (int v = VOXEL_SWEEP_MIN; v <= VOXEL_SWEEP_MAX; v++)
+                {
+                    int expected = RefFloorDiv(v, s);
+                    int actual = ChunkMath.FloorDiv(v, s);
+                    if (actual != expected)
+                    {
+                        Debug.LogError($"[FAIL] FloorDiv == Floor Div Oracle (sweep × spacings) — v={v} s={s} expected {expected}, got {actual}.");
+                        return false;
+                    }
+                }
+
+                foreach (int v in farValues)
+                {
+                    int expected = RefFloorDiv(v, s);
+                    int actual = ChunkMath.FloorDiv(v, s);
+                    if (actual != expected)
+                    {
+                        Debug.LogError($"[FAIL] FloorDiv == Floor Div Oracle (sweep × spacings) — far v={v} s={s} expected {expected}, got {actual}.");
+                        return false;
+                    }
+                }
+            }
+
+            Debug.Log("[PASS] FloorDiv == Floor Div Oracle (sweep × spacings)");
+            return true;
+        }
+
+        /// <summary>
+        /// Non-regression for existing worlds: inside ±2²⁴ (where <c>(float)v</c> is exact),
+        /// <see cref="ChunkMath.FloorDiv"/> must be byte-identical to the float idiom
+        /// <c>(int)floor((float)v / s)</c> it replaced at the structure cell election — sampled as dense
+        /// bands at the origin and at rising magnitudes up to the ±2²⁴ edge itself. Proven exhaustively
+        /// (every in-band value × every spacing) by <c>Tools/Python/verify_floordiv_parity.py</c>;
+        /// this scenario is the standing regression guard over that fact.
+        /// </summary>
+        private static bool RunFloorDivFloatParityBands()
+        {
+            const int BAND_HALF_WIDTH = 2048;
+            int[] bandCenters =
+            {
+                0,
+                1 << 16, -(1 << 16),
+                1 << 20, -(1 << 20),
+                (1 << 24) - BAND_HALF_WIDTH, -((1 << 24) - BAND_HALF_WIDTH),
+            };
+
+            foreach (int center in bandCenters)
+            {
+                for (int v = center - BAND_HALF_WIDTH; v <= center + BAND_HALF_WIDTH; v++)
+                {
+                    for (int s = 1; s <= FLOOR_DIV_SPACING_MAX; s++)
+                    {
+                        int floatIdiom = (int)Math.Floor((float)v / s);
+                        int actual = ChunkMath.FloorDiv(v, s);
+                        if (actual != floatIdiom)
+                        {
+                            Debug.LogError($"[FAIL] FloorDiv == Float Idiom In-Band (banded parity) — v={v} s={s} " +
+                                           $"float idiom {floatIdiom}, FloorDiv {actual}.");
+                            return false;
+                        }
+                    }
+                }
+            }
+
+            Debug.Log("[PASS] FloorDiv == Float Idiom In-Band (banded parity)");
+            return true;
+        }
+
+        /// <summary>
+        /// Teeth: fixed cases just past +2²⁴ where the float idiom provably returns the WRONG cell (first
+        /// divergences found by the exhaustive Python sweep). These assert both that
+        /// <see cref="ChunkMath.FloorDiv"/> is exact there AND that the float idiom disagrees — so the
+        /// in-band parity scenario cannot be green because the two expressions are secretly identical.
+        /// </summary>
+        private static bool RunFloorDivOutOfBandTeeth()
+        {
+            (int value, int spacing, int expected)[] cases =
+            {
+                (16777221, 3, 5592407),
+                (16777219, 5, 3355443),
+                (16777229, 7, 2396747),
+            };
+
+            foreach ((int value, int spacing, int expected) in cases)
+            {
+                int actual = ChunkMath.FloorDiv(value, spacing);
+                if (actual != expected || actual != RefFloorDiv(value, spacing))
+                {
+                    Debug.LogError($"[FAIL] FloorDiv Out-Of-Band Teeth — FloorDiv({value}, {spacing}) expected {expected}, got {actual}.");
+                    return false;
+                }
+
+                int floatIdiom = (int)Math.Floor((float)value / spacing);
+                if (floatIdiom == expected)
+                {
+                    Debug.LogError($"[FAIL] FloorDiv Out-Of-Band Teeth — float idiom({value}, {spacing}) matched {expected}; " +
+                                   "the fix has no teeth (this case must diverge from the float idiom).");
+                    return false;
+                }
+            }
+
+            Debug.Log("[PASS] FloorDiv Out-Of-Band Teeth (float idiom diverges)");
+            return true;
+        }
+    }
+}

@@ -116,3 +116,46 @@ inside `OnGUI` loops; auto-rebuilds on compilation/domain reload. `Database`, `C
 
 Same pattern for the credits database. Copy this pattern for any new frequently-read database
 asset instead of ad-hoc `AssetDatabase.LoadAssetAtPath` calls per repaint.
+
+## `EditorAudioPreview` — auditioning clips
+
+| Member | Purpose |
+|---|---|
+| `IsAvailable` | Whether this Unity version exposes the internal preview API at all. Gate play buttons on it. |
+| `Play(AudioClip)` / `StopAll()` | Start or stop the single preview voice. |
+| `IsPlaying()` / `IsPlayingClip(clip)` | Drive a ▶/⏹ button's state. |
+| `RepaintWhilePlaying(window)` | Returns a handler to register; nothing repaints an editor window when audio ends on its own. |
+| `StopRepainting(handler)` | Unregister it in `OnDisable`, and call `StopAll()` there too — a preview outlives the window otherwise. |
+
+## `AudioLoudnessAnalyzer` — measuring loudness
+
+| Member | Purpose |
+|---|---|
+| `IsAvailable` / `ResetAvailability()` | Cached probe for ffmpeg on PATH; reset it after the user installs it. |
+| `Measure(filePath)` | Integrated LUFS, true peak dBFS and LRA for one file, read from disk. Check `HasLoudnessRange` before trusting the LRA — 0 LU is a legitimate reading for a steady loop, so the flag is what separates it from an absent one. |
+| `ParseMeterOutput(text)` | The parse alone, so it can be pinned against captured output with no ffmpeg present. |
+
+**Integrated loudness is undefined for short clips.** EBU R128 gates on 400 ms blocks, so a clip
+shorter than one block has no qualifying block and ffmpeg returns its **-70.0 LUFS floor** — which
+means "unmeasurable", not "silent". Measured in this project: 0.15 s and 0.36 s clips both report
+-70.0; 0.55 s and 0.78 s clips measure normally. 56 of the 199 shipped clips are affected, all of them block one-shots;
+11 of those still true-peak above -1 dBFS, so excluding them from the loudness statistics must not
+exclude them from the clipping check. Any statistic taken over a mixed set (a median, a mean, a "quietest")
+is poisoned by them, and so is every trim derived from it. Filter by duration, or measure short
+clips with a different metric (`astats` RMS / `volumedetect` mean_volume) before comparing them
+against loops.
+
+**If you spawn a process from editor code, drain every stream you redirect.** Redirecting stdout
+and reading only stderr deadlocks once the unread pipe fills (~4 KB): the child blocks on write and
+the stream you *are* reading never reaches EOF. `ffmpeg -version` writes ~2.3 KB to stdout and
+nothing to stderr, so the bug hides until a build with a longer banner. Read both asynchronously
+(`BeginOutputReadLine`/`BeginErrorReadLine`) and let `WaitForExit(timeout)` be what you block in —
+otherwise the timeout sits after a blocking read and guards nothing. Pass `-nostdin` too, or the
+child inherits the editor's stdin.
+
+**Do not reach for `AudioClip.GetData` instead.** It returns samples only for clips imported as
+`DecompressOnLoad`. This project's ambience beds import as `Streaming` and its fluid emitters as
+`CompressedInMemory`; for both, `GetData` returns false with the clip stuck in
+`AudioDataLoadState.Loading` — verified to persist through `LoadAudioData`, through a temporary
+importer flip with a synchronous reimport, and through `SaveAndReimport` after unloading the stale
+instance. Reading the file is the only route that covers every profile.

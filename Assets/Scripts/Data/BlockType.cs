@@ -1,5 +1,6 @@
 using System;
 using System.Runtime.CompilerServices;
+using Data.Enums;
 using MyBox;
 using UnityEngine;
 
@@ -41,6 +42,19 @@ namespace Data
 
         [Tooltip("Indicates whether the neighboring faces should still be rendered when this block is placed.")]
         public bool renderNeighborFaces;
+
+        [Tooltip("Foliage wind-sway strength in [0, 1] (FL-2). 0 = rigid. Non-zero makes every vertex of this " +
+                 "block shimmer in the wind, scaled by the global sway amplitude. Only affects blocks rendered " +
+                 "in the transparent cutout pass (Render Neighbor Faces) — the opaque shader ignores the channel. " +
+                 "Cross-mesh flora ignores this field: FL-1 bakes its own root-anchored weights.")]
+        [Range(0f, 1f)]
+        public float swayStrength;
+
+        [Tooltip("FL-4b: how much this flora type varies from cell to cell — position nudge, size " +
+                 "range, and whether its texture may be mirrored. Only cross-mesh blocks use it; the " +
+                 "defaults reproduce the engine-wide look FL-4 shipped with.")]
+        [ConditionalField(nameof(renderShape), false, RenderShape.CrossMesh)]
+        public CrossMeshVariationSettings crossMeshVariation = CrossMeshVariationSettings.Default;
 
         [Header("Fluid Properties")]
         [Tooltip("The type of fluid this block represents. 'None' for solid blocks.")]
@@ -102,6 +116,11 @@ namespace Data
                  "(REPLACEABLE, LIQUID) — any other tag (structural, or PLANT which also tags solid leaves) makes the " +
                  "placement ray tunnel through that surface.")]
         public BlockTags placementCanReplaceTags;
+
+        [Header("Sound")]
+        [Tooltip("Which sound group this block uses for break/place/step. Independent of tags — tags seed " +
+                 "the value once at author time, but the runtime never consults them for audio.")]
+        public SoundMaterial soundMaterial;
 
         [Header("Block Behavior")]
         [Tooltip("Indicates whether the block has any block behavior.")]

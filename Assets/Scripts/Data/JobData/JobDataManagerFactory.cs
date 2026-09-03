@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using Data.NativeData;
 using Helpers;
 using Unity.Collections;
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace Data.JobData
@@ -62,6 +63,7 @@ namespace Data.JobData
                         VertCount = faceAsset.vertData.Length,
                         TriStartIndex = customTrisList.Count,
                         TriCount = faceAsset.triangles.Length,
+                        Centroid = FaceCentroid(faceAsset),
                     });
 
                     foreach (VertData vertAsset in faceAsset.vertData)
@@ -89,6 +91,10 @@ namespace Data.JobData
             // disagree on the active criterion — keep them built together.
             bool[] isActiveById = new bool[blockDatabase.blockTypes.Length];
 
+            // Flat isSolid lookup, co-built for the same reason: the seam-wake pass tests solidity once per
+            // scanned cell, and BlockType is a class — a per-cell deref there would cost more than the skip saves.
+            bool[] isSolidById = new bool[blockDatabase.blockTypes.Length];
+
             for (int i = 0; i < blockDatabase.blockTypes.Length; i++)
             {
                 int customMeshIndex = -1;
@@ -99,6 +105,7 @@ namespace Data.JobData
 
                 blockTypesJobData[i] = new BlockTypeJobData(blockDatabase.blockTypes[i], customMeshIndex);
                 isActiveById[i] = blockDatabase.blockTypes[i].isActive;
+                isSolidById[i] = blockDatabase.blockTypes[i].isSolid;
             }
 
             // --- Step 5: Create the final JobDataManager ---
@@ -114,7 +121,26 @@ namespace Data.JobData
             FluidTemplates fluidTemplates = ResourceLoader.LoadFluidTemplates();
             FluidVertexTemplatesNativeData fluidVertexTemplates = new FluidVertexTemplatesNativeData(fluidTemplates);
 
-            return new GlobalJobData(jobDataManager, fluidVertexTemplates, isActiveById);
+            return new GlobalJobData(jobDataManager, fluidVertexTemplates, isActiveById, isSolidById);
+        }
+
+        /// <summary>
+        /// VO-6: the mean of a face's authored vertices, in unrotated block-local space — the face's
+        /// position inside its own cell, which the mesher needs to know which cell a face actually looks
+        /// into (<see cref="CustomFaceData.Centroid"/>).
+        /// </summary>
+        /// <param name="faceAsset">The authored face.</param>
+        /// <returns>The centroid, or the cell center for a degenerate (vertex-less) face.</returns>
+        private static float3 FaceCentroid(FaceMeshData faceAsset)
+        {
+            if (faceAsset.vertData == null || faceAsset.vertData.Length == 0)
+                return new float3(0.5f, 0.5f, 0.5f);
+
+            float3 sum = float3.zero;
+            foreach (VertData vertAsset in faceAsset.vertData)
+                sum += (float3)vertAsset.position;
+
+            return sum / faceAsset.vertData.Length;
         }
     }
 
@@ -134,18 +160,24 @@ namespace Data.JobData
         /// <summary>Flat <c>blockId → isActive</c> lookup for the fallback active-voxel scan.</summary>
         public readonly bool[] IsActiveById;
 
+        /// <summary>Flat <c>blockId → isSolid</c> lookup for the seam-wake pass's per-cell wall test.</summary>
+        public readonly bool[] IsSolidById;
+
         /// <summary>Initializes the assembled job-data bundle.</summary>
         /// <param name="jobDataManager">Native block/custom-mesh job data.</param>
         /// <param name="fluidVertexTemplates">Native fluid vertex templates.</param>
         /// <param name="isActiveById">Flat active-voxel lookup keyed by block id.</param>
+        /// <param name="isSolidById">Flat solidity lookup keyed by block id.</param>
         public GlobalJobData(
             JobDataManager jobDataManager,
             FluidVertexTemplatesNativeData fluidVertexTemplates,
-            bool[] isActiveById)
+            bool[] isActiveById,
+            bool[] isSolidById)
         {
             JobDataManager = jobDataManager;
             FluidVertexTemplates = fluidVertexTemplates;
             IsActiveById = isActiveById;
+            IsSolidById = isSolidById;
         }
     }
 }

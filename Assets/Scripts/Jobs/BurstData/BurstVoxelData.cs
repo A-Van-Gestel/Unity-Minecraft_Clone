@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Mathematics;
@@ -32,11 +33,39 @@ namespace Jobs.BurstData
         public static readonly SharedStatic<NativeArray<int3>> CornerOffsets = SharedStatic<NativeArray<int3>>.GetOrCreate<BurstVoxelData, CornerOffsetsKey>();
 
         /// <summary>
+        /// VO-8: the block-local vertex each smooth-lighting corner sits on, in <c>{0,1}³</c>.
+        /// Layout: <c>[faceIndex * 4 + cornerIndex]</c>, 24 entries.
+        /// <para>
+        /// An AO corner is a vertex shared by eight cells; this is the vertex, so a sample can be asked
+        /// which of its octants touches that corner. Built in the same loop as
+        /// <see cref="CornerOffsets"/> from the same <c>VoxelVerts</c>/<c>VoxelTris</c> source the corner
+        /// signs are derived from — keep them together or the offsets and the vertex can disagree.
+        /// </para>
+        /// </summary>
+        public static readonly SharedStatic<NativeArray<int3>> CornerVertices = SharedStatic<NativeArray<int3>>.GetOrCreate<BurstVoxelData, CornerVerticesKey>();
+
+        /// <summary>
         /// The center of a unit voxel cube — the pivot point for all block-orientation rotations.
         /// Burst-safe (constructed from literals, no static storage); use this instead of
         /// re-spelling <c>(0.5, 0.5, 0.5)</c> at every rotation site.
         /// </summary>
         public static float3 BlockCenter => new float3(0.5f, 0.5f, 0.5f);
+
+        /// <summary>
+        /// The index of the face opposite <paramref name="faceIndex"/>, in <c>VoxelData.FaceChecks</c>
+        /// order. The Burst-safe mirror of <c>VoxelData.RevFaceChecksIndices</c>, which is a managed
+        /// <c>int[]</c> a Burst job cannot read.
+        /// <para>
+        /// <c>FaceChecks</c> pairs every face with its opposite in adjacent slots (0↔1 Back/Front,
+        /// 2↔3 Top/Bottom, 4↔5 Left/Right), so flipping the low bit is exact rather than a
+        /// coincidence. Meshing baseline B43 asserts this against the managed table so the two
+        /// cannot drift.
+        /// </para>
+        /// </summary>
+        /// <param name="faceIndex">Face direction, in <c>VoxelData.FaceChecks</c> order.</param>
+        /// <returns>The opposing face's index.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static int OppositeFace(int faceIndex) => faceIndex ^ 1;
 
         // These empty structs are just unique keys for the SharedStatic fields.
         private struct VoxelVertsKey
@@ -59,6 +88,10 @@ namespace Jobs.BurstData
         {
         }
 
+        private struct CornerVerticesKey
+        {
+        }
+
         // This method is called automatically when the game loads or when the editor reloads.
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
 #if UNITY_EDITOR
@@ -74,9 +107,11 @@ namespace Jobs.BurstData
             NativeArray<Vector2> voxelUvs = new NativeArray<Vector2>(VoxelData.VoxelUvs, Allocator.Persistent);
             NativeArray<Vector3Int> faceChecks = new NativeArray<Vector3Int>(VoxelData.FaceChecks, Allocator.Persistent);
 
-            // Build the smooth lighting corner offset LUT from VoxelVerts/VoxelTris/FaceChecks.
+            // Build the smooth lighting corner offset LUT from VoxelVerts/VoxelTris/FaceChecks, plus the
+            // VO-8 corner vertex table it derives its signs from.
             NativeArray<int3> cornerOffsets = new NativeArray<int3>(72, Allocator.Persistent);
-            BuildCornerOffsetLUT(cornerOffsets);
+            NativeArray<int3> cornerVertices = new NativeArray<int3>(24, Allocator.Persistent);
+            BuildCornerOffsetLUT(cornerOffsets, cornerVertices);
 
             // Assign the created NativeArrays to our SharedStatic fields.
             VoxelVerts.Data = voxelVerts;
@@ -84,6 +119,7 @@ namespace Jobs.BurstData
             VoxelUvs.Data = voxelUvs;
             FaceChecks.Data = faceChecks;
             CornerOffsets.Data = cornerOffsets;
+            CornerVertices.Data = cornerVertices;
 
             // Subscribe our Dispose method to the Application.quitting event.
             // This ensures our native memory is cleaned up when the game closes.
@@ -112,14 +148,18 @@ namespace Jobs.BurstData
             if (VoxelUvs.Data.IsCreated) VoxelUvs.Data.Dispose();
             if (FaceChecks.Data.IsCreated) FaceChecks.Data.Dispose();
             if (CornerOffsets.Data.IsCreated) CornerOffsets.Data.Dispose();
+            if (CornerVertices.Data.IsCreated) CornerVertices.Data.Dispose();
         }
 
         /// <summary>
         /// Builds the 72-entry corner offset LUT for smooth lighting.
         /// For each face (6) and each corner vertex (4), computes the 3 neighbor offsets
-        /// (SideA, SideB, Diagonal) relative to the block position.
+        /// (SideA, SideB, Diagonal) relative to the block position, and records the corner's own
+        /// block-local vertex for VO-8's octant selection.
         /// </summary>
-        private static void BuildCornerOffsetLUT(NativeArray<int3> offsets)
+        /// <param name="offsets">72-entry destination for the neighbor offsets.</param>
+        /// <param name="cornerVertices">24-entry destination for the corner vertices (VO-8).</param>
+        private static void BuildCornerOffsetLUT(NativeArray<int3> offsets, NativeArray<int3> cornerVertices)
         {
             for (int face = 0; face < 6; face++)
             {
@@ -174,6 +214,13 @@ namespace Jobs.BurstData
                     offsets[baseIdx + 0] = sideA;
                     offsets[baseIdx + 1] = sideB;
                     offsets[baseIdx + 2] = diag;
+
+                    // VO-8: the vertex this corner sits on, in {0,1}³ — the same vertPos the corner signs
+                    // above are read from, so the two can never describe different corners.
+                    cornerVertices[face * 4 + corner] = new int3(
+                        vertPos.x > 0.5f ? 1 : 0,
+                        vertPos.y > 0.5f ? 1 : 0,
+                        vertPos.z > 0.5f ? 1 : 0);
                 }
             }
         }

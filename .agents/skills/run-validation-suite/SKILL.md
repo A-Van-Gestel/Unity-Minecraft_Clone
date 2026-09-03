@@ -1,6 +1,6 @@
 ---
 name: run-validation-suite
-description: How to RUN the editor validation suites (a single suite, a subset, or all via "Validate All"/headless CI) and how to READ + interpret their output — the colorized console summary and the NUnit3 XML results file. Use when the user asks to "run the validation suite(s)", "validate the engine/lighting/meshing/etc.", "run Validate All", "run the regression suites", check a change didn't regress, run suites in batch/headless/CI, or asks what a suite's PASS/FAIL/Inconclusive/"fix candidate"/"isolation violation" output means or how to read the results XML. For WRITING new suites/scenarios or fixing a documented bug through a suite, use the validation-driven-bugfix skill instead; for the live-editor MCP mechanics themselves, see the unity-mcp skill.
+description: How to RUN the editor validation suites (one, a subset, or all via "Validate All"/headless CI) and how to READ their console + NUnit3 XML output. Use when the user asks to "run the validation suite(s)", "validate the engine/lighting/meshing/etc.", "run Validate All", "run the regression suites", check a change didn't regress, run suites in batch/headless/CI, or asks what a suite's PASS/FAIL/Inconclusive/"fix candidate"/"isolation violation" output means. For WRITING new suites/scenarios or fixing a documented bug through a suite, use validation-driven-bugfix instead; for live-editor MCP mechanics see unity-mcp.
 ---
 
 # Running & reading the validation suites
@@ -41,14 +41,28 @@ it. Before trusting any suite run after an edit:
 ## Step 2 — Run
 
 The authoritative list of suites the aggregate runs is `ValidationSuiteRegistry.Suites`; the
-`Validate All` menu runs exactly those. Current standard inventory (menu path prefix
-`Minecraft Clone/Dev/`): **Validate Lighting Engine, Validate Meshing, Validate Behavior, Validate
-Placement, Validate Mesh Build Queue, Validate Light Work Scheduler, Validate ChunkRelativePosition,
-Validate Validation Framework**, and the aggregate **Validate All**. Not in the aggregate (run
-individually): the nightly fuzz deep-runs (`Validate Lighting Engine (Border Height Fuzz)`,
-`(Bug 09 Geometry Fuzz)`, `(Bug 05 Canopy Fuzz)`), the fluid determinism variants
-(`Validate Fluid Parallel Determinism [ (Cross-Chunk Halo) | (Cross-Chunk Halo, Y-band) ]`), and the
-standalone `Validate Voxel Metadata Utility` / `Validate FastNoiseLite`.
+`Validate All` menu runs exactly those, and `ExpectedSuiteCount` is the floor the runner asserts
+against. **Read the registry rather than trusting any list, here or elsewhere** — it is one line per
+suite and it is the only place that cannot go stale.
+
+Standard inventory — **27 suites**, in registry run/report order, which is also the display-name
+spelling `RunSelected` expects:
+
+**Lighting Engine · Meshing · Behavior · Placement · Physics Solver · Voxel Occlusion · Mesh Build
+Queue · Light Work Scheduler · Chunk Math · Chunk Unload Decision · Pool Prune Decision · Pipeline
+Backpressure · Chunk Pipeline · Save Durability · Deserialization Robustness · Serialization
+Round-Trip · Migration Chain · Spawn · Command Console · World Clock · Sky & Celestial · Sky Render ·
+UI Blur Render · Worm Carver · Biome Selection · Sound Engine · Validation Framework**
+
+Each has a `Minecraft Clone/Dev/Validate <name>` menu item, plus the aggregate **Validate All** —
+**with two where the menu path is NOT the display name**: `Voxel Occlusion` → *Validate Occlusion*,
+and `Sky & Celestial` → *Validate Sky*. Use the display name for `RunSelected`, the menu path for
+`Unity_ManageMenuItem`; crossing them fails (an unknown subset name rejects the whole request).
+
+Not in the aggregate (run individually): the nightly fuzz deep-runs (`Validate Lighting Engine
+(Border Height Fuzz)`, `(Bug 09 Geometry Fuzz)`, `(Bug 05 Canopy Fuzz)`,
+`(Interrupted Reconciliation Fuzz)`), `Validate Fluid Parallel Determinism (Cross-Chunk Halo,
+Y-band)`, and the standalone `Validate Voxel Metadata Utility` / `Validate FastNoiseLite`.
 
 | Goal | Menu (human) | Programmatic, in-editor (agent, no exit) |
 |------|--------------|------------------------------------------|
@@ -68,6 +82,39 @@ smaller set. Output order is registry order regardless of request order.
   the run emits *any* `Debug.LogWarning`/`LogError` — and healthy runs do (every known-bug repro is a
   warning; some suites log a `B7 INCONCLUSIVE` zero-alloc note). That is **not** a suite failure —
   read the real verdict from `executionLogs` / the returned counts, not from the tool's success flag.
+
+**⚠️ Runtime budget — never drive `Validate All` through MCP.** A full pass is **~190–205 s**
+(last verified run: 204 s), and **Lighting alone is the dominant share — ~182 s when measured**;
+the other 23 suites together take ~6 s. Anything sent through
+`Unity_RunCommand` that outlives the MCP response window is **re-issued**, and the retries stack on
+the Editor's main thread, survive a client-side task stop, and are cleared only by restarting the
+Editor — so a single `Validate All` over MCP becomes an endless re-run loop that blocks every later
+call. Route it accordingly:
+
+| Want | Do |
+|---|---|
+| The full aggregate, agent-driven | `Unity_ManageMenuItem` → `Minecraft Clone/Dev/Validate All` (recipe below) |
+| The full aggregate, by hand | `Minecraft Clone/Dev/Validate All` from the Editor menu |
+| A fast agent-side sweep | `Unity_RunCommand` over the registry **skipping `"Lighting Engine"`** (~6 s, safely inside the window) |
+
+**Menu-item recipe** — the reliable way to drive the full aggregate from an agent. `Unity_ManageMenuItem`
+Execute `Minecraft Clone/Dev/Validate All`. The call exceeds 120 s and the harness **moves it to a
+background task cleanly** — no stacking, no re-execution — then delivers a completion notification. Do not
+`TaskStop` it or re-issue it; just wait, then read the combined summary from the editor log.
+
+**Resolve that log by newest write time** — it is usually `<project>/Logs/Editor.log` but some sessions
+write only `%LOCALAPPDATA%\Unity\Editor\Editor.log` (when the project log cannot be opened, the editor
+logs that reason at startup and falls back). A frozen log looks exactly like a job that never started. Use
+`Get-Content -Tail N` (that file reaches GB scale).
+
+**Do not try to schedule long work off a `Unity_RunCommand` via `EditorApplication.delayCall`.** The call
+returns `success: true` and the queued delegate then does not run on any predictable schedule. Observed
+2026-08-25: no output for **70 minutes** on an idle editor — no marker, no exception, nothing to
+distinguish it from a slow run — and it then fired unprompted when an unrelated
+`RequestScriptCompilation` pumped the editor, **executing the pre-edit assembly** and interleaving with a
+menu-item run issued in the meantime. Two hazards, not one: you cannot tell "queued" from "finished", and a
+forgotten delegate can wake up later and run **stale code** whose output looks current. Route long work
+through a menu item; if a task has no menu item, add one rather than scheduling it.
 
 **Batch / headless / CI.** `ValidationSuiteCI.RunHeadless` is the `-executeMethod` target:
 

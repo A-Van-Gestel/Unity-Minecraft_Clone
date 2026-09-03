@@ -75,6 +75,7 @@ MonoBehaviour:
   _deleteButton: {fileID: 4537149370655425024}
   _newWorldNameInput: {fileID: 8493775837810540778}
   _seedInput: {fileID: 2583738494202691757}
+  _borderRadiusInput: {fileID: 447685093482255262}
   _worldTypeDropdown: {fileID: 4898057533755787094}
   _worldTypeRegistry: {fileID: 11400000, guid: 3038e8b8e1ab9ae44802528aa73aa06a, type: 2}
 --- !u!1001 &5080541776167133718
@@ -520,6 +521,17 @@ RectTransform:
   m_CorrespondingSourceObject: {fileID: 6309260067916768120, guid: 91ab58663d236ea44980dfa0341dc995, type: 3}
   m_PrefabInstance: {fileID: 6275902336542420114}
   m_PrefabAsset: {fileID: 0}
+--- !u!114 &447685093482255262 stripped
+MonoBehaviour:
+  m_CorrespondingSourceObject: {fileID: 5849618278851870476, guid: 91ab58663d236ea44980dfa0341dc995, type: 3}
+  m_PrefabInstance: {fileID: 6275902336542420114}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 2da0c512f12947e489f739169773d7ca, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
 --- !u!114 &2583738494202691757 stripped
 MonoBehaviour:
   m_CorrespondingSourceObject: {fileID: 8413625240241040447, guid: 91ab58663d236ea44980dfa0341dc995, type: 3}

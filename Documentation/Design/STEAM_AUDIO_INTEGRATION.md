@@ -1,5 +1,12 @@
 # Steam Audio Integration (Physical Acoustics)
 
+**Version:** 1.0  
+**Date:** 2026-07-03  
+**Status:** **Draft — far-horizon (sound engine v3+).** Not scheduled, and gated on the base sound
+engine (S0–S3) shipping first — which has not started. SDK specifics MUST be re-verified against the
+then-current Steam Audio release before any implementation work; see §8.  
+**Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
+
 > **Draft** exploration of integrating Valve's **Steam Audio** SDK as the v3+ acoustics extension
 > of the sound engine: HRTF binaural spatialization, physically-based occlusion & transmission,
 > and real-time reflections/reverb derived from the voxel world itself. The central architectural
@@ -27,6 +34,13 @@
   strategy relies on `BurstCompiler.CompileFunctionPointer` interop rules.
 - [`../Architecture/DATA_STRUCTURES.md`](../Architecture/DATA_STRUCTURES.md) — the packed-`uint`
   voxel model the custom ray tracer reads.
+
+
+
+**Audited:** 2026-07-03 (drafted alongside the parent design; no code exists for either).
+This document is a **direction record**, not a verified plan: the voxel-side reasoning is grounded in
+the engine's existing packed-`uint` raycast patterns, but every Steam Audio API claim below was written
+against the SDK documentation of the day and has **not** been re-checked since.
 
 ---
 
@@ -241,3 +255,27 @@ This doc was written from SDK knowledge that will be stale by v3. Before SA-0:
    `Validate Sound Engine` suite (fixture snapshot → known rays → expected hits/materials),
    independent of the Steam Audio runtime. Simulation output itself is verified by ear, as with
    the parent design's audible layer.
+
+---
+
+## Document History
+
+*Entries below the newest are reconstructed from git history — this document predates the
+project's Document History convention, so they record what the commits changed rather than
+contemporaneous notes.*
+
+* **v1.0** - Mandatory header completed (2026-07-26): `Version`/`Date`/`Status`/`Target` and an
+  `Audited` line stating plainly that the SDK claims are unverified. Status lifted out of the summary
+  blockquote into a proper field. No design content changed. First versioned edition.
+* *(2026-07-03, `0da76ddf`)* - Initial draft: integrate Steam Audio for HRTF spatialization,
+  physically-based occlusion/transmission and real-time reverb, **skipping acoustic mesh export
+  entirely** by answering the SDK's custom ray-tracer callbacks directly against the packed-`uint`
+  voxel data — the same "the voxel array *is* the geometry" approach used for placement raycasts and
+  voxel physics.
+
+---
+
+**Last Updated:** 2026-07-26 (header completed; still a far-horizon draft)  
+**Next Review:** only when [`SOUND_ENGINE_DESIGN.md`](SOUND_ENGINE_DESIGN.md) S0–S3 have shipped. At
+that point re-verify every SDK claim against the current Steam Audio release before trusting any
+section — the §8 checklist exists for exactly that pass.

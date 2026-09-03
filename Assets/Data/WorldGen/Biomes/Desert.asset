@@ -13,6 +13,12 @@ MonoBehaviour:
   m_Name: Desert
   m_EditorClassIdentifier: Assembly-CSharp::Data.WorldTypes.StandardBiomeAttributes
   biomeName: Desert
+  ambientTracks:
+  - clip: {fileID: 8300000, guid: f8da20e74d48620449e7fd49c5dd04af, type: 3}
+    yRange: {x: 0, y: 128}
+    playChance: 1
+    volume: 1
+  musicTracks: []
   debugPreviewColor: {r: 0.85, g: 0.8, b: 0.5, a: 1}
   biomeWeightNoiseConfig:
     seedOffset: 1250

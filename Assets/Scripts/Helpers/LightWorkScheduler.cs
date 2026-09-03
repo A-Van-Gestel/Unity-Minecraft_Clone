@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using Benchmarks;
 using UnityEngine;
 
 namespace Helpers
@@ -72,7 +73,9 @@ namespace Helpers
         /// <param name="pos">Voxel-origin position of the chunk.</param>
         public void AddReady(Vector2Int pos)
         {
-            _waiting.Remove(pos);
+            // P9-0 §10 q4: close the park interval only when the chunk actually was parked, so a routine
+            // re-flag of an already-ready chunk does not manufacture a zero-length wait.
+            if (_waiting.Remove(pos)) PipelineTelemetry.StampUnparked(pos);
             _ready.Add(pos);
         }
 
@@ -97,7 +100,7 @@ namespace Helpers
         public void MarkWaiting(Vector2Int pos)
         {
             _ready.Remove(pos);
-            _waiting.Add(pos);
+            if (_waiting.Add(pos)) PipelineTelemetry.StampParked(pos);
         }
 
         /// <summary>
@@ -107,7 +110,12 @@ namespace Helpers
         public void Remove(Vector2Int pos)
         {
             _ready.Remove(pos);
-            _waiting.Remove(pos);
+
+            // Forgetting a parked chunk ends its wait. The elapsed time is NOT reported — only chunks that
+            // reach MeshApplied contribute a parked sample, and this path is usually an unload — so the
+            // stamp exists to close the interval, not to record it: an interval left open would otherwise
+            // be credited to whatever journey next traces this coord.
+            if (_waiting.Remove(pos)) PipelineTelemetry.StampUnparked(pos);
         }
 
         /// <summary>
@@ -146,6 +154,14 @@ namespace Helpers
             int promoted = _waiting.Count;
             if (promoted > 0)
             {
+                // The per-position stamp walk runs only while telemetry is capturing. The bulk UnionWith is
+                // the hot path this method exists to keep cheap, so it is left untouched for ordinary play.
+                if (PipelineTelemetry.Enabled)
+                {
+                    foreach (Vector2Int pos in _waiting)
+                        PipelineTelemetry.StampUnparked(pos);
+                }
+
                 _ready.UnionWith(_waiting);
                 _waiting.Clear();
             }
@@ -158,6 +174,15 @@ namespace Helpers
         /// </summary>
         public void Clear()
         {
+            // P9-0: the only other park exit that must close its interval. Harmless today — everything this
+            // drops is also unloaded, and an unloaded chunk contributes no parked sample — but leaving the
+            // one unclosed exit in place makes a future partial reset silently lose the measurement.
+            if (PipelineTelemetry.Enabled)
+            {
+                foreach (Vector2Int pos in _waiting)
+                    PipelineTelemetry.StampUnparked(pos);
+            }
+
             _ready.Clear();
             _waiting.Clear();
             // .NET Framework compatibility: ConcurrentQueue has no Clear() — drain it.
@@ -180,6 +205,8 @@ namespace Helpers
         private bool PromoteIfWaiting(Vector2Int pos)
         {
             if (!_waiting.Remove(pos)) return false;
+
+            PipelineTelemetry.StampUnparked(pos);
             _ready.Add(pos);
             return true;
         }

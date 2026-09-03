@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using Data;
 using Helpers;
 using UnityEngine;
 using Random = System.Random;
@@ -19,7 +20,7 @@ namespace Editor.Validation.Lighting.Framework
     /// <see cref="LightingTestWorld.CompleteLightingJob"/>, and in what order.
     /// </para>
     /// </summary>
-    public sealed class LightingFrameSimulator : ILightingCompletionDriver<Vector2Int>
+    public sealed class LightingFrameSimulator : IJobCompletionDriver<Vector2Int>
     {
         /// <summary>The order in which pending flights are completed within a single frame tick.</summary>
         public enum CompletionOrder
@@ -55,7 +56,7 @@ namespace Editor.Validation.Lighting.Framework
 
             /// <summary>Chunks that had pending work but were deferred because their neighbor terrain data
             /// was not ready — production's <see cref="LightingScheduleDecision.Result.NeighborsNotReady"/>
-            /// arm (<c>WorldJobManager.ScheduleLightingUpdate</c> sets <c>HasLightChangesToProcess = true</c>
+            /// arm (<c>WorldJobManager.ScheduleLightingUpdate</c> calls <c>ChunkData.FlagLightWork()</c>
             /// and returns without scheduling). The work is retained and retried once
             /// <see cref="LightingTestWorld.MarkNeighborsReady"/> is called. Kept separate from
             /// <see cref="ChunksStarved"/> so budget-pressure baselines stay meaningful.</summary>
@@ -99,8 +100,8 @@ namespace Editor.Validation.Lighting.Framework
         private readonly List<Vector2Int> _readyScratch = new List<Vector2Int>();
 
         // --- HF-4 #2: shared completion-pass driver state (per-pass scratch, reused) ---
-        // This simulator implements ILightingCompletionDriver<Vector2Int> and drives the same
-        // LightingCompletionPass skeleton production does, keying jobs by chunk coord (one in-flight job per
+        // This simulator implements IJobCompletionDriver<Vector2Int> and drives the same
+        // JobCompletionPass skeleton production does, keying jobs by chunk coord (one in-flight job per
         // chunk makes the coord a unique per-pass key).
         private readonly List<Vector2Int> _passCandidates = new List<Vector2Int>();
         private readonly Dictionary<Vector2Int, PendingFlight> _passFlights = new Dictionary<Vector2Int, PendingFlight>();
@@ -149,6 +150,12 @@ namespace Editor.Validation.Lighting.Framework
         public LightingFrameSimulator(LightingTestWorld world, int? seed = null, bool schedulerMode = false)
         {
             _world = world ?? throw new ArgumentNullException(nameof(world));
+
+            // The simulator's static grid↔origin conversions (ToVoxelOrigin/ToGridCoord) assume the
+            // identity anchor; far-anchored worlds are direct-harness-only until a scenario needs more.
+            if (world.AnchorChunk != Vector2Int.zero)
+                throw new NotSupportedException("LightingFrameSimulator does not support far-anchored worlds (AnchorChunk must be zero).");
+
             _rng = seed.HasValue ? new Random(seed.Value) : null;
             _schedulerMode = schedulerMode;
 
@@ -216,7 +223,7 @@ namespace Editor.Validation.Lighting.Framework
             FrameResult result = default;
 
             // --- Phase 1: Complete pending flights (selectively) via the shared completion-pass skeleton ---
-            // RunMergeLoop + RunRemoveAndPromote are the same LightingCompletionPass production drives in
+            // RunMergeLoop + RunRemoveAndPromote are the same JobCompletionPass production drives in
             // WorldJobManager.ProcessLightingJobs, so this replays production's fault isolation +
             // release-inside / remove-after ordering (HF-4 #2). Completion order stays a sim concern: it is
             // applied to the candidate list (BuildPassCandidates) before the skeleton iterates it. The driver
@@ -227,9 +234,9 @@ namespace Editor.Validation.Lighting.Framework
                 _currentPredicate = completionPredicate;
                 _chunksPromotedThisPass = 0;
 
-                LightingCompletionPass.RunMergeLoop(_passCandidates, this, _enrolledCoordsScratch);
+                JobCompletionPass.RunMergeLoop(_passCandidates, this, _enrolledCoordsScratch);
                 // No between-loop work for the sim (production batches dropped updates + mesh rebuilds here).
-                LightingCompletionPass.RunRemoveAndPromote(_enrolledCoordsScratch, this);
+                JobCompletionPass.RunRemoveAndPromote(_enrolledCoordsScratch, this);
 
                 result.JobsCompleted = _enrolledCoordsScratch.Count;
                 result.JobsCarriedOver = _carriedOverScratch.Count;
@@ -285,7 +292,7 @@ namespace Editor.Validation.Lighting.Framework
                     // Mirror production WorldJobManager.ScheduleLightingUpdate: leave the chunk's light
                     // work flagged and DON'T schedule. The chunk only reached here because it already has
                     // light work (the ChunkHasLightWork gate above), so the flag is already set — the
-                    // production "HasLightChangesToProcess = true" assignment is a no-op here. The work is
+                    // production's FlagLightWork() call is a no-op here. The work is
                     // retried on a later frame once MarkNeighborsReady is called.
                     result.ChunksNeighborsNotReady++;
                     continue;
@@ -343,14 +350,14 @@ namespace Editor.Validation.Lighting.Framework
             }
         }
 
-        // Explicit ILightingCompletionDriver<Vector2Int> implementation the shared LightingCompletionPass
+        // Explicit IJobCompletionDriver<Vector2Int> implementation the shared JobCompletionPass
         // sequences — the sim's mirror of WorldJobManager's per-job hooks. The sim holds no native
         // containers, so CompleteJob/ReleaseJob are no-ops and completion+merge collapse into MergeJob
         // (CompleteLightingJob). Explicit so they stay off the simulator's public API. _currentPredicate /
         // _passFlights are the per-pass context set by RunFrame's Phase 1.
 
         /// <inheritdoc />
-        bool ILightingCompletionDriver<Vector2Int>.IsComplete(Vector2Int key)
+        bool IJobCompletionDriver<Vector2Int>.IsComplete(Vector2Int key)
         {
             PendingFlight pf = _passFlights[key];
             int age = _currentFrame - pf.ScheduledOnFrame;
@@ -364,19 +371,19 @@ namespace Editor.Validation.Lighting.Framework
         }
 
         /// <inheritdoc />
-        void ILightingCompletionDriver<Vector2Int>.CompleteJob(Vector2Int key)
+        void IJobCompletionDriver<Vector2Int>.CompleteJob(Vector2Int key)
         {
             /* sim completes in MergeJob */
         }
 
         /// <inheritdoc />
-        void ILightingCompletionDriver<Vector2Int>.OnCompleteFault(Vector2Int key, Exception e)
+        void IJobCompletionDriver<Vector2Int>.OnCompleteFault(Vector2Int key, Exception e)
         {
             /* sim CompleteJob never throws */
         }
 
         /// <inheritdoc />
-        void ILightingCompletionDriver<Vector2Int>.MergeJob(Vector2Int key)
+        void IJobCompletionDriver<Vector2Int>.MergeJob(Vector2Int key)
         {
             // B7 fault-injection hook (default null = no-op): model a merge that faults after the job
             // completed — AbortLightingJob discards the result + clears the in-flight marker (like
@@ -392,7 +399,7 @@ namespace Editor.Validation.Lighting.Framework
         }
 
         /// <inheritdoc />
-        void ILightingCompletionDriver<Vector2Int>.OnMergeFault(Vector2Int key, Exception e)
+        void IJobCompletionDriver<Vector2Int>.OnMergeFault(Vector2Int key, Exception e)
         {
             LastFaultedMergeJobs++;
 
@@ -402,13 +409,13 @@ namespace Editor.Validation.Lighting.Framework
         }
 
         /// <inheritdoc />
-        void ILightingCompletionDriver<Vector2Int>.ReleaseJob(Vector2Int key)
+        void IJobCompletionDriver<Vector2Int>.ReleaseJob(Vector2Int key)
         {
             /* sim holds no per-job containers */
         }
 
         /// <inheritdoc />
-        void ILightingCompletionDriver<Vector2Int>.RemoveAndPromote(Vector2Int key)
+        void IJobCompletionDriver<Vector2Int>.RemoveAndPromote(Vector2Int key)
         {
             // Completion is the load-bearing MT-2 promotion hook: it un-parks the chunk itself (if it
             // re-flagged mid-flight) and any neighbor whose AreNeighborsReadyAndLit gate this completion
@@ -464,13 +471,15 @@ namespace Editor.Validation.Lighting.Framework
                     continue;
                 }
 
+                // Lazy gates, exactly as production's scan runs them (LP-6) — the simulator must not walk a
+                // gate the real scan skips, or its scheduling fidelity would diverge from the code it models.
                 LightingScanDecision.ScanAction action = LightingScanDecision.EvaluateReadyChunk(
                     _world.IsChunkInFlight(coord),
                     _world.ChunkNeedsInitialLighting(coord),
                     _world.ChunkNeedsEdgeCheck(coord),
                     _world.ChunkHasLightWork(coord),
-                    _world.AreNeighborsDataReady(coord),
-                    _world.AreNeighborsReadyAndLit(coord));
+                    _world,
+                    new ChunkCoord(coord.x, coord.y));
 
                 switch (action)
                 {

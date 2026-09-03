@@ -1,8 +1,18 @@
 # Design Document: AOT World Migration System
 
-**Version:** 1.1  
-**Date:** 2026-02-24  
-**Status:** Implemented (Stable)  
+**Version:** 1.2  
+**Date:** 2026-07-17  
+**Status:** Implemented (Stable)
+
+> **Reading the code listings below:** they are illustrative of the *design*, not a mirror of the source, and they
+> have drifted in three places (noted 2026-07-17, when the v12→v13 migration was written against them).
+> `WorldMigrationStep` also has an **abstract `ChangeSummary`** (a player-facing one-liner shown in the migration
+> prompt) that §2's listing omits — a new step will not compile without it. The naming convention is
+> `Migration_v{S}_to_v{T}_{Desc}.**cs**` for the *file* but `MigrationV{S}ToV{T}{Desc}` for the *class*, not the
+> underscored class name §5's example shows. And §6's "do not set the version field inside `MigrateLevelDat`" is
+> sound advice that **every shipped step violates** — harmlessly, since the manager re-stamps it afterwards, but do
+> not be surprised by it. `MigrationManager._steps` (§3) is the real registration list.
+
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)  
 **Context:** Infinite Voxel Engine Serialization (Region-Based)
 
@@ -528,11 +538,38 @@ namespace UI
 }
 ```
 
+### 4.1. Version-tolerant reads: `LevelDatCodec` (2026-07-17)
+
+Disk migration runs only when a world is **played** — but `level.dat` is *read* earlier and more often:
+the world list, the selection details panel (minimap player marker, border radius), and `World.StartWorld`'s
+editor-replay path all parse it through `SaveSystem.LoadWorldMetadata`. Parsing an old document directly with
+the live `WorldSaveData` was only ever accidentally safe (additive changes default missing fields); the v13
+`player.position` re-type broke it — JsonUtility silently blanks the field (§6), which put every unmigrated
+world's minimap marker at chunk (0, 0).
+
+`Assets/Scripts/Serialization/LevelDatCodec.cs` closes this class of bug by reusing the migration steps as a
+**read codec**: `ReadNormalized(json)` probes the version and, for old documents, folds the pending steps'
+`MigrateLevelDat` transforms over the JSON **in memory** before the live-type parse. The frozen DTOs inside
+the steps are the codec tables, so a future format change extends the read path automatically when its step
+is registered. Three invariants:
+
+- **Read-only.** The codec never writes to disk; on-disk migration (backup, rollback, chunks) remains
+  exclusively `MigrationManager`'s job at Play time.
+- **`version` stays the on-disk value.** Only the *contents* are normalized — `RequiresMigration` and the
+  menu's version UI still key off the real disk version.
+- **Fails open.** A broken step chain degrades to the raw live-type parse (the pre-codec behavior) with an
+  error log, never a blocked world list.
+
 ---
 
-## 5. The "True DTO" Migration Example (`Migration_v1_to_v2_RemoveNeedsLight.cs`)
+## 5. The "True DTO" Migration Example (illustrative — not a real file)
 
-This file is a complete, self-contained historical record of the v1 chunk binary layout. A developer working on this codebase in three years can open this single file and know exactly what a v1 chunk looked like on disk — no other files are needed. Every magic number is
+> **`Migration_v1_to_v2_RemoveNeedsLight` below is a teaching example, not a step in this codebase.** The
+> real v1→v2 step is [`Migration_v1_to_v2_RegionRepack.cs`](../../Assets/Scripts/Serialization/Migration/Steps/Migration_v1_to_v2_RegionRepack.cs)
+> (it repacks region files from the broken voxel-space addressing scheme to chunk-index space). Do not go
+> looking for the filename in this heading — read it as the pattern every step should follow.
+
+A step written this way is a complete, self-contained historical record of the chunk binary layout it reads. A developer working on this codebase in three years can open the single file and know exactly what a chunk of that version looked like on disk — no other files are needed. Every magic number is
 mathematically traced to its source.
 
 ```csharp
@@ -616,9 +653,9 @@ namespace Serialization.Migration.Steps
             //     byte (1) : node.OldLightLevel     (LightQueueNode.OldLightLevel is byte)
             //   Total per node: 4 + 4 + 4 + 1 = 13 bytes
             //
-            // Two queues are written consecutively: SunlightBfsQueue, then BlocklightBfsQueue.
-            int    sunCount      = reader.ReadInt32();
-            byte[] sunQueueData  = reader.ReadBytes(sunCount * 13);
+            // Two queues are written consecutively: SkylightBfsQueue, then BlocklightBfsQueue.
+            int    skyCount      = reader.ReadInt32();
+            byte[] skyQueueData  = reader.ReadBytes(skyCount * 13);
             int    blockCount    = reader.ReadInt32();
             byte[] blockQueueData = reader.ReadBytes(blockCount * 13);
 
@@ -644,8 +681,8 @@ namespace Serialization.Migration.Steps
                     writer.Write(v1Sections[i]);
             }
 
-            writer.Write(sunCount);
-            writer.Write(sunQueueData);
+            writer.Write(skyCount);
+            writer.Write(skyQueueData);
             writer.Write(blockCount);
             writer.Write(blockQueueData);
 
@@ -661,6 +698,26 @@ namespace Serialization.Migration.Steps
 
 These rules apply to every new `WorldMigrationStep` written against this system.
 
+**Frozen DTOs are not optional for `level.dat` either — and an additive change will not tell you.** *(Added
+2026-07-17, learned the expensive way during WS-4c.)* Four shipped steps — v3→v4, v6→v7, v10→v11, v11→v12 — read
+the **live** `WorldSaveData`, mutated one field, and wrote it back. That is fine for an *additive* change, because
+`JsonUtility` fills an absent field with a default, and every `level.dat` change up to v12 was additive. So the rule
+in §1.2 went unenforced for nine versions with no symptom.
+The v12→v13 **re-type** (`player.position`: `Vector3` → `ChunkRelativePosition`) is what it cannot survive: an old
+document's `"position":{"x":..,"y":..,"z":..}` has none of the members the new type looks for, so the field is
+**silently defaulted and written away** — no exception, no log, the player's position simply gone in every save
+below v13 (there were ~200 of them on disk at the time, spanning v1–v12). The backup is the only recourse, and the
+player has to know to use it.
+The fix is `Steps/LegacyLevelDat.cs`: one frozen DTO for the whole v1–v12 `level.dat` shape, which those four steps
+now read. **Why one shape covers all four:** a step migrating vN→vN+1 only ever sees vN-shaped JSON, and additive
+history means the v12 shape is a superset of anything they can receive — so it can never *drop* a field (a v3
+document has no v11 fields to lose), and fields the source lacks are written at their defaults and then set
+correctly by the later step that owns them. **Never extend a frozen DTO.** A future re-type writes its own for its
+own era; that is the entire point.
+The general rule, stated so the next person does not have to rediscover it: **if a step round-trips the whole
+document through a live type, it is a landmine waiting for the first non-additive change.** Freeze it when you
+write it, not when it breaks.
+
 **Always fully parse every field.** The `remainder` pattern — reading everything after a known point as an opaque blob — is forbidden. It is only safe for changes to the last field in a struct. Any change anywhere other than the final field will silently misalign all subsequent
 bytes in every affected chunk. Read every field explicitly and write them in the new order.
 
@@ -669,10 +726,47 @@ bytes in every affected chunk. Read every field explicitly and write them in the
 
 **Do not set the version field in `level.dat` inside `MigrateLevelDat`.** The manager stamps `SaveSystem.CURRENT_VERSION` onto `level.dat` after all steps have run. Setting it inside a step can conflict with multi-step chains and will cause a discrepancy if a step is skipped.
 
-**Register new steps in `MigrationManager._steps` in ascending version order.** Reflection-based auto-registration is not used because it has unreliable behaviour under IL2CPP with Unity's AOT compilation pipeline. Explicit registration is two lines and eliminates a class of
+**Register new steps in `MigrationManager._steps` in ascending version order.** Reflection-based auto-registration is not used because it has unreliable behavior under IL2CPP with Unity's AOT compilation pipeline. Explicit registration is two lines and eliminates a class of
 hard-to-diagnose runtime crashes on mobile and console builds.
 
 **Do not use `World.Instance` anywhere in the migration pipeline.** The migration runs before the World scene loads. Any reference to `World.Instance` will be a null reference exception.
+
+**Do not change what an already-shipped step produces.** A step's byte transform must stay identical for every input it has ever handled; semantic changes belong in a NEW step. Non-semantic hardening (error handling, fault isolation, logging) is fine.
+
+*One authorized exception exists, recorded here so it is not read as precedent.* On 2026-08-10 (RF-1) the shipped `MigrationV13ToV14EnvironmentWind` was revised to emit its `environment` section under `worldState` instead of at the document root, so all world state would share one parent. The project owner authorized it explicitly on the grounds that v14 had reached exactly one local test world, the change is `level.dat`-only, and every affected save was theirs. A v14 document written before the revision keeps its root-level `environment` and reads as calm wind — it is not re-migrated, because it is already stamped v14. **Any future world format that has reached a real save must take the new-step route instead.**
+
+**There is a validation suite now — add your step to it.** `Minecraft Clone/Dev/Validate Migration Chain`
+(`Assets/Editor/Validation/MigrationChain/`) folds the registered steps' `MigrateLevelDat` transforms over frozen
+documents (v1, v3, v12) and drives `MigrationManager` end-to-end over a real volatile-path world: the version stamp,
+the chunk loop, the backup, the corruption prompt, and rollback. A new `level.dat` step should arrive with a
+fully-populated fixture of its source era, asserting both what it injects and every field it must carry through —
+that is the failure class this system has (field loss is silent, and `LevelDatCodec` fails *open* to a raw parse, so
+a broken chain reds nothing at runtime). Two measurements the suite recorded when it landed, worth knowing before
+you touch this file:
+
+- **The manager's post-chain version stamp is redundant for a complete chain.** Deleting
+  `saveData.version = SaveSystem.CURRENT_VERSION` from `MigrateGlobalFiles` leaves every end-to-end scenario green,
+  because each shipped step also sets the version inside `MigrateLevelDat` — the thing this section forbids two
+  paragraphs above. Both halves stay as they are: the rule is right for new steps, and rewriting a shipped step's
+  output is forbidden regardless.
+- **Every numbered step now has coverage, but read what kind.** The chunk-payload rewrites are driven from an
+  authored chunk-format **v1/v2** fixture, and one fixture is enough for all five: the manager re-reads the version
+  byte between steps, so a single payload walks v3 → v4 → v5 → v6 → v7. The fixture's *input* layout is derived from
+  the steps' own read definitions, so it cannot catch a step that has always misread its input; the *output* is
+  validated by the real `ChunkSerializer.Deserialize`, which is independent of the fixture.
+- **The two region passes are sequential, not exclusive — do not "optimize" that back.** `RunAOTMigrationAsync`
+  runs the region-layout pass (when a step requests one) and *then* the per-chunk pass over the folder the layout
+  pass swapped in. A v1 world needs both: `MigrationV1ToV2RegionRepack` is the only step requesting a layout
+  migration, and it deliberately leaves the payload bytes alone, so without the second pass a v1 world ends up
+  repacked to correct addresses with chunk-format v1 payloads inside a world stamped current — every chunk then
+  regenerates from seed. That was a real regression (2026-03-30 → 2026-08-21); it is archived as
+  [`../Bugs/_FIXED_BUGS.md`](../Bugs/_FIXED_BUGS.md) **Serialization 07** and guarded by the suite's **B25**.
+  Two things that look like cleanups but are not: gating the per-chunk pass on "the path contains a chunk-format
+  step" (it also recompresses, defragments and detects corrupted chunks — a `level.dat`-only path still needs it),
+  and folding the format chain into `PerformRegionLayoutMigration` (that changes a shipped step's output, which
+  this section forbids).
+
+**A step that REMOVES a field must mirror the whole target shape in its DTO.** Up to v14 every `level.dat` step was additive, so an incomplete DTO was merely lossy in theory. `MigrationV14ToV15TimeOfDay` is the first removal (`worldState.timeOfDay` → `worldState.time`): whatever its `V15LevelDat` omits is dropped from every migrated document, because the step re-serializes from the DTO.
 
 ---
 

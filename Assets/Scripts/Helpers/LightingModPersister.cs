@@ -13,7 +13,7 @@ namespace Helpers
     /// the editor lighting validation harness compute a modification's LOCAL column inside its target chunk
     /// — and apply the same in-footprint bounds guard — through identical code, mirroring the existing
     /// <see cref="LightingJobProcessor"/> / <see cref="CrossChunkLightModApplier"/> seams. The off-by-one
-    /// risk in the column math lives here once; callers own the channel dispatch (sunlight column recalc
+    /// risk in the column math lives here once; callers own the channel dispatch (skylight column recalc
     /// vs. pending blocklight store) and any logging of the rejected case.
     /// </para>
     /// </summary>

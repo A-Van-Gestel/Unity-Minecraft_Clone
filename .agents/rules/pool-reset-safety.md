@@ -41,20 +41,25 @@ This project uses custom object pools (`DynamicPool<T>`, `ConcurrentDynamicPool<
 - Any field marked `[NonSerialized]`
 - Any field that is not part of the on-disk save format
 - Any runtime flag, counter, queue, or cached reference that accumulates state during a chunk's lifecycle
-- Any `bool` that gates pipeline progression (`NeedsInitialLighting`, `IsAwaitingMainThreadProcess`, etc.)
+- Any `bool` that gates pipeline progression (`NeedsInitialLighting`, `HasLightChangesToProcess`, etc.)
 
 ## Reset value guidelines
 
 - **Flags and booleans:** reset to their "not yet started" default (usually `false`).
 - **Counters with a non-zero default** (e.g., `RemainingEdgeCheckRounds = 2`): reset to the same value used in the constructor or initial assignment — not `0`.
+- **Monotonic lifecycle counters** (e.g., `ChunkData.LifecycleEpoch`): their "reset" is an **increment**, never a return-to-default — the whole point is distinguishing recycles. Document this on the field, add the field name to B34's `MonotonicTransientFields` exemption list (`LightingAssert`), and give it an explicit must-change assertion there — an exempted field with no explicit assertion is a silent coverage hole.
 - **Collections** (queues, hashsets, lists): call `.Clear()` to retain allocated capacity.
 - **Arrays** (voxel data, heightmaps): use `Array.Clear()` to zero out while retaining the allocation.
 - **Object references** (e.g., `ChunkData.Chunk`): set to `null` to unlink.
 - **Native containers**: `.Dispose()` in `Release()`, not `Reset()` — they are re-allocated on demand.
 
-## Property setter subtlety
+## Lighting work byte subtlety
 
-`ChunkData` lighting flags (`NeedsInitialLighting`, `HasLightChangesToProcess`, `NeedsEdgeCheck`) use property setters that invoke `OnLightWorkFlagged` when set to `true`. In `Reset()`, always set these through the property (not the backing field) so the guard logic runs correctly. Setting to `false` does NOT fire the callback — this is intentional.
+`ChunkData`'s lighting flags (`NeedsInitialLighting`, `HasLightChangesToProcess`, `NeedsEdgeCheck`) are bits of one `[Flags] LightingWork` byte, exposed as **get-only** bool adapters. They have no setters; every write goes through a named transition method, and all of those funnel into one private `SetWork` that fires `OnLightWorkFlagged` when a bit rises `0→1`. Clearing does NOT fire the callback — this is intentional.
+
+In `Reset()`, clear the whole set with `ClearAllLightingWork()` rather than touching the field, so the funnel runs.
+
+**The trap this field sets for B34:** the reset backstop sweeps `[NonSerialized]` fields by reflection, and its filter was `Type.IsPrimitive` — which is **false for enums**. The work byte escaped the sweep entirely until `IsEnum` was admitted. If you add an enum-typed transient to a pooled type, confirm the backstop actually covers it; a green B34 is not evidence on its own.
 
 ## Verification checklist
 

@@ -13,12 +13,12 @@ using UnityEngine;
 namespace Jobs
 {
     /// <summary>
-    /// One provisional cross-seam sunlight re-light performed by <see cref="NeighborhoodLightingJob"/>'s
+    /// One provisional cross-seam skylight re-light performed by <see cref="NeighborhoodLightingJob"/>'s
     /// darkness-wave pull-back: the job trusted its schedule-time SNAPSHOT of a neighbor voxel to re-light
     /// a just-darkened center border voxel. The snapshot may be stale (the neighbor darkened after it was
     /// taken), which plants sourceless "ghost" light nothing ever revisits (Bug 14) — so every claim is
     /// re-verified on the main thread at merge time against the neighbor's LIVE data, and a claim the live
-    /// source no longer supports is routed through the standard cross-chunk sunlight-removal veto.
+    /// source no longer supports is routed through the standard cross-chunk skylight-removal veto.
     /// </summary>
     public struct PullBackClaim
     {
@@ -57,14 +57,14 @@ namespace Jobs
         public NativeArray<uint> PaddedVoxels;
 
         // Padded ushort light volume. Gathered first, then the ONLY writable light store. It also serves
-        // as the in-job cross-chunk read-back store: a SetSunlight/SetBlocklightRGB into a halo cell writes
+        // as the in-job cross-chunk read-back store: a SetSkylight/SetBlocklightRGB into a halo cell writes
         // the padded volume directly (replacing the deleted NativeHashMap write-through cache), so a
         // subsequent Get*Data on that position observes the just-written value within the same job execution.
         public NativeArray<ushort> PaddedLight;
 
         // P-2 Layer 1: gather SOURCES — the center + 8 neighbor section-contiguous full-chunk snapshot maps
         // the worker-thread gather reads into the padded volumes above. Compass directions match
-        // WorldJobManager.AcquireNeighborMaps / NeighborMapSet. Each is a point-in-time snapshot copied by
+        // Helpers.NeighborMapAssembler / NeighborMapSet. Each is a point-in-time snapshot copied by
         // the main thread before scheduling (read-only here). A missing neighbor is passed as a created
         // zero-length array (NOT default — Unity job-safety requires every container be constructed), which
         // ChunkMath.GatherPadded* sentinel-fills (uint/ushort MaxValue) exactly as before.
@@ -125,9 +125,9 @@ namespace Jobs
         public Vector2Int ChunkPosition;
 
         // Queues of initial changes to process
-        public NativeQueue<LightQueueNode> SunlightBfsQueue;
+        public NativeQueue<LightQueueNode> SkylightBfsQueue;
         public NativeQueue<LightQueueNode> BlocklightBfsQueue;
-        public NativeQueue<Vector2Int> SunlightColumnRecalcQueue;
+        public NativeQueue<Vector2Int> SkylightColumnRecalcQueue;
 
         // Read-only heightmap.
         [ReadOnly]
@@ -152,7 +152,7 @@ namespace Jobs
 
         // LI-2 bottom band: global Y of the band's first gathered row. Rows below BandMinY are
         // inert-dark in every chunk by the derivation (light uniformly 0, no emitters, no wave — incl.
-        // the unbounded downward vertical-sunlight rule — can reach them; see
+        // the unbounded downward vertical-skylight rule — can reach them; see
         // LightingBandDecision.DeriveBandMinY), so reads there are answered virtually from
         // BandBottomLight and writes are value-preserving skips. The derivation's headroom additionally
         // proves those reads/writes UNREACHABLE — the virtual paths are defense-in-depth, guarded by the
@@ -318,30 +318,30 @@ namespace Jobs
                 LightW, LightE, LightS, LightN, LightSW, LightNW, LightSE, LightNE, BandMinY, BandHeight);
 
             // Internal queues for the actual flood-fill algorithm. These are temporary for this job's execution.
-            NativeQueue<LightRemovalNode> sunlightRemovalQueue = new NativeQueue<LightRemovalNode>(Allocator.Temp);
-            NativeQueue<Vector3Int> sunlightPlacementQueue = new NativeQueue<Vector3Int>(Allocator.Temp);
+            NativeQueue<LightRemovalNode> skylightRemovalQueue = new NativeQueue<LightRemovalNode>(Allocator.Temp);
+            NativeQueue<Vector3Int> skylightPlacementQueue = new NativeQueue<Vector3Int>(Allocator.Temp);
             NativeQueue<LightRemovalNode> blocklightRemovalQueue = new NativeQueue<LightRemovalNode>(Allocator.Temp);
             NativeQueue<Vector3Int> blocklightPlacementQueue = new NativeQueue<Vector3Int>(Allocator.Temp);
 
             // LI-1: cross-chunk modifications no longer need a separate write-through cache. The halo
-            // cells of the padded light volume ARE the cross-chunk read-back store: SetSunlight /
+            // cells of the padded light volume ARE the cross-chunk read-back store: SetSkylight /
             // SetBlocklightRGB write the halo cell of PaddedLight in place, so subsequent Get*Data reads
             // see the just-written value — the property the old NativeHashMap<long, ulong> cache provided
             // (it existed only because [ReadOnly] neighbor arrays could not be written). Voxels are never
             // mutated, so darkness-removal results being visible to the re-spreading phase still holds.
 
-            // Dedup set for Bug-12 cross-seam sunlight removal mods: a darkness wave can reach the same
-            // cross-chunk neighbor from many removal nodes, and EmitCrossChunkSunlightRemoval (unlike
-            // SetSunlight) writes neither the padded light volume nor anything else, so nothing else
+            // Dedup set for Bug-12 cross-seam skylight removal mods: a darkness wave can reach the same
+            // cross-chunk neighbor from many removal nodes, and EmitCrossChunkSkylightRemoval (unlike
+            // SetSkylight) writes neither the padded light volume nor anything else, so nothing else
             // suppresses a revisit. One removal mod per neighbor is sufficient (the main-thread apply is
             // idempotent), so we record emitted neighbor keys here and skip duplicates — keeping
             // CrossChunkLightMods from growing by O(wavefront) redundant entries (and the matching
             // redundant apply-side in-chunk-support scans). Keyed by EncodeNeighborKey.
-            NativeHashMap<long, byte> emittedSunRemovals = new NativeHashMap<long, byte>(16, Allocator.Temp);
+            NativeHashMap<long, byte> emittedSkyRemovals = new NativeHashMap<long, byte>(16, Allocator.Temp);
 
             // Bug 18: the same dedup set for the RGB cross-seam removal initiator (the blocklight mirror of
-            // the Bug 12 sunlight initiator). Kept distinct from emittedSunRemovals — both key on
-            // EncodeNeighborKey, so a shared set would let a sunlight removal to a neighbor suppress a
+            // the Bug 12 skylight initiator). Kept distinct from emittedSkyRemovals — both key on
+            // EncodeNeighborKey, so a shared set would let a skylight removal to a neighbor suppress a
             // legitimate blocklight removal to the same neighbor.
             NativeHashMap<long, byte> emittedBlockRemovals = new NativeHashMap<long, byte>(16, Allocator.Temp);
 
@@ -358,7 +358,7 @@ namespace Jobs
             // it is queued for correction via the standard BFS passes.
             if (PerformEdgeCheck)
             {
-                CheckEdges(sunlightPlacementQueue, blocklightPlacementQueue);
+                CheckEdges(skylightPlacementQueue, blocklightPlacementQueue);
             }
 
             // --- PASS 0: SEEDING ---
@@ -366,34 +366,34 @@ namespace Jobs
             // phase loops' fail-safe work budget (MAX_BFS_NODES_PER_PASS) — an over-accumulated
             // input queue aborts loudly instead of feeding a runaway.
             long bfsWork = 0;
-            while (SunlightColumnRecalcQueue.TryDequeue(out Vector2Int column))
+            while (SkylightColumnRecalcQueue.TryDequeue(out Vector2Int column))
             {
-                RecalculateSunlightForColumn(column.x, column.y, sunlightPlacementQueue, sunlightRemovalQueue);
+                RecalculateSkylightForColumn(column.x, column.y, skylightPlacementQueue, skylightRemovalQueue);
             }
 
-            while (SunlightBfsQueue.TryDequeue(out LightQueueNode node))
+            while (SkylightBfsQueue.TryDequeue(out LightQueueNode node))
             {
                 if (++bfsWork > MAX_BFS_NODES_PER_PASS)
                 {
-                    LogWorkCapAbort("sunSeed");
+                    LogWorkCapAbort("skySeed");
                     break;
                 }
 
                 uint currentPacked = GetPackedData(node.Position);
                 if (currentPacked == uint.MaxValue) continue;
                 ushort currentLightData = GetLightData(node.Position);
-                byte currentLight = LightBitMapping.GetSkyLight(currentLightData);
+                byte currentLight = LightBitMapping.GetSkylight(currentLightData);
                 if (currentLight < node.OldLightLevel)
-                    sunlightRemovalQueue.Enqueue(new LightRemovalNode { Pos = node.Position, LightLevel = node.OldLightLevel });
+                    skylightRemovalQueue.Enqueue(new LightRemovalNode { Pos = node.Position, LightLevel = node.OldLightLevel });
                 else if (currentLight > node.OldLightLevel)
-                    sunlightPlacementQueue.Enqueue(node.Position);
+                    skylightPlacementQueue.Enqueue(node.Position);
                 else if (currentLight > 0)
                     // Unchanged-but-lit: an opacity-only change can keep the voxel's own value while
                     // altering what its neighbors should receive (e.g. breaking a stone-top block
                     // leaves the new air at its old stamped 15, but the faces it just exposed were
                     // never stamped — Bug 15's in-chunk case). Re-spread; a no-deficiency wave is a
                     // bounded no-op since PropagateLight only writes increases.
-                    sunlightPlacementQueue.Enqueue(node.Position);
+                    skylightPlacementQueue.Enqueue(node.Position);
             }
 
             while (BlocklightBfsQueue.TryDequeue(out LightQueueNode node))
@@ -409,7 +409,7 @@ namespace Jobs
 
                 // No ushort.MaxValue sentinel check: the GetPackedData bounds check above proves the position is valid,
                 // and a fully-lit voxel (sky 15 + RGB 15,15,15) packs to exactly 0xFFFF — the sentinel would silently skip it
-                // (e.g. a white lamp on a sunlit surface would neither propagate on place nor clear on break).
+                // (e.g. a white lamp on a skylit surface would neither propagate on place nor clear on break).
                 ushort currentLight = GetLightData(node.Position);
                 byte curR = LightBitMapping.GetBlocklightR(currentLight);
                 byte curG = LightBitMapping.GetBlocklightG(currentLight);
@@ -454,26 +454,26 @@ namespace Jobs
             // The propagation logic now seamlessly crosses chunk borders within the 3x3 grid.
             // One shared fail-safe work budget across the four phase loops (MAX_BFS_NODES_PER_PASS):
             // a runaway pass aborts loudly instead of growing its queues until OOM.
-            while (sunlightRemovalQueue.TryDequeue(out LightRemovalNode node))
+            while (skylightRemovalQueue.TryDequeue(out LightRemovalNode node))
             {
                 if (++bfsWork > MAX_BFS_NODES_PER_PASS)
                 {
-                    LogWorkCapAbort("sunRemoval");
+                    LogWorkCapAbort("skyRemoval");
                     break;
                 }
 
-                PropagateDarkness(node, LightChannel.Sun, sunlightPlacementQueue, sunlightRemovalQueue, ref emittedSunRemovals, ref emittedBlockRemovals);
+                PropagateDarkness(node, LightChannel.Sky, skylightPlacementQueue, skylightRemovalQueue, ref emittedSkyRemovals, ref emittedBlockRemovals);
             }
 
-            while (sunlightPlacementQueue.TryDequeue(out Vector3Int pos))
+            while (skylightPlacementQueue.TryDequeue(out Vector3Int pos))
             {
                 if (++bfsWork > MAX_BFS_NODES_PER_PASS)
                 {
-                    LogWorkCapAbort("sunPlacement");
+                    LogWorkCapAbort("skyPlacement");
                     break;
                 }
 
-                PropagateLight(pos, LightChannel.Sun, sunlightPlacementQueue);
+                PropagateLight(pos, LightChannel.Sky, skylightPlacementQueue);
             }
 
             while (blocklightRemovalQueue.TryDequeue(out LightRemovalNode node))
@@ -486,7 +486,7 @@ namespace Jobs
 
                 if (bfsWork > MAX_BFS_NODES_PER_PASS - NEAR_CAP_NODE_DUMP)
                     LogNodeNearCap("blockRemoval", node.Pos, node.LightR, node.LightG, node.LightB);
-                PropagateDarkness(node, LightChannel.Block, blocklightPlacementQueue, blocklightRemovalQueue, ref emittedSunRemovals, ref emittedBlockRemovals);
+                PropagateDarkness(node, LightChannel.Block, blocklightPlacementQueue, blocklightRemovalQueue, ref emittedSkyRemovals, ref emittedBlockRemovals);
             }
 
             while (blocklightPlacementQueue.TryDequeue(out Vector3Int pos))
@@ -509,16 +509,16 @@ namespace Jobs
 
             // --- FINAL STEP ---
             // The lighting is stable if no more work was generated during this pass, AND no work was passed to neighbors.
-            IsStable[0] = sunlightRemovalQueue.IsEmpty() && sunlightPlacementQueue.IsEmpty() &&
+            IsStable[0] = skylightRemovalQueue.IsEmpty() && skylightPlacementQueue.IsEmpty() &&
                           blocklightRemovalQueue.IsEmpty() && blocklightPlacementQueue.IsEmpty() &&
                           CrossChunkLightMods.Length == 0;
 
             // --- CLEANUP ---
-            sunlightRemovalQueue.Dispose();
-            sunlightPlacementQueue.Dispose();
+            skylightRemovalQueue.Dispose();
+            skylightPlacementQueue.Dispose();
             blocklightRemovalQueue.Dispose();
             blocklightPlacementQueue.Dispose();
-            emittedSunRemovals.Dispose();
+            emittedSkyRemovals.Dispose();
             emittedBlockRemovals.Dispose();
         }
 
@@ -536,7 +536,7 @@ namespace Jobs
 
         /// <summary>
         /// Synchronizes the ushort light array with data from the uint packed map.
-        /// Ensures sunlight and blocklight emission values (baked into the uint by generation/placement)
+        /// Ensures skylight and blocklight emission values (baked into the uint by generation/placement)
         /// are reflected in the ushort light array so BFS and edge checks read consistent data.
         /// Every position whose emission gets stamped is also enqueued into the blocklight placement
         /// queue so the emission actually PROPAGATES — generation-written emissives never pass through
@@ -569,7 +569,7 @@ namespace Jobs
                         if (id == 0) continue;
 
                         ushort currentLight = PaddedLight[idx];
-                        byte sun = LightBitMapping.GetSkyLight(currentLight);
+                        byte sky = LightBitMapping.GetSkylight(currentLight);
 
                         BlockTypeJobData props = BlockTypes[id];
                         byte emR = props.EmissionR;
@@ -584,7 +584,7 @@ namespace Jobs
                             byte curB = LightBitMapping.GetBlocklightB(currentLight);
                             if (curR < emR || curG < emG || curB < emB)
                             {
-                                PaddedLight[idx] = LightBitMapping.PackLightData(sun,
+                                PaddedLight[idx] = LightBitMapping.PackLightData(sky,
                                     (byte)math.max((int)emR, curR),
                                     (byte)math.max((int)emG, curG),
                                     (byte)math.max((int)emB, curB));
@@ -609,7 +609,7 @@ namespace Jobs
                    pos.z >= 0 && pos.z < VoxelData.ChunkWidth;
         }
 
-        private void PropagateDarkness(LightRemovalNode node, LightChannel channel, NativeQueue<Vector3Int> pQueue, NativeQueue<LightRemovalNode> rQueue, ref NativeHashMap<long, byte> emittedSunRemovals, ref NativeHashMap<long, byte> emittedBlockRemovals)
+        private void PropagateDarkness(LightRemovalNode node, LightChannel channel, NativeQueue<Vector3Int> pQueue, NativeQueue<LightRemovalNode> rQueue, ref NativeHashMap<long, byte> emittedSkyRemovals, ref NativeHashMap<long, byte> emittedBlockRemovals)
         {
             if (channel == LightChannel.Block)
             {
@@ -624,7 +624,7 @@ namespace Jobs
                 if (neighborPacked == uint.MaxValue) continue;
 
                 ushort neighborLightData = GetLightData(neighborPos);
-                byte neighborLight = LightBitMapping.GetSkyLight(neighborLightData);
+                byte neighborLight = LightBitMapping.GetSkylight(neighborLightData);
 
                 if (neighborLight == 0 && !IsInCenterChunk(neighborPos))
                 {
@@ -634,13 +634,13 @@ namespace Jobs
                     // claim-verified at merge, so a genuinely dark live neighbor clears it again
                     // (Bug 15 residual: consecutive same-job waves over a seam stamp).
                     PullBackDimmerCrossSeamStamp(node.Pos, neighborPos, neighborPacked,
-                        SampleSnapshotSkyLight(neighborPos));
+                        SampleSnapshotSkylight(neighborPos));
                 }
                 else if (neighborLight > 0)
                 {
                     if (neighborLight < node.LightLevel)
                     {
-                        SetSunlight(neighborPos, 0);
+                        SetSkylight(neighborPos, 0);
                         if (IsInCenterChunk(neighborPos))
                             rQueue.Enqueue(new LightRemovalNode { Pos = neighborPos, LightLevel = neighborLight });
                         else
@@ -662,34 +662,37 @@ namespace Jobs
                         // re-lights this voxel from the neighbor's still-high (possibly stale) value, and the
                         // neighbor's own job does the same from this one, so the removal never initiates and
                         // the pair settles one level below the source forever (an over-bright stable-but-wrong
-                        // field). Emit a cross-chunk sunlight removal mod so the neighbor re-evaluates: the
-                        // Bug 11 veto (CrossChunkLightModApplier.InChunkSunlightSupport) KEEPS it when an
+                        // field). Emit a cross-chunk skylight removal mod so the neighbor re-evaluates: the
+                        // Bug 11 veto (CrossChunkLightModApplier.InChunkSkylightSupport) KEEPS it when an
                         // in-chunk source still independently supports the value (e.g. a horizontal shaft) and
                         // CLEARS it when it was only the stale loop. The guards keep this surgical: a strictly
                         // brighter neighbor (> the removed level) is a genuine source, and a neighbor that is
-                        // directly sky-exposed (receiving full vertical sunlight) is independently lit — both
+                        // directly sky-exposed (receiving full vertical skylight) is independently lit — both
                         // are left alone. A fully-opaque neighbor is also skipped: it cannot propagate
-                        // sunlight (it only stores surface light), so it is never a participant in a
+                        // skylight (it only stores surface light), so it is never a participant in a
                         // light-propagation loop, and clearing its cross-seam surface value here would
                         // perturb a sky-exposed wall/floor. Without these guards this would spuriously clear
                         // ordinary sky-lit border voxels whenever a shadow's darkness wave reaches a seam.
                         // A neighbor that this heuristic wrongly suspects (it IS independently fed, e.g. by
                         // a sky-lit chunk on its far side) is protected on the apply side instead: the Bug 11
                         // veto also credits LIVE cross-chunk support from chunks other than this emitter
-                        // (CrossChunkLightModApplier.CrossChunkSunlightSupport, the Bug 13 fix) — emitting
+                        // (CrossChunkLightModApplier.CrossChunkSkylightSupport, the Bug 13 fix) — emitting
                         // here from the stale snapshot and adjudicating there against live data keeps the
                         // initiator aggressive without livelocking perimeter-fed seams.
+                        // VO-4: a PARTIAL opaque block is a loop participant — since VO-3 it re-propagates
+                        // the light held in the open part of its cell, so it can sit in exactly this
+                        // 2-cycle. Only a fully-opaque CELL is exempt (it merely stores surface light).
                         if (neighborLight == node.LightLevel
-                            && !BlockTypes[BurstVoxelDataBitMapping.GetId(neighborPacked)].IsOpaque
+                            && !BlockTypes[BurstVoxelDataBitMapping.GetId(neighborPacked)].IsFullyOpaqueCell
                             && !IsVerticallySkyLit(neighborPos, neighborPacked))
-                            EmitCrossChunkSunlightRemoval(neighborPos, ref emittedSunRemovals);
+                            EmitCrossChunkSkylightRemoval(neighborPos, ref emittedSkyRemovals);
                     }
                 }
             }
         }
 
         /// <summary>
-        /// Pulls a cross-seam neighbor's attenuated sunlight contribution back into a just-darkened
+        /// Pulls a cross-seam neighbor's attenuated skylight contribution back into a just-darkened
         /// center voxel — the BFS must not continue into the neighbor chunk, so this re-derives the
         /// center from the neighbor's snapshot instead of silently dropping the re-spread seed
         /// (Bug 07 defect 2). The neighbor value is a schedule-time SNAPSHOT that may be stale (the
@@ -704,7 +707,7 @@ namespace Jobs
         /// <param name="neighborPos">The lit cross-seam (halo) neighbor supplying the contribution.</param>
         /// <param name="neighborPacked">The neighbor's packed voxel data (already bounds-checked).</param>
         /// <param name="neighborLightData">The neighbor's snapshot light value, captured before any halo write.</param>
-        /// <param name="pQueue">The sunlight placement queue for the re-spread seed.</param>
+        /// <param name="pQueue">The skylight placement queue for the re-spread seed.</param>
         private void PullBackCrossSeamContribution(Vector3Int centerPos, Vector3Int neighborPos,
             uint neighborPacked, ushort neighborLightData, NativeQueue<Vector3Int> pQueue)
         {
@@ -713,13 +716,13 @@ namespace Jobs
                 return;
 
             byte pulledBack = CheckEdgeVoxel(centerPos, centerPacked, GetLightData(centerPos),
-                neighborPacked, neighborLightData, pQueue);
+                neighborPos, neighborPacked, neighborLightData, pQueue);
 
             // Claims are only recorded for CENTER voxels — the merge-time verifier
             // indexes this chunk's live data with CenterPos. A removal node CAN sit in
             // the halo (the column-recalc shadow-caster check seeds cross-border
             // neighbors), and a pull-back into a halo voxel becomes a cross-chunk
-            // uplift mod instead (SetSunlight's halo path), whose staleness is
+            // uplift mod instead (SetSkylight's halo path), whose staleness is
             // self-healing via the inbound-removal ordering.
             if (pulledBack > 0 && IsInCenterChunk(centerPos))
             {
@@ -750,21 +753,24 @@ namespace Jobs
         private void PullBackDimmerCrossSeamStamp(Vector3Int centerPos, Vector3Int neighborPos,
             uint neighborPacked, byte neighborLight)
         {
-            // An opaque neighbor's stored value is a surface stamp, not a valid propagation source.
-            if (BlockTypes[BurstVoxelDataBitMapping.GetId(neighborPacked)].IsOpaque)
+            // A fully-opaque cell's stored value is a surface stamp, not a valid propagation source.
+            if (BlockTypes[BurstVoxelDataBitMapping.GetId(neighborPacked)].IsFullyOpaqueCell)
                 return;
 
             uint centerPacked = GetPackedData(centerPos);
             if (centerPacked == uint.MaxValue)
                 return;
-            if (!BlockTypes[BurstVoxelDataBitMapping.GetId(centerPacked)].IsOpaque)
+
+            // Stamps are for receive-only cells. A partial block re-propagates, so re-lighting it from a
+            // dimmer stale neighbor would plant spreading ghost light (_FIXED_BUGS.md Lighting #19).
+            if (!BlockTypes[BurstVoxelDataBitMapping.GetId(centerPacked)].IsFullyOpaqueCell)
                 return;
 
             byte stamp = (byte)math.max(0, neighborLight - 1);
-            if (stamp <= LightBitMapping.GetSkyLight(GetLightData(centerPos)))
+            if (stamp <= LightBitMapping.GetSkylight(GetLightData(centerPos)))
                 return;
 
-            SetSunlight(centerPos, stamp);
+            SetSkylight(centerPos, stamp);
 
             // Claims are center-only (see PullBackCrossSeamContribution): a halo darkness node's own
             // position is out-of-center, and its write surfaces as a cross-chunk mod instead.
@@ -786,7 +792,7 @@ namespace Jobs
         /// </summary>
         /// <param name="pos">The BFS-local position (center chunk space; halo positions lie outside [0,16)).</param>
         /// <returns>The snapshot sky light, or 0 when the source is missing or out of bounds.</returns>
-        private byte SampleSnapshotSkyLight(Vector3Int pos)
+        private byte SampleSnapshotSkylight(Vector3Int pos)
         {
             if ((uint)pos.y >= VoxelData.ChunkHeight)
                 return 0;
@@ -808,7 +814,7 @@ namespace Jobs
 
             int localX = pos.x - cx * VoxelData.ChunkWidth;
             int localZ = pos.z - cz * VoxelData.ChunkWidth;
-            return LightBitMapping.GetSkyLight(source[ChunkMath.GetFlattenedIndexInChunk(localX, pos.y, localZ)]);
+            return LightBitMapping.GetSkylight(source[ChunkMath.GetFlattenedIndexInChunk(localX, pos.y, localZ)]);
         }
 
         /// <summary>
@@ -899,7 +905,7 @@ namespace Jobs
                         bool sigG = nG == node.LightG && node.LightG > 0;
                         bool sigB = nB == node.LightB && node.LightB > 0;
                         if ((sigR || sigG || sigB)
-                            && !BlockTypes[BurstVoxelDataBitMapping.GetId(neighborPacked)].IsOpaque)
+                            && !BlockTypes[BurstVoxelDataBitMapping.GetId(neighborPacked)].IsFullyOpaqueCell)
                             EmitCrossChunkBlocklightRemoval(neighborPos, ref emittedBlockRemovals);
                     }
                 }
@@ -950,45 +956,62 @@ namespace Jobs
             uint sourcePacked = GetPackedData(pos);
             if (sourcePacked == uint.MaxValue) return;
 
-            byte sourceLight = LightBitMapping.GetSkyLight(GetLightData(pos));
+            byte sourceLight = LightBitMapping.GetSkylight(GetLightData(pos));
             BlockTypeJobData sourceProps = BlockTypes[BurstVoxelDataBitMapping.GetId(sourcePacked)];
 
-            // An opaque block cannot propagate sunlight to its neighbors.
-            if (sourceProps.IsOpaque) return;
+            // A block that fills its cell with opaque material cannot propagate skylight onward — it only
+            // stores surface light. A PARTIAL opaque block (a slab) is excluded from this guard on
+            // purpose: the open part of its cell holds a real value it must pass on (VO-3).
+            if (sourceProps.IsFullyOpaqueCell) return;
+
+            byte sourceMeta = BurstVoxelDataBitMapping.GetMeta(sourcePacked);
 
             for (int i = 0; i < 6; i++)
             {
+                // A partial block's solid side seals that direction; every other case falls through
+                // unchanged (a full opaque cube already returned above).
+                if (LightAttenuation.ExitBlocked(in sourceProps, sourceMeta, i)) continue;
+
                 Vector3Int neighborPos = pos + VoxelData.FaceChecks[i];
                 uint neighborPacked = GetPackedData(neighborPos);
                 if (neighborPacked == uint.MaxValue) continue;
 
-                byte neighborLight = LightBitMapping.GetSkyLight(GetLightData(neighborPos));
+                byte neighborLight = LightBitMapping.GetSkylight(GetLightData(neighborPos));
                 BlockTypeJobData neighborProps = BlockTypes[BurstVoxelDataBitMapping.GetId(neighborPacked)];
+                byte neighborMeta = BurstVoxelDataBitMapping.GetMeta(neighborPacked);
+                int entryFace = VoxelData.RevFaceChecksIndices[i];
 
-                bool isVerticalSunlight = sourceLight == 15 && sourceProps.IsFullyTransparentToLight && VoxelData.FaceChecks[i].y == -1 && neighborProps.IsFullyTransparentToLight;
+                // VO-3: the unattenuated downward sky column is a per-FACE question. A vertical slab's
+                // open half is a full-height channel, so the column must pass through it undimmed; a
+                // horizontal slab's solid underside still stops it. Water (opacity 2) keeps dimming the
+                // column because IsTransparentThroughFace tests entry COST, not merely "does not block".
+                bool isVerticalSkylight = sourceLight == 15 && VoxelData.FaceChecks[i].y == -1
+                                                            && LightAttenuation.IsTransparentThroughFace(in sourceProps, sourceMeta, i)
+                                                            && LightAttenuation.IsTransparentThroughFace(in neighborProps, neighborMeta, entryFace);
 
                 byte lightToPropagate;
 
-                if (neighborProps.IsOpaque)
+                if (LightAttenuation.FaceBlocksLight(in neighborProps, neighborMeta, entryFace))
                 {
                     lightToPropagate = (byte)math.max(0, sourceLight - 1);
                     if (lightToPropagate > neighborLight)
                     {
-                        SetSunlight(neighborPos, lightToPropagate);
+                        SetSkylight(neighborPos, lightToPropagate);
                     }
                 }
                 else
                 {
-                    lightToPropagate = AttenuateLight(sourceLight, neighborProps.Opacity);
+                    lightToPropagate = AttenuateLight(sourceLight,
+                        LightAttenuation.EntryOpacity(in neighborProps, neighborMeta, entryFace));
 
-                    if (isVerticalSunlight)
+                    if (isVerticalSkylight)
                     {
                         lightToPropagate = 15;
                     }
 
                     if (lightToPropagate > neighborLight)
                     {
-                        SetSunlight(neighborPos, lightToPropagate);
+                        SetSkylight(neighborPos, lightToPropagate);
                         if (IsInCenterChunk(neighborPos))
                             pQueue.Enqueue(neighborPos);
                     }
@@ -1019,10 +1042,12 @@ namespace Jobs
             // re-propagate received surface light (source - 1 stamps from neighbors). Without this,
             // surface-lit opaque voxels woken by ModifyVoxel leak light into solid volumes
             // (fixed Bug 09), and an opaque lamp re-radiates light received from a brighter
-            // adjacent source. Mirrors the IsOpaque source guard in the sunlight path.
+            // adjacent source. Mirrors the IsOpaque source guard in the skylight path.
             // Non-emissive opaque sources zero out entirely and exit via the all-zero return.
+            // VO-3: a PARTIAL opaque block is excluded — the open part of its cell carries real
+            // blocklight it must re-propagate, so it keeps its stored channels here.
             BlockTypeJobData sourceProps = BlockTypes[BurstVoxelDataBitMapping.GetId(sourcePacked)];
-            if (sourceProps.IsOpaque)
+            if (sourceProps.IsFullyOpaqueCell)
             {
                 srcR = sourceProps.EmissionR;
                 srcG = sourceProps.EmissionG;
@@ -1031,8 +1056,13 @@ namespace Jobs
 
             if (srcR == 0 && srcG == 0 && srcB == 0) return;
 
+            byte sourceMeta = BurstVoxelDataBitMapping.GetMeta(sourcePacked);
+
             for (int i = 0; i < 6; i++)
             {
+                // A partial block's solid side seals that direction (mirror of the skylight path).
+                if (LightAttenuation.ExitBlocked(in sourceProps, sourceMeta, i)) continue;
+
                 Vector3Int neighborPos = pos + VoxelData.FaceChecks[i];
                 uint neighborPacked = GetPackedData(neighborPos);
                 if (neighborPacked == uint.MaxValue) continue;
@@ -1046,10 +1076,12 @@ namespace Jobs
                 byte nB = LightBitMapping.GetBlocklightB(neighborLight);
 
                 BlockTypeJobData neighborProps = BlockTypes[BurstVoxelDataBitMapping.GetId(neighborPacked)];
+                byte neighborMeta = BurstVoxelDataBitMapping.GetMeta(neighborPacked);
+                int entryFace = VoxelData.RevFaceChecksIndices[i];
 
-                if (neighborProps.IsOpaque)
+                if (LightAttenuation.FaceBlocksLight(in neighborProps, neighborMeta, entryFace))
                 {
-                    // Opaque blocks receive surface light (source - 1) but do not propagate further
+                    // Faces that block receive surface light (source - 1) but do not propagate further
                     byte propR = (byte)math.max(0, srcR - 1);
                     byte propG = (byte)math.max(0, srcG - 1);
                     byte propB = (byte)math.max(0, srcB - 1);
@@ -1065,9 +1097,10 @@ namespace Jobs
                 }
                 else
                 {
-                    byte propR = AttenuateLight(srcR, neighborProps.Opacity);
-                    byte propG = AttenuateLight(srcG, neighborProps.Opacity);
-                    byte propB = AttenuateLight(srcB, neighborProps.Opacity);
+                    byte entryOpacity = LightAttenuation.EntryOpacity(in neighborProps, neighborMeta, entryFace);
+                    byte propR = AttenuateLight(srcR, entryOpacity);
+                    byte propG = AttenuateLight(srcG, entryOpacity);
+                    byte propB = AttenuateLight(srcB, entryOpacity);
 
                     byte finalR = (byte)math.max(nR, (int)propR);
                     byte finalG = (byte)math.max(nG, (int)propG);
@@ -1083,30 +1116,30 @@ namespace Jobs
             }
         }
 
-        private void RecalculateSunlightForColumn(int x, int z, NativeQueue<Vector3Int> pQueue, NativeQueue<LightRemovalNode> rQueue)
+        private void RecalculateSkylightForColumn(int x, int z, NativeQueue<Vector3Int> pQueue, NativeQueue<LightRemovalNode> rQueue)
         {
             // Use the heightmap to find the Y-level of the highest block that has any opacity.
             int heightmapIndex = x + VoxelData.ChunkWidth * z;
             ushort highestBlockY = Heightmap[heightmapIndex];
 
             // --- PASS 1: Above the highest block ---
-            // Everything above this point is transparent to the sky and should be fully sunlit.
+            // Everything above this point is transparent to the sky and should be fully skylit.
             // LI-2: start at the band top — the derivation's column-recalc rule guarantees the center's
             // rows at/above the band are already uniform full-sky whenever a recalc is queued (any other
             // top value forces a full-height band), so the skipped iterations would write nothing.
             for (int y = BandHeight - 1; y > highestBlockY; y--)
             {
                 Vector3Int currentPos = new Vector3Int(x, y, z);
-                byte oldSunlight = LightBitMapping.GetSkyLight(GetLightData(currentPos));
+                byte oldSkylight = LightBitMapping.GetSkylight(GetLightData(currentPos));
 
                 // Update the current block in the column to be fully lit.
-                if (oldSunlight != 15)
+                if (oldSkylight != 15)
                 {
-                    SetSunlight(currentPos, 15);
-                    if (15 > oldSunlight)
+                    SetSkylight(currentPos, 15);
+                    if (15 > oldSkylight)
                         pQueue.Enqueue(currentPos);
                     else
-                        rQueue.Enqueue(new LightRemovalNode { Pos = currentPos, LightLevel = oldSunlight });
+                        rQueue.Enqueue(new LightRemovalNode { Pos = currentPos, LightLevel = oldSkylight });
                 }
             }
 
@@ -1124,17 +1157,17 @@ namespace Jobs
                     uint neighborPacked = GetPackedData(neighborPos);
                     if (neighborPacked == uint.MaxValue) continue;
 
-                    byte neighborSunlight = LightBitMapping.GetSkyLight(GetLightData(neighborPos));
+                    byte neighborSkylight = LightBitMapping.GetSkylight(GetLightData(neighborPos));
 
-                    // If the neighbor has sunlight BUT NOT FULL SUNLIGHT, it needs to be re-evaluated.
+                    // If the neighbor has skylight BUT NOT FULL SKYLIGHT, it needs to be re-evaluated.
                     // A neighbor with level 15 has its own direct sky access and should be ignored.
-                    if (neighborSunlight > 0 && neighborSunlight < 15)
+                    if (neighborSkylight > 0 && neighborSkylight < 15)
                     {
                         // We MUST manually set this block's light to 0 before adding it to the removal queue.
                         // Otherwise, it acts as a permanent ghost light source during the darkness propagation pass!
-                        SetSunlight(neighborPos, 0);
+                        SetSkylight(neighborPos, 0);
 
-                        rQueue.Enqueue(new LightRemovalNode { Pos = neighborPos, LightLevel = neighborSunlight });
+                        rQueue.Enqueue(new LightRemovalNode { Pos = neighborPos, LightLevel = neighborSkylight });
                     }
                 }
             }
@@ -1149,17 +1182,17 @@ namespace Jobs
             {
                 Vector3Int currentPos = new Vector3Int(x, y, z);
                 uint currentPacked = GetPackedData(currentPos);
-                byte oldSunlight = LightBitMapping.GetSkyLight(GetLightData(currentPos));
+                byte oldSkylight = LightBitMapping.GetSkylight(GetLightData(currentPos));
                 BlockTypeJobData props = BlockTypes[BurstVoxelDataBitMapping.GetId(currentPacked)];
 
                 // Update the current block in the column based on the light from above.
-                if (oldSunlight != lightFromSky)
+                if (oldSkylight != lightFromSky)
                 {
-                    SetSunlight(currentPos, lightFromSky);
-                    if (lightFromSky > oldSunlight)
+                    SetSkylight(currentPos, lightFromSky);
+                    if (lightFromSky > oldSkylight)
                         pQueue.Enqueue(currentPos);
                     else
-                        rQueue.Enqueue(new LightRemovalNode { Pos = currentPos, LightLevel = oldSunlight });
+                        rQueue.Enqueue(new LightRemovalNode { Pos = currentPos, LightLevel = oldSkylight });
                 }
 
                 // If light is already 0, it can't get any lower.
@@ -1180,7 +1213,7 @@ namespace Jobs
         /// Inconsistencies are queued for correction via the standard BFS passes.
         /// </summary>
         private void CheckEdges(
-            NativeQueue<Vector3Int> sunPlacement, NativeQueue<Vector3Int> blockPlacement)
+            NativeQueue<Vector3Int> skyPlacement, NativeQueue<Vector3Int> blockPlacement)
         {
             // Check all 4 horizontal borders:
             // South border (z=0, neighbor at z=-1), North border (z=15, neighbor at z=+1)
@@ -1229,8 +1262,8 @@ namespace Jobs
                         ushort centerLightData = GetLightData(pos);
                         ushort neighborLightData = GetLightData(neighborPos);
 
-                        CheckEdgeVoxel(pos, centerPacked, centerLightData, neighborPacked, neighborLightData,
-                            sunPlacement);
+                        CheckEdgeVoxel(pos, centerPacked, centerLightData, neighborPos, neighborPacked, neighborLightData,
+                            skyPlacement);
                         CheckEdgeVoxelRGB(pos, centerPacked, neighborPos,
                             blockPlacement);
                     }
@@ -1239,7 +1272,7 @@ namespace Jobs
         }
 
         /// <summary>
-        /// Checks a single border voxel's sunlight against its cross-chunk neighbor.
+        /// Checks a single border voxel's skylight against its cross-chunk neighbor.
         /// Detects missing light (black spots) where the neighbor has light that should propagate here.
         /// An opaque center voxel still RECEIVES the surface stamp (source − 1, mirroring
         /// <see cref="PropagateLight"/>'s opaque-neighbor arm) — it is written but never enqueued,
@@ -1254,37 +1287,54 @@ namespace Jobs
         /// return (its staleness is reconciled by the iterative edge-check rounds).</returns>
         private byte CheckEdgeVoxel(
             Vector3Int centerPos, uint centerPacked, ushort centerLightData,
-            uint neighborPacked, ushort neighborLightData,
+            Vector3Int neighborPos, uint neighborPacked, ushort neighborLightData,
             NativeQueue<Vector3Int> placementQueue)
         {
-            byte centerLight = LightBitMapping.GetSkyLight(centerLightData);
-            byte neighborLight = LightBitMapping.GetSkyLight(neighborLightData);
+            byte centerLight = LightBitMapping.GetSkylight(centerLightData);
+            byte neighborLight = LightBitMapping.GetSkylight(neighborLightData);
 
-            // An opaque neighbor cannot transmit sunlight across the border: its sky value is
+            // An opaque neighbor cannot transmit skylight across the border: its sky value is
             // non-propagable surface light (opaque blocks have no sky emission), so seeding from it would
-            // leak light out of a wall into the adjacent chunk (Bug 10). Mirror of the IsOpaque source
-            // guard in PropagateLight; the add-only edge check could never reconcile the surplus away.
+            // leak light out of a wall into the adjacent chunk (Bug 10). Mirror of PropagateLight's source
+            // guard AND its per-direction exit test; the add-only edge check could never reconcile a
+            // surplus away, so this must not be looser than the BFS.
+            int entryFace = FaceIndexOfDirection(neighborPos - centerPos);
+
+            // Not face-adjacent: no transport to check, so write nothing. Returning 0 also keeps the
+            // pull-back from recording a claim for a seam that does not exist.
+            if (entryFace == NO_FACE) return 0;
+
+            int exitFace = VoxelData.RevFaceChecksIndices[entryFace];
+
             BlockTypeJobData neighborProps = BlockTypes[BurstVoxelDataBitMapping.GetId(neighborPacked)];
-            if (neighborProps.IsOpaque) return 0;
+            if (neighborProps.IsFullyOpaqueCell) return 0;
+
+            byte neighborMeta = BurstVoxelDataBitMapping.GetMeta(neighborPacked);
+            if (LightAttenuation.ExitBlocked(in neighborProps, neighborMeta, exitFace)) return 0;
 
             BlockTypeJobData centerProps = BlockTypes[BurstVoxelDataBitMapping.GetId(centerPacked)];
-            if (centerProps.IsOpaque)
+            byte centerMeta = BurstVoxelDataBitMapping.GetMeta(centerPacked);
+
+            // A receive-only cell takes the surface stamp; a partial block re-propagates, so it takes the
+            // attenuated arm below and IS enqueued.
+            if (centerProps.IsFullyOpaqueCell || LightAttenuation.FaceBlocksLight(in centerProps, centerMeta, entryFace))
             {
                 byte stamp = (byte)math.max(0, neighborLight - 1);
                 if (stamp > centerLight)
                 {
-                    SetSunlight(centerPos, stamp);
+                    SetSkylight(centerPos, stamp);
                     return stamp;
                 }
 
                 return 0;
             }
 
-            byte expectedFromNeighbor = AttenuateLight(neighborLight, centerProps.Opacity);
+            byte expectedFromNeighbor = AttenuateLight(neighborLight,
+                LightAttenuation.EntryOpacity(in centerProps, centerMeta, entryFace));
 
             if (expectedFromNeighbor > centerLight)
             {
-                SetSunlight(centerPos, expectedFromNeighbor);
+                SetSkylight(centerPos, expectedFromNeighbor);
                 placementQueue.Enqueue(centerPos);
                 return expectedFromNeighbor;
             }
@@ -1325,16 +1375,34 @@ namespace Jobs
             // border while an opaque non-emissive block (emission 0) contributes nothing.
             uint neighborPacked = GetPackedData(neighborPos);
             if (neighborPacked == uint.MaxValue) return;
+
+            int entryFace = FaceIndexOfDirection(neighborPos - centerPos);
+
+            // Not face-adjacent: no transport to check (mirror of CheckEdgeVoxel's guard).
+            if (entryFace == NO_FACE) return;
+
+            int exitFace = VoxelData.RevFaceChecksIndices[entryFace];
+
             BlockTypeJobData neighborProps = BlockTypes[BurstVoxelDataBitMapping.GetId(neighborPacked)];
-            if (neighborProps.IsOpaque)
+            byte neighborMeta = BurstVoxelDataBitMapping.GetMeta(neighborPacked);
+            if (neighborProps.IsFullyOpaqueCell)
             {
                 nR = neighborProps.EmissionR;
                 nG = neighborProps.EmissionG;
                 nB = neighborProps.EmissionB;
             }
+            else if (LightAttenuation.ExitBlocked(in neighborProps, neighborMeta, exitFace))
+            {
+                // A partial block's solid side seals this direction (mirror of PropagateLightRGB).
+                return;
+            }
+
+            byte centerMeta = BurstVoxelDataBitMapping.GetMeta(centerPacked);
+            bool centerReceivesOnly = centerProps.IsFullyOpaqueCell
+                                      || LightAttenuation.FaceBlocksLight(in centerProps, centerMeta, entryFace);
 
             byte expR, expG, expB;
-            if (centerProps.IsOpaque)
+            if (centerReceivesOnly)
             {
                 expR = (byte)math.max(0, nR - 1);
                 expG = (byte)math.max(0, nG - 1);
@@ -1342,9 +1410,10 @@ namespace Jobs
             }
             else
             {
-                expR = AttenuateLight(nR, centerProps.Opacity);
-                expG = AttenuateLight(nG, centerProps.Opacity);
-                expB = AttenuateLight(nB, centerProps.Opacity);
+                byte entryOpacity = LightAttenuation.EntryOpacity(in centerProps, centerMeta, entryFace);
+                expR = AttenuateLight(nR, entryOpacity);
+                expG = AttenuateLight(nG, entryOpacity);
+                expB = AttenuateLight(nB, entryOpacity);
             }
 
             byte finalR = (byte)math.max(cR, (int)expR);
@@ -1354,7 +1423,7 @@ namespace Jobs
             if (finalR != cR || finalG != cG || finalB != cB)
             {
                 SetBlocklightRGB(centerPos, finalR, finalG, finalB, isRemovalContext: false);
-                if (!centerProps.IsOpaque)
+                if (!centerReceivesOnly)
                     placementQueue.Enqueue(centerPos);
             }
         }
@@ -1463,8 +1532,8 @@ namespace Jobs
         /// Maps a position in this job's 3x3-grid local space to its world-space voxel position. The chunk's
         /// horizontal origin <see cref="ChunkPosition"/> (a 2D X/Z offset) is added to X and Z; the voxel Y
         /// is already global and passes through unchanged. Single definition of the local→global mapping
-        /// shared by every cross-chunk emitter (<see cref="SetSunlight"/>, <see cref="SetBlocklightRGB"/>,
-        /// <see cref="EmitCrossChunkSunlightRemoval"/>).
+        /// shared by every cross-chunk emitter (<see cref="SetSkylight"/>, <see cref="SetBlocklightRGB"/>,
+        /// <see cref="EmitCrossChunkSkylightRemoval"/>).
         /// </summary>
         /// <param name="localPos">The position in the 3x3 grid's local space.</param>
         /// <returns>The world-space voxel position.</returns>
@@ -1474,66 +1543,112 @@ namespace Jobs
         }
 
         /// <summary>
-        /// Returns true when the voxel at <paramref name="pos"/> receives full vertical sunlight — it is
+        /// Returns true when the voxel at <paramref name="pos"/> receives full vertical skylight — it is
         /// fully transparent and the voxel directly above it is fully transparent and holds full sky (15).
-        /// Encodes the same vertical-sunlight rule that <see cref="PropagateLight"/>'s
-        /// <c>isVerticalSunlight</c> relies on (a fully-transparent voxel directly below a fully-transparent
+        /// Encodes the same vertical-skylight rule that <see cref="PropagateLight"/>'s
+        /// <c>isVerticalSkylight</c> relies on (a fully-transparent voxel directly below a fully-transparent
         /// sky-15 voxel is lit to 15 with no attenuation), but evaluated standalone for a single voxel
         /// rather than across a source→neighbor downward step — the two are independent code paths, so a
-        /// change to the vertical-sunlight rule must be mirrored in both. Used by
+        /// change to the vertical-skylight rule must be mirrored in both. Used by
         /// <see cref="PropagateDarkness"/> to recognize a genuinely sky-exposed cross-seam neighbor (which
         /// is independently lit and must NOT be sent a Bug-12 cross-seam removal mod) versus a roofed seam
         /// voxel (which can only be the stale mutual-support side of a 2-cycle).
         /// </summary>
         /// <param name="pos">The voxel position in the 3x3 grid's local space.</param>
         /// <param name="packed">The voxel's already-fetched packed data (avoids a redundant lookup).</param>
-        /// <returns>True if the voxel is directly lit by vertical sunlight.</returns>
+        /// <returns>True if the voxel is directly lit by vertical skylight.</returns>
         private bool IsVerticallySkyLit(Vector3Int pos, uint packed)
         {
-            if (!BlockTypes[BurstVoxelDataBitMapping.GetId(packed)].IsFullyTransparentToLight) return false;
+            // VO-4: this must test the same faces PropagateLight's isVerticalSkylight rule does, or the
+            // Bug 12 initiator fires on voxels the BFS is holding at an undimmed 15 through a partial
+            // block's open half — and the veto's support model, which tops out at 14, cannot defend them.
+            BlockTypeJobData props = BlockTypes[BurstVoxelDataBitMapping.GetId(packed)];
+            if (!LightAttenuation.IsTransparentThroughFace(in props, BurstVoxelDataBitMapping.GetMeta(packed), TOP_FACE))
+                return false;
 
             Vector3Int above = new Vector3Int(pos.x, pos.y + 1, pos.z);
             uint abovePacked = GetPackedData(above);
             if (abovePacked == uint.MaxValue) return false;
-            if (!BlockTypes[BurstVoxelDataBitMapping.GetId(abovePacked)].IsFullyTransparentToLight) return false;
 
-            return LightBitMapping.GetSkyLight(GetLightData(above)) == 15;
+            BlockTypeJobData aboveProps = BlockTypes[BurstVoxelDataBitMapping.GetId(abovePacked)];
+            if (!LightAttenuation.IsTransparentThroughFace(in aboveProps, BurstVoxelDataBitMapping.GetMeta(abovePacked), BOTTOM_FACE))
+                return false;
+
+            return LightBitMapping.GetSkylight(GetLightData(above)) == 15;
+        }
+
+        /// <summary>The +Y face index in <c>VoxelData.FaceChecks</c> order.</summary>
+        private const int TOP_FACE = 2;
+
+        /// <summary>The -Y face index in <c>VoxelData.FaceChecks</c> order.</summary>
+        private const int BOTTOM_FACE = 3;
+
+        /// <summary>
+        /// The <c>VoxelData.FaceChecks</c> index of a unit step between face-adjacent voxels. Callers that
+        /// already hold both positions use this rather than threading a face index through every seam path.
+        /// </summary>
+        /// <param name="direction">The step from the center voxel to its face neighbor.</param>
+        /// <returns>The matching face index, or <see cref="NO_FACE"/> when the step is not a unit face
+        /// direction — a diagonal, a longer step, or the zero vector.</returns>
+        private static int FaceIndexOfDirection(Vector3Int direction)
+        {
+            if ((direction.x != 0 ? 1 : 0) + (direction.y != 0 ? 1 : 0) + (direction.z != 0 ? 1 : 0) != 1)
+                return NO_FACE;
+
+            if (direction.z == -1) return 0;
+            if (direction.z == 1) return 1;
+            if (direction.y == 1) return TOP_FACE;
+            if (direction.y == -1) return BOTTOM_FACE;
+            if (direction.x == -1) return 4;
+            if (direction.x == 1) return 5;
+
+            return NO_FACE;
         }
 
         /// <summary>
-        /// Emits a cross-chunk sunlight REMOVAL mod (level 0) for a neighbor-chunk voxel WITHOUT touching
+        /// Returned by <see cref="FaceIndexOfDirection"/> when the step is not a unit face direction.
+        /// <para>
+        /// Deliberately not a valid face index: the callers index <c>VoxelData.RevFaceChecksIndices</c>
+        /// with the result, so a malformed step must be rejected rather than silently charged against
+        /// whichever face a fallback happened to name.
+        /// </para>
+        /// </summary>
+        private const int NO_FACE = -1;
+
+        /// <summary>
+        /// Emits a cross-chunk skylight REMOVAL mod (level 0) for a neighbor-chunk voxel WITHOUT touching
         /// the padded light volume — the neighbor's halo value is left untouched in-job so the pull-back
         /// re-spread reads the unchanged snapshot, and the actual decision is deferred to the main-thread
-        /// cross-chunk apply (<see cref="Helpers.CrossChunkLightModApplier.ComputeSunlight"/> +
+        /// cross-chunk apply (<see cref="Helpers.CrossChunkLightModApplier.ComputeSkylight"/> +
         /// its in-chunk-support veto). Used by <see cref="PropagateDarkness"/> to break the Bug 12
         /// over-bright cross-seam loop: the neighbor re-evaluates and clears only if it was solely the stale
-        /// mutual support. Unlike <see cref="SetSunlight"/>, this neither writes the padded volume nor seeds
+        /// mutual support. Unlike <see cref="SetSkylight"/>, this neither writes the padded volume nor seeds
         /// a local BFS node — it only appends the modification. A darkness wave can reach the same neighbor from
-        /// many removal nodes, so <paramref name="emittedSunRemovals"/> dedups: only the first emission per
+        /// many removal nodes, so <paramref name="emittedSkyRemovals"/> dedups: only the first emission per
         /// neighbor is appended (the apply is idempotent), keeping the mod list from growing by O(wavefront).
         /// </summary>
         /// <param name="neighborPos">The neighbor-chunk voxel position in the 3x3 grid's local space.</param>
-        /// <param name="emittedSunRemovals">Per-job set of neighbor keys already sent a removal mod.</param>
-        private void EmitCrossChunkSunlightRemoval(Vector3Int neighborPos, ref NativeHashMap<long, byte> emittedSunRemovals)
+        /// <param name="emittedSkyRemovals">Per-job set of neighbor keys already sent a removal mod.</param>
+        private void EmitCrossChunkSkylightRemoval(Vector3Int neighborPos, ref NativeHashMap<long, byte> emittedSkyRemovals)
         {
             // TryAdd returns false when the key is already present — one removal mod per neighbor suffices.
-            if (!emittedSunRemovals.TryAdd(EncodeNeighborKey(neighborPos.x, neighborPos.y, neighborPos.z), 0))
+            if (!emittedSkyRemovals.TryAdd(EncodeNeighborKey(neighborPos.x, neighborPos.y, neighborPos.z), 0))
                 return;
 
             CrossChunkLightMods.Add(new LightModification
             {
-                GlobalPosition = LocalToGlobal(neighborPos), LightLevel = 0, Channel = LightChannel.Sun,
+                GlobalPosition = LocalToGlobal(neighborPos), LightLevel = 0, Channel = LightChannel.Sky,
             });
         }
 
         /// <summary>
         /// Bug 18: emits a cross-chunk blocklight removal mod for a seam neighbor caught at the 2-cycle
-        /// signature — the RGB mirror of <see cref="EmitCrossChunkSunlightRemoval"/>. The mod zeroes all
+        /// signature — the RGB mirror of <see cref="EmitCrossChunkSkylightRemoval"/>. The mod zeroes all
         /// channels with <c>IsRemoval</c>; the receiving chunk's apply path adjudicates it per channel
         /// through the Bug 17 independent-support veto
         /// (<c>CrossChunkLightModApplier.ComputeBlocklight</c>), keeping any channel a live independent
         /// source still backs and clearing the stale mutual-support loop. One mod per neighbor suffices
-        /// (the apply is idempotent); dedup on the neighbor key like the sunlight initiator.
+        /// (the apply is idempotent); dedup on the neighbor key like the skylight initiator.
         /// </summary>
         /// <param name="neighborPos">The cross-seam neighbor to re-evaluate for removal.</param>
         /// <param name="emittedBlockRemovals">Per-job dedup set of already-emitted blocklight-removal neighbor keys.</param>
@@ -1550,14 +1665,14 @@ namespace Jobs
         }
 
         /// <summary>
-        /// Sets sunlight level in the padded light volume (the single writable store for both center and
+        /// Sets skylight level in the padded light volume (the single writable store for both center and
         /// halo cells). For blocklight, use <see cref="SetBlocklightRGB"/> instead.
         /// <para>The in-place RMW reads the live padded value exactly as the old write-through cache did,
         /// so out-of-center writes accumulate identically; a cross-chunk mod is still emitted ONLY for an
         /// out-of-center position and still carries the INPUT <paramref name="lightLevel"/> (not the RMW
         /// result) — identical to the pre-LI-1 behavior.</para>
         /// </summary>
-        private void SetSunlight(Vector3Int localPos, byte lightLevel)
+        private void SetSkylight(Vector3Int localPos, byte lightLevel)
         {
             if (localPos.y is < 0 or >= VoxelData.ChunkHeight) return;
 
@@ -1572,7 +1687,7 @@ namespace Jobs
             if (localPos.y >= BandMinY && localPos.y < BandHeight)
             {
                 int idx = ChunkMath.GetPaddedLightingIndex(px, localPos.y - BandMinY, pz);
-                PaddedLight[idx] = LightBitMapping.SetSkyLight(PaddedLight[idx], lightLevel);
+                PaddedLight[idx] = LightBitMapping.SetSkylight(PaddedLight[idx], lightLevel);
             }
 
             if (localPos.x < 0 || localPos.x >= VoxelData.ChunkWidth ||
@@ -1580,7 +1695,7 @@ namespace Jobs
             {
                 CrossChunkLightMods.Add(new LightModification
                 {
-                    GlobalPosition = LocalToGlobal(localPos), LightLevel = lightLevel, Channel = LightChannel.Sun,
+                    GlobalPosition = LocalToGlobal(localPos), LightLevel = lightLevel, Channel = LightChannel.Sky,
                 });
             }
         }
@@ -1605,7 +1720,7 @@ namespace Jobs
             if ((uint)px >= ChunkMath.PADDED_CHUNK_WIDTH || (uint)pz >= ChunkMath.PADDED_CHUNK_WIDTH) return;
 
             // LI-2: skip the store outside the band (value-preserving by the band derivation), but keep
-            // emitting the cross-chunk mod below — see SetSunlight.
+            // emitting the cross-chunk mod below — see SetSkylight.
             if (localPos.y >= BandMinY && localPos.y < BandHeight)
             {
                 int idx = ChunkMath.GetPaddedLightingIndex(px, localPos.y - BandMinY, pz);
@@ -1660,7 +1775,7 @@ namespace Jobs
 
     public enum LightChannel : byte
     {
-        Sun,
+        Sky,
         Block,
     }
 }

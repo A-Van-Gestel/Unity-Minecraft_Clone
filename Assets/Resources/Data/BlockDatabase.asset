@@ -27,6 +27,12 @@ MonoBehaviour:
       min: {x: 0, y: 0, z: 0}
       max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 1
+    swayStrength: 0
+    crossMeshVariation:
+      offset: 0.15
+      scaleMin: 0.85
+      scaleMax: 1.1
+      allowMirror: 1
     fluidType: 0
     fluidShaderID: 0
     fluidMeshData: {fileID: 0}
@@ -42,6 +48,7 @@ MonoBehaviour:
     tags: 0
     worldGenCanReplaceTags: 4294967295
     placementCanReplaceTags: 4294967295
+    soundMaterial: 0
     isActive: 0
     metadataSchema: 0
     placementMetadataMode: 0
@@ -63,6 +70,12 @@ MonoBehaviour:
       min: {x: 0, y: 0, z: 0}
       max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
+    swayStrength: 0
+    crossMeshVariation:
+      offset: 0.15
+      scaleMin: 0.85
+      scaleMax: 1.1
+      allowMirror: 1
     fluidType: 0
     fluidShaderID: 0
     fluidMeshData: {fileID: 0}
@@ -78,6 +91,7 @@ MonoBehaviour:
     tags: 257
     worldGenCanReplaceTags: 8258
     placementCanReplaceTags: 8194
+    soundMaterial: 1
     isActive: 0
     metadataSchema: 5
     placementMetadataMode: 1
@@ -99,6 +113,12 @@ MonoBehaviour:
       min: {x: 0, y: 0, z: 0}
       max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
+    swayStrength: 0
+    crossMeshVariation:
+      offset: 0.15
+      scaleMin: 0.85
+      scaleMax: 1.1
+      allowMirror: 1
     fluidType: 0
     fluidShaderID: 0
     fluidMeshData: {fileID: 0}
@@ -114,6 +134,7 @@ MonoBehaviour:
     tags: 1041
     worldGenCanReplaceTags: 8258
     placementCanReplaceTags: 8194
+    soundMaterial: 3
     isActive: 1
     metadataSchema: 5
     placementMetadataMode: 1
@@ -135,6 +156,12 @@ MonoBehaviour:
       min: {x: 0, y: 0, z: 0}
       max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
+    swayStrength: 0
+    crossMeshVariation:
+      offset: 0.15
+      scaleMin: 0.85
+      scaleMax: 1.1
+      allowMirror: 1
     fluidType: 0
     fluidShaderID: 0
     fluidMeshData: {fileID: 0}
@@ -150,6 +177,7 @@ MonoBehaviour:
     tags: 1041
     worldGenCanReplaceTags: 8258
     placementCanReplaceTags: 8194
+    soundMaterial: 2
     isActive: 0
     metadataSchema: 5
     placementMetadataMode: 1
@@ -171,6 +199,12 @@ MonoBehaviour:
       min: {x: 0, y: 0, z: 0}
       max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
+    swayStrength: 0
+    crossMeshVariation:
+      offset: 0.15
+      scaleMin: 0.85
+      scaleMax: 1.1
+      allowMirror: 1
     fluidType: 0
     fluidShaderID: 0
     fluidMeshData: {fileID: 0}
@@ -186,6 +220,7 @@ MonoBehaviour:
     tags: 25
     worldGenCanReplaceTags: 8258
     placementCanReplaceTags: 8194
+    soundMaterial: 4
     isActive: 0
     metadataSchema: 5
     placementMetadataMode: 1
@@ -207,6 +242,12 @@ MonoBehaviour:
       min: {x: 0, y: 0, z: 0}
       max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
+    swayStrength: 0
+    crossMeshVariation:
+      offset: 0.15
+      scaleMin: 0.85
+      scaleMax: 1.1
+      allowMirror: 1
     fluidType: 0
     fluidShaderID: 0
     fluidMeshData: {fileID: 0}
@@ -222,6 +263,7 @@ MonoBehaviour:
     tags: 17
     worldGenCanReplaceTags: 8258
     placementCanReplaceTags: 8194
+    soundMaterial: 13
     isActive: 0
     metadataSchema: 5
     placementMetadataMode: 1
@@ -243,6 +285,12 @@ MonoBehaviour:
       min: {x: 0, y: 0, z: 0}
       max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
+    swayStrength: 0
+    crossMeshVariation:
+      offset: 0.15
+      scaleMin: 0.85
+      scaleMax: 1.1
+      allowMirror: 1
     fluidType: 0
     fluidShaderID: 0
     fluidMeshData: {fileID: 0}
@@ -258,6 +306,7 @@ MonoBehaviour:
     tags: 1041
     worldGenCanReplaceTags: 8258
     placementCanReplaceTags: 8194
+    soundMaterial: 13
     isActive: 0
     metadataSchema: 5
     placementMetadataMode: 1
@@ -279,6 +328,12 @@ MonoBehaviour:
       min: {x: 0, y: 0, z: 0}
       max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
+    swayStrength: 0
+    crossMeshVariation:
+      offset: 0.15
+      scaleMin: 0.85
+      scaleMax: 1.1
+      allowMirror: 1
     fluidType: 0
     fluidShaderID: 0
     fluidMeshData: {fileID: 0}
@@ -294,6 +349,7 @@ MonoBehaviour:
     tags: 2305
     worldGenCanReplaceTags: 8258
     placementCanReplaceTags: 8194
+    soundMaterial: 1
     isActive: 0
     metadataSchema: 5
     placementMetadataMode: 1
@@ -315,6 +371,12 @@ MonoBehaviour:
       min: {x: 0, y: 0, z: 0}
       max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
+    swayStrength: 0
+    crossMeshVariation:
+      offset: 0.15
+      scaleMin: 0.85
+      scaleMax: 1.1
+      allowMirror: 1
     fluidType: 0
     fluidShaderID: 0
     fluidMeshData: {fileID: 0}
@@ -330,6 +392,7 @@ MonoBehaviour:
     tags: 261
     worldGenCanReplaceTags: 8258
     placementCanReplaceTags: 8194
+    soundMaterial: 1
     isActive: 0
     metadataSchema: 5
     placementMetadataMode: 1
@@ -351,6 +414,12 @@ MonoBehaviour:
       min: {x: 0, y: 0, z: 0}
       max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
+    swayStrength: 0
+    crossMeshVariation:
+      offset: 0.15
+      scaleMin: 0.85
+      scaleMax: 1.1
+      allowMirror: 1
     fluidType: 0
     fluidShaderID: 0
     fluidMeshData: {fileID: 0}
@@ -366,6 +435,7 @@ MonoBehaviour:
     tags: 257
     worldGenCanReplaceTags: 8258
     placementCanReplaceTags: 8194
+    soundMaterial: 1
     isActive: 0
     metadataSchema: 5
     placementMetadataMode: 1
@@ -387,6 +457,12 @@ MonoBehaviour:
       min: {x: 0, y: 0, z: 0}
       max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
+    swayStrength: 0
+    crossMeshVariation:
+      offset: 0.15
+      scaleMin: 0.85
+      scaleMax: 1.1
+      allowMirror: 1
     fluidType: 0
     fluidShaderID: 0
     fluidMeshData: {fileID: 0}
@@ -402,6 +478,7 @@ MonoBehaviour:
     tags: 1041
     worldGenCanReplaceTags: 8258
     placementCanReplaceTags: 8194
+    soundMaterial: 3
     isActive: 0
     metadataSchema: 5
     placementMetadataMode: 1
@@ -423,6 +500,12 @@ MonoBehaviour:
       min: {x: 0, y: 0, z: 0}
       max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
+    swayStrength: 0
+    crossMeshVariation:
+      offset: 0.15
+      scaleMin: 0.85
+      scaleMax: 1.1
+      allowMirror: 1
     fluidType: 0
     fluidShaderID: 0
     fluidMeshData: {fileID: 0}
@@ -438,6 +521,7 @@ MonoBehaviour:
     tags: 2305
     worldGenCanReplaceTags: 8258
     placementCanReplaceTags: 8194
+    soundMaterial: 1
     isActive: 0
     metadataSchema: 5
     placementMetadataMode: 1
@@ -459,6 +543,12 @@ MonoBehaviour:
       min: {x: 0, y: 0, z: 0}
       max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
+    swayStrength: 0
+    crossMeshVariation:
+      offset: 0.15
+      scaleMin: 0.85
+      scaleMax: 1.1
+      allowMirror: 1
     fluidType: 0
     fluidShaderID: 0
     fluidMeshData: {fileID: 0}
@@ -474,6 +564,7 @@ MonoBehaviour:
     tags: 3105
     worldGenCanReplaceTags: 8258
     placementCanReplaceTags: 8194
+    soundMaterial: 6
     isActive: 0
     metadataSchema: 5
     placementMetadataMode: 1
@@ -495,6 +586,12 @@ MonoBehaviour:
       min: {x: 0, y: 0, z: 0}
       max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 1
+    swayStrength: 0
+    crossMeshVariation:
+      offset: 0.15
+      scaleMin: 0.85
+      scaleMax: 1.1
+      allowMirror: 1
     fluidType: 0
     fluidShaderID: 0
     fluidMeshData: {fileID: 0}
@@ -510,6 +607,7 @@ MonoBehaviour:
     tags: 2305
     worldGenCanReplaceTags: 8258
     placementCanReplaceTags: 8194
+    soundMaterial: 1
     isActive: 0
     metadataSchema: 0
     placementMetadataMode: 0
@@ -531,6 +629,12 @@ MonoBehaviour:
       min: {x: 0, y: 0, z: 0}
       max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
+    swayStrength: 0
+    crossMeshVariation:
+      offset: 0.15
+      scaleMin: 0.85
+      scaleMax: 1.1
+      allowMirror: 1
     fluidType: 0
     fluidShaderID: 0
     fluidMeshData: {fileID: 0}
@@ -546,6 +650,7 @@ MonoBehaviour:
     tags: 1057
     worldGenCanReplaceTags: 8386
     placementCanReplaceTags: 8194
+    soundMaterial: 6
     isActive: 0
     metadataSchema: 2
     placementMetadataMode: 2
@@ -567,6 +672,12 @@ MonoBehaviour:
       min: {x: 0, y: 0, z: 0}
       max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 1
+    swayStrength: 0.25
+    crossMeshVariation:
+      offset: 0.15
+      scaleMin: 0.85
+      scaleMax: 1.1
+      allowMirror: 1
     fluidType: 0
     fluidShaderID: 0
     fluidMeshData: {fileID: 0}
@@ -582,6 +693,7 @@ MonoBehaviour:
     tags: 1217
     worldGenCanReplaceTags: 0
     placementCanReplaceTags: 2
+    soundMaterial: 7
     isActive: 0
     metadataSchema: 5
     placementMetadataMode: 1
@@ -603,6 +715,12 @@ MonoBehaviour:
       min: {x: 0, y: 0, z: 0}
       max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
+    swayStrength: 0
+    crossMeshVariation:
+      offset: 0.15
+      scaleMin: 0.85
+      scaleMax: 1.1
+      allowMirror: 1
     fluidType: 0
     fluidShaderID: 0
     fluidMeshData: {fileID: 0}
@@ -618,6 +736,7 @@ MonoBehaviour:
     tags: 24640
     worldGenCanReplaceTags: 8192
     placementCanReplaceTags: 8194
+    soundMaterial: 8
     isActive: 0
     metadataSchema: 0
     placementMetadataMode: 0
@@ -639,6 +758,12 @@ MonoBehaviour:
       min: {x: 0, y: 0, z: 0}
       max: {x: 1, y: 0.5, z: 1}
     renderNeighborFaces: 1
+    swayStrength: 0
+    crossMeshVariation:
+      offset: 0.15
+      scaleMin: 0.85
+      scaleMax: 1.1
+      allowMirror: 1
     fluidType: 0
     fluidShaderID: 0
     fluidMeshData: {fileID: 0}
@@ -654,6 +779,7 @@ MonoBehaviour:
     tags: 2305
     worldGenCanReplaceTags: 8258
     placementCanReplaceTags: 8194
+    soundMaterial: 1
     isActive: 0
     metadataSchema: 4
     placementMetadataMode: 2
@@ -675,6 +801,12 @@ MonoBehaviour:
       min: {x: 0, y: 0, z: 0}
       max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
+    swayStrength: 0
+    crossMeshVariation:
+      offset: 0.15
+      scaleMin: 0.85
+      scaleMax: 1.1
+      allowMirror: 1
     fluidType: 0
     fluidShaderID: 0
     fluidMeshData: {fileID: 0}
@@ -690,6 +822,7 @@ MonoBehaviour:
     tags: 2048
     worldGenCanReplaceTags: 16379
     placementCanReplaceTags: 8194
+    soundMaterial: 1
     isActive: 0
     metadataSchema: 3
     placementMetadataMode: 2
@@ -711,6 +844,12 @@ MonoBehaviour:
       min: {x: 0, y: 0, z: 0}
       max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 1
+    swayStrength: 0
+    crossMeshVariation:
+      offset: 0.15
+      scaleMin: 0.85
+      scaleMax: 1.1
+      allowMirror: 1
     fluidType: 1
     fluidShaderID: 0
     fluidMeshData: {fileID: 11400000, guid: a649257ee68f6824bb83ec34f85315c6, type: 2}
@@ -726,6 +865,7 @@ MonoBehaviour:
     tags: 2
     worldGenCanReplaceTags: 8258
     placementCanReplaceTags: 8194
+    soundMaterial: 12
     isActive: 1
     metadataSchema: 0
     placementMetadataMode: 0
@@ -747,6 +887,12 @@ MonoBehaviour:
       min: {x: 0, y: 0, z: 0}
       max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 1
+    swayStrength: 0
+    crossMeshVariation:
+      offset: 0.15
+      scaleMin: 0.85
+      scaleMax: 1.1
+      allowMirror: 1
     fluidType: 2
     fluidShaderID: 1
     fluidMeshData: {fileID: 11400000, guid: 4166a3e10e186364d8a9e5f90be4c0ee, type: 2}
@@ -762,6 +908,7 @@ MonoBehaviour:
     tags: 2
     worldGenCanReplaceTags: 8258
     placementCanReplaceTags: 8194
+    soundMaterial: 12
     isActive: 1
     metadataSchema: 0
     placementMetadataMode: 0
@@ -783,6 +930,12 @@ MonoBehaviour:
       min: {x: 0, y: 0, z: 0}
       max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
+    swayStrength: 0
+    crossMeshVariation:
+      offset: 0.15
+      scaleMin: 0.85
+      scaleMax: 1.1
+      allowMirror: 1
     fluidType: 0
     fluidShaderID: 0
     fluidMeshData: {fileID: 0}
@@ -798,6 +951,7 @@ MonoBehaviour:
     tags: 769
     worldGenCanReplaceTags: 256
     placementCanReplaceTags: 8194
+    soundMaterial: 1
     isActive: 0
     metadataSchema: 5
     placementMetadataMode: 1
@@ -819,6 +973,12 @@ MonoBehaviour:
       min: {x: 0, y: 0, z: 0}
       max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 1
+    swayStrength: 0
+    crossMeshVariation:
+      offset: 0.15
+      scaleMin: 0.85000014
+      scaleMax: 1.0990832
+      allowMirror: 1
     fluidType: 0
     fluidShaderID: 0
     fluidMeshData: {fileID: 0}
@@ -834,6 +994,7 @@ MonoBehaviour:
     tags: 24640
     worldGenCanReplaceTags: 8192
     placementCanReplaceTags: 8194
+    soundMaterial: 8
     isActive: 0
     metadataSchema: 0
     placementMetadataMode: 0
@@ -855,6 +1016,12 @@ MonoBehaviour:
       min: {x: 0, y: 0, z: 0}
       max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
+    swayStrength: 0
+    crossMeshVariation:
+      offset: 0.15
+      scaleMin: 0.85
+      scaleMax: 1.1
+      allowMirror: 1
     fluidType: 0
     fluidShaderID: 0
     fluidMeshData: {fileID: 0}
@@ -870,6 +1037,7 @@ MonoBehaviour:
     tags: 65536
     worldGenCanReplaceTags: 8258
     placementCanReplaceTags: 8194
+    soundMaterial: 1
     isActive: 0
     metadataSchema: 0
     placementMetadataMode: 0
@@ -891,6 +1059,12 @@ MonoBehaviour:
       min: {x: 0, y: 0, z: 0}
       max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
+    swayStrength: 0
+    crossMeshVariation:
+      offset: 0.15
+      scaleMin: 0.85
+      scaleMax: 1.1
+      allowMirror: 1
     fluidType: 0
     fluidShaderID: 0
     fluidMeshData: {fileID: 0}
@@ -906,6 +1080,7 @@ MonoBehaviour:
     tags: 65536
     worldGenCanReplaceTags: 8258
     placementCanReplaceTags: 8194
+    soundMaterial: 1
     isActive: 0
     metadataSchema: 0
     placementMetadataMode: 0
@@ -927,6 +1102,12 @@ MonoBehaviour:
       min: {x: 0, y: 0, z: 0}
       max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
+    swayStrength: 0
+    crossMeshVariation:
+      offset: 0.15
+      scaleMin: 0.85
+      scaleMax: 1.1
+      allowMirror: 1
     fluidType: 0
     fluidShaderID: 0
     fluidMeshData: {fileID: 0}
@@ -942,6 +1123,7 @@ MonoBehaviour:
     tags: 65536
     worldGenCanReplaceTags: 8258
     placementCanReplaceTags: 8194
+    soundMaterial: 1
     isActive: 0
     metadataSchema: 0
     placementMetadataMode: 0
@@ -963,6 +1145,12 @@ MonoBehaviour:
       min: {x: 0, y: 0, z: 0}
       max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
+    swayStrength: 0
+    crossMeshVariation:
+      offset: 0.15
+      scaleMin: 0.85
+      scaleMax: 1.1
+      allowMirror: 1
     fluidType: 0
     fluidShaderID: 0
     fluidMeshData: {fileID: 0}
@@ -978,6 +1166,7 @@ MonoBehaviour:
     tags: 65536
     worldGenCanReplaceTags: 8258
     placementCanReplaceTags: 8194
+    soundMaterial: 1
     isActive: 0
     metadataSchema: 0
     placementMetadataMode: 0
@@ -999,6 +1188,12 @@ MonoBehaviour:
       min: {x: 0, y: 0, z: 0}
       max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
+    swayStrength: 0
+    crossMeshVariation:
+      offset: 0.15
+      scaleMin: 0.85
+      scaleMax: 1.1
+      allowMirror: 1
     fluidType: 0
     fluidShaderID: 0
     fluidMeshData: {fileID: 0}
@@ -1014,6 +1209,7 @@ MonoBehaviour:
     tags: 65536
     worldGenCanReplaceTags: 8258
     placementCanReplaceTags: 8194
+    soundMaterial: 1
     isActive: 0
     metadataSchema: 0
     placementMetadataMode: 0
@@ -1035,6 +1231,12 @@ MonoBehaviour:
       min: {x: 0, y: 0, z: 0}
       max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
+    swayStrength: 0
+    crossMeshVariation:
+      offset: 0.15
+      scaleMin: 0.85
+      scaleMax: 1.1
+      allowMirror: 1
     fluidType: 0
     fluidShaderID: 0
     fluidMeshData: {fileID: 0}
@@ -1050,6 +1252,7 @@ MonoBehaviour:
     tags: 65536
     worldGenCanReplaceTags: 8258
     placementCanReplaceTags: 8194
+    soundMaterial: 1
     isActive: 0
     metadataSchema: 0
     placementMetadataMode: 0
@@ -1071,6 +1274,12 @@ MonoBehaviour:
       min: {x: 0, y: 0, z: 0}
       max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
+    swayStrength: 0
+    crossMeshVariation:
+      offset: 0.15
+      scaleMin: 0.85
+      scaleMax: 1.1
+      allowMirror: 1
     fluidType: 0
     fluidShaderID: 0
     fluidMeshData: {fileID: 0}
@@ -1086,6 +1295,7 @@ MonoBehaviour:
     tags: 65536
     worldGenCanReplaceTags: 8258
     placementCanReplaceTags: 8194
+    soundMaterial: 1
     isActive: 0
     metadataSchema: 0
     placementMetadataMode: 0
@@ -1107,6 +1317,12 @@ MonoBehaviour:
       min: {x: 0, y: 0, z: 0}
       max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
+    swayStrength: 0
+    crossMeshVariation:
+      offset: 0.15
+      scaleMin: 0.85
+      scaleMax: 1.1
+      allowMirror: 1
     fluidType: 0
     fluidShaderID: 0
     fluidMeshData: {fileID: 0}
@@ -1122,6 +1338,7 @@ MonoBehaviour:
     tags: 65536
     worldGenCanReplaceTags: 8258
     placementCanReplaceTags: 8194
+    soundMaterial: 1
     isActive: 0
     metadataSchema: 0
     placementMetadataMode: 0
@@ -1143,6 +1360,12 @@ MonoBehaviour:
       min: {x: 0, y: 0, z: 0}
       max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
+    swayStrength: 0
+    crossMeshVariation:
+      offset: 0.15
+      scaleMin: 0.85
+      scaleMax: 1.1
+      allowMirror: 1
     fluidType: 0
     fluidShaderID: 0
     fluidMeshData: {fileID: 0}
@@ -1158,6 +1381,7 @@ MonoBehaviour:
     tags: 65536
     worldGenCanReplaceTags: 8258
     placementCanReplaceTags: 8194
+    soundMaterial: 1
     isActive: 0
     metadataSchema: 0
     placementMetadataMode: 0
@@ -1179,6 +1403,12 @@ MonoBehaviour:
       min: {x: 0, y: 0, z: 0}
       max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
+    swayStrength: 0
+    crossMeshVariation:
+      offset: 0.15
+      scaleMin: 0.85
+      scaleMax: 1.1
+      allowMirror: 1
     fluidType: 0
     fluidShaderID: 0
     fluidMeshData: {fileID: 0}
@@ -1194,6 +1424,7 @@ MonoBehaviour:
     tags: 65536
     worldGenCanReplaceTags: 8258
     placementCanReplaceTags: 8194
+    soundMaterial: 1
     isActive: 0
     metadataSchema: 0
     placementMetadataMode: 0
@@ -1215,6 +1446,12 @@ MonoBehaviour:
       min: {x: 0, y: 0, z: 0}
       max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
+    swayStrength: 0
+    crossMeshVariation:
+      offset: 0.15
+      scaleMin: 0.85
+      scaleMax: 1.1
+      allowMirror: 1
     fluidType: 0
     fluidShaderID: 0
     fluidMeshData: {fileID: 0}
@@ -1230,6 +1467,7 @@ MonoBehaviour:
     tags: 65536
     worldGenCanReplaceTags: 8258
     placementCanReplaceTags: 8194
+    soundMaterial: 1
     isActive: 0
     metadataSchema: 0
     placementMetadataMode: 0
@@ -1251,6 +1489,12 @@ MonoBehaviour:
       min: {x: 0, y: 0, z: 0}
       max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
+    swayStrength: 0
+    crossMeshVariation:
+      offset: 0.15
+      scaleMin: 0.85
+      scaleMax: 1.1
+      allowMirror: 1
     fluidType: 0
     fluidShaderID: 0
     fluidMeshData: {fileID: 0}
@@ -1266,6 +1510,7 @@ MonoBehaviour:
     tags: 65536
     worldGenCanReplaceTags: 8258
     placementCanReplaceTags: 8194
+    soundMaterial: 1
     isActive: 0
     metadataSchema: 0
     placementMetadataMode: 0
@@ -1287,6 +1532,12 @@ MonoBehaviour:
       min: {x: 0, y: 0, z: 0}
       max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
+    swayStrength: 0
+    crossMeshVariation:
+      offset: 0.15
+      scaleMin: 0.85
+      scaleMax: 1.1
+      allowMirror: 1
     fluidType: 0
     fluidShaderID: 0
     fluidMeshData: {fileID: 0}
@@ -1302,6 +1553,7 @@ MonoBehaviour:
     tags: 65536
     worldGenCanReplaceTags: 8258
     placementCanReplaceTags: 8194
+    soundMaterial: 1
     isActive: 0
     metadataSchema: 0
     placementMetadataMode: 0
@@ -1323,6 +1575,12 @@ MonoBehaviour:
       min: {x: 0, y: 0, z: 0}
       max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
+    swayStrength: 0
+    crossMeshVariation:
+      offset: 0.15
+      scaleMin: 0.85
+      scaleMax: 1.1
+      allowMirror: 1
     fluidType: 0
     fluidShaderID: 0
     fluidMeshData: {fileID: 0}
@@ -1338,6 +1596,7 @@ MonoBehaviour:
     tags: 65536
     worldGenCanReplaceTags: 8258
     placementCanReplaceTags: 8194
+    soundMaterial: 1
     isActive: 0
     metadataSchema: 0
     placementMetadataMode: 0
@@ -1359,6 +1618,12 @@ MonoBehaviour:
       min: {x: 0, y: 0, z: 0}
       max: {x: 1, y: 1, z: 1}
     renderNeighborFaces: 0
+    swayStrength: 0
+    crossMeshVariation:
+      offset: 0.15
+      scaleMin: 0.85
+      scaleMax: 1.1
+      allowMirror: 1
     fluidType: 0
     fluidShaderID: 0
     fluidMeshData: {fileID: 0}
@@ -1374,6 +1639,7 @@ MonoBehaviour:
     tags: 65536
     worldGenCanReplaceTags: 8258
     placementCanReplaceTags: 8194
+    soundMaterial: 1
     isActive: 0
     metadataSchema: 0
     placementMetadataMode: 0

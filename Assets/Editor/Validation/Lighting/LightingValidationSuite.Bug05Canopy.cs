@@ -1,4 +1,5 @@
 using System.Text;
+using Editor.Dev;
 using Editor.Validation.Lighting.Framework;
 using UnityEditor;
 using UnityEngine;
@@ -61,7 +62,7 @@ namespace Editor.Validation.Lighting
             /// <summary>Number of stacked leaves layers forming the canopy.</summary>
             public readonly int CanopyThickness;
 
-            /// <summary>Columns punched clear of canopy (air up to the sky) so vertical sunlight reaches the gap.</summary>
+            /// <summary>Columns punched clear of canopy (air up to the sky) so vertical skylight reaches the gap.</summary>
             public readonly Vector2Int[] Wells;
 
             /// <summary>Opaque under-canopy dividers (stone walls spanning the gap height) that force winding paths.</summary>
@@ -172,7 +173,7 @@ namespace Editor.Validation.Lighting
         /// stays fast). Logs the first failing seed's full case plus whether extra edge rounds resolve it
         /// (confirming the round-budget mechanism), or a green all-pass summary.
         /// </summary>
-        [MenuItem("Minecraft Clone/Dev/Validate Lighting Engine (Bug 05 Canopy Fuzz)")]
+        [MenuItem("Minecraft Clone/Dev/Validate Lighting Engine (Bug 05 Canopy Fuzz)", priority = DevMenuPriority.DeepValidation)]
         public static void RunBug05CanopyFuzz()
         {
             Debug.Log($"--- Bug 05 dense-canopy fuzz: {BUG05_CANOPY_NIGHTLY_ITERATIONS} randomized canopy seeds ---");
@@ -278,7 +279,7 @@ namespace Editor.Validation.Lighting
             }
 
             // Sky wells: clear the canopy (and everything above the gap) at the well columns so vertical
-            // sunlight reaches the gap. Cleared last so a well always wins over a divider at the same column.
+            // skylight reaches the gap. Cleared last so a well always wins over a divider at the same column.
             foreach (Vector2Int well in canopyCase.Wells)
             {
                 for (int y = gapBottomY; y < VoxelData.ChunkHeight; y++)

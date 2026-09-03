@@ -41,7 +41,7 @@ namespace Benchmarks
             // SectionData is required by MeshGenerationJob.Execute (one entry per 16-block section).
             // Left at default (IsEmpty=false, IsFullySolid=false) so every section runs the per-voxel
             // standard path — the representative hot path the throughput probe should measure.
-            const int sectionCount = VoxelData.ChunkHeight / ChunkMath.SECTION_SIZE;
+            const int sectionCount = ChunkMath.SECTIONS_PER_CHUNK;
             NativeArray<SectionJobData> sectionData = new NativeArray<SectionJobData>(sectionCount, Allocator.TempJob);
 
             // In cardinals-only mode the diagonal neighbor fields take a temporary empty array.
@@ -54,26 +54,26 @@ namespace Benchmarks
                 Map = input.Center,
                 SectionData = sectionData,
                 BlockTypes = jobData.BlockTypesJobData,
-                NeighborBack = input.Back,
-                NeighborFront = input.Front,
-                NeighborLeft = input.Left,
-                NeighborRight = input.Right,
-                NeighborFrontRight = input.IncludeDiagonals ? input.FrontRight : emptyArray,
-                NeighborBackRight = input.IncludeDiagonals ? input.BackRight : emptyArray,
-                NeighborBackLeft = input.IncludeDiagonals ? input.BackLeft : emptyArray,
-                NeighborFrontLeft = input.IncludeDiagonals ? input.FrontLeft : emptyArray,
+                NeighborS = input.NeighborS,
+                NeighborN = input.NeighborN,
+                NeighborW = input.NeighborW,
+                NeighborE = input.NeighborE,
+                NeighborNE = input.IncludeDiagonals ? input.NeighborNE : emptyArray,
+                NeighborSE = input.IncludeDiagonals ? input.NeighborSE : emptyArray,
+                NeighborSW = input.IncludeDiagonals ? input.NeighborSW : emptyArray,
+                NeighborNW = input.IncludeDiagonals ? input.NeighborNW : emptyArray,
                 // Light maps are optional to the job (GetLight returns 0 for an uncreated map); the
                 // benchmark leaves them default (it runs only in player builds where job-safety is off),
                 // while the calibrator supplies created zero maps so it also passes editor job-safety.
                 LightMap = input.LightCenter,
-                LightBack = input.LightBack,
-                LightFront = input.LightFront,
-                LightLeft = input.LightLeft,
-                LightRight = input.LightRight,
-                LightFrontRight = input.LightFrontRight,
-                LightBackRight = input.LightBackRight,
-                LightBackLeft = input.LightBackLeft,
-                LightFrontLeft = input.LightFrontLeft,
+                LightS = input.LightS,
+                LightN = input.LightN,
+                LightW = input.LightW,
+                LightE = input.LightE,
+                LightNE = input.LightNE,
+                LightSE = input.LightSE,
+                LightSW = input.LightSW,
+                LightNW = input.LightNW,
                 CustomMeshes = jobData.CustomMeshesJobData,
                 CustomFaces = jobData.CustomFacesJobData,
                 CustomVerts = jobData.CustomVertsJobData,
@@ -110,19 +110,19 @@ namespace Benchmarks
         public NativeArray<uint> Center;
 
         /// <summary>Cardinal neighbor voxel maps.</summary>
-        public NativeArray<uint> Back, Front, Left, Right;
+        public NativeArray<uint> NeighborS, NeighborN, NeighborW, NeighborE;
 
         /// <summary>Diagonal neighbor voxel maps (ignored when <see cref="IncludeDiagonals"/> is false).</summary>
-        public NativeArray<uint> FrontRight, BackRight, BackLeft, FrontLeft;
+        public NativeArray<uint> NeighborNE, NeighborSE, NeighborSW, NeighborNW;
 
         /// <summary>Center light map (optional; <c>default</c> meshes with zero light).</summary>
         public NativeArray<ushort> LightCenter;
 
         /// <summary>Cardinal neighbor light maps (optional).</summary>
-        public NativeArray<ushort> LightBack, LightFront, LightLeft, LightRight;
+        public NativeArray<ushort> LightS, LightN, LightW, LightE;
 
         /// <summary>Diagonal neighbor light maps (optional).</summary>
-        public NativeArray<ushort> LightFrontRight, LightBackRight, LightBackLeft, LightFrontLeft;
+        public NativeArray<ushort> LightNE, LightSE, LightSW, LightNW;
 
         /// <summary>When false, the diagonal voxel fields receive an empty array (cardinals-only meshing).</summary>
         public bool IncludeDiagonals;

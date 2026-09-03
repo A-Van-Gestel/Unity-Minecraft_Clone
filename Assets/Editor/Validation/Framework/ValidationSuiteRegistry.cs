@@ -1,11 +1,27 @@
 using System;
 using System.Collections.Generic;
 using Editor.Validation.Behavior;
+using Editor.Validation.Celestial;
+using Editor.Validation.ChunkPipeline;
+using Editor.Validation.ChunkUnload;
+using Editor.Validation.Commands;
+using Editor.Validation.DeserializationRobustness;
+using Editor.Validation.Generation;
 using Editor.Validation.Lighting;
 using Editor.Validation.LightScheduler;
 using Editor.Validation.Meshing;
 using Editor.Validation.MeshQueue;
+using Editor.Validation.MigrationChain;
+using Editor.Validation.Occlusion;
 using Editor.Validation.Placement;
+using Editor.Validation.PhysicsSolver;
+using Editor.Validation.PipelineBackpressure;
+using Editor.Validation.PoolPrune;
+using Editor.Validation.SaveDurability;
+using Editor.Validation.SerializationRoundTrip;
+using Editor.Validation.SoundEngine;
+using Editor.Validation.UIBlur;
+using Editor.Validation.WorldClock;
 
 namespace Editor.Validation.Framework
 {
@@ -45,7 +61,7 @@ namespace Editor.Validation.Framework
     public static class ValidationSuiteRegistry
     {
         /// <summary>The number of standard suites expected on the list — a floor the aggregate runner asserts against.</summary>
-        public const int ExpectedSuiteCount = 8;
+        public const int ExpectedSuiteCount = 27;
 
         /// <summary>The registered suites, in run/report order.</summary>
         public static readonly IReadOnlyList<RegisteredSuite> Suites = new[]
@@ -54,9 +70,28 @@ namespace Editor.Validation.Framework
             new RegisteredSuite("Meshing", MeshingValidationSuite.Execute),
             new RegisteredSuite("Behavior", BehaviorValidationSuite.Execute),
             new RegisteredSuite("Placement", PlacementValidationSuite.Execute),
+            new RegisteredSuite("Physics Solver", PhysicsSolverValidationSuite.Execute),
+            new RegisteredSuite("Voxel Occlusion", OcclusionValidationSuite.Execute),
             new RegisteredSuite("Mesh Build Queue", MeshBuildQueueValidationSuite.Execute),
             new RegisteredSuite("Light Work Scheduler", LightWorkSchedulerValidationSuite.Execute),
-            new RegisteredSuite("Chunk Math", ChunkRelativePositionTests.Execute),
+            new RegisteredSuite("Chunk Math", ChunkMathValidationSuite.Execute),
+            new RegisteredSuite("Chunk Unload Decision", ChunkUnloadDecisionValidationSuite.Execute),
+            new RegisteredSuite("Pool Prune Decision", PoolPruneDecisionValidationSuite.Execute),
+            new RegisteredSuite("Pipeline Backpressure", PipelineBackpressureValidationSuite.Execute),
+            new RegisteredSuite("Chunk Pipeline", ChunkPipelineValidationSuite.Execute),
+            new RegisteredSuite("Save Durability", SaveDurabilityValidationSuite.Execute),
+            new RegisteredSuite("Deserialization Robustness", DeserializationRobustnessValidationSuite.Execute),
+            new RegisteredSuite("Serialization Round-Trip", SerializationRoundTripValidationSuite.Execute),
+            new RegisteredSuite("Migration Chain", MigrationChainValidationSuite.Execute),
+            new RegisteredSuite("Spawn", SpawnValidationSuite.Execute),
+            new RegisteredSuite("Command Console", CommandConsoleValidationSuite.Execute),
+            new RegisteredSuite("World Clock", WorldClockValidationSuite.Execute),
+            new RegisteredSuite("Sky & Celestial", SkyValidationSuite.Execute),
+            new RegisteredSuite("Sky Render", SkyRenderValidationSuite.Execute),
+            new RegisteredSuite("UI Blur Render", UIBlurRenderValidationSuite.Execute),
+            new RegisteredSuite("Worm Carver", WormCarverValidationSuite.Execute),
+            new RegisteredSuite("Biome Selection", BiomeSelectionValidationSuite.Execute),
+            new RegisteredSuite("Sound Engine", SoundEngineValidationSuite.Execute),
             new RegisteredSuite("Validation Framework", ValidationFrameworkSelfTest.Execute),
         };
     }
