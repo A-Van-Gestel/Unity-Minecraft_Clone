@@ -25,16 +25,31 @@ namespace Data.NativeData
 
         // --- Methods ---
         /// <summary>
-        /// A helper to dispose of the allocated native arrays.
+        /// Whether <see cref="Dispose"/> has run. <b>The only reliable "are these templates still usable"
+        /// test this type offers</b> — see the remarks on <see cref="Dispose"/>.
         /// </summary>
+        public bool IsDisposed { get; private set; }
+
+        /// <summary>
+        /// A helper to dispose of the allocated native arrays. Safe to call more than once.
+        /// </summary>
+        /// <remarks>
+        /// <b><see cref="NativeArray{T}.IsCreated"/> cannot tell whether these templates are alive</b> — the
+        /// <c>readonly</c> fields keep their pointers after the hoisted copies below are disposed. Guard on
+        /// <see cref="IsDisposed"/> instead; see <c>Data.JobData.JobDataManager.Dispose</c> for the detail.
+        /// </remarks>
         public void Dispose()
         {
+            if (IsDisposed) return;
+
             // Hoisted off the readonly fields so Dispose() runs without hidden defensive copies.
             NativeArray<float> water = WaterVertexTemplates;
             NativeArray<float> lava = LavaVertexTemplates;
 
             if (water.IsCreated) water.Dispose();
             if (lava.IsCreated) lava.Dispose();
+
+            IsDisposed = true;
         }
     }
 }
