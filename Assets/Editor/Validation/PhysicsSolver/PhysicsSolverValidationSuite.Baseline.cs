@@ -156,7 +156,17 @@ namespace Editor.Validation.PhysicsSolver
                 StepUpFromFlatGroundGathersLiftedCells));
             scenarios.Add(new Scenario("B26: CalculateVelocity resolves the substep chain without touching the transform",
                 CalculateVelocityLeavesTransformUntouched));
+
+            scenarios.Add(new Scenario("B40: step smoothing lags the view without moving the collider",
+                StepSmoothingIsPresentationOnly));
+
+            // --- Fluid contact family (B27–B39, B41–B44) lives in PhysicsSolverValidationSuite.Fluid.cs. ---
+            AddFluidBaselineScenarios(scenarios);
         }
+
+        /// <summary>Hook for the fluid contact baselines (implemented in PhysicsSolverValidationSuite.Fluid.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddFluidBaselineScenarios(List<Scenario> scenarios);
 
         /// <summary>Builds a fixture over the controlled solver palette at the identity origin.</summary>
         /// <returns>A fresh fixture the caller owns and must dispose.</returns>
@@ -1134,6 +1144,71 @@ namespace Editor.Validation.PhysicsSolver
         }
 
         #endregion
+
+        /// <summary>
+        /// B40 — step smoothing is <b>presentation only</b>: it records a view offset without changing where
+        /// the collider ends up.
+        /// <para>
+        /// This is the invariant that keeps the feature safe. The obvious way to smooth a step is to spread
+        /// the rise over several ticks, which would leave the body intersecting the block it is climbing for
+        /// the duration — a collision bug wearing a polish feature's clothes. Smoothing the <i>view</i>
+        /// instead cannot do that, and this pins the distinction by running the identical step twice, with
+        /// smoothing on and off, and demanding the resolved displacement match exactly.
+        /// </para>
+        /// <para>
+        /// The offset assertions are the other half: with smoothing off it must stay at zero (nothing to
+        /// apply), and with it on it must equal the rise the solver actually performed.
+        /// </para>
+        /// </summary>
+        /// <returns>True when the solve is identical and only the offset differs.</returns>
+        private static bool StepSmoothingIsPresentationOnly()
+        {
+            Vector3 unsmoothed;
+            Vector3 restingUnsmoothed;
+            float offsetWhenDisabled;
+            using (PhysicsTestWorld world = BuildStepUpFixture())
+            {
+                world.Body.stepSmoothing = 0f;
+                unsmoothed = world.Step(new Vector3(0.2f, 0f, 0f));
+                world.CollectStepSmoothing();
+                offsetWhenDisabled = world.Body.StepSmoothingOffset;
+                restingUnsmoothed = world.Position;
+            }
+
+            Vector3 smoothed;
+            Vector3 restingSmoothed;
+            float offsetWhenEnabled;
+            using (PhysicsTestWorld world = BuildStepUpFixture())
+            {
+                world.Body.stepSmoothing = 0.12f;
+                smoothed = world.Step(new Vector3(0.2f, 0f, 0f));
+                world.CollectStepSmoothing();
+                offsetWhenEnabled = world.Body.StepSmoothingOffset;
+                restingSmoothed = world.Position;
+            }
+
+            bool ok = Expect(smoothed.y > 0.1f,
+                $"fixture: the step-up must actually have fired, got a rise of {smoothed.y:F4}");
+
+            ok &= ExpectApprox(smoothed.x, unsmoothed.x,
+                "horizontal displacement must not depend on smoothing", EXACT_TOLERANCE);
+            ok &= ExpectApprox(smoothed.y, unsmoothed.y,
+                "vertical displacement must not depend on smoothing", EXACT_TOLERANCE);
+
+            // The body itself must land in exactly the same place. Comparing only the resolved displacement
+            // would miss an implementation that smoothed by moving the COLLIDER down after the solve, which is
+            // the tempting wrong way to build this and the one that puts the body inside the step.
+            ok &= ExpectApprox(restingSmoothed.y, restingUnsmoothed.y,
+                "the body must come to rest at the same height regardless of smoothing", EXACT_TOLERANCE);
+
+            ok &= ExpectApprox(offsetWhenDisabled, 0f,
+                "no view offset may accumulate while smoothing is disabled", EXACT_TOLERANCE);
+
+            ok &= ExpectApprox(offsetWhenEnabled, smoothed.y,
+                "the view offset must equal the rise the solver snapped", PositionTolerance);
+
+            return ok;
+        }
 
         #region Shared fixture geometry
 

@@ -49,16 +49,60 @@ namespace Editor.Validation.PhysicsSolver.Framework
             /// without this entry that filter would have no coverage at all.
             /// </summary>
             public const ushort SolidFlaggedFluid = 5;
+
+            /// <summary>
+            /// A water-like fluid that does <b>not</b> hold a body up — <see cref="SinkingFluidBuoyancy"/>
+            /// mirrors the shipping Water block rather than <see cref="Id.Fluid"/>'s neutral 1.
+            /// </summary>
+            /// <remarks>
+            /// The fixture carries both because the neutral one cannot expose a whole class of defect.
+            /// <see cref="FluidBuoyancy"/> is 1 so a submerged body's expected momentum is a clean zero,
+            /// which is what makes the buoyancy baseline readable — but it also means gravity is fully
+            /// canceled, so any scenario about a body <i>losing</i> a vertical contest passes for free.
+            /// The waterfall-climb baseline was green against it while the shipping tuning sank the player,
+            /// which is exactly the gap this entry closes.
+            /// </remarks>
+            public const ushort SinkingFluid = 6;
         }
 
         /// <summary>Length of the palette array.</summary>
-        public const int Count = Id.SolidFlaggedFluid + 1;
+        public const int Count = Id.SinkingFluid + 1;
 
         /// <summary>The authored height of <see cref="Id.HalfSlab"/>'s collision volume, in block-local units.</summary>
         public const float HalfSlabHeight = 0.5f;
 
         /// <summary>The authored height of <see cref="Id.QuarterSlab"/>'s collision volume, in block-local units.</summary>
         public const float QuarterSlabHeight = 0.25f;
+
+        #region Pinned fluid physics coefficients
+
+        /// <summary>
+        /// Buoyancy of <see cref="Id.Fluid"/> — exactly 1, i.e. precisely cancelling gravity at full
+        /// submersion. Chosen so a fully submerged body's expected vertical momentum is a clean zero, which
+        /// a scenario can assert without restating the gravity integration it is meant to be checking.
+        /// </summary>
+        public const float FluidBuoyancy = 1f;
+
+        /// <summary>Vertical drag of <see cref="Id.Fluid"/>.</summary>
+        public const float FluidVerticalDrag = 4f;
+
+        /// <summary>Submerged horizontal speed multiplier of <see cref="Id.Fluid"/>.</summary>
+        public const float FluidSubmergedSpeedMultiplier = 0.5f;
+
+        /// <summary>Flow push strength of <see cref="Id.Fluid"/>, in meters per second at full flow.</summary>
+        public const float FluidPushStrength = 2f;
+
+        /// <summary>Swim-stroke ascent speed of <see cref="Id.Fluid"/>, in meters per second.</summary>
+        public const float FluidSwimAscendSpeed = 3f;
+
+        /// <summary>
+        /// Buoyancy of <see cref="Id.SinkingFluid"/> — under 1, so gravity is only partly canceled and a
+        /// body genuinely loses ground in a vertical contest. Matches the shipping Water block's authored
+        /// value at the time this entry was added.
+        /// </summary>
+        public const float SinkingFluidBuoyancy = 0.55f;
+
+        #endregion
 
         /// <summary>Builds the controlled solver palette.</summary>
         /// <returns>A <see cref="BlockType"/> array indexed by <see cref="Id"/>.</returns>
@@ -91,6 +135,15 @@ namespace Editor.Validation.PhysicsSolver.Framework
                 isSolid = false,
                 tags = BlockTags.LIQUID,
                 fluidType = FluidType.WaterLike,
+                flowLevels = PhysicsTestWorld.WaterFlowLevels,
+                // Pinned rather than left on BlockType's defaults, so retuning shipping water cannot move a
+                // baseline. FluidBuoyancy is 1 — exactly neutral — so a fully submerged body's expected
+                // vertical momentum is a clean zero rather than a number carrying gravity's sign.
+                buoyancy = FluidBuoyancy,
+                verticalDrag = FluidVerticalDrag,
+                submergedSpeedMultiplier = FluidSubmergedSpeedMultiplier,
+                pushStrength = FluidPushStrength,
+                swimAscendSpeed = FluidSwimAscendSpeed,
             };
 
             palette[Id.SolidFlaggedFluid] = new BlockType
@@ -99,6 +152,20 @@ namespace Editor.Validation.PhysicsSolver.Framework
                 isSolid = true,
                 tags = BlockTags.LIQUID,
                 fluidType = FluidType.WaterLike,
+            };
+
+            palette[Id.SinkingFluid] = new BlockType
+            {
+                blockName = "TestSinkingFluid",
+                isSolid = false,
+                tags = BlockTags.LIQUID,
+                fluidType = FluidType.WaterLike,
+                flowLevels = PhysicsTestWorld.WaterFlowLevels,
+                buoyancy = SinkingFluidBuoyancy,
+                verticalDrag = FluidVerticalDrag,
+                submergedSpeedMultiplier = FluidSubmergedSpeedMultiplier,
+                pushStrength = FluidPushStrength,
+                swimAscendSpeed = FluidSwimAscendSpeed,
             };
 
             return palette;
