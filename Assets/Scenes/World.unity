@@ -344,6 +344,9 @@ MonoBehaviour:
   collisionPadding: 0
   showBoundingBox: 0
   stepHeight: 0.5
+  swimStepHeight: 1.45
+  requireJumpReleaseAfterFluid: 1
+  stepSmoothing: 0.12
   jumpForce: 5.7
   walkSpeed: 3
   sprintSpeed: 6
