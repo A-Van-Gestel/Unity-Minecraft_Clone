@@ -9,7 +9,9 @@ This document outlines **open** bugs related to fluid behavior and simulation. R
 ## 02. No player effect — ⚠️ PARTIALLY IMPLEMENTED
 
 **Severity:** Missing Feature (visual only)  
-**Files:** `Player.cs`, `Physics/VoxelRigidbody.cs`, `World.GatherFluidContact`
+**Files (shipped physics half):** `Player.cs`, `Physics/VoxelRigidbody.cs`, `World.GatherFluidContact`  
+**Files (open visual half):** `Shaders/UberLiquidShader.shader`, plus the eye query, overlay pass and
+shader globals the design doc adds
 
 The physics half shipped 2026-09-03 (with **#14**, in-game confirmed) — fluid now slows the player,
 floats them, carries them on its current, and lets them swim up, down and out onto a bank. Tuned per
