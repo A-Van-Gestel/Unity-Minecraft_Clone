@@ -42,8 +42,9 @@ MonoBehaviour:
     probeSamplingDebugTexture: {fileID: 0}
     probeVolumeBlendStatesCS: {fileID: 0}
   m_RendererFeatures:
+  - {fileID: 857030412932682748}
   - {fileID: -1806709187082933392}
-  m_RendererFeatureMap: 70ab7c139147ede6l
+  m_RendererFeatureMap: fc138fac9ec8e40b70ab7c139147ede6l
   postProcessData: {fileID: 11400000, guid: 41439944d30ece34e96484bdb6645b55, type: 2}
   m_AssetVersion: 3
   m_PrepassLayerMask:
@@ -71,3 +72,18 @@ MonoBehaviour:
   m_AccurateGbufferNormals: 0
   m_IntermediateTextureMode: 0
   m_TileOnlyMode: 0
+--- !u!114 &857030412932682748
+MonoBehaviour:
+  m_ObjectHideFlags: 1
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: db0c1d89cb98df840b0af9ea125c04a2, type: 3}
+  m_Name: UnderwaterOverlayRendererFeature
+  m_EditorClassIdentifier: Assembly-CSharp::Rendering.UnderwaterOverlayRendererFeature
+  m_Active: 1
+  _settings:
+    overlayShader: {fileID: 4800000, guid: 092696f346a39a143a8d68352d2bbfd2, type: 3}

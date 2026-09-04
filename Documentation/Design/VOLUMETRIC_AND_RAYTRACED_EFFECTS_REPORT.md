@@ -43,6 +43,12 @@ that unblocks MR-8's smooth-lighting constraint), VX-9 (heat-haze distortion), V
   read VX-1's sky channel instead of its own 2D upload, but has no dependency on it.
 - [`FOLIAGE_LIVELINESS_IMPROVEMENTS_REPORT.md`](FOLIAGE_LIVELINESS_IMPROVEMENTS_REPORT.md)
   (`FL-*`) — no direct coupling; FL-6's fireflies pair visually with VX-2's night fog.
+- [`UNDERWATER_AND_SUBMERSION_RENDERING.md`](UNDERWATER_AND_SUBMERSION_RENDERING.md) (`UW-*`) —
+  **shipped VX-3's cheap half** in 2026-09-04's `UW-4`, as a screen-space pass integrating
+  Beer–Lambert absorption against an analytic box. **VX-3 + VX-5 are the exact replacement for that
+  box**: a per-pixel DDA march of fluid occupancy removes both the shape error (L-shaped bodies
+  under-fog) and the per-cell stepping of the eye-cell extent scan. `UW-6` closes `FLUID_BUGS` #02
+  with the approximation in place; this report owns the upgrade.
 - [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](PERFORMANCE_IMPROVEMENTS_REPORT.md) — `GS-2` (opaque
   texture) still constrains every render-feature addition here. `GS-4` (render-tier audit) **closed
   2026-08-15 and constrains nothing**: it shipped Render Scale and MSAA settings but no device-tier
@@ -347,21 +353,36 @@ degrades to fixed noon); RF-7 (weather density — soft); a tier capture of its 
 **Classification:** Polish, high-visibility (every swim). Mostly independent of VX-1 — ships
 its cheap half without it.
 
-**What exists today:** `UberLiquidShader`/`LiquidCore.hlsl` render the *surface* (waves, GS-1
-procedural FBM, refraction via the camera opaque texture — GS-2). Being underwater applies no
-fog, no light attenuation, no caustics; the underwater camera sees air-clear water.
+**What exists today:** ⚠️ **Updated 2026-09-04 — the cheap half of this item SHIPPED as `UW-4`**
+([`UNDERWATER_AND_SUBMERSION_RENDERING.md`](UNDERWATER_AND_SUBMERSION_RENDERING.md)). Being
+underwater now applies a per-pixel Beer–Lambert medium in the fluid's authored color, driven by a
+shared sub-cell eye query. Still absent: per-channel absorption (red dying first), the
+skylight-scaled darkening, caustics, and god rays.
 
-**Gap / finding:** water reads as a surface, not a medium.
+**Gap / finding:** water reads as a medium, but a **geometrically approximate** one — and that
+approximation is the reason this item is not closed.
 
-**Proposal (two halves, independently shippable):**
+`UW-4` integrates the fog along a view ray against an **analytic box**: the drawn surface plane as
+its lid and four horizontal extents scanned from the eye's cell as its sides (that design's §3.2).
+A box cannot describe an L-shaped, terraced or bent body, so those under-fog; and because the
+extents are measured **per cell**, they step as the eye crosses a cell boundary, which is visible as
+the fog shifting during a swim. Both are consequences of having no per-pixel knowledge of where the
+water actually is.
 
-1. **Cheap half (no VX-1):** when the camera's voxel cell is water (VQ-1 integer query, the
-   CL-8 pattern), enable an underwater state: full-screen depth-based Beer–Lambert absorption
-   tint (per-channel: red dies first), reduced far plane feel via fog density, and a
-   depth-scaled darkening from the camera cell's *own* stored skylight (one CPU voxel query —
-   deep water is dark water for free). Procedural caustics: project the existing GS-1 noise
-   family onto surfaces via a light-space scroll in the block shaders, masked to underwater
-   fragments, sky-exposure-scaled so caves get none.
+**The exact fix is a DDA march of the fluid occupancy along each view ray — `VX-5`'s substrate** —
+integrating real water thickness instead of a box intersection. That removes the shape error and the
+per-cell stepping in one move, because the answer stops depending on the eye's cell at all. Until
+then `UW-4`'s box stands, deliberately biased toward *under*-fogging (invisible) rather than
+over-fogging (a reported bug).
+
+**Proposal (three halves, independently shippable):**
+
+1. **Cheap half (no VX-1)** — ✅ **shipped as `UW-4`, 2026-09-04**, minus per-channel absorption and
+   the skylight-scaled darkening, which remain open here. Procedural caustics also remain: project
+   the existing GS-1 noise family onto surfaces via a light-space scroll in the block shaders, masked
+   to underwater fragments, sky-exposure-scaled so caves get none.
+1b. **Exact medium bounds (VX-5):** replace `UW-4`'s box with a fluid-occupancy DDA march per pixel.
+   Supersedes `_SubmersionBounds` and the eye-cell extent scan entirely.
 2. **Experimental half (VX-1):** underwater god rays — the VX-2 march with water-specific
    density/phase (stronger forward scatter, wavelength-dependent extinction) run inside the
    water medium; shafts wobble by the same surface-noise family. Shares VX-2's pass and most

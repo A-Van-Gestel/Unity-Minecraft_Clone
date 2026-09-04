@@ -21,6 +21,7 @@ using Jobs.Data;
 using Libraries;
 using MyBox;
 using Physics;
+using Rendering;
 using Serialization;
 using Sky;
 using Spawn;
@@ -304,6 +305,41 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     private static readonly int s_shaderStarBrightness = Shader.PropertyToID("_StarBrightness");
     private static readonly int s_shaderFogRange = Shader.PropertyToID("_VoxelFogRange");
     private static readonly int s_shaderFogColor = Shader.PropertyToID("_VoxelFogColor");
+
+    // --- Submersion (UW-4) ---
+
+    /// <summary>
+    /// How far the eye query scans horizontally for a fluid body's edge, in cells, per direction.
+    /// </summary>
+    /// <remarks>
+    /// Past this the body counts as unbounded. Chosen well beyond the distance at which the densest
+    /// authored fluid saturates, so the cap can only affect a view that was already fully fogged.
+    /// </remarks>
+    public const int FluidExtentScanCells = 32;
+
+    /// <summary>Extent reported for a direction that never leaves the fluid, in blocks.</summary>
+    public const float UnboundedFluidExtent = 1e6f;
+
+    /// <summary>
+    /// Last frame's published fluid-body extents, eased toward the measured ones (UW-4).
+    /// </summary>
+    /// <remarks>
+    /// Lives on the render publish path and never in <see cref="GatherEyeSubmersion"/>, which must stay
+    /// pure: <c>SoundManager</c> polls that query on its own cadence, and a stateful query would let the
+    /// audio layer perturb what the screen shows.
+    /// </remarks>
+    private Vector4 _submersionExtent;
+
+    /// <summary>Whether <see cref="_submersionExtent"/> holds this submersion's own history.</summary>
+    private bool _submersionExtentPrimed;
+
+    private static readonly int s_shaderSubmersionColor = Shader.PropertyToID("_SubmersionColor");
+    private static readonly int s_shaderSubmersionParams = Shader.PropertyToID("_SubmersionParams");
+    private static readonly int s_shaderSubmersionRayParams = Shader.PropertyToID("_SubmersionRayParams");
+    private static readonly int s_shaderSubmersionRayBasisX = Shader.PropertyToID("_SubmersionRayBasisX");
+    private static readonly int s_shaderSubmersionRayBasisY = Shader.PropertyToID("_SubmersionRayBasisY");
+    private static readonly int s_shaderSubmersionRayBasisZ = Shader.PropertyToID("_SubmersionRayBasisZ");
+    private static readonly int s_shaderSubmersionBounds = Shader.PropertyToID("_SubmersionBounds");
 
     // --- Fluid Vertex Data ---
     [NonSerialized]
@@ -693,6 +729,11 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         if (Instance == this) Instance = null;
 
         RestoreSkyRenderSettings();
+
+        // Disarmed with the other render state, and for the same reason: the overlay's active flag is only
+        // meaningful while a world is republishing it each frame. Quitting to the menu while submerged would
+        // otherwise leave the pass enqueueing over the menu with the last frame's tint still in the globals.
+        SubmersionOverlay.SetActive(false);
 
         // 1. Complete any running jobs and dispose the generator strategy.
         //    WorldJobManager.Dispose() handles all job completion and NativeArray disposal.
@@ -2176,6 +2217,11 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
 
         PublishSkyGlobals();
 
+        // A sibling of the sky publish, not a step inside it: PublishSkyGlobals returns early without a
+        // clock or authored settings, and the medium the player is swimming through has nothing to do
+        // with the time of day.
+        PublishSubmersionGlobals();
+
         // Null before StartWorld binds it (and in headless/suite contexts, e.g. the /time command
         // baseline) — the shader globals above still apply; only the camera color is skipped.
         if (_playerCamera != null && TimeManager != null)
@@ -2275,6 +2321,63 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
             AtmosphericFog.ComputeFogRange(settings.viewDistance, farClip, startFraction, curvePower,
                 settings.distanceFog));
         Shader.SetGlobalColor(s_shaderFogColor, TimeManager.HorizonColor);
+    }
+
+    /// <summary>
+    /// Pushes the medium at the player's eye to the submersion overlay's shader globals (UW-4).
+    /// </summary>
+    /// <remarks>
+    /// Publishes a dry result exactly as unconditionally as a submerged one. The overlay's whole answer to
+    /// "am I under water" is the alpha it reads here, so stopping at the surface would leave the screen
+    /// tinted after the player climbs out.
+    /// </remarks>
+    private void PublishSubmersionGlobals()
+    {
+        // Without a camera there is no eye to sample and no frustum to derive the view rays from. The
+        // globals are left as they are rather than zeroed: edit-mode fixtures build a World without
+        // StartWorld, and a suite that set them deliberately must not have them stomped mid-scenario.
+        // The pass is still disarmed, or a camera lost while submerged would leave the last frame's
+        // medium drawn over every Game camera until the world tears down.
+        if (_playerCamera == null)
+        {
+            SubmersionOverlay.SetActive(false);
+            _submersionExtentPrimed = false;
+            return;
+        }
+
+        Transform eye = _playerCamera.transform;
+        GatherEyeSubmersion(eye.position, out EyeSubmersion submersion);
+
+        // The extents are re-measured from whichever cell the eye occupies, so they step at every cell
+        // boundary — all four together when crossing vertically. Easing them turns that into a settle.
+        if (submersion.IsSubmerged)
+        {
+            _submersionExtent = SubmersionOverlay.StepExtents(_submersionExtent,
+                submersion.HorizontalExtent, Time.deltaTime, _submersionExtentPrimed);
+            _submersionExtentPrimed = true;
+            submersion.HorizontalExtent = _submersionExtent;
+        }
+        else
+        {
+            // Dropped rather than carried, so re-entering the water snaps to the body actually around the
+            // eye instead of sweeping in from the last one.
+            _submersionExtentPrimed = false;
+        }
+
+        SubmersionGlobals globals = SubmersionOverlay.Pack(in submersion, _playerCamera.fieldOfView,
+            _playerCamera.aspect, eye.rotation);
+
+        Shader.SetGlobalColor(s_shaderSubmersionColor, globals.Color);
+        Shader.SetGlobalVector(s_shaderSubmersionParams, globals.FogParams);
+        Shader.SetGlobalVector(s_shaderSubmersionRayParams, globals.RayParams);
+        Shader.SetGlobalVector(s_shaderSubmersionRayBasisX, globals.RayBasisX);
+        Shader.SetGlobalVector(s_shaderSubmersionRayBasisY, globals.RayBasisY);
+        Shader.SetGlobalVector(s_shaderSubmersionRayBasisZ, globals.RayBasisZ);
+        Shader.SetGlobalVector(s_shaderSubmersionBounds, globals.Bounds);
+
+        // Not a duplicate of the alpha: an overlay that would fog nothing still costs a fullscreen
+        // triangle, so the feature skips enqueueing the pass altogether rather than drawing nothing.
+        SubmersionOverlay.SetActive(globals.Color.a > 0f);
     }
 
     /// <summary>
@@ -4992,6 +5095,233 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         contact = BuildContact(fluid, new Vector3(flow.x, 0f, flow.y), bestSurfaceY, bodyAABB, isFalling: false);
     }
 
+    /// <summary>
+    /// Resolves what fluid, if any, an eye point is inside, and where that fluid's <b>drawn</b> surface sits
+    /// relative to it — the rendering and audio counterpart to <see cref="GatherFluidContact"/>.
+    /// </summary>
+    /// <param name="unityEyePos">The eye's <b>Unity-space</b> position.</param>
+    /// <param name="submersion">The resolved submersion; <c>default</c> (no fluid) when no surface is near.</param>
+    /// <remarks>
+    /// Takes a world-space point rather than a camera or a player, so a future spectator or cutscene eye
+    /// needs no second query.
+    /// <para>
+    /// The search is <b>two cells deep</b>. The eye's own cell owns the answer when it holds a fluid;
+    /// otherwise the cell below is probed. That cell cannot submerge the eye — its surface is at most its own
+    /// ceiling — but it supplies the surface a waterline tracks while the eye sits just above water, and
+    /// reports a negative <see cref="EyeSubmersion.EyeDepth"/>.
+    /// </para>
+    /// <para>
+    /// Unlike <see cref="GatherFluidContact"/>, the height comes from the mesher's corner-smoothed surface
+    /// via <see cref="FluidSurfaceResolver"/>: what this answers has to agree with what the player can see,
+    /// where the logical per-cell template can sit half a block off at a sloped pool edge.
+    /// </para>
+    /// </remarks>
+    public void GatherEyeSubmersion(Vector3 unityEyePos, out EyeSubmersion submersion)
+    {
+        submersion = default;
+
+        // Published from Update, which can outlive a world unload by a frame. Guarded on IsDisposed, not on
+        // the arrays' IsCreated, which stays true after disposal — see JobDataManager.Dispose's remarks.
+        if (FluidVertexTemplates == null || FluidVertexTemplates.IsDisposed) return;
+        if (JobDataManager == null || JobDataManager.IsDisposed) return;
+
+        // WS-4: the only Unity → voxel conversion in this query. The fractional part is origin-independent
+        // (the origin is whole cells), so it is read straight off the Unity position.
+        Vector3Int eyeCell = WorldOrigin.UnityToVoxelCell(unityEyePos);
+        float fracX = unityEyePos.x - Mathf.Floor(unityEyePos.x);
+        float fracZ = unityEyePos.z - Mathf.Floor(unityEyePos.z);
+
+        // The eye's own cell owns the answer; the cell below only supplies a surface to track.
+        Vector3Int resolvedCell = eyeCell;
+        if (!TryResolveEyeCell(eyeCell, fracX, fracZ, out submersion))
+        {
+            resolvedCell = eyeCell + Vector3Int.down;
+            TryResolveEyeCell(resolvedCell, fracX, fracZ, out submersion);
+        }
+
+        if (submersion.Type == FluidType.None) return;
+
+        submersion.EyeDepth = submersion.SurfaceY - unityEyePos.y;
+
+        // Measured only for an eye actually under the surface — it is the one consumer, and the scan is
+        // the expensive part of this query. A dry eye near water resolves a type and a surface for the
+        // waterline to track and pays nothing for a body it is not looking through.
+        if (submersion.IsSubmerged)
+            submersion.HorizontalExtent = MeasureHorizontalExtent(resolvedCell, submersion.Type, fracX,
+                fracZ, JobDataManager.BlockTypesJobData);
+    }
+
+    /// <summary>Resolves one candidate cell's drawn surface at the eye's XZ, if it holds a fluid.</summary>
+    /// <param name="voxelCell">The <b>voxel-space</b> cell to test.</param>
+    /// <param name="fracX">The eye's position across the cell on X, 0–1.</param>
+    /// <param name="fracZ">The eye's position across the cell on Z, 0–1.</param>
+    /// <param name="submersion">The fluid, its authored look and its surface Y; <c>default</c> when the cell
+    /// holds no fluid. <see cref="EyeSubmersion.EyeDepth"/> is left for the caller to fill.</param>
+    /// <returns>True when the cell holds a fluid.</returns>
+    private bool TryResolveEyeCell(Vector3Int voxelCell, float fracX, float fracZ, out EyeSubmersion submersion)
+    {
+        submersion = default;
+
+        if (!worldData.TryGetVoxel(voxelCell.x, voxelCell.y, voxelCell.z, out VoxelState voxel)) return false;
+
+        BlockType fluid = voxel.Properties;
+        if (fluid == null || fluid.fluidType == FluidType.None) return false;
+
+        NativeArray<BlockTypeJobData> blockTypes = JobDataManager.BlockTypesJobData;
+        NativeArray<float> templates = TemplatesFor(fluid.fluidType);
+
+        // The body's own top cell, not the eye's: an interior cell has its drawn corners forced flat, so
+        // the eye's cell would report its own ceiling and step down at every boundary the eye sinks past.
+        Vector3Int surfaceCell = TopOfFluidBody(voxelCell, fluid.fluidType, in blockTypes,
+            out VoxelState surfaceVoxel);
+
+        BlockTypeJobData props = blockTypes[surfaceVoxel.ID];
+
+        FluidCornerHeights smoothed = FluidSurfaceResolver.SmoothedCornerHeights(
+            in props, surfaceVoxel.FluidLevel,
+            VoxelFluidNeighbor(surfaceCell, 0, 1),
+            VoxelFluidNeighbor(surfaceCell, 1, 0),
+            VoxelFluidNeighbor(surfaceCell, 0, -1),
+            VoxelFluidNeighbor(surfaceCell, -1, 0),
+            VoxelFluidNeighbor(surfaceCell, 1, 1),
+            VoxelFluidNeighbor(surfaceCell, 1, -1),
+            VoxelFluidNeighbor(surfaceCell, -1, -1),
+            VoxelFluidNeighbor(surfaceCell, -1, 1),
+            in templates, in blockTypes);
+
+        OptionalVoxelState above = worldData.TryGetVoxel(surfaceCell.x, surfaceCell.y + 1, surfaceCell.z,
+            out VoxelState aboveVoxel)
+            ? new OptionalVoxelState(aboveVoxel)
+            : default;
+
+        // Always false here, since TopOfFluidBody stops exactly where the fluid ends (and at the world
+        // ceiling, where there is no cell to read). Computed anyway so this path keeps the same shape as
+        // the mesher's use of the shared resolver.
+        FluidCornerHeights surface = FluidSurfaceResolver.SurfaceCornerHeights(
+            in smoothed, FluidSurfaceResolver.HasSameFluidAbove(above, in props, in blockTypes));
+
+        submersion = new EyeSubmersion
+        {
+            // The fluid at the EYE decides what the camera is looking through; the cell above only decides
+            // where that medium ends.
+            Type = fluid.fluidType,
+            // Voxel Y carries no origin offset (WS-4), so it doubles as the Unity-space cell floor.
+            SurfaceY = surfaceCell.y + FluidSurfaceResolver.SampleSurfaceAt(in surface, fracX, fracZ),
+            SubmersionColor = fluid.submersionColor,
+            SubmersionDensity = fluid.submersionDensity,
+        };
+
+        return true;
+    }
+
+    /// <summary>
+    /// Measures how far the fluid body reaches horizontally from a point inside it, at that point's height.
+    /// </summary>
+    /// <param name="voxelCell">The <b>voxel-space</b> cell the point is in, known to hold the fluid.</param>
+    /// <param name="fluidType">The fluid the body is made of.</param>
+    /// <param name="fracX">The point's position across its cell on X, 0–1.</param>
+    /// <param name="fracZ">The point's position across its cell on Z, 0–1.</param>
+    /// <param name="blockTypes">The job-side block palette.</param>
+    /// <returns>Distances in blocks to the body's edge: <c>x</c> = −X · <c>y</c> = +X · <c>z</c> = −Z · <c>w</c> = +Z.</returns>
+    /// <remarks>
+    /// Only distances leave this method, never coordinates, so it is indifferent to the world origin (WS-4).
+    /// A direction that runs the full <see cref="FluidExtentScanCells"/> without leaving the fluid reports
+    /// <see cref="UnboundedFluidExtent"/> rather than the scanned distance — a large body must not be
+    /// clamped to the scan's reach, which would visibly thin the fog out in open water.
+    /// <para>
+    /// A cell that cannot be read ends that direction's scan at the last distance actually proven to be
+    /// fluid. The medium is therefore under-stated, never over-stated, while a chunk is still loading:
+    /// reporting the body as unbounded there would assert water across terrain nothing has seen yet.
+    /// </para>
+    /// </remarks>
+    private Vector4 MeasureHorizontalExtent(Vector3Int voxelCell, FluidType fluidType, float fracX,
+        float fracZ, NativeArray<BlockTypeJobData> blockTypes)
+    {
+        int negX = FluidReachCells(voxelCell, fluidType, -1, 0, blockTypes);
+        int posX = FluidReachCells(voxelCell, fluidType, 1, 0, blockTypes);
+        int negZ = FluidReachCells(voxelCell, fluidType, 0, -1, blockTypes);
+        int posZ = FluidReachCells(voxelCell, fluidType, 0, 1, blockTypes);
+
+        // The point's own cell is split between the two directions: going positive the body's edge is
+        // `reach` whole cells past the rest of this one, going negative it is `reach` past the part behind.
+        return new Vector4(
+            negX < 0 ? UnboundedFluidExtent : negX + fracX,
+            posX < 0 ? UnboundedFluidExtent : posX + 1f - fracX,
+            negZ < 0 ? UnboundedFluidExtent : negZ + fracZ,
+            posZ < 0 ? UnboundedFluidExtent : posZ + 1f - fracZ);
+    }
+
+    /// <summary>
+    /// Finds how many cells away the fluid body still reaches along one horizontal step.
+    /// </summary>
+    /// <param name="voxelCell">The <b>voxel-space</b> cell to start from.</param>
+    /// <param name="fluidType">The fluid to match.</param>
+    /// <param name="stepX">Step on X, in cells.</param>
+    /// <param name="stepZ">Step on Z, in cells.</param>
+    /// <param name="blockTypes">The job-side block palette.</param>
+    /// <returns>The farthest offset still holding the fluid, or <c>-1</c> when the scan reached its cap
+    /// with fluid still present.</returns>
+    /// <remarks>
+    /// Reports the <b>last</b> fluid cell within reach, not the first gap — the two differ whenever
+    /// something stands in the water, and the difference is severe: a single block six cells out was
+    /// measured in game shortening this side of the body from 23 cells to 6, which thinned the medium
+    /// across a whole quadrant of the view.
+    /// <para>
+    /// Passing over a gap is correct rather than lenient. This bounds where the <i>water</i> ends; anything
+    /// solid inside the body is an <i>occluder</i>, and the depth buffer already stops each ray at it — so
+    /// a ray toward that block is charged for the water in front of it and no more, whatever this returns.
+    /// </para>
+    /// <para>
+    /// An unloaded or out-of-world cell ends the scan: nothing can be known past it, and an edge that
+    /// cannot be seen cannot need bounding.
+    /// </para>
+    /// </remarks>
+    private int FluidReachCells(Vector3Int voxelCell, FluidType fluidType, int stepX, int stepZ,
+        NativeArray<BlockTypeJobData> blockTypes)
+    {
+        int farthest = 0;
+
+        for (int i = 1; i <= FluidExtentScanCells; i++)
+        {
+            if (!worldData.TryGetVoxel(voxelCell.x + stepX * i, voxelCell.y, voxelCell.z + stepZ * i,
+                    out VoxelState neighbor))
+                break;
+
+            if (blockTypes[neighbor.ID].FluidType == fluidType) farthest = i;
+        }
+
+        return farthest == FluidExtentScanCells ? -1 : farthest;
+    }
+
+    /// <summary>
+    /// Walks up from a fluid cell to the topmost cell of the same fluid body above it.
+    /// </summary>
+    /// <param name="voxelCell">The <b>voxel-space</b> cell to start from, known to hold the fluid.</param>
+    /// <param name="fluidType">The fluid the body is made of.</param>
+    /// <param name="blockTypes">The job-side block palette.</param>
+    /// <param name="topVoxel">The state of the cell returned.</param>
+    /// <returns>The voxel-space cell whose top face the body actually draws.</returns>
+    /// <remarks>
+    /// Bounded by the column: the walk stops at the first cell that is not the same fluid, and
+    /// <c>TryGetVoxel</c> fails above the world, so the worst case is the world height. In practice it is
+    /// the depth the player has swum to.
+    /// </remarks>
+    private Vector3Int TopOfFluidBody(Vector3Int voxelCell, FluidType fluidType,
+        in NativeArray<BlockTypeJobData> blockTypes, out VoxelState topVoxel)
+    {
+        worldData.TryGetVoxel(voxelCell.x, voxelCell.y, voxelCell.z, out topVoxel);
+        Vector3Int cell = voxelCell;
+
+        while (worldData.TryGetVoxel(cell.x, cell.y + 1, cell.z, out VoxelState above) &&
+               blockTypes[above.ID].FluidType == fluidType)
+        {
+            cell.y++;
+            topVoxel = above;
+        }
+
+        return cell;
+    }
+
     /// <summary>Assembles a contact from a resolved current and the fluid's authored coefficients.</summary>
     /// <param name="fluid">The block at the waterline.</param>
     /// <param name="flowDirection">The resolved current, in Unity space.</param>
@@ -5015,6 +5345,24 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
             SwimAscendSpeed = fluid.swimAscendSpeed,
             PushStrength = fluid.pushStrength,
         };
+    }
+
+    /// <summary>Reads one horizontal neighbor of a <b>voxel-space</b> fluid cell for the surface smoothing.</summary>
+    /// <param name="voxelCell">The voxel-space cell being sampled around.</param>
+    /// <param name="dx">Offset on X, in cells.</param>
+    /// <param name="dz">Offset on Z, in cells.</param>
+    /// <returns>The neighbor's state, or a value-less state when it is out of world or unloaded — which the
+    /// corner smoothing already treats as a non-fluid edge.</returns>
+    /// <remarks>
+    /// The WS-4 twin of <see cref="FluidNeighbor"/>, which takes a Unity-space cell and folds the origin in.
+    /// Kept apart rather than passing a zero origin: a query that has already converted must not look like
+    /// one that has not.
+    /// </remarks>
+    private OptionalVoxelState VoxelFluidNeighbor(Vector3Int voxelCell, int dx, int dz)
+    {
+        return worldData.TryGetVoxel(voxelCell.x + dx, voxelCell.y, voxelCell.z + dz, out VoxelState neighbor)
+            ? new OptionalVoxelState(neighbor)
+            : default;
     }
 
     /// <summary>Reads one horizontal neighbor of a fluid cell for the flow derivative.</summary>

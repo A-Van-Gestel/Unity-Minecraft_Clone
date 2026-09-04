@@ -405,8 +405,10 @@ namespace Audio
                 ? LightBitMapping.GetSkylight(lightData)
                 : (byte)0;
 
-            bool submerged = world.TryGetVoxel(headVoxelCell.x, headVoxelCell.y, headVoxelCell.z, out VoxelState head) &&
-                             AmbienceResolution.IsSubmerged(world.BlockTypes, head.ID);
+            // The shared sub-cell query, so the muffling and the screen tint engage on one boundary.
+            // Safe to sample at this layer's own cadence: the query is pure and carries no physics timing.
+            world.GatherEyeSubmersion(_listener.position, out EyeSubmersion eyeSubmersion);
+            bool submerged = eyeSubmersion.IsSubmerged;
 
             BiomeTracker tracker = world.BiomeTracker;
             bool hasBiome = tracker is { HasBiome: true };

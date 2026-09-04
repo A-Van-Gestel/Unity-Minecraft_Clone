@@ -9,6 +9,12 @@ namespace Data
     /// <summary>
     /// Represents a single block type in the game.
     /// </summary>
+    /// <remarks>
+    /// Copy instances of this with <c>Editor.BlockEditor.Helpers.BlockTypeCloner</c>, never with a
+    /// hand-written initializer list. The Block Editor works on a copy of the database and writes it back
+    /// on save, so a field a copy omits is not merely missing — it is <b>silently overwritten in the
+    /// asset with its initializer</b>.
+    /// </remarks>
     [Serializable]
     public class BlockType
     {
@@ -112,6 +118,17 @@ namespace Data
                  "at the waterline instead of launching clear of it.")]
         [Range(0f, 10f)]
         public float swimAscendSpeed = 0.9f;
+
+        [Tooltip("The color the view fades toward while the eye is inside this fluid, thickening with " +
+                 "distance rather than tinting everything evenly — so a block held up close stays almost " +
+                 "clear.\nDeep blue-green reads as water; dark orange-red as lava.")]
+        public Color submersionColor = new Color(0.11f, 0.30f, 0.42f, 1f);
+
+        [Tooltip("How fast the view fades to Submersion Color, as extinction per block of view distance.\n" +
+                 "Low values leave metres of visibility (water); high values go near-opaque within about a " +
+                 "block (lava).")]
+        [Range(0f, 4f)]
+        public float submersionDensity = 0.14f;
 
         [Header("Lighting Properties")]
         [Tooltip("How many light levels will be blocked by this block.")]

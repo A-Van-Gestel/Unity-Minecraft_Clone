@@ -1,6 +1,6 @@
 # Sound Engine Design
 
-**Version:** 1.19  
+**Version:** 1.20  
 **Date:** 2026-09-02  
 **Status:** **Partially implemented — S0–S3, S5–S8, S10 and S11 shipped; all confirmed in game except S8
 and S10, which are awaiting their listening pass.** The `SoundMaterial`
@@ -346,9 +346,13 @@ footfall and resets the accumulator.
 > wading. `Assets/Scripts/Physics/` still computes **no** liquid contact state at all — but that turned out not to
 > block `AudioContext.Submerged` (§5.3): S2 reads the block filling the listener's head cell and asks whether its
 > `fluidType` is anything but `None`, the same read-only posture footsteps already take. The prerequisite this
-> section recorded was real for the *footstep* case and overstated for the submerged one. What the cell-level read
-> costs is precision at the surface: a fluid voxel is only partly filled, so a head just under the waterline reads
-> dry until it enters the cell below.
+> section recorded was real for the *footstep* case and overstated for the submerged one. The cell-level read cost
+> precision at the surface — a fluid voxel is only partly filled, so a head just under the waterline read dry until
+> it entered the cell below. **Superseded 2026-09-04 (`UW-3`):** the layer now reads
+> `World.GatherEyeSubmersion`, a sub-cell query against the fluid's *drawn* surface height, so the muffling engages
+> at the waterline and on the same boundary as the underwater visuals. It is still a pure read over the eye point —
+> not the solver's contact state — so this layer keeps its own 4 Hz cadence and takes on no physics timing. See
+> [`UNDERWATER_AND_SUBMERSION_RENDERING.md`](UNDERWATER_AND_SUBMERSION_RENDERING.md) §3.3.
 
 > **Gait and jump events** (`S11`, shipped and confirmed in game 2026-08-31, §16). A footfall is not always a walking step:
 > `Sprint`, `JumpStart` and `JumpLand` are separate `BlockSoundEvent`s resolving against their own clip
@@ -629,7 +633,8 @@ one is assigned and is applied per source when one is not, so the mixer asset ca
 without a code change. Sliders map linearly 0–1 → dB via the standard `20 * log10(x)` conversion with a
 floor at −80 dB.
 
-**Underwater ✅ shipped, but not as a snapshot.** `AudioContext.Submerged` drives an `AudioLowPassFilter`
+**Underwater ✅ shipped, but not as a snapshot.** `AudioContext.Submerged` — since `UW-3` the shared
+`World.GatherEyeSubmersion` answer rather than a per-cell `fluidType` test — drives an `AudioLowPassFilter`
 on each non-UI source — the one-shot voices, the ambience beds and the music source — swept between a dry and a
 wet cutoff over a short fade. A mixer snapshot was the original design and was **not** built: the mixer asset
 carries a single snapshot and no effects, authoring one needs editor API the §5.4 setup tool does not cover, and a
@@ -1605,6 +1610,10 @@ deliberately.
 
 ## Document History
 
+* **v1.20** - `UW-3`: the submersion test behind the low-pass filter is now the shared, sub-cell
+  `World.GatherEyeSubmersion` instead of a per-cell `fluidType` read, so audio and the underwater visuals
+  switch on one boundary. `AmbienceResolution.IsSubmerged` removed and its Sound Engine baseline rewritten
+  to pin the depth rule in both directions. §5.1's amendment and the §7 underwater note updated.
 * **v1.19** - Shared-gain extraction (2026-09-02). No behavioral change; three duplications collapsed.
   The mixer-group rule (`group == null ? GetLinear(category) : 1f`) existed in four copies across
   `SoundManager`, `AmbienceDirector`, `FluidEmitterDirector` and `MusicScheduler` and is now

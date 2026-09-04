@@ -62,6 +62,10 @@ Shader "Minecraft/UberLiquidShader"
                 "LightMode"="UniversalForward"
             }
 
+            // Draws the body from inside it too. Safe only while the fragment reads worldNormal through
+            // abs() alone (GetShoreData, RouteFlowTo3D); ZWrite On keeps the nearer face by depth test.
+            Cull Off
+
             HLSLPROGRAM
             #pragma vertex vertFunction
             #pragma fragment fragFunction

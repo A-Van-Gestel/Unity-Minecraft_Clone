@@ -1,8 +1,8 @@
 # Underwater & Submersion Rendering (UW-*)
 
-**Version:** 1.0  
-**Date:** 2026-09-03  
-**Status:** Proposed design — not implemented.  
+**Version:** 2.0  
+**Date:** 2026-09-04  
+**Status:** Partially implemented — UW-0, UW-1, UW-2 and UW-4 shipped and confirmed in game 2026-09-04, the overlay after seven in-game passes and accepted as a **proxy** whose remaining imprecision is owned by `VX-3`/`VX-5` (§3.2). UW-3 is suite-green and visually confirmed through UW-4, but its audible half is unverified. UW-5 and UW-6 not started.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > Closes the last open bullet of `FLUID_BUGS` **#02** — the one the 2026-09-03 physics ship left
@@ -13,8 +13,9 @@
 > surface-height-aware query — `World.GatherEyeSubmersion` — and both the new overlay pass and the
 > already-shipped ambience low-pass filter read it, so what the player sees and what they hear
 > switch on the same block boundary.** The overlay is a URP `ScriptableRendererFeature` that fogs
-> exponentially against `_CameraDepthTexture`; the backface fix is one `Cull Off` line, safe
-> because the liquid fragment reads its normal only through `abs()`.
+> exponentially against `_CameraDepthTexture` — per pixel, over the part of each ray that lies below
+> the surface, so a partly submerged view splits rather than switching wholesale; the backface fix is
+> one `Cull Off` line, safe because the liquid fragment reads its normal only through `abs()`.
 
 **Audited:** 2026-09-03, at commit `356329eb` (branch `feat/fluid-physics`).
 Findings are from static review of `UberLiquidShader.shader`, `Includes/LiquidCore.hlsl`,
@@ -79,7 +80,7 @@ Unity's defaults apply); no runtime capture was taken.
 
 | Area                        | State                                                                                                                                                                                                                                                            |
 |-----------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Liquid render state         | `UberLiquidShader.shader`'s `LiquidForward` pass declares **no `Cull`, no `Blend`, no `ZWrite`** → Unity defaults: `Cull Back`, opaque write, `ZWrite On`. **This is the root cause of goal 1.** The pass self-composites against `_CameraOpaqueTexture`.        |
+| Liquid render state         | The SubShader is tagged `Queue="Transparent"`, and `LiquidForward` declared **no `Cull`, no `Blend`, no `ZWrite`** → Unity defaults: `Cull Back`, opaque write, `ZWrite On`. `Cull Back` was the root cause of goal 1 (fixed by UW-1). The pass self-composites against `_CameraOpaqueTexture`. **The transparent queue matters beyond sorting:** with `ZWrite On` it puts the fluid surface into `_CameraDepthTexture` under this project's copy mode — see the URP row. |
 | Liquid normal use           | `LiquidCore.hlsl` reads `worldNormal` in exactly two places — `GetShoreData` and `RouteFlowTo3D` — and **both take `abs()` first**. A back-facing (negated) normal is therefore a no-op through the whole fragment. `LiquidV2F` uses 11 of 15 interpolators.       |
 | Fluid face emission         | `VoxelMeshHelper.GenerateFluidMeshData:1044/1117/1298` — top face unless the same fluid is above; bottom only over transparent, non-same-fluid; sides culled against effectively-full-height same-fluid neighbors. A submerged camera sits inside a **shell whose faces all point away from it**: the geometry exists, back-face culling hides it. |
 | Corner surface height       | `GetSmoothedCornerHeight` averages the cell with up to three same-fluid neighbors, then the caller forces all four corners to `1.0` when fluid is above and clamps to `kMinFluidSurfaceHeight` (0.005). Vertices land at the cell's four XZ corners; the rasterizer interpolates between them. `private static` today. |
@@ -87,11 +88,12 @@ Unity's defaults apply); no runtime capture was taken.
 | Eye/head submersion         | **Already exists, in audio.** `SoundManager.cs:409` resolves the listener's head cell from `Camera.main.transform` via `WorldOrigin.UnityToVoxelCell` at ~4 Hz and calls `AmbienceResolution.IsSubmerged`, a **per-cell** `fluidType != None` test. Its own docstring states the consequence: *"a head just under a partly-filled surface reads dry until it enters the cell below."* |
 | Shader-global publish point | `World.SetGlobalLightValue` → `PublishSkyGlobals` → `PublishFogGlobals`, every frame, already null-guarded for edit-mode fixtures that build a `World` without `StartWorld`. `_playerCamera = Camera.main` (`World.cs:783`).                                       |
 | Distance fog                | `VoxelFog.hlsl` — **horizontal (XZ) radial**, back-loaded by `pow(t, exponent)`, explicitly chosen to conceal the loaded-chunk radius without dissolving the ground under a flying player. A zero-width range reads as fog-off, which is what uninitialized globals give. |
-| URP configuration           | `VoxelEngine-URP-Asset.asset`: `m_RequireDepthTexture: 1`, `m_RequireOpaqueTexture: 1`, `m_OpaqueDownsampling: 1`, `m_MSAA: 2`, HDR on. Depth **and** opaque are available to a fullscreen pass.                                                                 |
-| Renderer features           | `UIBlurRendererFeature` is the **only** one, RenderGraph-based, listed in `VoxelEngine-URP-Renderer.asset`'s `m_RendererFeatures`. Its `Create()` is documented as idempotent across domain reload and inspector edits.                                            |
+| URP configuration           | `VoxelEngine-URP-Asset.asset`: `m_RequireDepthTexture: 1`, `m_RequireOpaqueTexture: 1`, `m_OpaqueDownsampling: 1`, `m_MSAA: 2`, HDR on. Depth **and** opaque are available to a fullscreen pass. `GraphicsSettingsController` mutates render scale and MSAA at runtime, so neither is a fixed property of the build. |
+| Depth copy timing           | `VoxelEngine-URP-Renderer.asset`: **`m_CopyDepthMode: 1` = `AfterTransparents`** (`UniversalRendererData.cs:16-24`). URP schedules the copy as late as it can while still preceding the earliest depth reader (`UniversalRendererRenderGraph.cs:946-978`, `ScriptableRenderer.cs:1015-1023`), so a pass at `AfterRenderingTransparents` reads valid depth — **provided it declares `ConfigureInput(ScriptableRenderPassInput.Depth)`**. The consequence for UW-4 is that `_CameraDepthTexture` **contains transparent geometry, the liquid surface included**. |
+| Renderer features           | `UIBlurRendererFeature` is the **only** one, RenderGraph-based, listed in `VoxelEngine-URP-Renderer.asset`'s `m_RendererFeatures`. Its `Create()` is documented as idempotent across domain reload and inspector edits. It runs at **`AfterRenderingTransparents`** and samples `resourceData.activeColorTexture` — the same injection point UW-4 wants, so list order decides which sees the other's output (§3.5). |
 | Post-processing             | `GraphicsSettingsController.ApplyBloom:171` sets `data.renderPostProcessing = enabled && FindAnyObjectByType<Volume>() != null` — post-processing is **off** whenever bloom is off or no Volume exists.                                                            |
 | Liquid material             | `World.LiquidMaterial => _blockDatabase.liquidMaterial` — a **shared project asset**, already mutated at runtime by `GraphicsSettingsController` (quality keywords, refraction keyword, distortion floats).                                                        |
-| Per-fluid authoring slot    | `BlockType.cs:93-114`, `[Header("Fluid Properties")]`: `buoyancy`, `verticalDrag`, `submergedSpeedMultiplier`, `pushStrength`, `swimAscendSpeed` — all **`public` fields**, tuned in `BlockDatabase.asset` via the `BlockEditor`.                                  |
+| Per-fluid authoring slot    | `BlockType.cs`, `[Header("Fluid Properties")]`: `buoyancy`, `verticalDrag`, `submergedSpeedMultiplier`, `pushStrength`, `swimAscendSpeed` — all **`public` fields**. As of 2026-09-03 none of them had `BlockEditor` UI; they were tuned in the raw Inspector on `BlockDatabase.asset`. UW-0 gave all seven fluid coefficients sliders in the `BlockEditor` and closed the matching gap in `DuplicateSelectedBlock`, which silently dropped every one of them. |
 | Render-suite precedent      | `UIBlurRenderValidationSuite` + `SkyRenderValidationSuite` render a shader in edit mode and assert **arithmetic**, never checked-in golden images ("GPU output is not bit-reproducible across drivers"), and report **INCONCLUSIVE** under `-nographics`. Both are listed in `ValidationSuiteRegistry`. |
 
 ---
@@ -148,6 +150,138 @@ attenuates it again through the water column.
 Sky pixels (depth at the far plane) take full density, so the surface far above and any visible
 sky read as fully submerged rather than punching a clear hole in the effect.
 
+⚠️ **Corrected 2026-09-04.** The paragraphs above assumed `_CameraDepthTexture` holds opaque geometry
+only. It does not: this renderer copies depth **after transparents** (§2), and the liquid pass writes
+depth from the transparent queue, so the sampled distance is to the nearest *fluid face* rather than to
+the terrain behind it. That is arguably the better medium — fog should end where the water does, and a
+fluid body's boundary is exactly where it ends — but two stated consequences do not survive: terrain is
+**not** attenuated twice through the water column when a fluid face lies in front of it, and looking up
+at the sky through a surface fogs to the *surface*, not to full density. The shader arithmetic in the
+§7 baselines is unaffected; the in-game reading of it is. Flipping `m_CopyDepthMode` to `AfterOpaques`
+would restore the original description at the cost of an earlier copy every frame, project-wide; §8
+records taking the depth as it is.
+
+**The fog is charged per pixel, for the submerged part of that pixel's ray** ✅ **CHOSEN 2026-09-04,
+after the first in-game pass.** Submersion is a property of a **ray**, not of the camera: whether a
+pixel looks through water depends on where its ray goes. Gating the whole effect on a scalar derived
+from the eye alone meant a partly submerged view switched the medium off wholesale — reported in game
+as a player at the waterline being able to clear the fog while half the screen was underwater.
+
+Each pixel now solves where its ray meets the surface plane and fogs only the segment below it:
+
+```
+y(t) = eyeY + rayUpwardness · t,   t ∈ [0, rayDistance]
+submerged where y(t) < surfaceY  →  crossing = clamp(eyeDepth / rayUpwardness, 0, rayDistance)
+   rising ray  (upwardness > 0):  submerged length = crossing
+   falling ray (upwardness < 0):  submerged length = rayDistance − crossing
+   level ray:                     all of it, or none, by the sign of eyeDepth
+```
+
+Because the crossing depends only on `surfaceY − eyeY`, **only the eye's signed depth crosses the
+wire** — no camera world position, and no large-magnitude world coordinate in the fragment. The
+waterline then emerges as the locus where the submerged length reaches zero, which is why this
+retires the ramp above rather than sitting beside it, and why UW-5 shrinks to the meniscus band and
+the wobble.
+
+**The surface is a plane; the fluid is a body — and the difference has to be modelled, twice.**
+
+**From outside**, the plane runs to the horizon while the pool may be three blocks wide, so every ray
+that misses the water gets charged for the whole distance to whatever it does hit.
+`SubmergedRayLength` therefore returns zero whenever the eye is above the surface, and
+`_SubmersionColor.a` gates on `EyeSubmersion.IsSubmerged`. **That much is exact, not a
+simplification:** a ray that does reach water *ends* at the water, so the pixel shows the surface as
+the liquid shader drew it, never a column of water seen through. Reported in game 2026-09-04 as a
+shallow pool painting the medium across a dry cave (`B21`).
+
+**From inside, the plane is only the body's lid**, and the sides need bounding too.
+⚠️ It was recorded here that the depth buffer bounded them for free — the liquid mesh is a closed
+shell that writes depth, so a ray leaving sideways should terminate on a side face. **That was wrong,
+and a live frame disproved it.** With the eye 2.4 cm under the surface at the body's western edge, a
+westward ray crossed **zero** water and was charged **3.9 blocks** — 42 % fog on dry cave — while
+eastward rays through 3.9 blocks of real water came out correct to within 3 %. At a shoreline the
+nearest boundary face sits centimetres from the eye, **inside the near clip plane**, so it is never
+rasterized and the depth buffer reports the terrain beyond it.
+
+So the half-space became a **box**: `EyeSubmersion.HorizontalExtent` carries the body's reach in
+±X and ±Z, measured by `World.MeasureHorizontalExtent` at the eye's own height, and the fragment
+clamps the submerged length with a slab-exit test (`B22`). A direction that runs the full
+`World.FluidExtentScanCells` reports `World.UnboundedFluidExtent` instead of the scanned distance, so
+open water is never clamped to the scan's reach.
+
+**The extents measure where the water ends, not where the first obstruction is** — and the difference is
+not a nicety. Each extent is a single 1-D probe along a world axis, so a lone block standing in the water
+used to truncate that whole side of the box. Measured in game: one voxel six cells out cut the +Z side
+from 23 cells to 6.47, thinning the medium across a quadrant of the view, and swimming past such blocks
+was what made the fog look unstable — the body appeared to breathe as obstructions moved in and out of
+the four probes.
+
+Reading *past* a gap is correct rather than lenient, and the reason is the depth buffer.
+`_SubmersionBounds` bounds where the **water** ends; a solid block inside the body is an **occluder**, and
+`rayDistance` already stops each ray at it. A ray aimed at that block is charged for the water in front of
+it whatever the extent says — while every *other* ray on that side stops being starved of the water that
+is genuinely there. `World.FluidReachCells` therefore scans the full reach and reports the farthest fluid
+cell (`B24`).
+
+**The extents are eased, not published raw.** They are re-measured from whichever cell the eye occupies,
+so they **step** at every cell boundary — and crossing one *vertically* re-scans all four directions at
+once, which reads as the whole medium jumping. Measured on a terraced pool: `EyeDepth` stayed continuous
+across the boundary (0.855 → 0.895) while the extents stepped 2.50 → 6.50 together.
+`SubmersionOverlay.StepExtents` therefore eases the published values over
+`SubmersionOverlay.ExtentDampTime`, and **snaps** on the first publish after the eye enters a fluid so
+the fog cannot sweep in from the last body swum through.
+
+Two details that are load-bearing rather than incidental. The easing lives in
+`World.PublishSubmersionGlobals` and **never in the query**, which must stay pure — `SoundManager` polls
+`GatherEyeSubmersion` on its own cadence, and a stateful query would let the audio layer perturb what the
+screen shows. And it interpolates `1 / (1 + d)` rather than the raw distance, because
+`World.UnboundedFluidExtent` is enormous: easing linearly from open water into a two-block channel would
+spend seconds at values that bound nothing, which is the over-fogging the extents exist to prevent.
+
+Easing buys **no accuracy** — the box is exactly as wrong as before, just no longer wrong
+discontinuously — and it adds a deliberate artifact of its own: the bound lags a fast swimmer, so
+entering a narrow channel briefly over-fogs. That trade is taken because a lag reads as the medium
+settling while a step reads as a bug.
+
+**Still an approximation, and deliberately a conservative one.** A box cannot describe an L-shaped
+pool, and the extents are read at one height, so a body that widens lower down reads narrow. Both
+errors point at *under*-fogging, which goes unnoticed; over-fogging is the defect that keeps being
+reported.
+
+**The exact fix has a home: `VX-3` (volumetric water) riding on `VX-5` (voxel DDA trace substrate)**,
+in [`VOLUMETRIC_AND_RAYTRACED_EFFECTS_REPORT.md`](VOLUMETRIC_AND_RAYTRACED_EFFECTS_REPORT.md).
+Marching fluid occupancy per pixel integrates the water actually crossed, which removes the box's
+shape error **and** its per-cell stepping in one move — the answer stops depending on the eye's cell
+at all. That report now records `UW-4` as having shipped its cheap half and names this box as what
+`VX-5` supersedes; `_SubmersionBounds` and `World.MeasureHorizontalExtent` are the pieces that would
+be deleted.
+
+⚠️ **The hazard this introduces, and how it bit.** The *sign* of the vertical NDC is now load-bearing,
+where for the ray's length only its magnitude mattered. `Blit.hlsl`'s `GetFullScreenTriangleTexCoord`
+**already** flips its V on platforms whose textures start at the top, so a shader that compensates a
+second time under `UNITY_UV_STARTS_AT_TOP` inverts the result: it fogs the **sky** and leaves the water
+clear. That is exactly what shipped and what play reported — the visible symptom is a plane across the
+view, fogged above and clear below, appearing only within roughly ±20–30° of level because outside that
+range the split plane is off-screen.
+
+**Do not add a flip here.** The correct mapping is the plain `uv * 2 - 1`, and it is now pinned by a
+baseline that *measures* rather than reasons: `B20` (§7) draws a marker across the bottom half of
+**clip space**, where `y = -1` is the bottom of the view by definition, and asserts the fogged rows are
+the marker's rows. A flip anywhere in the texture/readback chain moves both together, so the assertion
+holds without assuming any platform convention — which is what makes it trustworthy where two rounds of
+reasoning about `UNITY_UV_STARTS_AT_TOP` were not.
+
+**How it composites: one alpha-blended pass, no copy of the camera color** ✅ **CHOSEN 2026-09-04.**
+The effect is `lerp(scene, tint, fogFactor)`, and that is *exactly* what a `SrcAlpha OneMinusSrcAlpha`
+blend computes against the attachment. So the pass writes the camera color directly, reads only
+depth, and needs neither a fullscreen temp nor a second blit. Both the source color and the source
+alpha are per-fragment, so this does **not** constrain UW-5: the waterline can output full tint below
+the split and a fading alpha above it — and even a differently-colored meniscus band — in the same
+single pass.
+
+The rejected alternative was to copy the camera color and blit it back through the material (§9).
+What that would have bought is the one thing this option genuinely forecloses: **a shader that
+offset-samples the scene**, i.e. v2's distortion. See §5 for the corrected reserved-seat wording.
+
 ### 3.3 Who owns "is the eye submerged"
 
 **A new surface-aware query, which the audio layer then adopts** ✅ **CHOSEN**.
@@ -181,10 +315,14 @@ physics rule. The two queries answer different questions and should differ:
 | `World.GatherFluidContact`  | Physics          | Logical per-cell template     | A body's buoyancy must not depend on the smoothing its neighbors happen to induce. |
 | `World.GatherEyeSubmersion` | Rendering, audio | Corner-smoothed, bilinear     | The tint boundary must sit where the drawn surface is.                          |
 
-`GetSmoothedCornerHeight` and the `hasFluidAbove` / `kMinFluidSurfaceHeight` post-steps become
-callable outside the mesher (see §4.2). **The risk this creates is a re-implementation drift** —
-which is why UW-2's gate is an oracle against real mesh output, never against a re-typed copy of
-the smoothing expression (§7).
+**Shipped 2026-09-04 as a move, not an exposure.** `GetSmoothedCornerHeight` and the `hasFluidAbove` /
+`kMinFluidSurfaceHeight` post-steps left `VoxelMeshHelper` for `Helpers/FluidSurfaceResolver`, and the
+mesher now calls them there. Re-implementation drift is therefore impossible by construction rather than
+guarded against — one function computes both answers. What remains observable, and what UW-2's baselines
+actually pin, is the *mapping*: which resolver corner lands on which emitted vertex, and which axis each
+of `SampleSurfaceAt`'s two fractions addresses. A transposed assignment leaves every averaged quantity
+identical while putting the tint boundary on the wrong slope, so the gate reads corner values off real
+`GenerateFluidMeshData` output (§7).
 
 ### 3.5 Where the overlay pass runs
 
@@ -195,6 +333,17 @@ off or the scene has no `Volume`, so the submersion look would differ between tw
 have nothing to do with each other. Running after transparents makes the overlay identical in every
 configuration; lava's glow is carried by its authored color instead of borrowed from the post
 stack.
+
+**`UIBlurRendererFeature` already occupies that event**, and URP runs same-event custom passes in
+renderer-feature **list order**. The overlay must therefore be listed **before** it in
+`VoxelEngine-URP-Renderer.asset`: the blur samples `activeColorTexture` to build the HUD's frosted
+backdrop, so a blur recorded first would show an untinted world behind every panel while the rest of the
+screen is tinted. UW-4's read-back baseline asserts the index, not just membership — a check for
+"the feature is listed" passes with this bug present.
+
+The pass must also declare `ConfigureInput(ScriptableRenderPassInput.Depth)`. URP derives the depth-copy
+schedule from the earliest declared depth reader, and a pass that reads `_CameraDepthTexture` without
+saying so is not counted (§2).
 
 ---
 
@@ -246,6 +395,7 @@ public struct EyeSubmersion
     public FluidType Type;
 
     /// <summary>Unity-space Y of the drawn fluid surface at the eye's XZ, when one was found.</summary>
+    /// <remarks>The top of the whole fluid <b>body</b>, not of the eye's own cell — see §4.2.</remarks>
     public float SurfaceY;
 
     /// <summary>
@@ -282,7 +432,23 @@ The cell search is two cells deep, not one:
    ceiling — but it supplies the `SurfaceY` the waterline needs while the eye is just above water.
    `EyeDepth` comes back negative.
 
-Surface height at the eye reproduces the mesher exactly:
+**Then the surface is resolved at the top of the body, not at the cell that matched.** Once a fluid
+cell is found, `World.TopOfFluidBody` walks **up** the column while the cell above holds the same
+fluid, and the corner smoothing is evaluated on that topmost cell — the one whose top face is
+actually drawn. The walk terminates at the first non-matching cell or at the world ceiling, so it is
+bounded by the depth the player has swum to; the cost is one voxel read per cell, once per frame.
+
+⚠️ **This was wrong until 2026-09-04 and shipped that way.** The surface was read off the eye's *own*
+cell. An interior cell has its drawn corners forced flat (§3.4), so `SurfaceY` came back as the eye's
+cell **ceiling** — meaning it stepped down by one every time the eye sank past a boundary, and
+`EyeDepth` collapsed to nearly zero at each one. Reported in game as the overlay re-running its fade
+once per voxel cell while sinking. Two things hid it: audio only ever read `IsSubmerged`, whose sign
+stayed correct throughout, and no baseline pinned `SurfaceY`'s *value* for a submerged eye — B8
+asserted only that the depth was positive. `B18` now pins the value, the monotonic deepening, and the
+strength staying saturated across boundaries. It would also have put UW-5's split plane a cell too
+low, so this is a prerequisite for the waterline and not only an overlay fix.
+
+Surface height at that cell reproduces the mesher exactly:
 
 - Four smoothed corner heights from the shared `GetSmoothedCornerHeight` path;
 - forced to `1.0` when the same fluid is directly above, clamped up to `kMinFluidSurfaceHeight`;
@@ -295,16 +461,49 @@ differ by a small amount along that diagonal. §8 records the bound.
 
 ### 4.3 Shader globals
 
-Two, published next to the fog globals. Both live in **Unity/render space**, matching every other
+**Seven**, published next to the fog globals by `World.PublishSubmersionGlobals` — a **sibling** of
+`PublishSkyGlobals` under `SetGlobalLightValue`, not a step inside it: that method returns early
+without a clock or authored `TimeOfDaySettings`, and the medium the player is swimming through has
+nothing to do with the time of day. All of them live in **Unity/render space**, matching every other
 global the block and liquid shaders consume.
 
-| Global               | Contents                                                                            |
-|----------------------|-------------------------------------------------------------------------------------|
-| `_SubmersionColor`   | `rgb` = authored fluid tint; `a` = submerged weight, 0–1, for the fade at the edge.  |
-| `_SubmersionParams`  | `x` = fog density (per block) · `y` = `SurfaceY` (Unity space) · `z` = meniscus half-width · `w` = reserved |
+| Global                 | Contents                                                                            |
+|------------------------|-------------------------------------------------------------------------------------|
+| `_SubmersionColor`     | `rgb` = authored fluid tint; `a` = 1 when a fluid is at the eye, 0 in air (a gate, not a fade). |
+| `_SubmersionParams`    | `x` = fog density (per block) · `y` = the eye's **signed depth** below the drawn surface, positive submerged · `z` = meniscus half-width (UW-5) · `w` = distortion (v2) |
+| `_SubmersionRayParams` | `xy` = the view frustum's half-extents at unit depth (horizontal, vertical) · `zw` = unused |
+| `_SubmersionRayBasisX/Y/Z` | The rows of the camera's world rotation — `xyz` = the world-space X, Y and Z components of its right, up and forward axes. A row at a time, because the fragment consumes them as dot products against a camera-space ray. `Y` alone carried the surface plane; `X` and `Z` arrived with the horizontal bound. |
+| `_SubmersionBounds`    | Distance to the fluid body's edge, in blocks: `x` = −X · `y` = +X · `z` = −Z · `w` = +Z. `World.UnboundedFluidExtent` means "no edge within the scan". |
 
 A zero `_SubmersionColor.a` means "not submerged", which is what uninitialized globals give — the
 same fail-safe convention `VoxelFog.hlsl` uses for its zero-width range.
+
+**Why the ray basis is published rather than derived in the shader.** The obvious route is
+`ComputeWorldSpacePosition`/`UNITY_MATRIX_I_VP`, and it would need no global at all. It is rejected
+because that matrix is unsettable outside a real camera render, so the fragment's distance
+reconstruction could then only be validated behind an `#ifdef` — gating a *different* code path
+than the one that ships. Publishing a handful of floats makes the arc's most error-prone arithmetic
+testable against the real fragment (§7, UW-4). It is also resolution-independent, so it survives the
+render scale `GraphicsSettingsController` changes at runtime.
+
+The basis rows track pitch *and* roll, which the waterline must. `Y` alone sufficed while the only
+bound was the surface plane; the horizontal box needs the ray's world XZ as well, hence all three.
+
+**`_SubmersionColor.a` is a gate, not a fade.** It is 1 while the eye is **under** a fluid surface
+(`EyeSubmersion.IsSubmerged`) and 0 otherwise — it never takes an intermediate value. How much medium
+a pixel looks through is decided **per pixel**, in the shader, from the eye depth and that ray's
+direction (§3.2). Gating on `IsSubmerged` also means the tint and the ambience low-pass filter switch
+on exactly the same boundary, which is §3.3's promise; `B16` asserts the two agree rather than assuming
+it.
+
+⛔ **Superseded 2026-09-04 — a 0.25-block depth ramp on `_SubmersionColor.a`.** Chosen earlier the
+same day to avoid the full-screen pop at the surface, and withdrawn after the first in-game pass:
+a screen-wide strength is the wrong shape for the problem. It let a player floating at the waterline
+fade the medium to nothing while the lower half of their view was still entirely underwater, and a
+hard switch has the identical hole — just binary rather than adjustable. The ramp also introduced the
+audio/visual divergence recorded here as a ⚠️, which the per-pixel solve removes: continuity is now
+geometric, so there is no band in which the tint lags the muffling, and `IsSubmerged` remains the
+audio boundary without the visuals having to agree with it screen-wide.
 
 ### 4.4 Authoring
 
@@ -330,9 +529,15 @@ initializers on load. No chunk-format change, no `level.dat` bump, no AOT migrat
 - ⚠️ **The overlay's fog depends on `m_RequireDepthTexture: 1`.** If that is ever turned off, the
   fog silently degrades to a flat tint with no error. UW-4 logs a warning once when the depth
   texture is unavailable rather than failing quietly.
-- **Reserved seat — per-fluid distortion (v2).** The overlay shader takes its distortion amount
-  from a global from the first version, wired to `0` until v2 fills it, so adding the wobble later
-  touches the shader and `GraphicsSettingsController` only.
+- **Reserved seat — per-fluid distortion (v2).** The overlay shader takes its distortion amount from
+  `_SubmersionParams.w`, wired to `0` until v2 fills it.
+  ⚠️ **Corrected 2026-09-04.** The original claim that adding the wobble "touches the shader and
+  `GraphicsSettingsController` only" does not survive the single-pass composite chosen in §3.2. That
+  pass never reads the camera color, so a distortion that offset-samples the scene needs a source
+  texture the pass does not currently have. Two ways out when v2 arrives, neither costing anything
+  today: sample `_CameraOpaqueTexture`, which is already enabled (`m_RequireOpaqueTexture: 1`) and
+  loses only the liquid surface from the distortion source; or restructure the pass into
+  copy-then-blit at that point. The reserved global still means no C# plumbing has to change.
 - **Reserved seat — non-player eyes.** `GatherEyeSubmersion` takes a world-space point, not a
   `Player`, so a future spectator or cutscene camera needs no new query. There is no freecam or
   third-person camera in `Assets/Scripts` today; `Camera.main` is the only consumer.
@@ -360,11 +565,11 @@ initializers on load. No chunk-format change, no `level.dat` bump, no AOT migrat
 
 | Phase                          | Scope                                                                                                                                                     | Effort | Depends on   | Status |
 |--------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|--------------|--------|
-| **UW-0 — Authored look**       | `submersionColor` + `submersionDensity` on `BlockType`; surfaced in `BlockEditor`; first-pass water and lava values.                                        |   🟢   | —            | —      |
-| **UW-1 — Backfaces**           | `Cull Off` on `UberLiquidShader`'s `LiquidForward` pass. Shader only, no C#.                                                                                |   🟢   | —            | —      |
-| **UW-2 — Eye query**           | `EyeSubmersion`, `Helpers/FluidSurfaceResolver`, `World.GatherEyeSubmersion`; open the mesher's corner-height path for sharing.                              |   🟡   | UW-0         | —      |
-| **UW-3 — Audio adopts it**     | `AmbienceResolution.IsSubmerged` → the shared query; `SoundManager.cs:409` call site; SoundEngine baselines updated for sub-cell behavior.                   |   🟢   | UW-2         | —      |
-| **UW-4 — Overlay pass**        | `Rendering/UnderwaterOverlayRendererFeature` + `Shaders/UnderwaterOverlay.shader`; `PublishSubmersionGlobals`; wire into `VoxelEngine-URP-Renderer.asset`; Graphics setting. |   🟡   | UW-2         | —      |
+| **UW-0 — Authored look**       | `submersionColor` + `submersionDensity` on `BlockType`; surfaced in `BlockEditor`; first-pass water and lava values.                                        |   🟢   | —            | ✅ 2026-09-04 |
+| **UW-1 — Backfaces**           | `Cull Off` on `UberLiquidShader`'s `LiquidForward` pass. Shader only, no C#.                                                                                |   🟢   | —            | ✅ 2026-09-04 |
+| **UW-2 — Eye query**           | `EyeSubmersion`, `Helpers/FluidSurfaceResolver`, `World.GatherEyeSubmersion`; the mesher's corner-height path moved there wholesale.                          |   🟡   | UW-0         | ✅ 2026-09-04 |
+| **UW-3 — Audio adopts it**     | `AmbienceResolution.IsSubmerged` → the shared query; `SoundManager.cs:409` call site; SoundEngine baselines updated for sub-cell behavior.                   |   🟢   | UW-2         | In progress |
+| **UW-4 — Overlay pass**        | `Rendering/UnderwaterOverlayRendererFeature` + `Shaders/UnderwaterOverlay.shader` + `Rendering/SubmersionOverlay`; `World.PublishSubmersionGlobals`; wired into `VoxelEngine-URP-Renderer.asset` **above `UIBlurRendererFeature`** (§3.5). **No Graphics setting** — decided 2026-09-04: the pass enqueues nothing unless the eye is submerged, so "off" buys no measurable frame time and only restores the bug. |   🟡   | UW-2         | ✅ 2026-09-04 |
 | **UW-5 — Waterline**           | Per-pixel near-plane test against the surface plane, meniscus band, wobble.                                                                                 |   🔴   | UW-4         | —      |
 | **UW-6 — Lava pass & closure** | Lava density/color tuning, in-game confirmation, `docs-sync`, `FLUID_BUGS` #02 archived.                                                                     |   🟢   | UW-1…UW-5    | —      |
 
@@ -376,6 +581,95 @@ what>`.*
 fogged, correctly-tinted submerged view. UW-3 and UW-5 are polish on top of a working effect, and
 UW-6 is closure.
 
+**UW-1 confirmed in game 2026-09-04.** A fluid body renders correctly from inside it, **including at
+distance under the atmospheric fog** — worth stating because `ApplyVoxelFog` is live in this pass and the
+`UW-1` baselines deliberately force the fog range to zero to keep the culling measurement clean, so the
+fogged case is confirmed by play and not by the suite.
+
+**Landed 2026-09-04 (UW-0, UW-2, UW-3).** `submersionColor` /
+`submersionDensity` on `BlockType` with water and lava authored and all seven fluid coefficients given
+`BlockEditor` sliders; `Cull Off` on the liquid pass; `Helpers/FluidSurfaceResolver` +
+`Helpers/EyeSubmersion` + `World.GatherEyeSubmersion`, with the mesher rewired to the shared resolver;
+`SoundManager` reading the shared query and `AmbienceResolution.IsSubmerged` deleted. A new
+`Minecraft Clone/Dev/Validate Underwater Render` suite carries nine baselines and is registered
+(`ExpectedSuiteCount` 27 → 28). B2 and B3 were confirmed **red before** the `Cull Off` line and green
+after. UW-0's authored values and UW-2's surface boundary were not visible until UW-4 drew them, so all
+three waited on UW-4's confirmation; **UW-0 and UW-2 are dated by it**. **UW-3 stays `In progress`**: the
+shared query it consumes is confirmed, but the sharper waterline is an *audible* change and nobody has
+listened for it yet — a visual confirmation is not evidence about the ambience filter's boundary.
+
+**Landed and confirmed in game 2026-09-04 (UW-4), after seven in-game passes.** `Rendering/SubmersionOverlay` (the shader
+wire format, the ramp, and the pass's active flag), `World.PublishSubmersionGlobals` as a sibling of
+`PublishSkyGlobals`, `Shaders/UnderwaterOverlay.shader`, and
+`Rendering/UnderwaterOverlayRendererFeature` — wired into `VoxelEngine-URP-Renderer.asset` at index 0,
+ahead of `UIBlurRendererFeature`, with the shader assigned. The suite carries **24** baselines and
+`Validate All` stands at **720 across 28 suites**. Nine of the new baselines were confirmed able to
+fail: `B12` by dropping the shader's ray-length scale (center stayed green, edge and corner went red),
+`B17` by moving the feature below the UI blur while leaving it present, `B18` against the pre-fix
+per-cell `SurfaceY` (§4.2), `B19` by charging every ray its full length instead of its submerged part,
+`B20` against the pre-fix inverted vertical sign, `B21` against the ungated build that fogged from
+above the surface, `B22` against the unbounded half-space, `B23` against a build whose extents never snap, and `B24` against the first-gap scan rule (all §3.2).
+
+**First in-game pass, 2026-09-04 — the medium renders; four items came back, all addressed.**
+
+1. **The fade re-ran once per voxel cell while sinking.** A UW-2 surface-resolution defect, not an
+   overlay one: fixed at §4.2 and pinned by `B18`. ✅ confirmed fixed in game.
+2. **Water read too cyan.** Retuned `(0.11, 0.30, 0.42)` → `(0.08, 0.24, 0.50)`: green-to-blue ratio
+   0.71 → 0.48 at roughly held luminance (0.27 → 0.23), so a hue shift rather than a darkening.
+   ✅ confirmed in game.
+3. **The fog was too strong.** Density `0.14` halved the scene color at **5 blocks** and reached 94 %
+   at 20, washing out a pond floor three blocks down. Reduced to `0.05` — half-obscured at ~14 blocks,
+   90 % at ~46. Authoring, so the final call belongs to UW-6's feel pass.
+4. **A partly submerged view could switch the medium off entirely.** The defect that reshaped §3.2:
+   fog is now charged per pixel over each ray's own submerged length, and `_SubmersionColor.a` became
+   a gate rather than a fade. Pinned by `B19`.
+
+**Third in-game pass, 2026-09-04 — one item.** The per-pixel fog shipped with an **inverted vertical
+sign**: it fogged the sky and left the water clear, visible as a plane across the view within roughly
+±20–30° of level (outside that range the split is off-screen, which is why it read as "breaks between
+-20 and +20"). Cause and fix at §3.2 — `Blit.hlsl` already flips its texcoord, so the shader's own
+`UNITY_UV_STARTS_AT_TOP` compensation was a second flip. Now pinned by `B20`, which measures the
+orientation against a clip-space marker instead of reasoning about it.
+
+**Fourth in-game pass, 2026-09-04 — the sign fix confirmed, two more items.** Standing in a shallow
+pool with the head clear of the water painted the medium over a dry cave: the plane-versus-body error,
+fixed and pinned by `B21` (§3.2). And clouds are not visible through a water surface — an opaque-copy
+timing limitation recorded in §8, owned by the cloud backlog rather than by this arc.
+
+**Fifth in-game pass, 2026-09-04.** Standing at a shoreline with the eye just under the surface still
+fogged the dry half of the view. Diagnosed by probing the live frame rather than by inspection — the
+numbers are quoted in §3.2 — and fixed by bounding the body horizontally (`B22`). The same session
+recorded that the plane's *sides* had been wrongly assumed to be bounded by the depth buffer.
+
+**Sixth in-game pass, 2026-09-04.** The shoreline fix confirmed; the medium then read *unstable* as the
+player swam, worst on vertical cell crossings. Diagnosed on a terraced pool in edit mode — the extents,
+not `EyeDepth` — and eased in the publish path (`B23`).
+
+**Seventh in-game pass, 2026-09-04, and the better diagnosis.** The instability was mostly **not** cell
+quantization: each extent is a single 1-D probe, so any block standing in the water truncated that side
+of the box, and swimming past obstructions made the body breathe. A live probe put numbers on it — one
+voxel cutting +Z from 23 cells to 6.47. Fixed by measuring the body's **reach** rather than the first gap
+(`B24`); the easing from the sixth pass stays, now handling only the residual cell-boundary step it was
+always meant for.
+
+**Eighth in-game pass, 2026-09-04 — accepted.** The reach fix confirmed, and with it the whole set that
+had accumulated unseen: items 3 and 4, the plane-versus-body gate, the horizontal box and its easing.
+UW-4 is dated by this pass. It was accepted explicitly as **not fully perfect** — the box remains a proxy
+for a voxel body, and the residual imprecision is the one `VX-3` on `VX-5` removes rather than tunes
+(§3.2). No further tuning of `MeasureHorizontalExtent` is planned; the next move on this axis is the
+volumetric path, not a better box.
+
+**Review pass, 2026-09-05 - confirmed in game, no regressions.** A full-tree code review returned ten
+findings against the arc. Fixed: the overlay stayed armed when its camera vanished mid-dive; the easing
+floor now derives from the unbounded sentinel rather than a bare literal; the validation harness
+snapshots and restores `_CameraDepthTexture_TexelSize` and rebinds the depth global even when it was
+previously unset; and four comments were corrected to describe the code as it stands. Deferred with its
+reason in the limitations below: the frame-late publish. Outside this arc but caused by it, the Block
+Editor's copy paths were dropping seven of `BlockType`'s fields and had flattened **Lava's** five
+body-physics coefficients as well as the submersion values - restored from `c7f14147`, with
+`BlockTypeCloner` now covering private fields too so a `[SerializeField] private` addition cannot
+reopen it.
+
 **Validation is built alongside, not after.** A new `Minecraft Clone/Dev/Validate Underwater
 Render` suite (`Assets/Editor/Validation/UnderwaterRender/`, namespace
 `Editor.Validation.UnderwaterRender`) gains baselines as each phase lands, following the
@@ -386,9 +680,9 @@ All` and the CI entry point pick it up.
 | Phase | What its baselines pin                                                                                                                                                                                                                                                     |
 |-------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | UW-1  | **Prove-red first.** A reversed-winding fluid quad rendered with the liquid material returns the backdrop before the change and fluid color after. `FLUID_BUGS` #02 is a documented bug, so `validation-driven-bugfix`'s red→green→promote order applies.                     |
-| UW-2  | **An oracle, not a tautology.** Build a fluid neighborhood, run the **real** `GenerateFluidMeshData`, read the emitted top-face vertex Ys, and assert `GatherEyeSubmersion`'s `SurfaceY` equals their bilinear sample at the eye's XZ. Asserting it against a re-typed copy of the smoothing expression would agree by construction and prove nothing. Plus: eye above/below surface, unloaded chunk, disposed-world guards, zero allocations. |
+| UW-2  | **Pins the mapping, not the arithmetic.** With the smoothing moved into the shared resolver (§3.4) the heights agree by construction, so the baselines assert what sharing does not fix: corner values are read off the **real** `GenerateFluidMeshData` output and matched against `SampleSurfaceAt` at all four corner fractions, over a neighborhood deliberately smoothed to four *different* heights so a transposed assignment is observable. Plus the interior sample, the fluid-above override, the minimum-height floor, the two-cell search, and the soft-failure guards. |
 | UW-3  | Existing SoundEngine ambience baselines extended: a head just under a partly-filled surface now reads submerged, where the per-cell test read dry.                                                                                                                            |
-| UW-4  | Overlay arithmetic — density 0 is a pass-through, full density reaches the tint, sky-depth pixels take full density. **Plus an explicit read-back** that `VoxelEngine-URP-Renderer.asset` actually lists the feature: the render scenarios pass on the shader alone and cannot observe an unwired pipeline. |
+| UW-4  | **Shipped as `B10`–`B24`.** `B10` is the positive control (a saturated medium reaches the authored tint) and must be read first, because "the overlay drew nothing" is the same reading the pass-through scenarios call success. `B11` cross-checks the shader's depth decode against a CPU inversion of `LinearEyeDepth`. **`B12` is the one that earns its keep:** at one uniform depth it measures three screen radii, because the ray-length scale is the arc's most error-prone arithmetic and a center-only check passes with it missing entirely — proven by mutation, center green while edge and corner went red. Then density 0 and strength 0 pass-throughs, far-plane saturation, and `B16` on the packing — which pins the strength as a **gate** that never takes an intermediate value and opens exactly when `IsSubmerged` does. That one is asserted with `ExactValue`, not a tolerance: an epsilon would accept the very intermediate value the baseline exists to forbid, and the gate is a stored literal, so exactness is the contract. The same holds for the fields `Pack` copies through untouched and for `B24`'s claim that an obstruction changes the reach by *nothing*; the measured composites keep their epsilon, because a half-float render target genuinely has one. `B16` also pins so the tint and the ambience filter share one boundary, and that pitch and roll reach the published camera basis. **`B17` is the read-back** of `m_RendererFeatures`, asserting the overlay is present, its shader is **assigned**, and its **index is below `UIBlurRendererFeature`'s** — all three are silent failures the render scenarios cannot see, and a membership-only check catches none of the last two. `B16`/`B17` are deliberately **not** device-gated, so a headless run still asserts something about UW-4. **`B18`** sinks an eye across two cell boundaries inside a body and pins that `SurfaceY` does not move, that `EyeDepth` deepens monotonically, and that the published depth tracks it — the in-game fade-per-cell defect of §4.2, which `B8` could not see because it asserted only the depth's sign. **`B19`** pins the per-pixel submerged length (§3.2): pitched straight down every ray is submerged, pitched straight up none is, level at the surface the screen splits, rolling 180° swaps which half is fogged, and a deep eye stops splitting at all. It asserts the split's **structure** and is proven by mutation — charging every ray its full length reddened exactly the pitched-up and split assertions. **`B20` pins the orientation `B19` leaves out**, which is the gap an inverted vertical sign shipped through: it draws a marker across the bottom half of **clip space** and asserts the fogged rows are the marker's rows, so a flip anywhere in the texture or readback chain moves both together and the assertion needs no platform assumption. Confirmed red against the inverted shader before the fix. Structure and orientation are separate failures and need separate baselines — every `B19` assertion passes with the sign backwards. **`B21`** pins the plane-versus-body gate of §3.2: an eye above the surface fogs neither half, however far below it the geometry sits. It asserts the shader's own guard with the gate forced open, so the fragment is covered independently of C# declining to draw, and confirmed red against the ungated build — the lower half read fully fogged where the backdrop should have survived. **`B22`** pins the horizontal box of §3.2, reproducing the measured shoreline frame: a body ending 2 cm to the west and unbounded east must leave a westward ray nearly clear while an eastward one stays saturated, with an open-water control proving it is the bound that changed rather than the sampling. Proven red by dropping the slab clamp. **`B23`** pins the easing, and is device-free because the step is a pure function — which is what makes the two things most likely to be wrong reachable at all: the **snap** on entering water (proven red by removing it) and the reciprocal **space** the easing happens in, where a linear interpolation would still read ~630 000 blocks one time constant out of open water. |
 | UW-5  | The split row asserted against the analytically computed row at a known camera pose — **and a second scenario with the camera pitched and rolled**, so math that ignores camera orientation goes red. A "submerged is tinted / dry is clear" check alone would pass with the waterline entirely wrong. |
 
 The final look — how water *feels* to swim through, whether the lava density is right — stays
@@ -406,27 +700,103 @@ verified in game (UW-6).
 ## 8. Open questions
 
 1. **MSAA and the sampled depth texture.** The URP asset runs `m_MSAA: 2` with
-   `m_OpaqueDownsampling: 1`. URP resolves depth for `_CameraDepthTexture`, but the interaction of
-   that resolve with the downsampled opaque texture at non-100 render scale is unverified here.
-   Resolves at UW-4's first in-editor render; if the depth read is wrong the fog banding will be
-   obvious immediately.
+   `m_OpaqueDownsampling: 1`, and `GraphicsSettingsController` changes **both MSAA and render scale at
+   runtime** from the graphics settings — so this is not one configuration to verify but a range the
+   player moves through. URP resolves depth for `_CameraDepthTexture`, but the interaction of that
+   resolve with the downsampled opaque texture at non-100 render scale is unverified here. Resolves at
+   UW-4's first in-editor render, and must be re-checked at a non-default render scale rather than only
+   at 100%; if the depth read is wrong the fog banding will be obvious immediately.
+   **Narrowed 2026-09-04, not closed.** Two of the three moving parts are now resolution-independent by
+   construction: the view-ray basis is published from FOV and aspect (§4.3), and the depth UV comes from
+   `Blit.hlsl`'s `texcoord`, which is normalized. The overlay also samples the *resolved*
+   `_CameraDepthTexture`, never an MSAA target, while writing to an MSAA camera color — a combination the
+   baselines cannot exercise, since the harness renders single-sample. **Still open, and still a range
+   rather than one configuration: this needs looking at in game at a non-default render scale.**
 2. **A strongly sloped surface under the eye.** UW-5 splits the screen on a **flat** plane at
    `SurfaceY`. Where the smoothed surface tilts steeply — a shallow shore cell between a full cell
    and dry land — the true surface is not flat, and the drawn line will be slightly off. Resolves
    in game at UW-5; the fallback is to tilt the plane using the same four corner heights the
    resolver already has.
 
+**Closed 2026-09-04 — which screen half the split puts the water on.** Opened with the per-pixel fog and
+closed the same day by play: the shipped shader compensated for `UNITY_UV_STARTS_AT_TOP` on top of a
+flip `Blit.hlsl` had already applied, and fogged the sky. The lesson is scoped narrowly and recorded at
+§3.2 and §7: an orientation this arc reasoned about wrongly twice is now **measured** by `B20` against a
+clip-space marker, not argued from convention. The earlier judgement that a render-texture harness could
+not pin it was wrong — it cannot pin *absolute* orientation, but it does not need to; it only needs the
+overlay and a clip-space reference to travel through the same target.
+
 **Accepted limitations** (not questions — consequences to state plainly):
 
 - Two fluid layers still never blend. The liquid pass writes opaquely and composites against
   `_CameraOpaqueTexture`, so a distant water wall seen from underwater shows one layer, as it does
   today from outside.
+- **Clouds are not visible through a water surface** — reported in game 2026-09-04, and not an
+  underwater-overlay defect but a consequence of where URP takes its opaque copy. The liquid fragment
+  reads what is behind it with `SampleSceneColor` (`UberLiquidShader.shader:134/182`), which samples
+  `_CameraOpaqueTexture`. URP fills that texture **after the skybox but before transparents**
+  (`UniversalRendererRenderGraph.cs:1292`), and `CloudShader` is `Queue="Transparent"` — so the sky is
+  in the copy and the clouds never are. Everything else transparent seen through water is missing for
+  the same reason.  
+  **What a fix would take, for a future session:** the clouds cannot simply move to the opaque queue —
+  they are `Blend SrcAlpha OneMinusSrcAlpha` with `ZWrite On` for the vanilla-parity overlap strategy
+  (`CloudShader.shader:15-22`), so they need the frame behind them. The workable shapes are a **second
+  color copy** after the clouds but before the fluid (a custom pass, plus a keyword or second sampler
+  on the liquid shader so it reads the later copy), or drawing the clouds in a **pre-transparent
+  custom pass** of their own so the existing copy catches them. Both are cloud- and liquid-rendering
+  work rather than UW work; neither is a small edit, and the second changes cloud sorting against other
+  transparents. Owned by the `CL-*` cloud backlog, not by UW-5 or UW-6.
 - The overlay is a camera effect. It does not change what the chunk shaders draw, so an individual
   block half in and half out of water is not treated per-block.
 - The resolver's bilinear surface can differ from the rasterized two-triangle surface along the
   quad diagonal (§4.2).
+- **The overlay's fog measures to the nearest fluid face, not to the terrain behind it.** This
+  renderer copies depth after transparents, so the liquid surface is in `_CameraDepthTexture` (§2, §3.2).
+  Accepted rather than fixed: fog that ends where the medium ends is the more physical reading, and
+  changing `m_CopyDepthMode` to restore the originally-described behavior would force an earlier depth
+  copy on every frame of the whole project for a look that is arguably worse.
+- **Any other transparent geometry shortens the fog the same way.** Nothing else currently writes depth
+  from the transparent queue, but a future transparent effect that does will pull the underwater fog in
+  front of the terrain without any change to this system.
 - No suite validates the assembled pipeline. The render suites exercise the shaders; the read-back
   check exercises the wiring; only in-game play exercises the two together.
+- **The globals describe the eye one frame before the one being drawn.** `PublishSubmersionGlobals`
+  runs from `World.Update`, and nothing pins `World` after whatever drives the camera, so the ray basis,
+  eye depth and extents are a frame stale. Deferred to `UW-6` rather than fixed: at a high refresh rate
+  it is a few milliseconds of camera lag that the extent easing's own time constant already dwarfs, and
+  moving the publish to `RenderPipelineManager.beginCameraRendering` — the hook that removes the
+  ordering question entirely — is a lifecycle change to a system confirmed in game. It is most visible
+  on a fast look while swimming at a low framerate.
+- **A camera lost while submerged is handled by disarming, not by clearing.** `PublishSubmersionGlobals`
+  returns early without a camera and drops the easing's primed flag, so the pass stops enqueueing while
+  the last frame's values stay in the globals. No baseline covers it: the publish is private and needs a
+  live camera, so the guard is asserted only by reading it.
+- **The overlay's fog starts at zero.** Pure Beer–Lambert means a block held right up to the eye is
+  essentially untinted, and only distance thickens the medium. That is §3.2's decision working as
+  intended — a flat floor is what makes a filter rather than a medium — but if water ends up reading
+  too clear up close, the fix is a small minimum weight and it belongs to UW-6's feel pass, not here.
+  The first in-game pass moved the opposite way: the fog was too *strong*, and the density came down
+  from `0.14` to `0.05` (§7).
+- **The fluid body is approximated by a box, so an L-shaped or terraced body under-fogs**, and the
+  box's dimensions are re-measured per eye cell, so they step as the player swims — eased rather than
+  removed, which leaves a **lag**: a swimmer entering a narrow channel is briefly over-fogged for about
+  `SubmersionOverlay.ExtentDampTime` (§3.2; `VX-3`/`VX-5` is the exact replacement). The four
+  extents are measured at the eye's height along the world axes (§3.2), so a pool that bends, or that
+  widens below the eye, reports narrower than it is and the medium thins out early down that arm. The
+  error is one-directional by design — under-fogging reads as "the water is clear here", where
+  over-fogging reads as a bug. Exact bounding is a per-pixel voxel march, which is `VX-*` work.
+- **The waterline is a hard edge until UW-5.** The per-pixel solve gives a geometrically exact split,
+  but nothing softens it: there is no meniscus band and no wobble, so at the surface the boundary is
+  one pixel wide. UW-5 owns both.
+- **`AddRenderPasses`' "enqueue nothing while dry" gate is not baselined.** Asserting it needs a real
+  `ScriptableRenderer` and a populated `RenderingData`, neither of which can be fabricated in edit
+  mode. `B16` covers the strength that drives it, and the shader's zero-strength early-out (`B15`)
+  means a wrongly-enqueued pass would still draw nothing — so the exposure is a wasted fullscreen
+  triangle, not a visual defect.
+- **`SubmersionOverlay.Active` is a mutable static with two owners.** It is republished every frame
+  while a world lives, cleared on play-mode entry, and cleared again in `World.OnDestroy` — that last
+  one because quitting to the menu while submerged would otherwise leave the pass armed with the final
+  frame's tint still in the globals. A third teardown path that bypasses `OnDestroy` would reopen it.
 
 ---
 
@@ -442,14 +812,94 @@ verified in game (UW-6).
 | A UI `Canvas` image tint instead of a render pass                        | Cannot read depth, so no medium fog and no waterline; composites over the HUD rather than under it.                                                                                     | 2026-09-03 |
 | Extend `VoxelFog.hlsl` to fog terrain underwater from the block shaders   | Needs a keyword or branch in every block shader, still cannot tint the sky, and gives no waterline. Also fights the XZ-radial law that fog was deliberately given.                       | 2026-09-03 |
 | Place the overlay at `BeforeRenderingPostProcessing`                     | `GraphicsSettingsController.ApplyBloom:171` disables `renderPostProcessing` when bloom is off or no `Volume` exists, so submersion would look different across an unrelated setting. §3.5 | 2026-09-03 |
+| Copy the camera color and blit it back through the overlay material      | A fullscreen temp and a second fullscreen pass every submerged frame, to buy an offset-sampling capability only v2's distortion needs. The tint-plus-fog effect is a lerp toward a constant color, which `SrcAlpha` blending already performs against the attachment — and per-fragment color and alpha leave UW-5's waterline fully expressible in one pass. §3.2, §5 | 2026-09-04 |
+| A hard `IsSubmerged` switch for `_SubmersionColor.a`                     | Cheaper and puts the tint on literally the same test as the audio, but pops the whole screen in one frame at the surface. A 0.25-block ramp is preferred until UW-5 makes that boundary legible; the residual audio/visual divergence inside the band is recorded at §4.3 and §8. | 2026-09-04 |
+| Reconstruct the view ray in the shader from `UNITY_MATRIX_I_VP`          | Needs no published global, but that matrix cannot be set outside a real camera render, so the fog's distance reconstruction would only be testable behind an `#ifdef` — gating a different code path than ships. Published floats keep the real fragment measurable. §4.3 | 2026-09-04 |
+| A hard `IsSubmerged` switch for the medium (revisited after play)        | Removes the fade-to-nothing exploit but not the defect behind it: an eye a centimetre above the surface still leaves a fully submerged lower half unfogged, and it reinstates the full-screen pop. The gap is that submersion is a **per-ray** property being gated on a per-camera scalar. §3.2 | 2026-09-04 |
+| Floor the strength while any fluid is near (`max(0.5, ramp)`)           | Cheapest way to kill the exploit, but it tints the **sky** half of the screen at 50 % while the eye is at the surface — wrong in the other direction, and it still cannot produce a waterline. §3.2 | 2026-09-04 |
 
 ---
 
 ## Document History
 
+* **v2.0** - **UW-4 confirmed in game on the eighth pass and dated `✅ 2026-09-04`**, carrying UW-0 and
+  UW-2 with it — both were unobservable until the overlay drew them. UW-3 stays `In progress`: its
+  audible half is still unheard, and a visual confirmation says nothing about the ambience boundary.
+  Accepted as a **proxy**, explicitly imperfect, with the residual owned by `VX-3`/`VX-5` rather than by
+  further tuning of the box. Also records a data-loss defect found the same day *outside* this arc but
+  destroying its authored values: the Block Editor's load path copied `BlockType` with a hand-written
+  initializer list that had fallen 7 fields behind, so opening the editor and saving wrote defaults over
+  `submersionColor`, `submersionDensity` and the five 2026-09-03 fluid coefficients. Both copy sites now
+  use `Editor/BlockEditor/Helpers/BlockTypeCloner`; water's values were re-authored from §7's first pass.
+* **v1.9** - Seventh in-game pass on UW-4, and a sharper diagnosis of v1.8's instability: each horizontal
+  extent is a single 1-D probe, so a lone block standing in the water truncated that whole side of the box
+  — measured live at one voxel cutting +Z from 23 cells to 6.47. `World.FluidReachCells` now reports the
+  farthest fluid cell rather than stopping at the first gap, which is correct because a solid block inside
+  the body is an occluder the depth buffer already bounds. §3.2 gains that reasoning, `B24` added and
+  proven red against the old rule.
+* **v1.8** - Sixth in-game pass on UW-4: the medium shifted as the player swam. The box's extents are
+  re-measured from the eye's cell, so they step at every boundary — all four at once crossing vertically.
+  Measured on a terraced pool (`EyeDepth` continuous, extents 2.50 → 6.50). §3.2 gains
+  `SubmersionOverlay.StepExtents`: eased over `ExtentDampTime`, snapping on entry, interpolated in
+  `1/(1+d)` so the unbounded sentinel is a finite endpoint, and living in the publish path so
+  `GatherEyeSubmersion` stays pure for the audio poll. The extent scan also now runs only for a
+  *submerged* eye. §8 records the lag the easing introduces; `B23` added and proven red.
+* **v1.7** - Fifth in-game pass on UW-4, and a retraction. §3.2's claim that the depth buffer bounded the
+  fluid body's **sides** for free was **wrong**: at a shoreline the nearest boundary face sits inside the
+  near clip plane and is never rasterized, so a ray crossing zero water was charged 3.9 blocks. Measured
+  on the live frame rather than argued. The half-space became a **box** — `EyeSubmersion.HorizontalExtent`
+  plus a slab-exit clamp in the fragment — with `_SubmersionRayBasisX/Z` and `_SubmersionBounds` added to
+  §4.3 and `B22` proven red. §8 records the box's own limitation (L-shaped bodies under-fog) and points
+  exact bounding at the `VX-*` volumetric backlog.
+* **v1.6** - Fourth in-game pass on UW-4. §3.2 gains the **plane-versus-body** rule: the surface plane is
+  only valid from *inside* the water, because from outside it runs to the horizon while the pool does not
+  — a shallow pool was painting the medium across a dry cave. `SubmergedRayLength` now returns zero above
+  the surface and the gate is `IsSubmerged` again, which is exact rather than a simplification (a ray
+  reaching water ends at the water) and restores §3.3's single boundary with audio. §4.3's gate wording
+  follows, `B21` added and proven red, `B16` re-pointed at the new contract. §8 records the **clouds not
+  visible through water** limitation with its cause (URP's opaque copy predates transparents) and what a
+  fix would take, assigned to the cloud backlog.
+* **v1.5** - Third in-game pass on UW-4: the per-pixel fog's **vertical sign was inverted**, fogging the
+  sky and leaving the water clear. `Blit.hlsl`'s `GetFullScreenTriangleTexCoord` already flips its V on
+  `UNITY_UV_STARTS_AT_TOP` platforms, so the shader's own compensation was a second flip; the correct
+  mapping is a plain `uv * 2 - 1`. §3.2's hazard note rewritten as a "do not add a flip here" with the
+  symptom named, §8's open question 2 **closed**, and `B20` added — it measures the orientation against a
+  marker drawn in **clip space**, which needs no platform assumption because a flip in the texture or
+  readback chain moves the marker and the fog together. The earlier claim that a render-texture harness
+  could not pin this was wrong, and is retracted at §8.
+* **v1.4** - Second in-game pass on UW-4. **§3.2 reshaped: the fog is now charged per pixel, over the
+  part of each ray below the surface** — a screen-wide strength let a player at the waterline clear the
+  medium while half the view was underwater, because submersion is a per-ray property. §4.3's
+  `_SubmersionColor.a` became a gate rather than a fade, the 0.25-block ramp is marked ⛔ superseded
+  (its audio-divergence ⚠️ retired with it), `_SubmersionParams.y` now carries the eye's **signed
+  depth** instead of `SurfaceY`, and `_SubmersionRayBasisY` was added as a fourth global. §7 gains
+  `B19`; §8 gains the UV-flip orientation question and the hard-edge waterline, and records the fog
+  density coming down `0.14` → `0.05` after the pond-floor screenshot; §9 gains the two alternatives
+  weighed against the per-pixel solve.
+* **v1.3** - First in-game pass on UW-4. §4.2 corrected: the eye surface is resolved at the top of the
+  fluid **body** via `World.TopOfFluidBody`, not at the eye's own cell, whose forced-flat corners made
+  `SurfaceY` step down and `EyeDepth` reset at every boundary a sinking eye crossed — the overlay
+  re-ran its fade once per cell. `EyeSubmersion.SurfaceY`'s contract tightened to match, `B18` added to
+  pin it, and §7 records why `B8` could not see it. Water's `submersionColor` retuned away from cyan.
+* **v1.2** - UW-4 implemented. §3.2 gains the single-pass composite decision (no camera-color copy) and
+  why it still leaves UW-5 expressible; §4.3 grows to **three** globals, records `PublishSubmersionGlobals`
+  as a *sibling* of `PublishSkyGlobals` rather than a step inside it, documents the ramped
+  `_SubmersionColor.a` and states the audio/visual divergence it introduces inside the band, and explains
+  why the view-ray basis is published rather than derived from `UNITY_MATRIX_I_VP`; §5's distortion
+  reserved-seat claim corrected — the single-pass composite does not leave v2 to "the shader and
+  `GraphicsSettingsController` only"; §7 records what `B10`–`B17` actually pin, including the two proven
+  by mutation; §8 narrows the MSAA/render-scale question without closing it and gains four limitations;
+  §9 gains the three alternatives weighed on the day.
+* **v1.1** - UW-0…UW-3 implemented. Corrected §2 against the code: the liquid SubShader is
+  `Queue="Transparent"`, the renderer copies depth `AfterTransparents` (so `_CameraDepthTexture` holds the
+  fluid surface), `UIBlurRendererFeature` shares UW-4's injection point, and the fluid physics coefficients
+  were never in the `BlockEditor`. §3.2's double-fogging and sky-density consequences withdrawn accordingly;
+  §3.4 records the smoothing as moved rather than exposed; §3.5 gains the feature-ordering and
+  `ConfigureInput` requirements; §8 gains three limitations. UW-1 confirmed in game the same day,
+  including the fogged distance case its baselines cannot cover.
 * **v1.0** - Initial design
 
 ---
 
-**Last Updated:** 2026-09-03  
-**Next Review:** when UW-0 starts
+**Last Updated:** 2026-09-04  
+**Next Review:** when UW-4 is confirmed in game, which unblocks UW-5

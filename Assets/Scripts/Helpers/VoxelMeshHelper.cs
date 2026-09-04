@@ -1020,21 +1020,18 @@ namespace Helpers
             CalculateSymmetricCornerShorePush(n_S, n_SE, centerState, n_E, in blockTypes, out Vector2 shore_push_br);
             CalculateSymmetricCornerShorePush(centerState, n_E, n_N, n_NE, in blockTypes, out Vector2 shore_push_tr);
 
-            // Clamp smoothed corner heights to a small positive value to prevent z-fighting.
-            const float kMinFluidSurfaceHeight = 0.005f;
-            float smooth_tr = math.max(kMinFluidSurfaceHeight, GetSmoothedCornerHeight(in props, fluidLevel, n_N, n_E, n_NE, in templates, in blockTypes));
-            float smooth_tl = math.max(kMinFluidSurfaceHeight, GetSmoothedCornerHeight(in props, fluidLevel, n_N, n_W, n_NW, in templates, in blockTypes));
-            float smooth_br = math.max(kMinFluidSurfaceHeight, GetSmoothedCornerHeight(in props, fluidLevel, n_S, n_E, n_SE, in templates, in blockTypes));
-            float smooth_bl = math.max(kMinFluidSurfaceHeight, GetSmoothedCornerHeight(in props, fluidLevel, n_S, n_W, n_SW, in templates, in blockTypes));
+            // Surface geometry comes from the shared resolver, which World.GatherEyeSubmersion samples too —
+            // a second copy here is exactly the drift the eye query cannot tolerate (UW-2).
+            FluidCornerHeights smoothed = FluidSurfaceResolver.SmoothedCornerHeights(
+                in props, fluidLevel, n_N, n_E, n_S, n_W, n_NE, n_SE, n_SW, n_NW, in templates, in blockTypes);
+            float smooth_tr = smoothed.TR, smooth_tl = smoothed.TL, smooth_br = smoothed.BR, smooth_bl = smoothed.BL;
 
             // Check if we have fluid directly above us
-            bool hasFluidAbove = above.HasValue && blockTypes[above.State.ID].FluidType == props.FluidType;
+            bool hasFluidAbove = FluidSurfaceResolver.HasSameFluidAbove(above, in props, in blockTypes);
 
             // Force all corners to 1.0 when submerged so the block connects seamlessly to the one above.
-            float height_tr = hasFluidAbove ? 1.0f : smooth_tr;
-            float height_tl = hasFluidAbove ? 1.0f : smooth_tl;
-            float height_br = hasFluidAbove ? 1.0f : smooth_br;
-            float height_bl = hasFluidAbove ? 1.0f : smooth_bl;
+            FluidCornerHeights surface = FluidSurfaceResolver.SurfaceCornerHeights(in smoothed, hasFluidAbove);
+            float height_tr = surface.TR, height_tl = surface.TL, height_br = surface.BR, height_bl = surface.BL;
 
 
             // --- 4. GENERATE FACES ---
@@ -1354,52 +1351,6 @@ namespace Helpers
 
                 vertexIndex += 4;
             }
-        }
-
-        /// <summary>
-        /// Calculates the smoothed height for a fluid block's corner by averaging its height
-        /// with adjacent and diagonal fluid neighbors. Prevents height smoothing through solid walls.
-        /// </summary>
-        /// <param name="centerProps">The properties of the center fluid block.</param>
-        /// <param name="centerLevel">The fluid level of the center block.</param>
-        /// <param name="n1">The first adjacent orthogonal neighbor.</param>
-        /// <param name="n2">The second adjacent orthogonal neighbor.</param>
-        /// <param name="nDiag">The diagonal neighbor shared by n1 and n2.</param>
-        /// <param name="templates">The pre-computed height templates for this fluid type.</param>
-        /// <param name="blockTypes">The global block types data array.</param>
-        /// <returns>The averaged height for the evaluated corner.</returns>
-        [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        private static float GetSmoothedCornerHeight(in BlockTypeJobData centerProps, byte centerLevel, OptionalVoxelState n1, OptionalVoxelState n2, OptionalVoxelState nDiag, in NativeArray<float> templates, in NativeArray<BlockTypeJobData> blockTypes)
-        {
-            float totalHeight = templates[centerLevel];
-            int count = 1;
-
-            // Track if adjacent neighbors are fluids to determine if the diagonal path is open ---
-            bool n1IsFluid = n1.HasValue && blockTypes[n1.State.ID].FluidType == centerProps.FluidType;
-            bool n2IsFluid = n2.HasValue && blockTypes[n2.State.ID].FluidType == centerProps.FluidType;
-
-            if (n1IsFluid)
-            {
-                totalHeight += templates[n1.State.FluidLevel];
-                count++;
-            }
-
-            if (n2IsFluid)
-            {
-                totalHeight += templates[n2.State.FluidLevel];
-                count++;
-            }
-
-            // Only consider the diagonal neighbor for smoothing if at least one of the
-            // adjacent neighbors is also a fluid. This prevents height smoothing "through" solid corners.
-            bool nDiagIsFluid = nDiag.HasValue && blockTypes[nDiag.State.ID].FluidType == centerProps.FluidType;
-            if ((n1IsFluid || n2IsFluid) && nDiagIsFluid)
-            {
-                totalHeight += templates[nDiag.State.FluidLevel];
-                count++;
-            }
-
-            return totalHeight / count;
         }
 
         /// <summary>

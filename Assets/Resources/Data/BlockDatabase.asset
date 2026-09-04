@@ -46,6 +46,8 @@ MonoBehaviour:
     submergedSpeedMultiplier: 0.5
     pushStrength: 1.4
     swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 0
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -94,6 +96,8 @@ MonoBehaviour:
     submergedSpeedMultiplier: 0.5
     pushStrength: 1.4
     swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -142,6 +146,8 @@ MonoBehaviour:
     submergedSpeedMultiplier: 0.5
     pushStrength: 1.4
     swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -190,6 +196,8 @@ MonoBehaviour:
     submergedSpeedMultiplier: 0.5
     pushStrength: 1.4
     swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -238,6 +246,8 @@ MonoBehaviour:
     submergedSpeedMultiplier: 0.5
     pushStrength: 1.4
     swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -286,6 +296,8 @@ MonoBehaviour:
     submergedSpeedMultiplier: 0.5
     pushStrength: 1.4
     swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -334,6 +346,8 @@ MonoBehaviour:
     submergedSpeedMultiplier: 0.5
     pushStrength: 1.4
     swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -382,6 +396,8 @@ MonoBehaviour:
     submergedSpeedMultiplier: 0.5
     pushStrength: 1.4
     swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -430,6 +446,8 @@ MonoBehaviour:
     submergedSpeedMultiplier: 0.5
     pushStrength: 1.4
     swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -478,6 +496,8 @@ MonoBehaviour:
     submergedSpeedMultiplier: 0.5
     pushStrength: 1.4
     swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -526,6 +546,8 @@ MonoBehaviour:
     submergedSpeedMultiplier: 0.5
     pushStrength: 1.4
     swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -574,6 +596,8 @@ MonoBehaviour:
     submergedSpeedMultiplier: 0.5
     pushStrength: 1.4
     swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -622,6 +646,8 @@ MonoBehaviour:
     submergedSpeedMultiplier: 0.5
     pushStrength: 1.4
     swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -670,6 +696,8 @@ MonoBehaviour:
     submergedSpeedMultiplier: 0.5
     pushStrength: 1.4
     swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 0
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -718,6 +746,8 @@ MonoBehaviour:
     submergedSpeedMultiplier: 0.5
     pushStrength: 1.4
     swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -766,6 +796,8 @@ MonoBehaviour:
     submergedSpeedMultiplier: 0.5
     pushStrength: 1.4
     swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 5
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -814,6 +846,8 @@ MonoBehaviour:
     submergedSpeedMultiplier: 0.5
     pushStrength: 1.4
     swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -862,6 +896,8 @@ MonoBehaviour:
     submergedSpeedMultiplier: 0.5
     pushStrength: 1.4
     swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -910,6 +946,8 @@ MonoBehaviour:
     submergedSpeedMultiplier: 0.5
     pushStrength: 1.4
     swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -958,6 +996,8 @@ MonoBehaviour:
     submergedSpeedMultiplier: 0.5
     pushStrength: 1.4
     swimAscendSpeed: 0.9
+    submersionColor: {r: 0.08, g: 0.24, b: 0.5, a: 1}
+    submersionDensity: 0.05
     opacity: 2
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -1006,6 +1046,8 @@ MonoBehaviour:
     submergedSpeedMultiplier: 0.3
     pushStrength: 0.7
     swimAscendSpeed: 0.5
+    submersionColor: {r: 0.8, g: 0.10980392, b: 0.09411765, a: 1}
+    submersionDensity: 1.5
     opacity: 7
     lightEmission: 15
     lightEmissionColor: {r: 1, g: 0.73333335, b: 0.26666668, a: 1}
@@ -1054,6 +1096,8 @@ MonoBehaviour:
     submergedSpeedMultiplier: 0.5
     pushStrength: 1.4
     swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -1102,6 +1146,8 @@ MonoBehaviour:
     submergedSpeedMultiplier: 0.5
     pushStrength: 1.4
     swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 0
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -1150,6 +1196,8 @@ MonoBehaviour:
     submergedSpeedMultiplier: 0.5
     pushStrength: 1.4
     swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 1
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -1198,6 +1246,8 @@ MonoBehaviour:
     submergedSpeedMultiplier: 0.5
     pushStrength: 1.4
     swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 2
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -1246,6 +1296,8 @@ MonoBehaviour:
     submergedSpeedMultiplier: 0.5
     pushStrength: 1.4
     swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 3
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -1294,6 +1346,8 @@ MonoBehaviour:
     submergedSpeedMultiplier: 0.5
     pushStrength: 1.4
     swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 4
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -1342,6 +1396,8 @@ MonoBehaviour:
     submergedSpeedMultiplier: 0.5
     pushStrength: 1.4
     swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 5
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -1390,6 +1446,8 @@ MonoBehaviour:
     submergedSpeedMultiplier: 0.5
     pushStrength: 1.4
     swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 6
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -1438,6 +1496,8 @@ MonoBehaviour:
     submergedSpeedMultiplier: 0.5
     pushStrength: 1.4
     swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 7
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -1486,6 +1546,8 @@ MonoBehaviour:
     submergedSpeedMultiplier: 0.5
     pushStrength: 1.4
     swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 8
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -1534,6 +1596,8 @@ MonoBehaviour:
     submergedSpeedMultiplier: 0.5
     pushStrength: 1.4
     swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 9
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -1582,6 +1646,8 @@ MonoBehaviour:
     submergedSpeedMultiplier: 0.5
     pushStrength: 1.4
     swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 10
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -1630,6 +1696,8 @@ MonoBehaviour:
     submergedSpeedMultiplier: 0.5
     pushStrength: 1.4
     swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 11
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -1678,6 +1746,8 @@ MonoBehaviour:
     submergedSpeedMultiplier: 0.5
     pushStrength: 1.4
     swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 12
     lightEmissionColor: {r: 0, g: 1, b: 0, a: 1}
@@ -1726,6 +1796,8 @@ MonoBehaviour:
     submergedSpeedMultiplier: 0.5
     pushStrength: 1.4
     swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 13
     lightEmissionColor: {r: 0, g: 0, b: 1, a: 1}
@@ -1774,6 +1846,8 @@ MonoBehaviour:
     submergedSpeedMultiplier: 0.5
     pushStrength: 1.4
     swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 14
     lightEmissionColor: {r: 1, g: 0, b: 0, a: 1}
@@ -1822,6 +1896,8 @@ MonoBehaviour:
     submergedSpeedMultiplier: 0.5
     pushStrength: 1.4
     swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 15
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}

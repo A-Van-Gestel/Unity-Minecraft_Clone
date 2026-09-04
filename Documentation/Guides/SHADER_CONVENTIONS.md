@@ -41,7 +41,7 @@ hardware it excludes**:
 | 4.6     | 15 (no gain)  | `cubearray tesshw tessellation msaatex`           | FL11+     | 4.1+           | 3.1 + AEP |
 | 5.0     | 15 (no gain)  | `compute randomwrite msaatex tesshw tessellation` | FL11+     | 4.3+           | 3.1 + AEP |
 
-**Declare `#pragma target 4.5`.** As of 2026-09-01 all **12** project-owned shaders do — a new shader
+**Declare `#pragma target 4.5`.** As of 2026-09-04 all **13** project-owned shaders do — a new shader
 that departs from it should say why in a comment at the pragma.
 
 Omitting the directive is not neutral: Unity defaults to **2.5**, which guarantees only 8 interpolators.
