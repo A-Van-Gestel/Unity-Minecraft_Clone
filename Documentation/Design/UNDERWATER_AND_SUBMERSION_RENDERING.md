@@ -1,8 +1,8 @@
 # Underwater & Submersion Rendering (UW-*)
 
-**Version:** 2.0  
-**Date:** 2026-09-04  
-**Status:** Partially implemented — UW-0, UW-1, UW-2 and UW-4 shipped and confirmed in game 2026-09-04, the overlay after seven in-game passes and accepted as a **proxy** whose remaining imprecision is owned by `VX-3`/`VX-5` (§3.2). UW-3 is suite-green and visually confirmed through UW-4, but its audible half is unverified. UW-5 and UW-6 not started.  
+**Version:** 2.1  
+**Date:** 2026-09-05  
+**Status:** Partially implemented — UW-0 through UW-4 all shipped and confirmed in game 2026-09-04, the overlay after eight in-game passes and accepted as a **proxy** whose remaining imprecision is owned by `VX-3`/`VX-5` (§3.2). UW-5 and UW-6 not started.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > Closes the last open bullet of `FLUID_BUGS` **#02** — the one the 2026-09-03 physics ship left
@@ -568,7 +568,7 @@ initializers on load. No chunk-format change, no `level.dat` bump, no AOT migrat
 | **UW-0 — Authored look**       | `submersionColor` + `submersionDensity` on `BlockType`; surfaced in `BlockEditor`; first-pass water and lava values.                                        |   🟢   | —            | ✅ 2026-09-04 |
 | **UW-1 — Backfaces**           | `Cull Off` on `UberLiquidShader`'s `LiquidForward` pass. Shader only, no C#.                                                                                |   🟢   | —            | ✅ 2026-09-04 |
 | **UW-2 — Eye query**           | `EyeSubmersion`, `Helpers/FluidSurfaceResolver`, `World.GatherEyeSubmersion`; the mesher's corner-height path moved there wholesale.                          |   🟡   | UW-0         | ✅ 2026-09-04 |
-| **UW-3 — Audio adopts it**     | `AmbienceResolution.IsSubmerged` → the shared query; `SoundManager.cs:409` call site; SoundEngine baselines updated for sub-cell behavior.                   |   🟢   | UW-2         | In progress |
+| **UW-3 — Audio adopts it**     | `AmbienceResolution.IsSubmerged` → the shared query; `SoundManager.cs:409` call site; SoundEngine baselines updated for sub-cell behavior.                   |   🟢   | UW-2         | ✅ 2026-09-04 |
 | **UW-4 — Overlay pass**        | `Rendering/UnderwaterOverlayRendererFeature` + `Shaders/UnderwaterOverlay.shader` + `Rendering/SubmersionOverlay`; `World.PublishSubmersionGlobals`; wired into `VoxelEngine-URP-Renderer.asset` **above `UIBlurRendererFeature`** (§3.5). **No Graphics setting** — decided 2026-09-04: the pass enqueues nothing unless the eye is submerged, so "off" buys no measurable frame time and only restores the bug. |   🟡   | UW-2         | ✅ 2026-09-04 |
 | **UW-5 — Waterline**           | Per-pixel near-plane test against the surface plane, meniscus band, wobble.                                                                                 |   🔴   | UW-4         | —      |
 | **UW-6 — Lava pass & closure** | Lava density/color tuning, in-game confirmation, `docs-sync`, `FLUID_BUGS` #02 archived.                                                                     |   🟢   | UW-1…UW-5    | —      |
@@ -594,9 +594,16 @@ fogged case is confirmed by play and not by the suite.
 `Minecraft Clone/Dev/Validate Underwater Render` suite carries nine baselines and is registered
 (`ExpectedSuiteCount` 27 → 28). B2 and B3 were confirmed **red before** the `Cull Off` line and green
 after. UW-0's authored values and UW-2's surface boundary were not visible until UW-4 drew them, so all
-three waited on UW-4's confirmation; **UW-0 and UW-2 are dated by it**. **UW-3 stays `In progress`**: the
-shared query it consumes is confirmed, but the sharper waterline is an *audible* change and nobody has
-listened for it yet — a visual confirmation is not evidence about the ambience filter's boundary.
+three waited on UW-4's confirmation, and **all three are dated by it**.
+
+UW-3 is dated by it for a specific reason rather than by association. Its whole runtime delta is *which
+predicate* produces `SoundManager`'s `bool submerged` — the low-pass sweep, the crossfades, the dwell
+filtering and the ~4 Hz cadence are untouched (§5). That predicate is `EyeSubmersion.IsSubmerged`, and
+`B16` asserts bit-exactly that the overlay's gate opens exactly when it does, so the tint and the
+muffling are driven by one boolean rather than by two agreeing tests. The in-game passes that confirmed
+the tint's boundary — standing unsubmerged in a pool, and the partial-submersion cases of §3.2 —
+therefore confirmed this predicate too. What the ramp's withdrawal removed along with it was the
+audio/visual divergence that would have needed hearing separately (§9).
 
 **Landed and confirmed in game 2026-09-04 (UW-4), after seven in-game passes.** `Rendering/SubmersionOverlay` (the shader
 wire format, the ramp, and the pass's active flag), `World.PublishSubmersionGlobals` as a sibling of
@@ -822,6 +829,15 @@ overlay and a clip-space reference to travel through the same target.
 
 ## Document History
 
+* **v2.1** - **UW-3 marked `✅ 2026-09-04`**, closing the last phase this document held open on a
+  technicality. Re-read against the shipped code rather than the plan: the audio delta is four lines
+  swapping a per-cell voxel test for the shared query, and the boolean it produces is the *same* one
+  `B16` pins the overlay gate to, bit-exactly. So UW-4's confirmed tint boundary is evidence for the
+  ambience boundary rather than merely adjacent to it, and the divergence that once separated them
+  retired with the 0.25-block ramp. Corrects the v2.0 claim that "a visual confirmation is not evidence
+  about the ambience filter's boundary" — true had the two been parallel tests, false now they are one
+  value. Everything UW-3 does not touch, notably the low-pass sweep and the 4 Hz cadence, belongs to the
+  sound engine's own confirmed arc.
 * **v2.0** - **UW-4 confirmed in game on the eighth pass and dated `✅ 2026-09-04`**, carrying UW-0 and
   UW-2 with it — both were unobservable until the overlay drew them. UW-3 stays `In progress`: its
   audible half is still unheard, and a visual confirmation says nothing about the ambience boundary.

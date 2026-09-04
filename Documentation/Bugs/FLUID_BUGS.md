@@ -28,8 +28,7 @@ when the eye sits at the surface.
   The back-face shell is drawn where culling used to hide it. Confirmed correct at distance under the
   atmospheric fog as well, which the baselines cannot see — they zero the fog range to isolate culling.
 
-**Landed 2026-09-04 — `UW-0`, `UW-2` and `UW-4` confirmed in game after eight passes; `UW-3` suite-green,
-its audible half still unheard:**
+**Landed and confirmed in game 2026-09-04 — `UW-0` through `UW-4`, the overlay after eight passes:**
 
 - `submersionColor` / `submersionDensity` on `BlockType`, authored for water and lava; all seven fluid
   coefficients now have `BlockEditor` sliders. The editor copied blocks with hand-written initializer
