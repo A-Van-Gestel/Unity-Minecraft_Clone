@@ -348,6 +348,23 @@ namespace Editor.BlockEditor
                     _selectedBlock.infiniteSourceRegeneration = EditorGUILayout.Toggle(new GUIContent("Infinite Source Regeneration", "If true, this fluid will generate a new source block if it is horizontally adjacent to 2 other source blocks and has a solid floor."), _selectedBlock.infiniteSourceRegeneration);
                     _selectedBlock.spreadChance = EditorGUILayout.Slider(new GUIContent("Spread Chance", "Chance between 0.0 and 1.0 that this fluid will successfully spread horizontally on a given tick. 1.0 is fast, lower numbers are physically slower/thicker."), _selectedBlock.spreadChance, 0f, 1f);
 
+                    // --- Body Physics (FLUID_BUGS #14 / #02) ---
+                    EditorGUILayout.Space();
+                    EditorGUILayout.LabelField("Body Physics", EditorStyles.boldLabel);
+                    _selectedBlock.buoyancy = EditorGUILayout.Slider(new GUIContent("Buoyancy", "How strongly this fluid lifts a body inside it, as a fraction of gravity that gets cancelled. 0 = no support, 1 = neutral float, above 1 pushes the body up to the surface. Scaled by how much of the body is actually under the surface."), _selectedBlock.buoyancy, 0f, 2f);
+                    _selectedBlock.verticalDrag = EditorGUILayout.Slider(new GUIContent("Vertical Drag", "How quickly vertical speed bleeds off inside this fluid, per second. Higher values settle a body to a slow, steady sink or rise instead of letting it keep accelerating."), _selectedBlock.verticalDrag, 0f, 30f);
+                    _selectedBlock.submergedSpeedMultiplier = EditorGUILayout.Slider(new GUIContent("Submerged Speed", "Horizontal movement speed multiplier while fully submerged. 1 = normal walking speed, lower values wade/swim slower. Scaled by submersion, so wading ankle-deep barely slows the player."), _selectedBlock.submergedSpeedMultiplier, 0.1f, 1f);
+                    _selectedBlock.pushStrength = EditorGUILayout.Slider(new GUIContent("Push Strength", "How hard flowing fluid pushes a body along the current, in meters per second at full flow. Zero makes the fluid still — bodies float but are never carried."), _selectedBlock.pushStrength, 0f, 10f);
+                    _selectedBlock.swimAscendSpeed = EditorGUILayout.Slider(new GUIContent("Swim Ascend Speed", "Vertical speed a swim stroke reaches inside this fluid, in meters per second (jump swims up, crouch swims down). Scaled by submersion, so a body near the surface settles at the waterline instead of launching clear of it."), _selectedBlock.swimAscendSpeed, 0f, 10f);
+
+                    // --- Submerged Look (UW-0) ---
+                    EditorGUILayout.Space();
+                    EditorGUILayout.LabelField("Submerged Look", EditorStyles.boldLabel);
+                    _selectedBlock.submersionColor = EditorGUILayout.ColorField(
+                        new GUIContent("Submersion Color", "The medium's color while the eye is inside this fluid — both the tint at zero depth and the color distant geometry fades toward."),
+                        _selectedBlock.submersionColor, showEyedropper: true, showAlpha: false, hdr: false);
+                    _selectedBlock.submersionDensity = EditorGUILayout.Slider(new GUIContent("Submersion Density", "How fast the view fades to Submersion Color, as extinction per block of view distance. Low values leave metres of visibility (water); high values go near-opaque within about a block (lava)."), _selectedBlock.submersionDensity, 0f, 4f);
+
                     // --- Fluid Preview Slider ---
                     EditorGUILayout.Space();
                     EditorGUILayout.LabelField("Editor Preview", EditorStyles.boldLabel);
@@ -952,50 +969,19 @@ namespace Editor.BlockEditor
             _listScrollPos.y = float.MaxValue;
         }
 
+        /// <summary>
+        /// Copies the selected block into a new "(Copy)" entry and selects it for editing.
+        /// </summary>
+        /// <remarks>
+        /// Copies through <see cref="BlockTypeCloner"/> so a new <see cref="BlockType"/> field needs no
+        /// change here. The name is the only field a duplicate wants to differ, and it is assigned below.
+        /// </remarks>
         private void DuplicateSelectedBlock()
         {
             if (_selectedBlock == null) return;
 
-            // Create a deep copy
-            BlockType newBlock = new BlockType
-            {
-                blockName = $"{_selectedBlock.blockName} (Copy)",
-                icon = _selectedBlock.icon,
-                renderShape = _selectedBlock.renderShape,
-                meshData = _selectedBlock.meshData,
-                stackSize = _selectedBlock.stackSize,
-                isSolid = _selectedBlock.isSolid,
-                collisionBounds = _selectedBlock.collisionBounds,
-                renderNeighborFaces = _selectedBlock.renderNeighborFaces,
-                swayStrength = _selectedBlock.swayStrength,
-                crossMeshVariation = _selectedBlock.crossMeshVariation,
-                fluidType = _selectedBlock.fluidType,
-                fluidShaderID = _selectedBlock.fluidShaderID,
-                fluidMeshData = _selectedBlock.fluidMeshData,
-                fluidLevel = _selectedBlock.fluidLevel,
-                flowLevels = _selectedBlock.flowLevels,
-                waterfallsMaxSpread = _selectedBlock.waterfallsMaxSpread,
-                infiniteSourceRegeneration = _selectedBlock.infiniteSourceRegeneration,
-                spreadChance = _selectedBlock.spreadChance,
-                opacity = _selectedBlock.opacity,
-                lightEmission = _selectedBlock.lightEmission,
-                lightEmissionColor = _selectedBlock.lightEmissionColor,
-                tagPreset = _selectedBlock.tagPreset,
-                tags = _selectedBlock.tags,
-                worldGenCanReplaceTags = _selectedBlock.worldGenCanReplaceTags,
-                placementCanReplaceTags = _selectedBlock.placementCanReplaceTags,
-                soundMaterial = _selectedBlock.soundMaterial,
-                isActive = _selectedBlock.isActive,
-                metadataSchema = _selectedBlock.metadataSchema,
-                placementMetadataMode = _selectedBlock.placementMetadataMode,
-                defaultMetadata = _selectedBlock.defaultMetadata,
-                backFaceTexture = _selectedBlock.backFaceTexture,
-                frontFaceTexture = _selectedBlock.frontFaceTexture,
-                topFaceTexture = _selectedBlock.topFaceTexture,
-                bottomFaceTexture = _selectedBlock.bottomFaceTexture,
-                leftFaceTexture = _selectedBlock.leftFaceTexture,
-                rightFaceTexture = _selectedBlock.rightFaceTexture,
-            };
+            BlockType newBlock = BlockTypeCloner.Clone(_selectedBlock);
+            newBlock.blockName = $"{_selectedBlock.blockName} (Copy)";
 
             int insertIndex = _selectedBlockIndex + 1;
             _blockTypesCopy.Insert(insertIndex, newBlock);

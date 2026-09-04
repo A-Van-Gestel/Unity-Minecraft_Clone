@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Data;
 using Data.Enums;
+using Editor.BlockEditor.Helpers;
 using Editor.DataGeneration;
 using Editor.Libraries;
 using UnityEditor;
@@ -163,49 +164,7 @@ namespace Editor.BlockEditor
             // We work on a copy of the data. This allows for "Save" and "Revert" functionality.
             _blockTypesCopy = new List<BlockType>();
             foreach (BlockType blockType in _blockDatabase.blockTypes)
-            {
-                // Simple member-wise copy for a new instance.
-                _blockTypesCopy.Add(new BlockType
-                {
-                    // copy all fields
-                    blockName = blockType.blockName,
-                    icon = blockType.icon,
-                    renderShape = blockType.renderShape,
-                    meshData = blockType.meshData,
-                    stackSize = blockType.stackSize,
-                    isSolid = blockType.isSolid,
-                    renderNeighborFaces = blockType.renderNeighborFaces,
-                    swayStrength = blockType.swayStrength,
-                    crossMeshVariation = blockType.crossMeshVariation,
-                    fluidType = blockType.fluidType,
-                    fluidShaderID = blockType.fluidShaderID,
-                    fluidMeshData = blockType.fluidMeshData,
-                    fluidLevel = blockType.fluidLevel,
-                    flowLevels = blockType.flowLevels,
-                    waterfallsMaxSpread = blockType.waterfallsMaxSpread,
-                    infiniteSourceRegeneration = blockType.infiniteSourceRegeneration,
-                    spreadChance = blockType.spreadChance,
-                    opacity = blockType.opacity,
-                    lightEmission = blockType.lightEmission,
-                    lightEmissionColor = blockType.lightEmissionColor,
-                    tagPreset = blockType.tagPreset,
-                    tags = blockType.tags,
-                    worldGenCanReplaceTags = blockType.worldGenCanReplaceTags,
-                    placementCanReplaceTags = blockType.placementCanReplaceTags,
-                    soundMaterial = blockType.soundMaterial,
-                    isActive = blockType.isActive,
-                    metadataSchema = blockType.metadataSchema,
-                    placementMetadataMode = blockType.placementMetadataMode,
-                    defaultMetadata = blockType.defaultMetadata,
-                    backFaceTexture = blockType.backFaceTexture,
-                    frontFaceTexture = blockType.frontFaceTexture,
-                    topFaceTexture = blockType.topFaceTexture,
-                    bottomFaceTexture = blockType.bottomFaceTexture,
-                    leftFaceTexture = blockType.leftFaceTexture,
-                    rightFaceTexture = blockType.rightFaceTexture,
-                    collisionBounds = blockType.collisionBounds,
-                });
-            }
+                _blockTypesCopy.Add(BlockTypeCloner.Clone(blockType));
 
             hasUnsavedChanges = false;
             Debug.Log("Block Editor: Loaded " + _blockTypesCopy.Count + " block types from BlockDatabase asset.");
