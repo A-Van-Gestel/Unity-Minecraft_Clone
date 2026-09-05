@@ -431,8 +431,9 @@ rest of the sound engine, never a verification of the trigger seam.
 ## Document History
 
 * **v1.0** - Promoted from `Design/TOAST_NOTIFICATION_SYSTEM.md` (v1.4) on TN-9's in-game
-  confirmation. That design was deleted 2026-09-05 per `DG-*`; recover it with
-  `git show 5007fe64:Documentation/Design/TOAST_NOTIFICATION_SYSTEM.md`. Every claim re-verified against code at `c2694593`; constants extracted from source.
+  confirmation — **v1.4** being the content that was merged. The design was later bumped to
+  **v1.5** by its own freeze edit and then deleted 2026-09-05 per `DG-*`, so
+  `git show 5007fe64:Documentation/Design/TOAST_NOTIFICATION_SYSTEM.md` returns v1.5, not v1.4. Every claim re-verified against code at `c2694593`; constants extracted from source.
   Phase structure removed and merged into current-state sections; the design's superseded text — the
   blur ban, the `Action<MusicTrack>` payload, the `InUI` suppression condition and the "one visual
   style" non-goal — is described only as it now stands, with each supersession recorded in §9.

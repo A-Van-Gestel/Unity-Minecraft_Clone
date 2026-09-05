@@ -690,9 +690,10 @@ The standing "do not re-litigate" list, including the options refuted by *measur
 
 ## Document History
 
-* **v1.0** - Promoted from `Design/UNDERWATER_AND_SUBMERSION_RENDERING.md` v2.5 (2026-09-05), which
-  was deleted at the promotion per `DG-*`; recover it with
-  `git show 5cbc13f3:Documentation/Design/UNDERWATER_AND_SUBMERSION_RENDERING.md`. Every claim was
+* **v1.0** - Promoted from `Design/UNDERWATER_AND_SUBMERSION_RENDERING.md` **v2.5** (2026-09-05) —
+  the content that was merged. That same commit then bumped it to **v2.6** while freezing it, so the
+  file recovered below reads v2.6; the design was deleted at `DG-4` per `DG-*`, and
+  `git show 5cbc13f3:Documentation/Design/UNDERWATER_AND_SUBMERSION_RENDERING.md` returns it. Every claim was
   re-verified against code at `cb1508ed`; the design's phase structure is merged into current-state
   sections and its `UW-*` IDs carried across in the index above. UW-5's resume material moved to
   [`../Design/ANIMATED_LIQUID_SURFACE.md`](../Design/ANIMATED_LIQUID_SURFACE.md), since it is a plan
