@@ -47,8 +47,7 @@ rather than archive — is unchanged.
   Benefit / Seed / Save`. Also the precedent that a backlog-status doc is exempt from the promotion
   trigger, so a global index never becomes due for promotion itself.
 - [`../Architecture/UNDERWATER_AND_SUBMERSION_RENDERING.md`](../Architecture/UNDERWATER_AND_SUBMERSION_RENDERING.md)
-  and [`UNDERWATER_AND_SUBMERSION_RENDERING.md`](UNDERWATER_AND_SUBMERSION_RENDERING.md) — the
-  promotion that surfaced the conflict, and DG-4's first migration target.
+  — the promotion that surfaced the conflict, and DG-4's first deletion.
 - [`OPEN_WORK_INDEX.md`](OPEN_WORK_INDEX.md) — the index DG-3 built, and the precondition DG-4's
   deletions check against.
 - [`ANIMATED_LIQUID_SURFACE.md`](ANIMATED_LIQUID_SURFACE.md) — `UW-5`. The worked example of the

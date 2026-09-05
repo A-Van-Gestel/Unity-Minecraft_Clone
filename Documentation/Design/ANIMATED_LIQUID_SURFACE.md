@@ -31,8 +31,9 @@ reverted build survives in code.
 - [`../Architecture/UNDERWATER_AND_SUBMERSION_RENDERING.md`](../Architecture/UNDERWATER_AND_SUBMERSION_RENDERING.md)
   — the shipped system this extends. Owns the eye query, the overlay pass and the hard-edge
   limitation this would close (its §7). It carries `UW-5`'s row in its ID index, pointing here.
-- [`UNDERWATER_AND_SUBMERSION_RENDERING.md`](UNDERWATER_AND_SUBMERSION_RENDERING.md) — the frozen
-  design the `UW-*` arc ran through. Its §3.6 is the dated account of the reverted band.
+- The `UW-*` design doc was deleted at its promotion (`DG-*`). Its §3.6 held the dated account of
+  the reverted band, reproduced in §2 below; the original is at
+  `git show 5cbc13f3:Documentation/Design/UNDERWATER_AND_SUBMERSION_RENDERING.md`.
 - [`../Architecture/FLUID_SHORELINE_RENDERING.md`](../Architecture/FLUID_SHORELINE_RENDERING.md) —
   owns the liquid shader's vertex-channel contract, which §4.2 finds has no room left.
 - [`../Architecture/SUB_VOXEL_COLLISION_SYSTEM.md`](../Architecture/SUB_VOXEL_COLLISION_SYSTEM.md) —
@@ -187,9 +188,8 @@ not `OverlayFragmentRenderer`'s. New baselines continue the suite's numbering fr
 
 ## Document History
 
-* **v1.0** - Split out of
-  [`UNDERWATER_AND_SUBMERSION_RENDERING.md`](UNDERWATER_AND_SUBMERSION_RENDERING.md) §3.6 at that
-  document's promotion to `Architecture/` (2026-09-05). An Architecture doc describes current code
+* **v1.0** - Split out of `Design/UNDERWATER_AND_SUBMERSION_RENDERING.md` §3.6 at that document's
+  promotion to `Architecture/` (2026-09-05). An Architecture doc describes current code
   and cannot hold a plan for work not done, and the source design is frozen on promotion — so
   `UW-5`'s resume material, including the three banked findings, lives here where it can be edited
   when the phase resumes. `UW-5` keeps its ID; nothing is renumbered.

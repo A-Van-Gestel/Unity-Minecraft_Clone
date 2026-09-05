@@ -36,9 +36,6 @@ dated ones from the design's play passes.
 
 **Relationship to other documents:**
 
-- [`../Design/UNDERWATER_AND_SUBMERSION_RENDERING.md`](../Design/UNDERWATER_AND_SUBMERSION_RENDERING.md)
-  — the design this was promoted from. It remains the dated record of intent and of the two
-  reverted approaches; this document describes the code.
 - [`../Design/ANIMATED_LIQUID_SURFACE.md`](../Design/ANIMATED_LIQUID_SURFACE.md) — **UW-5**, paused.
   Holds the mesh-displacement plan and the three findings the reverted screen-space band banked.
 - [`FLUID_SHORELINE_RENDERING.md`](FLUID_SHORELINE_RENDERING.md) — owns the liquid shader's
@@ -693,11 +690,11 @@ The standing "do not re-litigate" list, including the options refuted by *measur
 
 ## Document History
 
-* **v1.0** - Promoted from
-  [`../Design/UNDERWATER_AND_SUBMERSION_RENDERING.md`](../Design/UNDERWATER_AND_SUBMERSION_RENDERING.md)
-  v2.5 (2026-09-05). Every claim re-verified against code at `cb1508ed`; the design's phase
-  structure is merged into current-state sections and its `UW-*` IDs carried across in the index
-  above. UW-5's resume material moved to
+* **v1.0** - Promoted from `Design/UNDERWATER_AND_SUBMERSION_RENDERING.md` v2.5 (2026-09-05), which
+  was deleted at the promotion per `DG-*`; recover it with
+  `git show 5cbc13f3:Documentation/Design/UNDERWATER_AND_SUBMERSION_RENDERING.md`. Every claim was
+  re-verified against code at `cb1508ed`; the design's phase structure is merged into current-state
+  sections and its `UW-*` IDs carried across in the index above. UW-5's resume material moved to
   [`../Design/ANIMATED_LIQUID_SURFACE.md`](../Design/ANIMATED_LIQUID_SURFACE.md), since it is a plan
   for work not done and this document describes only shipped code.
 

@@ -1360,7 +1360,7 @@ The physics half shipped 2026-09-03 (with **#14**, in-game confirmed) — fluid 
 floats them, carries them on its current, and lets them swim up, down and out onto a bank. Tuned per
 fluid in `BlockDatabase.asset`; guarded by `Minecraft Clone/Dev/Validate Physics Solver` `B27`-`B44`.
 
-Designed in [`../Design/UNDERWATER_AND_SUBMERSION_RENDERING.md`](../Design/UNDERWATER_AND_SUBMERSION_RENDERING.md)
+Designed in [`../Architecture/UNDERWATER_AND_SUBMERSION_RENDERING.md`](../Architecture/UNDERWATER_AND_SUBMERSION_RENDERING.md)
 (`UW-0`…`UW-6`), which scopes three defects under the remaining bullet: the liquid pass never rendered
 from *inside* a fluid body (`Cull Back`), there is no screen-space medium, and there is no waterline
 when the eye sits at the surface. The first two are shipped and confirmed. The third is **half shipped
