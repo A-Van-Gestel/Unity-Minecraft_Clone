@@ -103,8 +103,8 @@ namespace Rendering
         /// </summary>
         /// <remarks>
         /// Mirrors <see cref="EyeSubmersion.IsSubmerged"/>, which is also the boundary the ambience
-        /// low-pass filter switches on — so the tint and the muffling engage together, as §3.3 of the
-        /// design doc intends.
+        /// low-pass filter switches on — so the tint and the muffling engage together
+        /// (<c>UNDERWATER_AND_SUBMERSION_RENDERING.md</c> §6).
         /// <para>
         /// Mutable static, so it is zeroed on play-mode entry below rather than relying on the field
         /// initializer — the project runs with <i>Reload Domain</i> off, where initializers do not re-run.

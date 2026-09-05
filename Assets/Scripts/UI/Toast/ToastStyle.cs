@@ -103,8 +103,8 @@ namespace UI.Toast
         /// <remarks>
         /// <b>Not</b> U+26A0 WARNING SIGN, which the project font does not contain — and its atlas is static,
         /// so nothing supplies it at runtime. A character-table entry can also point at an empty glyph, which
-        /// <c>HasCharacter</c> cannot reveal, so the shortlist was rendered and judged by eye; the design doc
-        /// §3.5 carries the measured coverage.
+        /// <c>HasCharacter</c> cannot reveal, so the shortlist was rendered and judged by eye;
+        /// <c>TOAST_NOTIFICATION_SYSTEM.md</c> §5.1 carries the measured coverage.
         /// </remarks>
         public const string WarningGlyph = "!";
 

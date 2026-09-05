@@ -130,7 +130,7 @@ namespace Helpers
         /// <remarks>
         /// An approximation of a quad the GPU rasterizes as <b>two triangles</b>, whose diagonal the mesher
         /// may flip by light value — so this can differ from the drawn surface by a small amount along that
-        /// diagonal. The bound is accepted in the design doc's §8.
+        /// diagonal. The bound is accepted in <c>UNDERWATER_AND_SUBMERSION_RENDERING.md</c> §7.
         /// </remarks>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static float SampleSurfaceAt(in FluidCornerHeights corners, float fracX, float fracZ)
