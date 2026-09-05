@@ -10,8 +10,9 @@ This document outlines **open** bugs related to fluid behavior and simulation. R
 
 **Severity:** Missing Feature (visual only)  
 **Files (shipped physics half):** `Player.cs`, `Physics/VoxelRigidbody.cs`, `World.GatherFluidContact`  
-**Files (open visual half):** `Shaders/UnderwaterOverlay.shader` — `UW-5` adds the waterline split to the
-overlay fragment that now carries the tint and fog
+**Files (open visual half):** no defect outstanding in code — `Shaders/UnderwaterOverlay.shader` carries
+the tint, the fog and an exact but hard-edged split. `UW-6` (lava's feel pass, then this entry's
+archival) is unblocked and is the active work; `UW-5`'s meniscus is paused, see below
 
 The physics half shipped 2026-09-03 (with **#14**, in-game confirmed) — fluid now slows the player,
 floats them, carries them on its current, and lets them swim up, down and out onto a bank. Tuned per
@@ -20,7 +21,9 @@ fluid in `BlockDatabase.asset`; guarded by `Minecraft Clone/Dev/Validate Physics
 Designed in [`../Design/UNDERWATER_AND_SUBMERSION_RENDERING.md`](../Design/UNDERWATER_AND_SUBMERSION_RENDERING.md)
 (`UW-0`…`UW-6`), which scopes three defects under the remaining bullet: the liquid pass never rendered
 from *inside* a fluid body (`Cull Back`), there is no screen-space medium, and there is no waterline
-when the eye sits at the surface.
+when the eye sits at the surface. The first two are shipped and confirmed. The third is **half shipped
+and half paused** — the eye at the surface now splits the screen exactly, but the edge stays hard while
+`UW-5` is on hold.
 
 **`UW-1` shipped and confirmed in game 2026-09-04:**
 
@@ -94,8 +97,15 @@ still present.
 
 **Still open — the waterline's polish:**
 
-- The screen now splits geometrically at the surface, but the boundary is a hard one-pixel edge: no
-  meniscus band and no wobble. `UW-5` owns both, and its prerequisite is met — `UW-4` is confirmed.
+- ⏸️ **The hard waterline is on hold — `UW-5` paused 2026-09-05, on cost/benefit rather than closed.**
+  The screen splits geometrically at the surface and that split is exact, but nothing softens it: no
+  meniscus band, no wobble, a one-pixel edge. A screen-space band for it was built and **reverted the
+  same day** — it read *worse* than the hard edge. It missed the drawn surface (solved against a flat
+  plane's horizon, not the corner-smoothed mesh), and more decisively, a sine band against a **straight**
+  mesh edge must cross it, leaving a gap the width of the wave amplitude that no alignment can close.
+  Softening it therefore means animating the liquid mesh — still the open route, just priced above what
+  the polish is worth at current priority. Full reasoning, plus three findings for when it resumes, in
+  the design doc's §3.6. **Do not rebuild the overlay band**; the mesh version wants a fresh plan.
 - The medium is bounded by a **box**, not by the fluid body itself, so it stays a proxy. Accepted as
   good enough at the eighth pass rather than tuned further: `VX-3` on `VX-5` is the exact replacement
   and deletes both `_SubmersionBounds` and `World.MeasureHorizontalExtent`.

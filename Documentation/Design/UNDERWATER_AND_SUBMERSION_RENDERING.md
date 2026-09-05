@@ -1,8 +1,8 @@
 # Underwater & Submersion Rendering (UW-*)
 
-**Version:** 2.1  
+**Version:** 2.2  
 **Date:** 2026-09-05  
-**Status:** Partially implemented — UW-0 through UW-4 all shipped and confirmed in game 2026-09-04, the overlay after eight in-game passes and accepted as a **proxy** whose remaining imprecision is owned by `VX-3`/`VX-5` (§3.2). UW-5 and UW-6 not started.  
+**Status:** Partially implemented — UW-0 through UW-4 all shipped and confirmed in game 2026-09-04, the overlay after eight in-game passes and accepted as a **proxy** whose remaining imprecision is owned by `VX-3`/`VX-5` (§3.2). **UW-5 was built as a screen-space band on 2026-09-05, failed its in-game pass, was reverted whole and is ⏸️ paused on cost/benefit at current priority** — not abandoned: §3.6 records why the band cannot work at all, and what a mesh-displacement version would have to answer when it is picked up. **UW-6 is unblocked and is the only phase active**, with nothing gating it.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > Closes the last open bullet of `FLUID_BUGS` **#02** — the one the 2026-09-03 physics ship left
@@ -58,6 +58,11 @@ Unity's defaults apply); no runtime capture was taken.
    sub-cell query, so the tint and the low-pass filter engage together.
 4. **A waterline when the eye is at the surface.** The screen splits along the fluid plane, with a
    meniscus band, and the split tracks camera pitch and roll.
+   ⏸️ **Met in half; the other half is paused, not dropped (2026-09-05).** UW-4's per-pixel solve
+   delivers the split, geometrically exact and tracking pitch and roll. The **meniscus band is not
+   built** — softening that edge turns out to require animating the liquid mesh rather than the overlay
+   (§3.6), which is more than the polish is worth at current priority. The boundary stays hard until
+   UW-5 is picked back up.
 5. **Per-fluid authoring.** Water and lava differ by authored values on `BlockType`, tuned in the
    `BlockEditor`, exactly as the 2026-09-03 physics coefficients are.
 
@@ -66,6 +71,9 @@ Unity's defaults apply); no runtime capture was taken.
 - **Per-fluid screen distortion** (water wobble, lava heat shimmer) — planned as a **v2
   extension**, see the §7 extension roadmap. The authoring hooks (`_DistortionAmount`,
   `_HeatDistortionAmount`, already scaled by `GraphicsSettingsController`) are reserved for it.
+  ⚠️ Not the same thing as UW-5's **waterline** wobble, which moves where the water's edge *is* rather
+  than resampling the image. The two shared one word until 2026-09-05 and the ambiguity cost a build —
+  §3.6.
 - **Caustics, god rays, bubble trails, surface splash particles** — `FLUID_BUGS` **#15** owns
   fluid particles and audio; this design must not grow a second particle path.
 - **Blending two fluid layers.** The liquid pass writes opaquely and composites against
@@ -345,6 +353,67 @@ The pass must also declare `ConfigureInput(ScriptableRenderPassInput.Depth)`. UR
 schedule from the earliest declared depth reader, and a pass that reads `_CameraDepthTexture` without
 saying so is not counted (§2).
 
+### 3.6 The waterline cannot be drawn in screen space — built, played, reverted
+
+⛔ **A screen-space meniscus band, 2026-09-05.** Implemented in full and reverted the same day after one
+in-game pass. Recorded here rather than deleted, because the reason it fails is a property of the
+problem and not of the build: **a future session that reads §7's "meniscus band" and reaches for the
+overlay fragment will rebuild exactly this.**
+
+**What was built.** `meniscusWidth` / `meniscusWobble` authored on `BlockType`, published through
+`_SubmersionParams.z` and a new `_SubmersionWaveParams`, consumed by a `MeniscusBand` function in
+`UnderwaterOverlay.shader`. The band was drawn on the surface plane's **horizon** — the locus where the
+view ray runs level, `dot(rayDirection, worldUp) = 0`, which is an infinite plane's exact image at any
+eye depth — displaced by a world-anchored sine, gated by the fog's own horizontal bound and by eye
+depth. Four baselines (`B25`–`B28`), all proven red by mutation; `Validate All` green at 724.
+
+**What play said: worse than no UW-5 at all.** Two findings, and the second is the fatal one.
+
+1. **It did not line up with the water.** The band sat a wide margin above the drawn surface. The
+   horizon is where the plane's image goes *asymptotically*, and the surface the player sees is the
+   **corner-smoothed mesh** a fraction of a block over their eye — those are not the same line, and at
+   shallow depth they are nowhere near each other. Aligning them would mean solving against the
+   smoothed mesh height rather than a flat plane at `SurfaceY`.
+2. **⚠️ Even perfectly aligned, it cannot close.** The drawn surface edge is a **straight** line — the
+   mesh is flat-topped quads. A sine band drawn against it must cross it: where the wave crests the band
+   paints water over sky, where it dips a strip of bare surface shows through. **The gap is the wave
+   amplitude, by construction.** Centring the band perfectly does not remove the error, it halves it in
+   each direction. No screen-space band can put a wavy edge on a straight one.
+
+**So the wobble belongs to the geometry, not to the overlay.** For the waterline to undulate, the
+*surface* has to undulate — local vertex displacement on the liquid mesh, with the overlay's band (if it
+survives at all) reading the same wave so the two agree by construction rather than by tuning.
+
+⏸️ **And on that finding the phase was paused, 2026-09-05 — paused, not dropped.** Animating the
+liquid mesh is UW-4-sized work — a vertex-stage displacement that keeps the lid welded to the walls, an
+eye query that follows the wave, and an answer for what an oscillating `EyeDepth` does to the ambience
+gate — bought against a boundary that is already *geometrically correct* and merely hard-edged. At
+current priority that trade does not pay; it is a cost/benefit call at a moment in time, not a verdict
+that the effect is unwanted or unreachable. UW-6 does not wait on it. Everything below is what UW-5
+starts from when it resumes.
+
+**Three things that design owes an answer to**, found while establishing the above and recorded so the
+next pass starts from them rather than rediscovering them:
+
+- **The lid and the walls have to stay welded.** Top-face vertices are identifiable in `LiquidVert`
+  (`Includes/LiquidCore.hlsl:140`) by their `+Y` normal, but the **side** faces' top edges carry
+  horizontal normals and share no marker with the lid they meet — displacing only the lid tears it off
+  the walls. Displacing every vertex by an XZ-keyed wave welds them but moves the whole water column,
+  sliding the body against terrain at every shoreline.
+- **There is nowhere to put a "distance from the surface" vertex channel.** MR-2's 32-byte layout has
+  all four color channels, both UVs and `lightData` spoken for
+  ([`../Architecture/FLUID_SHORELINE_RENDERING.md`](../Architecture/FLUID_SHORELINE_RENDERING.md)), so
+  the weight has to be derived, not carried.
+- **A wobbling surface reaches the audio.** §3.4 requires the eye query to follow the *drawn* surface,
+  so `SurfaceY` would have to include the displacement — and then `EyeDepth` oscillates through zero for
+  a player floating at the surface. `IsSubmerged` is the same boolean the ambience low-pass switches on
+  (`B16` pins that bit-exactly, §4.3), so the muffling would chatter with the waves. Hysteresis on the
+  gate, or letting audio keep the unwobbled height and reopening the divergence UW-3 closed, are both
+  choices with costs; neither is a detail.
+
+**What survived the revert:** nothing in code. UW-4's per-pixel split is untouched and still gives a
+geometrically exact boundary — the edge is simply hard, which §8 continues to record as a limitation.
+
 ---
 
 ## 4. Architecture
@@ -570,8 +639,8 @@ initializers on load. No chunk-format change, no `level.dat` bump, no AOT migrat
 | **UW-2 — Eye query**           | `EyeSubmersion`, `Helpers/FluidSurfaceResolver`, `World.GatherEyeSubmersion`; the mesher's corner-height path moved there wholesale.                          |   🟡   | UW-0         | ✅ 2026-09-04 |
 | **UW-3 — Audio adopts it**     | `AmbienceResolution.IsSubmerged` → the shared query; `SoundManager.cs:409` call site; SoundEngine baselines updated for sub-cell behavior.                   |   🟢   | UW-2         | ✅ 2026-09-04 |
 | **UW-4 — Overlay pass**        | `Rendering/UnderwaterOverlayRendererFeature` + `Shaders/UnderwaterOverlay.shader` + `Rendering/SubmersionOverlay`; `World.PublishSubmersionGlobals`; wired into `VoxelEngine-URP-Renderer.asset` **above `UIBlurRendererFeature`** (§3.5). **No Graphics setting** — decided 2026-09-04: the pass enqueues nothing unless the eye is submerged, so "off" buys no measurable frame time and only restores the bug. |   🟡   | UW-2         | ✅ 2026-09-04 |
-| **UW-5 — Waterline**           | Per-pixel near-plane test against the surface plane, meniscus band, wobble.                                                                                 |   🔴   | UW-4         | —      |
-| **UW-6 — Lava pass & closure** | Lava density/color tuning, in-game confirmation, `docs-sync`, `FLUID_BUGS` #02 archived.                                                                     |   🟢   | UW-1…UW-5    | —      |
+| **UW-5 — Waterline**           | **Rescoped 2026-09-05 after a failed build, then paused (§3.6).** The screen split is *not* part of this — it shipped with UW-4's per-pixel solve. What remains is making the drawn surface itself undulate: local vertex displacement on the liquid mesh, welded lid-to-walls, with the eye query following the wave and an answer for what that does to the ambience gate. A screen-space band was built and reverted — do not rebuild *that*. The mesh version is still the open route; it is paused on cost/benefit, and wants a fresh plan when it resumes. |   🔴   | UW-4         | ⏸️ 2026-09-05 |
+| **UW-6 — Lava pass & closure** | Lava density/color tuning, in-game confirmation, `docs-sync`, `FLUID_BUGS` #02 archived. **Unblocked 2026-09-05** — pausing UW-5 dropped it from this list, so nothing gates UW-6 and it does not wait on the waterline resuming. |   🟢   | UW-1…UW-4    | —      |
 
 *Status: `—` not started · `In progress` · `✅ YYYY-MM-DD` complete (dated at in-game
 confirmation) · `⏸️ YYYY-MM-DD` deliberately not implemented · `⛔ Superseded YYYY-MM-DD — <by
@@ -579,7 +648,9 @@ what>`.*
 
 **UW-0 + UW-1 + UW-2 + UW-4 is the minimal set that delivers standalone value**: a visible,
 fogged, correctly-tinted submerged view. UW-3 and UW-5 are polish on top of a working effect, and
-UW-6 is closure.
+UW-6 is closure. That framing held up under test: **UW-5 was paused without disturbing anything, and
+UW-6 did not have to wait for it** — which is exactly what "polish on top of a working effect" is
+supposed to buy.
 
 **UW-1 confirmed in game 2026-09-04.** A fluid body renders correctly from inside it, **including at
 distance under the atmospheric fog** — worth stating because `ApplyVoxelFog` is live in this pass and the
@@ -690,7 +761,7 @@ All` and the CI entry point pick it up.
 | UW-2  | **Pins the mapping, not the arithmetic.** With the smoothing moved into the shared resolver (§3.4) the heights agree by construction, so the baselines assert what sharing does not fix: corner values are read off the **real** `GenerateFluidMeshData` output and matched against `SampleSurfaceAt` at all four corner fractions, over a neighborhood deliberately smoothed to four *different* heights so a transposed assignment is observable. Plus the interior sample, the fluid-above override, the minimum-height floor, the two-cell search, and the soft-failure guards. |
 | UW-3  | Existing SoundEngine ambience baselines extended: a head just under a partly-filled surface now reads submerged, where the per-cell test read dry.                                                                                                                            |
 | UW-4  | **Shipped as `B10`–`B24`.** `B10` is the positive control (a saturated medium reaches the authored tint) and must be read first, because "the overlay drew nothing" is the same reading the pass-through scenarios call success. `B11` cross-checks the shader's depth decode against a CPU inversion of `LinearEyeDepth`. **`B12` is the one that earns its keep:** at one uniform depth it measures three screen radii, because the ray-length scale is the arc's most error-prone arithmetic and a center-only check passes with it missing entirely — proven by mutation, center green while edge and corner went red. Then density 0 and strength 0 pass-throughs, far-plane saturation, and `B16` on the packing — which pins the strength as a **gate** that never takes an intermediate value and opens exactly when `IsSubmerged` does. That one is asserted with `ExactValue`, not a tolerance: an epsilon would accept the very intermediate value the baseline exists to forbid, and the gate is a stored literal, so exactness is the contract. The same holds for the fields `Pack` copies through untouched and for `B24`'s claim that an obstruction changes the reach by *nothing*; the measured composites keep their epsilon, because a half-float render target genuinely has one. `B16` also pins so the tint and the ambience filter share one boundary, and that pitch and roll reach the published camera basis. **`B17` is the read-back** of `m_RendererFeatures`, asserting the overlay is present, its shader is **assigned**, and its **index is below `UIBlurRendererFeature`'s** — all three are silent failures the render scenarios cannot see, and a membership-only check catches none of the last two. `B16`/`B17` are deliberately **not** device-gated, so a headless run still asserts something about UW-4. **`B18`** sinks an eye across two cell boundaries inside a body and pins that `SurfaceY` does not move, that `EyeDepth` deepens monotonically, and that the published depth tracks it — the in-game fade-per-cell defect of §4.2, which `B8` could not see because it asserted only the depth's sign. **`B19`** pins the per-pixel submerged length (§3.2): pitched straight down every ray is submerged, pitched straight up none is, level at the surface the screen splits, rolling 180° swaps which half is fogged, and a deep eye stops splitting at all. It asserts the split's **structure** and is proven by mutation — charging every ray its full length reddened exactly the pitched-up and split assertions. **`B20` pins the orientation `B19` leaves out**, which is the gap an inverted vertical sign shipped through: it draws a marker across the bottom half of **clip space** and asserts the fogged rows are the marker's rows, so a flip anywhere in the texture or readback chain moves both together and the assertion needs no platform assumption. Confirmed red against the inverted shader before the fix. Structure and orientation are separate failures and need separate baselines — every `B19` assertion passes with the sign backwards. **`B21`** pins the plane-versus-body gate of §3.2: an eye above the surface fogs neither half, however far below it the geometry sits. It asserts the shader's own guard with the gate forced open, so the fragment is covered independently of C# declining to draw, and confirmed red against the ungated build — the lower half read fully fogged where the backdrop should have survived. **`B22`** pins the horizontal box of §3.2, reproducing the measured shoreline frame: a body ending 2 cm to the west and unbounded east must leave a westward ray nearly clear while an eastward one stays saturated, with an open-water control proving it is the bound that changed rather than the sampling. Proven red by dropping the slab clamp. **`B23`** pins the easing, and is device-free because the step is a pure function — which is what makes the two things most likely to be wrong reachable at all: the **snap** on entering water (proven red by removing it) and the reciprocal **space** the easing happens in, where a linear interpolation would still read ~630 000 blocks one time constant out of open water. |
-| UW-5  | The split row asserted against the analytically computed row at a known camera pose — **and a second scenario with the camera pitched and rolled**, so math that ignores camera orientation goes red. A "submerged is tinted / dry is clear" check alone would pass with the waterline entirely wrong. |
+| UW-5  | **Rewritten 2026-09-05 for the rescoped phase (§3.6).** The reverted screen-space attempt carried four baselines that were all green and all proven red by mutation — and the feature still failed in play, because every one of them asserted the band against the *plane* the shader was given rather than against the surface the mesher **drew**. That is the gap to close: a mesh-displacement UW-5 wants the displaced vertex height read off real `GenerateFluidMeshData` output and matched against whatever `FluidSurfaceResolver` reports at the same XZ and time, so the drawn surface and the eye query cannot drift — the `B4` pattern, extended with time as an input. Plus: the lid and the side faces' top edges agree at a shared corner (the tearing case), the wave is a pure function of world position and time (so chunk borders cannot seam), and physics' `GatherFluidContact` height is **unaffected** (§3.4's split must survive, or buoyancy oscillates). None of that is measurable from a fullscreen readback, so the harness is `FluidSurfaceFixture`'s, not `OverlayFragmentRenderer`'s. |
 
 The final look — how water *feels* to swim through, whether the lava density is right — stays
 verified in game (UW-6).
@@ -719,7 +790,10 @@ verified in game (UW-6).
    `_CameraDepthTexture`, never an MSAA target, while writing to an MSAA camera color — a combination the
    baselines cannot exercise, since the harness renders single-sample. **Still open, and still a range
    rather than one configuration: this needs looking at in game at a non-default render scale.**
-2. **A strongly sloped surface under the eye.** UW-5 splits the screen on a **flat** plane at
+2. **A strongly sloped surface under the eye.** ⚠️ **Sharpened 2026-09-05 by the reverted build (§3.6),
+   which measured it rather than predicted it: the flat-plane assumption was the *first* of the two
+   things that sank the band, and it is worse than "slightly off" at shallow depth.** UW-5 was to split
+   the screen on a **flat** plane at
    `SurfaceY`. Where the smoothed surface tilts steeply — a shallow shore cell between a full cell
    and dry land — the true surface is not flat, and the drawn line will be slightly off. Resolves
    in game at UW-5; the fallback is to tilt the plane using the same four corner heights the
@@ -792,9 +866,13 @@ overlay and a clip-space reference to travel through the same target.
   widens below the eye, reports narrower than it is and the medium thins out early down that arm. The
   error is one-directional by design — under-fogging reads as "the water is clear here", where
   over-fogging reads as a bug. Exact bounding is a per-pixel voxel march, which is `VX-*` work.
-- **The waterline is a hard edge until UW-5.** The per-pixel solve gives a geometrically exact split,
-  but nothing softens it: there is no meniscus band and no wobble, so at the surface the boundary is
-  one pixel wide. UW-5 owns both.
+- **The waterline is a hard edge for as long as UW-5 stays paused.** The per-pixel solve gives a
+  geometrically exact split, but nothing softens it: there is no meniscus band and no wobble, so at the
+  surface the boundary is one pixel wide. ⏸️ **Live with it for now rather than a pending phase** — a
+  screen-space band was built and reverted on 2026-09-05 (it read *worse* than the hard edge, and §3.6
+  records why the approach cannot work at all), and the mesh-displacement route that remains is priced
+  above what the polish is worth today. Unlike the other entries here this one has a known way out, so
+  it is a limitation by choice rather than by consequence.
 - **`AddRenderPasses`' "enqueue nothing while dry" gate is not baselined.** Asserting it needs a real
   `ScriptableRenderer` and a populated `RenderingData`, neither of which can be fabricated in edit
   mode. `B16` covers the strength that drives it, and the shader's zero-strength early-out (`B15`)
@@ -824,11 +902,34 @@ overlay and a clip-space reference to travel through the same target.
 | Reconstruct the view ray in the shader from `UNITY_MATRIX_I_VP`          | Needs no published global, but that matrix cannot be set outside a real camera render, so the fog's distance reconstruction would only be testable behind an `#ifdef` — gating a different code path than ships. Published floats keep the real fragment measurable. §4.3 | 2026-09-04 |
 | A hard `IsSubmerged` switch for the medium (revisited after play)        | Removes the fade-to-nothing exploit but not the defect behind it: an eye a centimetre above the surface still leaves a fully submerged lower half unfogged, and it reinstates the full-screen pop. The gap is that submersion is a **per-ray** property being gated on a per-camera scalar. §3.2 | 2026-09-04 |
 | Floor the strength while any fluid is near (`max(0.5, ramp)`)           | Cheapest way to kill the exploit, but it tints the **sky** half of the screen at 50 % while the eye is at the surface — wrong in the other direction, and it still cannot produce a waterline. §3.2 | 2026-09-04 |
+| **A screen-space meniscus band in the overlay fragment (UW-5, v1)**     | **Built in full, played, and reverted the same day.** Drawn on the surface plane's horizon, which is not where the corner-smoothed mesh the player sees actually is; and even aligned, a sine band against a straight mesh edge leaves a gap the width of the wave amplitude, because it must cross the edge it is meant to decorate. The wobble has to move the geometry. §3.6 | 2026-09-05 |
+| Draw the meniscus where the fog's submerged length falls off            | Weighed while building the above. That locus is real, but it depends on the authored density and the eye's depth as well as on the geometry — no closed form for a baseline to assert, and the line moves when someone retunes the water's color. §3.6 | 2026-09-05 |
+| Key the waterline's wobble to screen position                           | One fewer dot product, but the wave then stays glued to the view and slides sideways whenever the player turns their head. Still true for a mesh-based wave: it must be a function of world position and time, which is also what keeps chunk borders from seaming. §3.6 | 2026-09-05 |
 
 ---
 
 ## Document History
 
+* **v2.2** - **UW-5 built as a screen-space meniscus band, failed its in-game pass, reverted whole, and
+  then marked `⏸️ 2026-09-05` — paused on cost/benefit, not abandoned.** No code from it survives. New §3.6
+  records the attempt in full, because the reason it fails belongs to the problem rather than to the
+  build: a sine band drawn against a **straight** mesh edge must cross it, so the gap it leaves *is* the
+  wave amplitude and centring the band only halves the error in each direction. It also missed the
+  surface outright, having been solved against the flat plane's horizon rather than the corner-smoothed
+  mesh the player sees — which sharpens §8's open question 2 from a predicted "slightly off" into a
+  measured miss. The route that remains is **local vertex displacement on the liquid mesh**, which is
+  UW-4-sized work bought against a boundary that is already geometrically correct and merely hard-edged;
+  at current priority that does not pay, so the phase is paused on the trade rather than closed on
+  impossibility, and §3.6 is written as what it resumes from. Consequences: §1's goal 4 is half-met by
+  UW-4 and half-paused, §8's hard-edge entry becomes a **limitation by choice** with a known way out,
+  and UW-6 drops UW-5 from its dependencies — unblocked, and not waiting on the waterline coming back.
+  §7's baseline row is rewritten to say why four green,
+  mutation-proven baselines did not catch any of this — every one asserted the band against the plane the
+  shader was handed rather than against the surface the mesher drew. §3.6 also banks three findings a
+  resumed UW-5 would otherwise rediscover: the lid tears off the side faces' top edges, MR-2's vertex has no
+  room for a surface-distance channel, and a wobbling `SurfaceY` makes `EyeDepth` cross zero on a floating
+  player, which would chatter the ambience low-pass `B16` pins to it. §1's non-goal now separates the two
+  senses of "wobble" that shared one word.
 * **v2.1** - **UW-3 marked `✅ 2026-09-04`**, closing the last phase this document held open on a
   technicality. Re-read against the shipped code rather than the plan: the audio delta is four lines
   swapping a per-cell voxel test for the shared query, and the boolean it produces is the *same* one
@@ -917,5 +1018,6 @@ overlay and a clip-space reference to travel through the same target.
 
 ---
 
-**Last Updated:** 2026-09-04  
-**Next Review:** when UW-4 is confirmed in game, which unblocks UW-5
+**Last Updated:** 2026-09-05  
+**Next Review:** at UW-6 — lava's feel pass, in-game confirmation and `FLUID_BUGS` #02's archival, which
+UW-5's pause unblocked; or earlier, if UW-5 is picked back up
