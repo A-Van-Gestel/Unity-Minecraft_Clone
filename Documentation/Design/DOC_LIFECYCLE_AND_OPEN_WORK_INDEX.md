@@ -1,6 +1,6 @@
 # Documentation Lifecycle & Open-Work Index (DG-*)
 
-**Version:** 1.4  
+**Version:** 1.5  
 **Date:** 2026-09-05  
 **Status:** ✅ **Implemented — DG-0…DG-5 all shipped 2026-09-05.** The rule is written in one place,
 [`OPEN_WORK_INDEX.md`](OPEN_WORK_INDEX.md) is live, both promoted designs are deleted, and the
@@ -343,6 +343,18 @@ bound.
 
 ## Document History
 
+* **v1.5** - **Review hardening (2026-09-06).** A full-tree review of the branch returned ten
+  findings, all verified. The substantive ones were **six silent-skip paths in the two checkers I
+  had just shipped** — hyphenated filenames dropped by a regex charset, a `'---' in line` guard that
+  ate any row with a dash run in its text, a doc listed in **both** index sections collapsed by a
+  dict and made invisible, basename resolution that reads the wrong file during the very promotion
+  window it guards, incidental prose outranking a closed marker, and links with raw spaces or
+  drifted case passing silently. Each now has a fixture that failed before its fix, and the three
+  original prove-red cases still fire. **The lesson is the shape of the gap, not the count:** the
+  original gate exercised `classify` hard and `_rows` barely, so calibration passed 30/30 with four
+  extractor bugs live — a "prove it" step must target the *extractors* too, and the docstring now
+  says so. Also: `docs-sync`'s inbound sweep gained **`Assets/`**, because deleting a design strands
+  the XML docstrings that cite it in prose no checker can see — three had already dangled.
 * **v1.4** - **`DG-5` shipped, closing the arc for the second time (2026-09-05).**
   `Tools/Python/check_doc_status.py` reads `OPEN_WORK_INDEX.md` §2/§3 and every doc they link,
   classifying each `**Status:**` with **ordered** rules — OPEN tested first, because "Partially
@@ -392,4 +404,4 @@ bound.
 
 **Last Updated:** 2026-09-05  
 **Next Review:** at the next promotion, or when a doc joins the index that `check_doc_status.py`
-cannot classify — its rule lists are calibrated, not general
+cannot classify — its rule lists are calibrated, not general, and cannot read negation
