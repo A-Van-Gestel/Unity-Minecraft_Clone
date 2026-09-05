@@ -110,6 +110,8 @@ namespace Editor.Validation.UnderwaterRender
                     RunB24ObstructionDoesNotShrinkTheBody),
                 new Scenario("B25 A dry gap ends the body, where a solid block inside it does not",
                     RunB25DryGapEndsTheBody),
+                new Scenario("B26 The authored sRGB tint is packed as linear, on the exact curve",
+                    RunB26AuthoredTintIsConvertedToLinear),
             };
 
             return ValidationSuiteRunner.Execute("Underwater Render", scenarios, KnownBugChannel.Bug,

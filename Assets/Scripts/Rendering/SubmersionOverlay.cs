@@ -13,7 +13,8 @@ namespace Rendering
     public readonly struct SubmersionGlobals
     {
         /// <summary>
-        /// <c>rgb</c> = the medium's tint; <c>a</c> = 1 while the eye is under a fluid surface, else 0.
+        /// <c>rgb</c> = the medium's tint, in <b>linear</b> space; <c>a</c> = 1 while the eye is under a
+        /// fluid surface, else 0.
         /// </summary>
         /// <remarks>
         /// A gate, not a fade. How much medium a pixel looks through is decided per-pixel in the shader
@@ -212,9 +213,10 @@ namespace Rendering
         public static SubmersionGlobals Pack(in EyeSubmersion submersion, float verticalFov, float aspect,
             Quaternion cameraRotation)
         {
+            // The authored value is sRGB off a picker; the shader blends against a linear target.
             // A gate, not a fade: the shader decides per pixel how much medium each ray crosses, so an
             // eye just under the surface keeps the lower half fogged and the sky clear (SubmergedRayLength).
-            Color color = submersion.SubmersionColor;
+            Color color = submersion.SubmersionColor.linear;
             color.a = submersion.IsSubmerged ? 1f : 0f;
 
             Vector4 fogParams = new Vector4(submersion.SubmersionDensity, submersion.EyeDepth, 0f, 0f);

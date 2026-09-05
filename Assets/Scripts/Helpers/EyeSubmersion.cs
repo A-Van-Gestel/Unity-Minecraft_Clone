@@ -36,7 +36,7 @@ namespace Helpers
         /// </summary>
         public float EyeDepth;
 
-        /// <summary>Authored tint of the fluid at the eye, or <c>default</c> in air.</summary>
+        /// <summary>Authored sRGB tint of the fluid at the eye, or <c>default</c> in air.</summary>
         public Color SubmersionColor;
 
         /// <summary>Authored fog density of the fluid at the eye, in per-block extinction.</summary>

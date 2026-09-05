@@ -41,6 +41,19 @@ namespace Editor.Validation.UnderwaterRender
         /// <summary>A water-like extinction, low enough to leave the fog measurably below saturation.</summary>
         private const float WATER_DENSITY = 0.14f;
 
+        /// <summary>A lava-like extinction — near-opaque within about a block.</summary>
+        private const float LAVA_DENSITY = 1.5f;
+
+        /// <summary>
+        /// Tolerance for the sRGB → linear packing conversion, which is CPU arithmetic with no render
+        /// target in between.
+        /// </summary>
+        /// <remarks>
+        /// Tighter than <c>COLOR_EPSILON</c>, whose half-float allowance exceeds the gap between the
+        /// exact sRGB curve and a <c>pow(2.2)</c> approximation on two channels of three.
+        /// </remarks>
+        private const float CONVERSION_EPSILON = 1e-4f;
+
         /// <summary>
         /// An eye depth deep enough that every ray in these scenarios is submerged over its whole length.
         /// </summary>
@@ -156,6 +169,15 @@ namespace Editor.Validation.UnderwaterRender
         /// <param name="expected">Expected value.</param>
         /// <returns>True when they agree.</returns>
         private static bool Near(float actual, float expected) => Mathf.Abs(actual - expected) <= COLOR_EPSILON;
+
+        /// <summary>
+        /// Whether a converted channel matches an expected value within <see cref="CONVERSION_EPSILON"/>.
+        /// </summary>
+        /// <param name="actual">Value produced by the packing.</param>
+        /// <param name="expected">Value from the sRGB transfer function, computed independently.</param>
+        /// <returns>True when they agree.</returns>
+        private static bool NearConverted(float actual, float expected) =>
+            Mathf.Abs(actual - expected) <= CONVERSION_EPSILON;
 
         /// <summary>Whether a sampled color matches an expected color in all three channels.</summary>
         /// <param name="actual">Measured color.</param>
@@ -429,8 +451,9 @@ namespace Editor.Validation.UnderwaterRender
             bool ok = Check($"a submerged eye opens the gate (a = {packed.Color.a})",
                 ExactValue.Equal(packed.Color.a, 1f));
 
-            ok &= Check("the tint rgb is the authored color",
-                NearRgb(packed.Color, deep.SubmersionColor));
+            // Which channels carry the tint, not what the conversion does to it — B26 owns that.
+            ok &= Check("the tint rgb is the authored color, converted for the shader",
+                NearRgb(packed.Color, deep.SubmersionColor.linear));
 
             ok &= Check($"x carries the authored density ({packed.FogParams.x})",
                 ExactValue.Equal(packed.FogParams.x, WATER_DENSITY));
@@ -493,6 +516,88 @@ namespace Editor.Validation.UnderwaterRender
             EyeSubmersion dry = default;
             ok &= Check("a dry eye closes the gate — the not-submerged fail-safe",
                 ExactValue.IsZero(SubmersionOverlay.Pack(in dry, OVERLAY_FOV, OVERLAY_ASPECT, level).Color.a));
+
+            return ok;
+        }
+
+        /// <summary>
+        /// B26 — the authored sRGB tint is packed as linear, against the sRGB curve rather than a gamma
+        /// approximation.
+        /// </summary>
+        /// <remarks>
+        /// Needs no device. The expected values are literals from the sRGB piecewise transfer function
+        /// (<c>((s + 0.055) / 1.055)^2.4</c> above the linear toe), computed independently of the call under
+        /// test — asserting against <c>Color.linear</c> would only restate the implementation.
+        /// <para>
+        /// Tolerance is <see cref="CONVERSION_EPSILON"/>: a <c>pow(2.2)</c> approximation lands within
+        /// 0.0026 on green and blue, which <c>COLOR_EPSILON</c> swallows whole.
+        /// </para>
+        /// <para>
+        /// Reported in game 2026-09-05: lava's authored deep red reached the screen as salmon, an sRGB
+        /// value blended against a linear target.
+        /// </para>
+        /// </remarks>
+        /// <returns>True when every assertion holds.</returns>
+        private static bool RunB26AuthoredTintIsConvertedToLinear()
+        {
+            // sRGB(0.85, 0.30, 0.05) — the authored lava tint — through the spec curve.
+            const float expectedR = 0.69207106f;
+            const float expectedG = 0.07323896f;
+            const float expectedB = 0.00393594f;
+
+            // What pow(2.2) would give for the same input, as the wrong-curve control.
+            const float gammaR = 0.69939357f;
+            const float gammaG = 0.07074028f;
+            const float gammaB = 0.00137320f;
+
+            EyeSubmersion lava = new EyeSubmersion
+            {
+                Type = FluidType.LavaLike,
+                SurfaceY = 92f,
+                EyeDepth = 1.375f,
+                SubmersionColor = new Color(0.85f, 0.30f, 0.05f, 1f),
+                SubmersionDensity = LAVA_DENSITY,
+            };
+
+            SubmersionGlobals packed = SubmersionOverlay.Pack(in lava, OVERLAY_FOV, OVERLAY_ASPECT,
+                Quaternion.identity);
+
+            bool ok = Check($"the authored sRGB tint is packed as linear ({packed.Color.r:F6}, " +
+                            $"{packed.Color.g:F6}, {packed.Color.b:F6})",
+                NearConverted(packed.Color.r, expectedR) && NearConverted(packed.Color.g, expectedG) &&
+                NearConverted(packed.Color.b, expectedB));
+
+            // All three channels, because the two curves separate by 0.0073 on red but only ~0.0026 on
+            // green and blue: a check on one channel can miss the wrong curve entirely.
+            ok &= Check($"every channel takes the exact curve, not pow(2.2) ({packed.Color.r:F6}, " +
+                        $"{packed.Color.g:F6}, {packed.Color.b:F6})",
+                !NearConverted(packed.Color.r, gammaR) && !NearConverted(packed.Color.g, gammaG) &&
+                !NearConverted(packed.Color.b, gammaB));
+
+            // The conversion darkens; a tint that arrived unchanged is the defect this baseline exists for.
+            ok &= Check("the packed tint is darker than the swatch it was authored as",
+                packed.Color.r < lava.SubmersionColor.r && packed.Color.g < lava.SubmersionColor.g &&
+                packed.Color.b < lava.SubmersionColor.b);
+
+            // The gate is a stored literal and must survive the conversion untouched.
+            ok &= Check($"the conversion leaves the gate exact (a = {packed.Color.a})",
+                ExactValue.Equal(packed.Color.a, 1f));
+
+            EyeSubmersion dry = lava;
+            dry.EyeDepth = ABOVE_SURFACE_DEPTH;
+            ok &= Check("and still closes it above the surface",
+                ExactValue.IsZero(SubmersionOverlay.Pack(in dry, OVERLAY_FOV, OVERLAY_ASPECT,
+                    Quaternion.identity).Color.a));
+
+            // Black and white are the curve's fixed points; a conversion applied twice, or applied in the
+            // wrong direction, still passes them — so they bound the check rather than carry it.
+            EyeSubmersion white = lava;
+            white.SubmersionColor = Color.white;
+            SubmersionGlobals whitePacked = SubmersionOverlay.Pack(in white, OVERLAY_FOV, OVERLAY_ASPECT,
+                Quaternion.identity);
+            ok &= Check("white stays white through the conversion",
+                NearConverted(whitePacked.Color.r, 1f) && NearConverted(whitePacked.Color.g, 1f) &&
+                NearConverted(whitePacked.Color.b, 1f));
 
             return ok;
         }
