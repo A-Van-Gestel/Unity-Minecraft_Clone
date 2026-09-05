@@ -1,10 +1,12 @@
 # Steam Audio Integration (Physical Acoustics)
 
-**Version:** 1.0  
+**Version:** 1.1  
 **Date:** 2026-07-03  
-**Status:** **Draft — far-horizon (sound engine v3+).** Not scheduled, and gated on the base sound
-engine (S0–S3) shipping first — which has not started. SDK specifics MUST be re-verified against the
-then-current Steam Audio release before any implementation work; see §8.  
+**Status:** **Draft — far-horizon (sound engine v3+).** Not scheduled. **Its first prerequisite is
+met**: the base sound engine `S0`–`S3` shipped, so `SoundManager`, the pooled 3D sources and voice
+budget, the mixer groups and the per-block `SoundMaterial` all exist in code. What still gates it is
+the parent design's **v2 occlusion extension**, which is unbuilt. SDK specifics MUST be re-verified
+against the then-current Steam Audio release before any implementation work; see §8.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > **Draft** exploration of integrating Valve's **Steam Audio** SDK as the v3+ acoustics extension
@@ -18,8 +20,8 @@ then-current Steam Audio release before any implementation work; see §8.
 > Status: **Draft — far-horizon (sound engine v3+).** Not scheduled. Written to capture the
 > design direction and the verification checklist (§8) while the reasoning is fresh; SDK
 > specifics MUST be re-verified against the then-current Steam Audio release before any
-> implementation starts. Prerequisite: the base sound engine (S0–S3) and ideally the v2 voxel
-> occlusion extension are shipped first.
+> implementation starts. Prerequisites: the base sound engine (`S0`–`S3`) — **shipped** — and
+> ideally the v2 voxel occlusion extension, which is not.
 
 **Relationship to other documents:**
 
@@ -41,6 +43,16 @@ then-current Steam Audio release before any implementation work; see §8.
 This document is a **direction record**, not a verified plan: the voxel-side reasoning is grounded in
 the engine's existing packed-`uint` raycast patterns, but every Steam Audio API claim below was written
 against the SDK documentation of the day and has **not** been re-checked since.
+
+**Amended:** 2026-09-05 — prerequisite status only; no design content changed and **no SDK claim was
+re-verified**. The Audited line above is dated: "no code exists for either" was true on 2026-07-03
+and is not now. The base sound engine has since shipped `S0`–`S3` (verified in code this session:
+`Audio/SoundManager.cs` owns the mixer reference and the pooled 3D sources with a voice budget,
+`Audio/AmbienceDirector.cs` builds the bed sources and their `AudioLowPassFilter`s, and
+`Data/Enums/SoundMaterial.cs` is on `BlockType.soundMaterial`), so the Status field's claim that it
+"has not started" was wrong. The **v2 occlusion** prerequisite is unchanged and still unbuilt —
+`SOUND_ENGINE_DESIGN.md` §8 still lists it as a v2 extension. The `NativeCompressions` precedent in
+the relationship list was re-checked and holds (`Serialization/CompressionFactory.cs:4`).
 
 ---
 
@@ -264,6 +276,11 @@ This doc was written from SDK knowledge that will be stale by v3. Before SA-0:
 project's Document History convention, so they record what the commits changed rather than
 contemporaneous notes.*
 
+* **v1.1** - Prerequisite status corrected (2026-09-05, `docs-sync`). The Status field said the base
+  sound engine "has not started"; `S0`–`S3` had in fact shipped, verified in code rather than against
+  the parent doc. The gate is now the v2 occlusion extension alone, which remains unbuilt, and the
+  `Next Review` trigger — which had silently fired — is restated against it. **No SDK claim was
+  re-verified and no design content changed**; §8 still owns that pass.
 * **v1.0** - Mandatory header completed (2026-07-26): `Version`/`Date`/`Status`/`Target` and an
   `Audited` line stating plainly that the SDK claims are unverified. Status lifted out of the summary
   blockquote into a proper field. No design content changed. First versioned edition.
@@ -275,7 +292,10 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-07-26 (header completed; still a far-horizon draft)  
-**Next Review:** only when [`SOUND_ENGINE_DESIGN.md`](SOUND_ENGINE_DESIGN.md) S0–S3 have shipped. At
-that point re-verify every SDK claim against the current Steam Audio release before trusting any
-section — the §8 checklist exists for exactly that pass.
+**Last Updated:** 2026-07-26 (header completed; still a far-horizon draft; prerequisite status
+amended 2026-09-05 — the body is unreviewed since 2026-07-26)  
+**Next Review:** when [`SOUND_ENGINE_DESIGN.md`](SOUND_ENGINE_DESIGN.md)'s **v2 occlusion
+extension** ships, which is now the only prerequisite left — the `S0`–`S3` trigger this line used to carry **fired on 2026-09-05** and was
+answered by a prerequisite-only amendment, not by a review of the body. Whenever that pass happens,
+re-verify every SDK claim against the current Steam Audio release before trusting any section; the
+§8 checklist exists for exactly that.
