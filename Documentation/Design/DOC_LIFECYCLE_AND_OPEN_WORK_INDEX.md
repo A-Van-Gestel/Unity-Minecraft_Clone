@@ -2,10 +2,10 @@
 
 **Version:** 1.1  
 **Date:** 2026-09-05  
-**Status:** **Partially implemented.** **DG-0, DG-1 and DG-2 shipped 2026-09-05** — the inventory
-ran and corrected this document's own scope (§2.1), and the README and the promotion protocol now
-state one rule. **DG-3 (the open-work index) and DG-4 (delete the two) are open**, in that order:
-DG-3 is DG-4's prerequisite, not its follow-up.  
+**Status:** **Partially implemented.** **DG-0…DG-3 shipped 2026-09-05** — the inventory corrected
+this document's own scope (§2.1), the README and the promotion protocol now state one rule, and
+[`OPEN_WORK_INDEX.md`](OPEN_WORK_INDEX.md) is live. **DG-4 (delete the two) is the only phase
+open.**  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production) — documentation-only, no code
 
 > What happens to a Design doc after its Architecture doc exists. Today two written rules disagree:
@@ -49,6 +49,8 @@ rather than archive — is unchanged.
 - [`../Architecture/UNDERWATER_AND_SUBMERSION_RENDERING.md`](../Architecture/UNDERWATER_AND_SUBMERSION_RENDERING.md)
   and [`UNDERWATER_AND_SUBMERSION_RENDERING.md`](UNDERWATER_AND_SUBMERSION_RENDERING.md) — the
   promotion that surfaced the conflict, and DG-4's first migration target.
+- [`OPEN_WORK_INDEX.md`](OPEN_WORK_INDEX.md) — the index DG-3 built, and the precondition DG-4's
+  deletions check against.
 - [`ANIMATED_LIQUID_SURFACE.md`](ANIMATED_LIQUID_SURFACE.md) — `UW-5`. The worked example of the
   retrieval problem DG-3 solves: a paused item split out of a promoted design, discoverable today
   only because two docs happen to link it.
@@ -170,11 +172,21 @@ The `WORM_CARVER` precedent, and what README's third Convention line says today.
 
 ### 3.2 Where open items become findable
 
-**One global, feature-independent index ✅ CHOSEN** — `Documentation/Design/OPEN_WORK_INDEX.md`
-(name to confirm at DG-3), status `Open backlog.`, on the `PERFORMANCE_IMPROVEMENTS_REPORT.md`
-model: a Legend, a master summary table, and per-area tables beneath it. Each row is an ID, a
-one-line description, and **a pointer to the doc that owns it** — a live Design doc, or an
-Architecture doc's limitation section where the deferral is recorded as a consequence.
+**One global, feature-independent index ✅ CHOSEN** — [`OPEN_WORK_INDEX.md`](OPEN_WORK_INDEX.md),
+status `Open backlog.`, shipped at DG-3 on 2026-09-05.
+
+**Its rows are per-DOCUMENT, not per-item** — amended 2026-09-05 when DG-3 measured what a per-item
+index would actually contain. Two findings forced it. Roughly **144 item rows already exist** across
+seven master tables in the backlog reports, so mirroring them here would be precisely the second
+source of truth the next paragraph forbids, drifting from the originals on their next edit. And the
+orphan case that motivated per-item rows is **empty**: all 66 forward-referenced IDs under
+`Architecture/` resolve to a document that already owns them. The retrieval problem was never
+homeless items — it is that a reader must know *which* document to open, which a per-document map
+answers completely.
+
+So each row is an area, its owning document, its ID space and a one-line state. The index also
+carries the **closed, retained** docs of §3.4, so a reader who finds a finished design in `Design/`
+can tell it is deliberate rather than an oversight.
 
 The index is a **pointer table, not a second source of truth.** It carries no rationale and no
 status narrative; those stay in the owning doc, which is the thing that gets updated when the work
@@ -227,7 +239,7 @@ applies to it then.
 | **DG-0 — Inventory** ✅ 2026-09-05 | Enumerate every `Design/` doc whose status is implemented, superseded or closed, and every open item they own. Record which have an Architecture doc already and which do not — a doc with no promotion target cannot be deleted, only left. | 🟢 | — | — |
 | **DG-1 — README** ✅ 2026-09-05 | Rewrite the three Conventions lines and the `Design/` row of the Directory guide to state the deletion rule, name the `git show <sha>:<path>` retrieval, and point at the DG-3 index. Correct the `reference-documentation-layout` memory in the same pass. | 🟢 | DG-0 | — |
 | **DG-2 — Protocol** ✅ 2026-09-05 | Rewrite `promotion-protocol.md` Step 4 and `docs-sync` SKILL.md Step 2b/2c to match: delete rather than retain, state the `## ID index` test that separates a promotion from a closed arc (§3.4), add the *closed, retained* disposition, carve the explicit `Documentation/Bugs/` exception for repointing inbound links, and require the DG-3 index row before deletion. **Lands in the same commit as DG-1** (§3.3). `.agents/` and `.claude/` are the same inode — one edit, both twins. | 🟢 | DG-1 | — |
-| **DG-3 — The index** | Author `OPEN_WORK_INDEX.md` per §3.2, seeded from DG-0's inventory. **Prerequisite for DG-4**, not a follow-up: deleting a design before its open items have a home is the regression §3.1 accepts only because this exists. | 🟡 | DG-0 | — |
+| **DG-3 — The index** ✅ 2026-09-05 | [`OPEN_WORK_INDEX.md`](OPEN_WORK_INDEX.md), seeded from DG-0's inventory. Shipped **per-document** rather than per-item (§3.2, amended) — 24 area rows plus the six closed-retained docs. **Prerequisite for DG-4**, not a follow-up: deleting a design before its open items have a home is the regression §3.1 accepts only because this exists. | 🟡 | DG-0 | ✅ |
 | **DG-4 — Delete the two** | Apply §3.1 to **tier 1** only (§2.1): `UNDERWATER_AND_SUBMERSION_RENDERING` first, then `TOAST_NOTIFICATION_SYSTEM`. One commit each: add the index row, repoint inbound links (incl. `_FIXED_BUGS.md`), **remove the Architecture doc's "the design this was promoted from" relationship bullet** — a deliberate link, so a zero-hits sweep would read it as breakage rather than as intent — then delete. Tiers 2–4 are untouched; they get DG-2's *closed, retained* status line instead. | 🟢 | DG-2, DG-3 | — |
 
 *Status: `—` not started · `In progress` · `✅ YYYY-MM-DD` complete · `⏸️ YYYY-MM-DD` deliberately
@@ -264,6 +276,7 @@ bound.
 | Move promoted designs to `Archived/` | Keeps a stale file in a folder framed as decision context, saves none of the inbound-link work, and grows monotonically with documents whose every useful sentence exists twice. §3.1 | 2026-09-05 |
 | Delete without a global index | Cheapest, and it regresses exactly what `Design/` was accidentally providing: a browsable list of work not done. §3.2 | 2026-09-05 |
 | Per-area open-work indices instead of one global | Cheaper to write and they rot independently, but the retrieval problem is that a reader does not know which area to look in. §3.2 | 2026-09-05 |
+| A per-**item** index row for every open item | The literal v1.0 spec, refuted by measurement at DG-3: ~144 rows already exist across seven master tables, so this is a second source of truth that drifts on their next edit — and it buys nothing, because no open item is orphaned. §3.2 | 2026-09-05 |
 | Rely on Architecture docs' limitation sections for open items | They record deferrals well but are reachable only by already knowing which system to read. §3.2 | 2026-09-05 |
 | Promote the six closed-but-unpromoted arcs, then delete them | Each is a full promotion — the `UW-*` one took a session for a doc written that same day — so six is a multi-session arc bought for tidiness, in a folder that holds them meanwhile either way. §3.4 | 2026-09-05 |
 | Delete the closed-but-unpromoted arcs anyway, repointing links at `Architecture/` | Fastest route to a clean `Design/`, and it discards content the Architecture docs explicitly defer to — `CHUNK_LIFECYCLE_PIPELINE.md:427` sends the reader to "the CP doc §3.3/§7 CP-3". §3.4 | 2026-09-05 |
