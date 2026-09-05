@@ -1,11 +1,11 @@
 # Documentation Lifecycle & Open-Work Index (DG-*)
 
-**Version:** 1.1  
+**Version:** 1.2  
 **Date:** 2026-09-05  
-**Status:** **Partially implemented.** **DG-0…DG-3 shipped 2026-09-05** — the inventory corrected
-this document's own scope (§2.1), the README and the promotion protocol now state one rule, and
-[`OPEN_WORK_INDEX.md`](OPEN_WORK_INDEX.md) is live. **DG-4 (delete the two) is the only phase
-open.**  
+**Status:** ✅ **Implemented — DG-0…DG-4 all shipped 2026-09-05.** The inventory corrected this
+document's own scope (§2.1), the README and the promotion protocol state one rule,
+[`OPEN_WORK_INDEX.md`](OPEN_WORK_INDEX.md) is live, and both promoted designs are deleted. The rule
+now applies to future promotions; §2.1's tiers 2–4 stay in `Design/` by design.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production) — documentation-only, no code
 
 > What happens to a Design doc after its Architecture doc exists. Today two written rules disagree:
@@ -53,8 +53,9 @@ rather than archive — is unchanged.
 - [`ANIMATED_LIQUID_SURFACE.md`](ANIMATED_LIQUID_SURFACE.md) — `UW-5`. The worked example of the
   retrieval problem DG-3 solves: a paused item split out of a promoted design, discoverable today
   only because two docs happen to link it.
-- [`TOAST_NOTIFICATION_SYSTEM.md`](TOAST_NOTIFICATION_SYSTEM.md) — the other ⛔ Superseded design,
-  and the precedent that established promote-in-place. DG-4 migrates it too.
+- [`../Architecture/TOAST_NOTIFICATION_SYSTEM.md`](../Architecture/TOAST_NOTIFICATION_SYSTEM.md) —
+  the other promotion, and DG-4's second deletion. Its design doc had established the
+  promote-in-place precedent this document overturned.
 
 ---
 
@@ -99,7 +100,7 @@ rather than archive — is unchanged.
 | `_FIXED_BUGS.md` inbound | **Five** links across **four** Design docs: `VOXEL_OCCLUSION_REFACTOR` ×2, `UNDERWATER_AND_SUBMERSION_RENDERING` ×2, `LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP`, `CHUNK_PALETTE_MAPPING`. |
 | Link validation | `check_doc_refs.py` reads only `@`-prefixed doc references and `check_markdown_breaks.py` only trailing whitespace — **neither can see a broken relative markdown link**, so a deletion leaves both green. Closed 2026-09-05 by `Tools/Python/check_doc_links.py` (785 links resolving; prove-red confirmed against a deleted-doc fixture). |
 | Archival precedent | `Archived/WORM_CARVER_FAR_COORDINATE_PRECISION.md` — a shipped design whose architectural content was merged into `Architecture/World Generation/CAVE_GENERATION.md`, moved and tagged `[ARCHIVED]` with a dated reason block. Predates the promotion protocol. |
-| Promote-in-place precedent | `Design/TOAST_NOTIFICATION_SYSTEM.md`, 2026-09-02 — ⛔ Superseded status line, kept in `Design/`. Postdates the protocol and follows it. |
+| Promote-in-place precedent | `Design/TOAST_NOTIFICATION_SYSTEM.md`, 2026-09-02 — ⛔ Superseded status line, kept in `Design/`. Postdated the protocol and followed it; **deleted at DG-4**, 2026-09-05. |
 | Index precedent | `PERFORMANCE_IMPROVEMENTS_REPORT.md`: `## Legend` (Effort/Risk/Benefit/Seed/Save symbol table), `## Master summary table`, then per-area tables sharing the `ID / Finding / Effort / Risk / Benefit / Seed / Save` columns. Status `Open backlog.`, which `docs-sync` Step 2b **exempts** from the promotion trigger. |
 | Memory drift | The auto-memory `reference-documentation-layout` states `Design/` = "**not-yet-implemented** proposals and backlogs", matching README and equally contradicted by the six docs above. |
 
@@ -239,7 +240,7 @@ applies to it then.
 | **DG-1 — README** ✅ 2026-09-05 | Rewrite the three Conventions lines and the `Design/` row of the Directory guide to state the deletion rule, name the `git show <sha>:<path>` retrieval, and point at the DG-3 index. Correct the `reference-documentation-layout` memory in the same pass. | 🟢 | DG-0 | — |
 | **DG-2 — Protocol** ✅ 2026-09-05 | Rewrite `promotion-protocol.md` Step 4 and `docs-sync` SKILL.md Step 2b/2c to match: delete rather than retain, state the `## ID index` test that separates a promotion from a closed arc (§3.4), add the *closed, retained* disposition, carve the explicit `Documentation/Bugs/` exception for repointing inbound links, and require the DG-3 index row before deletion. **Lands in the same commit as DG-1** (§3.3). `.agents/` and `.claude/` are the same inode — one edit, both twins. | 🟢 | DG-1 | — |
 | **DG-3 — The index** ✅ 2026-09-05 | [`OPEN_WORK_INDEX.md`](OPEN_WORK_INDEX.md), seeded from DG-0's inventory. Shipped **per-document** rather than per-item (§3.2, amended) — 24 area rows plus the six closed-retained docs. **Prerequisite for DG-4**, not a follow-up: deleting a design before its open items have a home is the regression §3.1 accepts only because this exists. | 🟡 | DG-0 | ✅ |
-| **DG-4 — Delete the two** | Apply §3.1 to **tier 1** only (§2.1): `UNDERWATER_AND_SUBMERSION_RENDERING` first, then `TOAST_NOTIFICATION_SYSTEM`. One commit each: add the index row, repoint inbound links (incl. `_FIXED_BUGS.md`), **remove the Architecture doc's "the design this was promoted from" relationship bullet** — a deliberate link, so a zero-hits sweep would read it as breakage rather than as intent — then delete. Tiers 2–4 are untouched; they get DG-2's *closed, retained* status line instead. | 🟢 | DG-2, DG-3 | — |
+| **DG-4 — Delete the two** ✅ 2026-09-05 | Apply §3.1 to **tier 1** only (§2.1): `UNDERWATER_AND_SUBMERSION_RENDERING` first, then `TOAST_NOTIFICATION_SYSTEM`. One commit each: add the index row, repoint inbound links (incl. `_FIXED_BUGS.md`), **remove the Architecture doc's "the design this was promoted from" relationship bullet** — a deliberate link, so a zero-hits sweep would read it as breakage rather than as intent — then delete. Tiers 2–4 are untouched; they get DG-2's *closed, retained* status line instead. | 🟢 | DG-2, DG-3 | ✅ |
 
 *Status: `—` not started · `In progress` · `✅ YYYY-MM-DD` complete · `⏸️ YYYY-MM-DD` deliberately
 not implemented · `⛔ Superseded YYYY-MM-DD — <by what>`.*
@@ -287,6 +288,15 @@ bound.
 
 ## Document History
 
+* **v1.2** - **DG-1…DG-4 shipped (2026-09-05), closing the arc.** README and
+  `promotion-protocol.md` Step 4 now state one rule, with the `## ID index` test that separates a
+  promotion from a merely-closed arc and the narrow `Documentation/Bugs/` exception for repointing
+  links. [`OPEN_WORK_INDEX.md`](OPEN_WORK_INDEX.md) shipped **per-document, not per-item** — §3.2
+  amended, because ~144 item rows already exist across seven master tables and no forward-referenced
+  ID in `Architecture/` turned out to be orphaned. `Design/UNDERWATER_AND_SUBMERSION_RENDERING.md`
+  and `Design/TOAST_NOTIFICATION_SYSTEM.md` are deleted, their inbound links repointed at the
+  Architecture docs (including two in `_FIXED_BUGS.md`) and their provenance kept as `git show`
+  pointers. `Tools/Python/check_doc_links.py` was added first and gated every deletion.
 * **v1.1** - **DG-0's inventory ran, and corrected this document.** Three of v1.0's own claims were
   wrong: the straggler count (six → **twelve**, because v1.0 counted them with `grep -l Superseded`,
   which only finds docs containing that word), the `_FIXED_BUGS.md` inbound-link count (one →
@@ -308,4 +318,4 @@ bound.
 ---
 
 **Last Updated:** 2026-09-05  
-**Next Review:** when DG-3 starts — DG-0 is done (§2.1), DG-1 and DG-2 land together
+**Next Review:** at the next promotion — it is the first use of the rule this arc wrote
