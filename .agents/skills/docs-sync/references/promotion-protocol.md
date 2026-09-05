@@ -72,13 +72,40 @@ Structure, top to bottom:
   `PERFORMANCE_IMPROVEMENTS_REPORT.md` already uses: the detail section is archived while its row
   stays in the master table. This is the one sanctioned reason for `docs-sync` to write to
   `Archived/` (the skill's constraint otherwise reserves that folder for `archive-fixed-bug`).
-- The Design doc is **not deleted**. It keeps its phases and their dated statuses as the record of
-  intent, gains a status line pointing at the Architecture doc that superseded it, and stops
-  receiving edits — the freeze rule now applies to the whole document.
-- **Sweep inbound references** per `docs-sync` Step 3: `@Documentation/` refs, markdown links, and
+- **The Design doc is DELETED** (`DG-*`, 2026-09-05). By this point every load-bearing part of it has
+  been *merged*, not copied: current state into the Architecture body, the "do not re-litigate" list
+  into Rejected alternatives, consequences into Limitations, the whole ID space into the ID index,
+  and any planned-but-unbuilt work into its own live Design doc. What deletion costs is the dated
+  `Document History` narrative — which **git still has**: `git show <sha>:Documentation/Design/<NAME>.md`
+  retrieves it forever. Archived-versus-deleted differs only in browsability, and browsability of a
+  doc that no longer describes the code is the hazard, not the benefit.
+
+  **Two preconditions, both hard.** The design's open items must already have rows in the open-work
+  index, and the inbound-link sweep below must come back clean. Delete only after both.
+- ⚠️ **Deletion applies ONLY to a doc that actually went through this protocol.** The test is
+  mechanical, and it is the one a reader will get wrong: *does an Architecture doc carry this
+  design's `## ID index`?* Citing the design's IDs is **not** the same thing — most closed arcs in
+  this repo were finished by shipping the work and updating whatever Architecture docs it touched,
+  which leaves those docs deferring detail *back* to the design (`CHUNK_LIFECYCLE_PIPELINE.md`
+  sends the reader to "the CP doc §3.3/§7 CP-3"). Deleting one of those destroys content.
+- **A closed arc that was never promoted is RETAINED**, in `Design/`, with a status line saying so:
+  *the arc is closed, and the Architecture tree cites this document rather than superseding it.*
+  Same for a design with no Architecture counterpart at all. Neither is a promotion, so neither is
+  deletable — see `Documentation/Design/DOC_LIFECYCLE_AND_OPEN_WORK_INDEX.md` §2.1/§3.4 for the
+  tiering and the current inventory.
+- **Sweep inbound references** per `docs-sync` Step 3: `@`-prefixed doc refs, markdown links, and
   bare prose mentions of the old filename across `CLAUDE.md`, `AGENTS.md`, `Documentation/`, and
-  `.agents/`. Run `python Tools/Python/check_doc_refs.py` and confirm the found-count is plausible,
-  not just that unresolved is zero.
+  `.agents/`. Run **all three** checkers — `check_doc_refs.py` (confirm the found-count is
+  plausible, not just that unresolved is zero), `check_markdown_breaks.py`, and
+  **`check_doc_links.py`**, which is the only one that can see a broken *relative markdown link*
+  and therefore the only one that can see a deletion at all.  
+  **Two link classes need judgment, not a zero-hits rule:**
+    - the promoted Architecture doc's own "the design this was promoted from" relationship bullet is
+      **deliberate** — remove it as part of the deletion rather than reading it as breakage;
+    - links from `Documentation/Bugs/` are **repointed at the Architecture doc**. This is an explicit,
+      narrow exception to this skill's "do not edit `Documentation/Bugs/`" constraint: a knowingly
+      broken link in the bug archive is worse than the boundary crossing. Repoint only — never edit
+      a bug entry's content.
 
 ## Step 5 — Report
 

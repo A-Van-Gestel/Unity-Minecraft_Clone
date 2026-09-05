@@ -115,7 +115,9 @@ the other:
 
 - **`Design/` is a record of intent over time.** Phases stay, and each carries its own dated
   status (`create-design-doc` owns the format). A reader is expected to read a completed phase as
-  history and use its date to judge how far it has drifted.
+  history and use its date to judge how far it has drifted. **A design that completes a promotion
+  leaves the folder entirely — it is deleted**, because everything load-bearing is by then merged
+  into the Architecture doc and git retains the rest (`DG-*`; protocol Step 4).
 - **`Architecture/` is a description of the codebase right now.** No phase structure, no "we
   then changed it to" — overlapping or stacked phases are merged into single logical sections
   describing current behavior only.
@@ -157,7 +159,15 @@ The three rules that decide whether the result can be trusted:
   place.
 - **Carry the IDs across.** The promoted doc keeps an ID index table (`create-design-doc` Step 4)
   so `RF-3`-style references in commit messages and code comments still resolve after the phase
-  sections they named are gone.
+  sections they named are gone. **That table is also the promotion's proof-of-work:** an
+  Architecture doc without one has not superseded anything, whatever IDs it cites.
+- **Then delete the Design doc** (Step 4), once its open items have rows in the open-work index and
+  the link sweep is clean. ⚠️ **Only a doc that actually went through this protocol.** Most closed
+  arcs in this repo never did — they were finished by shipping the work and updating whatever
+  Architecture docs it touched, which leaves those docs deferring detail *back* to the design. Those
+  are **closed, retained**: they stay in `Design/` with a status line saying the Architecture tree
+  cites rather than supersedes them. `Documentation/Design/DOC_LIFECYCLE_AND_OPEN_WORK_INDEX.md`
+  §2.1 holds the current tiering.
 
 ### Step 3 — Verify cross-references
 
@@ -170,8 +180,13 @@ tree, and a broken one silently degrades agent context — nothing errors. It is
 do it regardless of what you changed:
 
 ```bash
-python Tools/Python/check_doc_refs.py
+python Tools/Python/check_doc_refs.py     # @-prefixed doc references
+python Tools/Python/check_doc_links.py    # relative markdown links between docs
 ```
+
+The second is not optional on a move, rename or deletion: `check_doc_refs.py` reads only the
+`@`-prefixed form, so a doc whose inbound links are ordinary markdown can be deleted with both the
+reference checker and the line-break checker fully green.
 
 It prints the number of references it found and lists any that do not resolve, exiting non-zero
 on failure. **A "0 unresolved" result only means something if the found-count is plausible** — a
@@ -244,7 +259,7 @@ whole-file doc rewrite.
 - **Do not mass-rewrite.** Apply targeted diffs. Preserve existing tone, headings, ASCII diagrams, and `#region`-style structure. Never delete a section just because a *different* section is now wrong.
 - **Never restate a claim about code you did not read this session.** A targeted edit must not regenerate prose about behavior you did not verify — that silently launders an unverified claim into an authoritative doc. If a neighbouring claim looks wrong but you cannot confirm it, report it (see Output shape); do not fix it and do not delete it.
 - **Do not restamp a date header for a targeted edit.** Many Architecture and Design docs carry a `Last Updated:` / `Date:` / `Analysis Date:` line, which means *the whole doc was verified at that date*. Restamping after a one-line fix makes the rest of the doc look fresher than it is — only move the stamp when you actually re-verified the whole doc.
-- **Do not edit `Documentation/Bugs/` or `Documentation/Archived/` from this skill** — those are handled by `archive-fixed-bug` and the `voxel-debugging` workflow respectively. The one exception is a **Design → Architecture promotion**, which archives superseded phase detail (see `references/promotion-protocol.md` Step 4).
+- **Do not edit `Documentation/Bugs/` or `Documentation/Archived/` from this skill** — those are handled by `archive-fixed-bug` and the `voxel-debugging` workflow respectively. Two narrow exceptions, both belonging to a **Design → Architecture promotion** (see `references/promotion-protocol.md` Step 4): archiving superseded phase detail, and **repointing a `Documentation/Bugs/` link at the Architecture doc when the design it names is deleted** — repoint only, never edit a bug entry's content.
 - **Do not patch a completed phase to track code drift.** The freeze rule (Step 2b) allows only corrections that were already wrong at completion time. Drift belongs to the Architecture doc, not to a historical phase.
 - **Do not promote by paraphrasing the Design doc.** A promotion's claims come from current code, verified per claim; the design's own prose is the least trustworthy input in the room.
 - **Do not duplicate content.** If the same fact lives in `CLAUDE.md` and an Architecture doc, link from `CLAUDE.md` to the doc — do not copy the doc's body into `CLAUDE.md`.

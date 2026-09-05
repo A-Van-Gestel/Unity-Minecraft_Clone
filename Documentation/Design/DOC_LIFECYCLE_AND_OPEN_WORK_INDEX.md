@@ -2,10 +2,10 @@
 
 **Version:** 1.1  
 **Date:** 2026-09-05  
-**Status:** **Proposed design — not implemented.** DG-0…DG-4 are all open. Both skills still state
-the rule DG-2 replaces. **DG-0's inventory ran 2026-09-05 and corrected this document's own scope**
-(§2.1): twelve `Design/` docs describe closed or shipped work, not six, and only **two** of them are
-deletable — see the tier table.  
+**Status:** **Partially implemented.** **DG-0, DG-1 and DG-2 shipped 2026-09-05** — the inventory
+ran and corrected this document's own scope (§2.1), and the README and the promotion protocol now
+state one rule. **DG-3 (the open-work index) and DG-4 (delete the two) are open**, in that order:
+DG-3 is DG-4's prerequisite, not its follow-up.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production) — documentation-only, no code
 
 > What happens to a Design doc after its Architecture doc exists. Today two written rules disagree:
@@ -224,9 +224,9 @@ applies to it then.
 
 | Phase | Scope | Effort | Depends on | Status |
 |---|---|:--:|---|---|
-| **DG-0 — Inventory** | Enumerate every `Design/` doc whose status is implemented, superseded or closed, and every open item they own. Record which have an Architecture doc already and which do not — a doc with no promotion target cannot be deleted, only left. | 🟢 | — | — |
-| **DG-1 — README** | Rewrite the three Conventions lines and the `Design/` row of the Directory guide to state the deletion rule, name the `git show <sha>:<path>` retrieval, and point at the DG-3 index. Correct the `reference-documentation-layout` memory in the same pass. | 🟢 | DG-0 | — |
-| **DG-2 — Protocol** | Rewrite `promotion-protocol.md` Step 4 and `docs-sync` SKILL.md Step 2b/2c to match: delete rather than retain, state the `## ID index` test that separates a promotion from a closed arc (§3.4), add the *closed, retained* disposition, carve the explicit `Documentation/Bugs/` exception for repointing inbound links, and require the DG-3 index row before deletion. **Lands in the same commit as DG-1** (§3.3). `.agents/` and `.claude/` are the same inode — one edit, both twins. | 🟢 | DG-1 | — |
+| **DG-0 — Inventory** ✅ 2026-09-05 | Enumerate every `Design/` doc whose status is implemented, superseded or closed, and every open item they own. Record which have an Architecture doc already and which do not — a doc with no promotion target cannot be deleted, only left. | 🟢 | — | — |
+| **DG-1 — README** ✅ 2026-09-05 | Rewrite the three Conventions lines and the `Design/` row of the Directory guide to state the deletion rule, name the `git show <sha>:<path>` retrieval, and point at the DG-3 index. Correct the `reference-documentation-layout` memory in the same pass. | 🟢 | DG-0 | — |
+| **DG-2 — Protocol** ✅ 2026-09-05 | Rewrite `promotion-protocol.md` Step 4 and `docs-sync` SKILL.md Step 2b/2c to match: delete rather than retain, state the `## ID index` test that separates a promotion from a closed arc (§3.4), add the *closed, retained* disposition, carve the explicit `Documentation/Bugs/` exception for repointing inbound links, and require the DG-3 index row before deletion. **Lands in the same commit as DG-1** (§3.3). `.agents/` and `.claude/` are the same inode — one edit, both twins. | 🟢 | DG-1 | — |
 | **DG-3 — The index** | Author `OPEN_WORK_INDEX.md` per §3.2, seeded from DG-0's inventory. **Prerequisite for DG-4**, not a follow-up: deleting a design before its open items have a home is the regression §3.1 accepts only because this exists. | 🟡 | DG-0 | — |
 | **DG-4 — Delete the two** | Apply §3.1 to **tier 1** only (§2.1): `UNDERWATER_AND_SUBMERSION_RENDERING` first, then `TOAST_NOTIFICATION_SYSTEM`. One commit each: add the index row, repoint inbound links (incl. `_FIXED_BUGS.md`), **remove the Architecture doc's "the design this was promoted from" relationship bullet** — a deliberate link, so a zero-hits sweep would read it as breakage rather than as intent — then delete. Tiers 2–4 are untouched; they get DG-2's *closed, retained* status line instead. | 🟢 | DG-2, DG-3 | — |
 
