@@ -33,6 +33,10 @@ using UnityEngine;
 using UnityEngine.Pool;
 using Debug = UnityEngine.Debug;
 using Random = UnityEngine.Random;
+// Aliased: UnityEngine.Rendering's ListPool/HashSetPool/DictionaryPool would collide with the
+// UnityEngine.Pool ones used throughout this file.
+using RenderPipelineManager = UnityEngine.Rendering.RenderPipelineManager;
+using ScriptableRenderContext = UnityEngine.Rendering.ScriptableRenderContext;
 
 public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
 {
@@ -674,6 +678,25 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     {
         _shutdownTokenSource = new CancellationTokenSource();
         SettingsManager.OnSettingChanged += HandleSettingChanged;
+        RenderPipelineManager.beginCameraRendering += OnBeginCameraRendering;
+    }
+
+    /// <summary>
+    /// Publishes the submersion globals for the camera that is about to render (UW-6).
+    /// </summary>
+    /// <param name="context">URP's rendering context for this camera. Unused.</param>
+    /// <param name="camera">The camera URP is about to render.</param>
+    /// <remarks>
+    /// URP raises this inside the scope that also calls <c>AddRenderPasses</c>, so the globals and
+    /// <see cref="SubmersionOverlay.Active"/> both describe the frame about to be drawn.
+    /// </remarks>
+    private void OnBeginCameraRendering(ScriptableRenderContext context, Camera camera)
+    {
+        // A lost player camera still falls through: the publish's own null guard is what disarms the
+        // pass, so returning early here would leave the overlay armed with the last frame's tint.
+        if (_playerCamera != null && camera != _playerCamera) return;
+
+        PublishSubmersionGlobals();
     }
 
 
@@ -722,6 +745,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     private void OnDisable()
     {
         SettingsManager.OnSettingChanged -= HandleSettingChanged;
+        RenderPipelineManager.beginCameraRendering -= OnBeginCameraRendering;
     }
 
     private void OnDestroy()
@@ -2217,11 +2241,6 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
 
         PublishSkyGlobals();
 
-        // A sibling of the sky publish, not a step inside it: PublishSkyGlobals returns early without a
-        // clock or authored settings, and the medium the player is swimming through has nothing to do
-        // with the time of day.
-        PublishSubmersionGlobals();
-
         // Null before StartWorld binds it (and in headless/suite contexts, e.g. the /time command
         // baseline) — the shader globals above still apply; only the camera color is skipped.
         if (_playerCamera != null && TimeManager != null)
@@ -2330,6 +2349,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// Publishes a dry result exactly as unconditionally as a submerged one. The overlay's whole answer to
     /// "am I under water" is the alpha it reads here, so stopping at the surface would leave the screen
     /// tinted after the player climbs out.
+    /// <para>Runs once per frame, immediately before the camera it describes is rendered.</para>
     /// </remarks>
     private void PublishSubmersionGlobals()
     {
