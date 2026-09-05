@@ -409,7 +409,9 @@ namespace Editor.Validation.UnderwaterRender
         {
             const string scenario = "B9";
 
-            EyeSubmersionFixture fixture = new EyeSubmersionFixture();
+            // using, not a finally: the guard below returns early, and Dispose is what restores
+            // World.Instance and the floating-origin anchor.
+            using EyeSubmersionFixture fixture = new EyeSubmersionFixture();
             Vector2 eyeXz = fixture.EyeXz;
 
             // Proves the query answers before disposal, so the assertion after it is about the guard and not
@@ -431,10 +433,6 @@ namespace Editor.Validation.UnderwaterRender
             {
                 threw = true;
                 Debug.LogWarning($"  [INFO] {scenario}: the query threw {e.GetType().Name}.");
-            }
-            finally
-            {
-                fixture.Dispose();
             }
 
             bool ok = Check($"{scenario}: a disposed world did not throw", !threw);
