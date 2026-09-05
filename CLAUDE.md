@@ -200,6 +200,9 @@ The Unity Editor exposes live tools via the `unity-mcp` MCP server. These provid
 ### Rules
 
 - `Unity_RunCommand` is powerful but runs in the editor process — do not execute long-running or blocking code that could freeze the editor.
+- **Anything over ~3 minutes must NOT go through `Unity_RunCommand`.** It wedges the MCP bridge in a command loop that only a full Editor restart clears, and the harness backgrounds the call so it merely looks slow. Drive those through `Unity_ManageMenuItem` instead — `Validate All` is the standard case — then read the outcome from the console or `Logs/Editor.log`. Single suites are short and stay fine on `Unity_RunCommand`.
+- **Never edit a `.cs` file while a `Unity_RunCommand` is executing.** The domain reload tears down the running script's context, so the call never returns and burns its full timeout.
+- `AssetDatabase.ImportAsset(..., ForceUpdate)` bumps a source file's **mtime without recompiling** (Unity compiles on content hash), so the DLL looks stale against its source and the validation runner's STALE-CODE warning fires falsely. Confirm the real state by resolving the type (`Type.GetType("Ns.Type, Assembly-CSharp")`) rather than trusting timestamps.
 - Profiler tools return no data unless a profiling session is active (play mode with profiler recording). Check with `Unity_ManageEditor` → `GetState` first.
 - `Unity_ManageEditor` Play/Pause/Stop controls affect the editor's play state — always confirm with the user before entering play mode.
 
