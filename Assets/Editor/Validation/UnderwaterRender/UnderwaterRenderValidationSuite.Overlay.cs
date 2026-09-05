@@ -980,6 +980,71 @@ namespace Editor.Validation.UnderwaterRender
         }
 
         /// <summary>
+        /// B25 — a dry gap ends the body, where a solid block inside it does not.
+        /// </summary>
+        /// <remarks>
+        /// The complement of <c>B24</c>, and the case its reasoning did not cover. Passing over a
+        /// <b>solid</b> block is right: the depth buffer already stops every ray at it, so the water beyond
+        /// still belongs to the rays that miss it. Air is the opposite — nothing stops a ray crossing a dry
+        /// floor, so counting a second pool past one charges the whole side for water it never enters, and
+        /// the overlay fogs the dry gap.
+        /// <para>
+        /// Two pools at one height with a dry gap between them, which is what a cave with two puddles
+        /// looks like. Drives the real <c>World.GatherEyeSubmersion</c>, so it pins the scan itself.
+        /// </para>
+        /// </remarks>
+        /// <returns>True when every assertion holds.</returns>
+        private static bool RunB25DryGapEndsTheBody()
+        {
+            // The harness world is one 16-wide chunk, so every x here must stay inside [0, 16):
+            // near pool 1..5, dry gap 6..7, far pool 8..12.
+            const int groundY = 2;
+            const int fluidY = 5;
+            const int poolX = 3;
+            const int poolZ = 8;
+            const int nearPoolReach = 2;
+            const int gapCells = 2;
+            const int farPoolEdge = 12;
+
+            using PhysicsTestWorld world = new PhysicsTestWorld(TestPhysicsBlockPalette.Create());
+            world.FillLayer(groundY, Id.Ground);
+
+            // Near pool: the eye's own body, ending two cells east of it.
+            for (int y = groundY + 1; y <= fluidY; y++)
+            for (int dx = -nearPoolReach; dx <= nearPoolReach; dx++)
+            for (int dz = -nearPoolReach; dz <= nearPoolReach; dz++)
+                world.SetBlock(poolX + dx, y, poolZ + dz, Id.Fluid, 0);
+
+            // Far pool: same height, past a dry gap. Left as air between them — no wall.
+            for (int x = poolX + nearPoolReach + gapCells + 1; x <= farPoolEdge; x++)
+                world.SetBlock(x, fluidY, poolZ, Id.Fluid, 0);
+
+            Vector3 eye = new Vector3(poolX + 0.5f, fluidY + 0.5f, poolZ + 0.5f);
+
+            World.Instance.GatherEyeSubmersion(eye, out EyeSubmersion gapped);
+
+            bool ok = Check("the eye is submerged in the near pool", gapped.IsSubmerged);
+
+            ok &= Check("the body ends at the near pool's edge, not at the far pool past the dry gap " +
+                        $"({gapped.HorizontalExtent.y:F2}, the far pool would read " +
+                        $"{farPoolEdge - poolX + 0.5f:F2})",
+                Near(gapped.HorizontalExtent.y, nearPoolReach + 0.5f));
+
+            // The same gap filled with stone must NOT shorten it: that is B24's rule, and this fix must not
+            // have traded one for the other.
+            for (int x = poolX + nearPoolReach + 1; x <= poolX + nearPoolReach + gapCells; x++)
+                world.SetBlock(x, fluidY, poolZ, Id.Ground);
+
+            World.Instance.GatherEyeSubmersion(eye, out EyeSubmersion bridged);
+
+            ok &= Check("filling that same gap with solid restores the far pool's reach " +
+                        $"({bridged.HorizontalExtent.y:F2})",
+                Near(bridged.HorizontalExtent.y, farPoolEdge - poolX + 0.5f));
+
+            return ok;
+        }
+
+        /// <summary>
         /// B17 — the overlay is wired into the renderer asset, shader assigned, ahead of the UI blur.
         /// </summary>
         /// <remarks>

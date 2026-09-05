@@ -108,6 +108,8 @@ namespace Editor.Validation.UnderwaterRender
                     RunB23ExtentsEaseButSnapOnEntry),
                 new Scenario("B24 A block standing in the water does not shrink the body around it",
                     RunB24ObstructionDoesNotShrinkTheBody),
+                new Scenario("B25 A dry gap ends the body, where a solid block inside it does not",
+                    RunB25DryGapEndsTheBody),
             };
 
             return ValidationSuiteRunner.Execute("Underwater Render", scenarios, KnownBugChannel.Bug,

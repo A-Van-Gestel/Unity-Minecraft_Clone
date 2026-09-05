@@ -5101,6 +5101,9 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// </summary>
     /// <param name="unityEyePos">The eye's <b>Unity-space</b> position.</param>
     /// <param name="submersion">The resolved submersion; <c>default</c> (no fluid) when no surface is near.</param>
+    /// <param name="measureExtent">Whether to measure <see cref="EyeSubmersion.HorizontalExtent"/>, which
+    /// is the expensive half of this query. Pass false when only <see cref="EyeSubmersion.IsSubmerged"/> or
+    /// the surface is read; the extent is left at its default.</param>
     /// <remarks>
     /// Takes a world-space point rather than a camera or a player, so a future spectator or cutscene eye
     /// needs no second query.
@@ -5116,7 +5119,8 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// where the logical per-cell template can sit half a block off at a sloped pool edge.
     /// </para>
     /// </remarks>
-    public void GatherEyeSubmersion(Vector3 unityEyePos, out EyeSubmersion submersion)
+    public void GatherEyeSubmersion(Vector3 unityEyePos, out EyeSubmersion submersion,
+        bool measureExtent = true)
     {
         submersion = default;
 
@@ -5146,7 +5150,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         // Measured only for an eye actually under the surface — it is the one consumer, and the scan is
         // the expensive part of this query. A dry eye near water resolves a type and a surface for the
         // waterline to track and pays nothing for a body it is not looking through.
-        if (submersion.IsSubmerged)
+        if (measureExtent && submersion.IsSubmerged)
             submersion.HorizontalExtent = MeasureHorizontalExtent(resolvedCell, submersion.Type, fracX,
                 fracZ, JobDataManager.BlockTypesJobData);
     }
@@ -5267,9 +5271,15 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// measured in game shortening this side of the body from 23 cells to 6, which thinned the medium
     /// across a whole quadrant of the view.
     /// <para>
-    /// Passing over a gap is correct rather than lenient. This bounds where the <i>water</i> ends; anything
-    /// solid inside the body is an <i>occluder</i>, and the depth buffer already stops each ray at it — so
-    /// a ray toward that block is charged for the water in front of it and no more, whatever this returns.
+    /// Passing over a <b>solid</b> gap is correct rather than lenient. This bounds where the <i>water</i>
+    /// ends; anything solid inside the body is an <i>occluder</i>, and the depth buffer already stops each
+    /// ray at it — so a ray toward that block is charged for the water in front of it and no more, whatever
+    /// this returns.
+    /// </para>
+    /// <para>
+    /// <b>Air</b> is the opposite case and ends the scan. Nothing stops a ray crossing a dry gap, so counting
+    /// the water beyond one charges every ray on that side for water it never enters — an eye in a cave pool
+    /// with a second pool across a dry floor would fog the dry air between them.
     /// </para>
     /// <para>
     /// An unloaded or out-of-world cell ends the scan: nothing can be known past it, and an edge that
@@ -5286,6 +5296,10 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
             if (!worldData.TryGetVoxel(voxelCell.x + stepX * i, voxelCell.y, voxelCell.z + stepZ * i,
                     out VoxelState neighbor))
                 break;
+
+            // Air ends the body; anything else is passed over, so a block or a submerged decoration
+            // standing in the water cannot shorten the medium around it (see the remarks).
+            if (neighbor.ID == BlockIDs.Air) break;
 
             if (blockTypes[neighbor.ID].FluidType == fluidType) farthest = i;
         }

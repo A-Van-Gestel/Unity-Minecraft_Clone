@@ -1,6 +1,6 @@
 # Underwater & Submersion Rendering (UW-*)
 
-**Version:** 2.2  
+**Version:** 2.4  
 **Date:** 2026-09-05  
 **Status:** Partially implemented — UW-0 through UW-4 all shipped and confirmed in game 2026-09-04, the overlay after eight in-game passes and accepted as a **proxy** whose remaining imprecision is owned by `VX-3`/`VX-5` (§3.2). **UW-5 was built as a screen-space band on 2026-09-05, failed its in-game pass, was reverted whole and is ⏸️ paused on cost/benefit at current priority** — not abandoned: §3.6 records why the band cannot work at all, and what a mesh-displacement version would have to answer when it is picked up. **UW-6 is unblocked and is the only phase active**, with nothing gating it.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
@@ -223,12 +223,19 @@ from 23 cells to 6.47, thinning the medium across a quadrant of the view, and sw
 was what made the fog look unstable — the body appeared to breathe as obstructions moved in and out of
 the four probes.
 
-Reading *past* a gap is correct rather than lenient, and the reason is the depth buffer.
+Reading *past* a **solid** gap is correct rather than lenient, and the reason is the depth buffer.
 `_SubmersionBounds` bounds where the **water** ends; a solid block inside the body is an **occluder**, and
 `rayDistance` already stops each ray at it. A ray aimed at that block is charged for the water in front of
 it whatever the extent says — while every *other* ray on that side stops being starved of the water that
-is genuinely there. `World.FluidReachCells` therefore scans the full reach and reports the farthest fluid
+is genuinely there. `World.FluidReachCells` therefore scans past it and reports the farthest fluid
 cell (`B24`).
+
+**Air is the opposite case and ends the scan** (`B25`, added 2026-09-05). The reasoning above turns
+entirely on the block being an occluder, and nothing stops a ray crossing a dry gap — so counting a second
+pool beyond one charges every ray on that side for water it never enters, and the overlay fogs the dry air
+between them. `FluidReachCells` breaks on `BlockIDs.Air` and passes over everything else, so a submerged
+torch or plant still cannot shorten the medium around it. One edge is left open: fluid at exactly
+`FluidExtentScanCells` with solid in between still reports the body as unbounded on that side.
 
 **The extents are eased, not published raw.** They are re-measured from whichever cell the eye occupies,
 so they **step** at every cell boundary — and crossing one *vertically* re-scans all four directions at
@@ -734,8 +741,13 @@ always meant for.
 had accumulated unseen: items 3 and 4, the plane-versus-body gate, the horizontal box and its easing.
 UW-4 is dated by this pass. It was accepted explicitly as **not fully perfect** — the box remains a proxy
 for a voxel body, and the residual imprecision is the one `VX-3` on `VX-5` removes rather than tunes
-(§3.2). No further tuning of `MeasureHorizontalExtent` is planned; the next move on this axis is the
-volumetric path, not a better box.
+(§3.2). Beyond the `B25` air-gap correction below, no further tuning of `MeasureHorizontalExtent` is
+planned; the next move on this axis is the volumetric path, not a better box. Its cost is accepted as it
+stands: the four scans re-run every rendered frame while the eye is submerged, which was reviewed on
+2026-09-05 and deliberately left alone — memoizing them would be exactly output-equivalent, but it needs
+invalidation on every fluid edit, and that is a staleness surface bought against an unmeasured cost. The
+one change made was to stop the audio ambience paying for it: `GatherEyeSubmersion` now takes
+`measureExtent`, and `SoundManager` passes `false` because it reads only `IsSubmerged`.
 
 **Review pass, 2026-09-05 - confirmed in game, no regressions.** A full-tree code review returned ten
 findings against the arc. Fixed: the overlay stayed armed when its camera vanished mid-dive; the easing
@@ -812,21 +824,22 @@ overlay and a clip-space reference to travel through the same target.
 - Two fluid layers still never blend. The liquid pass writes opaquely and composites against
   `_CameraOpaqueTexture`, so a distant water wall seen from underwater shows one layer, as it does
   today from outside.
-- **Clouds are not visible through a water surface** — reported in game 2026-09-04, and not an
-  underwater-overlay defect but a consequence of where URP takes its opaque copy. The liquid fragment
-  reads what is behind it with `SampleSceneColor` (`UberLiquidShader.shader:134/182`), which samples
-  `_CameraOpaqueTexture`. URP fills that texture **after the skybox but before transparents**
-  (`UniversalRendererRenderGraph.cs:1292`), and `CloudShader` is `Queue="Transparent"` — so the sky is
-  in the copy and the clouds never are. Everything else transparent seen through water is missing for
-  the same reason.  
-  **What a fix would take, for a future session:** the clouds cannot simply move to the opaque queue —
-  they are `Blend SrcAlpha OneMinusSrcAlpha` with `ZWrite On` for the vanilla-parity overlap strategy
-  (`CloudShader.shader:15-22`), so they need the frame behind them. The workable shapes are a **second
-  color copy** after the clouds but before the fluid (a custom pass, plus a keyword or second sampler
-  on the liquid shader so it reads the later copy), or drawing the clouds in a **pre-transparent
-  custom pass** of their own so the existing copy catches them. Both are cloud- and liquid-rendering
-  work rather than UW work; neither is a small edit, and the second changes cloud sorting against other
-  transparents. Owned by the `CL-*` cloud backlog, not by UW-5 or UW-6.
+- **Clouds through a water surface — FIXED by `CL-9` (2026-09-05), not a UW change.** Reported in game
+  2026-09-04, and never an underwater-overlay defect but a consequence of where URP takes its opaque
+  copy. The liquid fragment reads what is behind it with `SampleSceneColor`
+  (`UberLiquidShader.shader:131/179`), which samples `_CameraOpaqueTexture`. URP fills that texture
+  **after the skybox but before transparents** (`UniversalRendererRenderGraph.cs:1292`), and
+  `CloudShader` was `Queue="Transparent"` — so the sky was in the copy and the clouds never were. The
+  clouds could not simply move to the opaque queue: they are `Blend SrcAlpha OneMinusSrcAlpha` with
+  `ZWrite On` for the vanilla-parity overlap strategy (`CloudShader.shader:15-22`), so they need the
+  frame behind them. The shipped shape gives them both — `CloudPrepassRendererFeature` draws them at
+  `RenderPassEvent.AfterRenderingSkybox`, after the skybox and the opaque terrain are down but before
+  `m_CopyColorPass`, filtered by a custom `LightMode` that keeps URP's own transparent draw off them.
+  Confirmed in game 2026-09-05. **Everything else transparent seen through water — glass, leaves — is
+  still missing for the original reason**, and would each need the same treatment. The fix also trades one
+  direction for the other: a fluid surface viewed *from above the cloud layer* is now invisible through the
+  cloud, since it fails the depth test the cloud's `ZWrite` laid down. Owned by the `CL-*` cloud backlog;
+  see that report for why every fix shape shares that trade.
 - The overlay is a camera effect. It does not change what the chunk shaders draw, so an individual
   block half in and half out of water is not treated per-block.
 - The resolver's bilinear surface can differ from the rasterized two-triangle surface along the
@@ -910,6 +923,35 @@ overlay and a clip-space reference to travel through the same target.
 
 ## Document History
 
+* **v2.4** - **Code-review findings closed** (2026-09-05). A full-tree review of the branch returned five
+  items; three were in this arc's shipped code. (1) **`FluidReachCells` now breaks on air.** §3.2's rule
+  that reading past a gap is correct turns entirely on the block being an **occluder** the depth buffer
+  already stops rays at — true of stone, false of air. An eye in a cave pool with a second pool across a
+  dry floor counted the far pool and fogged the gap. New baseline **`B25`** (suite 24 → 25) pins both
+  halves: a dry gap ends the body, and filling that same gap with solid restores the far reach, so the fix
+  cannot trade `B24`'s rule for this one. Prove-red confirmed the honest way — the first attempt was
+  **invalid** and is recorded as such: the fixture placed its far pool at x = 18 in a 16-wide harness
+  world, so `B25` went red on an out-of-range throw rather than on the defect. Regeometried inside the
+  chunk, it reds on the measurement itself (extent 9.50, the far pool, where the near edge is 2.50).
+  (2) **`RunB9DisposedWorld` leaked its fixture.** It was the only scenario not using `using`, and its
+  guard's bare `return false` skipped the `Dispose` that restores `World.Instance` and the floating-origin
+  anchor — so a future failure of that one assertion would have contaminated every later suite in a
+  `Validate All`. Proven, not argued: with the old shape and the guard forced, `World.Instance` was left
+  holding `PhysicsSolver_StubWorld` instead of null. (3) **The audio path stopped paying for an extent it
+  discards** — see §3.2. The per-frame cost of the scan itself was reviewed and **deliberately not
+  optimized**; the reasoning is recorded in §3.2 rather than left as silent debt.
+* **v2.3** - **The "clouds are not visible through a water surface" limitation is resolved** — by `CL-9`
+  in the cloud backlog, not by any UW change; no code in this document's scope moved. The bullet in §8 is
+  rewritten as shipped and its stale `UberLiquidShader.shader:134/182` reference corrected to `131/179`.
+  Two claims made when the limitation was first written are corrected with it. First, ownership: the entry
+  said the work was "owned by the `CL-*` cloud backlog", but it had never been filed there — that report
+  had no row for it, and CL-9 is the entry that closes the gap. Second, the two "workable shapes" were not
+  equivalent: a second color copy *after the clouds* still has to pull them out of the transparent queue
+  first, so it inherits the identical sorting change and pays for an extra full-screen copy on top. Only
+  moving the **liquid** to a post-transparent pass preserves cloud sorting, and that reorders water against
+  the other transparents and disturbs the UW-4 depth-copy ordering confirmed in game. The pre-transparent
+  cloud pass was therefore the only shape worth building, and it is smaller than "neither is a small edit"
+  implied. Glass and leaves through water are unchanged and still missing.
 * **v2.2** - **UW-5 built as a screen-space meniscus band, failed its in-game pass, reverted whole, and
   then marked `⏸️ 2026-09-05` — paused on cost/benefit, not abandoned.** No code from it survives. New §3.6
   records the attempt in full, because the reason it fails belongs to the problem rather than to the

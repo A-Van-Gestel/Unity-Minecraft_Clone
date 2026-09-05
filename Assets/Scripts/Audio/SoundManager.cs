@@ -407,7 +407,8 @@ namespace Audio
 
             // The shared sub-cell query, so the muffling and the screen tint engage on one boundary.
             // Safe to sample at this layer's own cadence: the query is pure and carries no physics timing.
-            world.GatherEyeSubmersion(_listener.position, out EyeSubmersion eyeSubmersion);
+            // measureExtent: false — only IsSubmerged is read here, and the extent scan is the costly half.
+            world.GatherEyeSubmersion(_listener.position, out EyeSubmersion eyeSubmersion, false);
             bool submerged = eyeSubmersion.IsSubmerged;
 
             BiomeTracker tracker = world.BiomeTracker;
