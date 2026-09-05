@@ -996,7 +996,7 @@ MonoBehaviour:
     submergedSpeedMultiplier: 0.5
     pushStrength: 1.4
     swimAscendSpeed: 0.9
-    submersionColor: {r: 0.08, g: 0.24, b: 0.5, a: 1}
+    submersionColor: {r: 0.31332, g: 0.527146, b: 0.735358, a: 1}
     submersionDensity: 0.05
     opacity: 2
     lightEmission: 0
@@ -1046,7 +1046,7 @@ MonoBehaviour:
     submergedSpeedMultiplier: 0.3
     pushStrength: 0.7
     swimAscendSpeed: 0.5
-    submersionColor: {r: 0.8, g: 0.10980392, b: 0.09411765, a: 1}
+    submersionColor: {r: 0.85, g: 0.3, b: 0.05, a: 1}
     submersionDensity: 1.5
     opacity: 7
     lightEmission: 15
