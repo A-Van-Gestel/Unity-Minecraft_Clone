@@ -95,10 +95,11 @@ Structure, top to bottom:
   tiering and the current inventory.
 - **Sweep inbound references** per `docs-sync` Step 3: `@`-prefixed doc refs, markdown links, and
   bare prose mentions of the old filename across `CLAUDE.md`, `AGENTS.md`, `Documentation/`, and
-  `.agents/`. Run **all three** checkers — `check_doc_refs.py` (confirm the found-count is
-  plausible, not just that unresolved is zero), `check_markdown_breaks.py`, and
+  `.agents/`. Run **all four** checkers — `check_doc_refs.py` (confirm the found-count is
+  plausible, not just that unresolved is zero), `check_markdown_breaks.py`,
   **`check_doc_links.py`**, which is the only one that can see a broken *relative markdown link*
-  and therefore the only one that can see a deletion at all.  
+  and therefore the only one that can see a deletion at all, and **`check_doc_status.py`**, which
+  catches the open-work index still listing a doc whose arc just closed.  
   **Two link classes need judgment, not a zero-hits rule:**
     - the promoted Architecture doc's own "the design this was promoted from" relationship bullet is
       **deliberate** — remove it as part of the deletion rather than reading it as breakage;

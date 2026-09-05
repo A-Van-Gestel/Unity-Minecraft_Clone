@@ -171,8 +171,8 @@ The three rules that decide whether the result can be trusted:
 
 ### Step 3 — Verify cross-references
 
-Two checks. The first runs **every time** this skill runs; the second only when a doc's path or
-name changed.
+Three checks. The first runs **every time** this skill runs; the second only when a doc's path or
+name changed; the third only when something **closed**.
 
 **Always — `@Documentation/` reference integrity.** This repo wires several dozen
 `@Documentation/...` references from `CLAUDE.md`, `AGENTS.md`, and `.agents/skills/` into the doc
@@ -180,8 +180,9 @@ tree, and a broken one silently degrades agent context — nothing errors. It is
 do it regardless of what you changed:
 
 ```bash
-python Tools/Python/check_doc_refs.py     # @-prefixed doc references
-python Tools/Python/check_doc_links.py    # relative markdown links between docs
+python Tools/Python/check_doc_refs.py      # @-prefixed doc references
+python Tools/Python/check_doc_links.py     # relative markdown links between docs
+python Tools/Python/check_doc_status.py    # OPEN_WORK_INDEX vs each doc's own **Status:**
 ```
 
 The second is not optional on a move, rename or deletion: `check_doc_refs.py` reads only the
@@ -220,6 +221,29 @@ grep -rn "OldDocName.md" CLAUDE.md AGENTS.md Documentation/ .agents/
 
 Fix every hit in the same commit as the rename. Broken `@`-refs silently degrade agent context
 windows.
+
+**On closing an item, phase or arc — sweep the docs that cite it (`DG-5`).** This is the check with
+no tool behind it, and it exists because the other kind of drift has no trigger at all: `docs-sync`
+fires on a **code change** or a **promotion**, and neither happens when a document goes stale
+because *another document's* state moved. Two ways that bites, both observed on 2026-09-05:
+
+- **A prerequisite completed.** `STEAM_AUDIO_INTEGRATION.md` said the sound engine "has not
+  started" long after `S0`–`S3` shipped, and its `**Next Review:**` trigger — *"only when S0–S3
+  have shipped"* — had fired silently. **Not automatable**: 38 docs carry that field and only 6
+  cite a resolvable ID, so a resolver would miss ~84 % while looking authoritative.
+- **An index went stale.** `OPEN_WORK_INDEX.md` still listed an arc as open hours after it closed.
+  *This half is automated* — `check_doc_status.py` above catches it.
+
+So when you mark something complete, before you commit:
+
+```bash
+grep -rn "<THE-ID>" Documentation/ | grep -v "<the doc that owns it>"
+```
+
+Read the `**Status:**` and `**Next Review:**` of every doc that comes back. A doc naming your item
+as a prerequisite, or whose review trigger your closure just fired, is now stale — fix it in the
+same commit or report it explicitly. Checking costs one grep; the failure mode is silent and was
+found by accident twice.
 
 ### Step 4 — Commit alongside the code change
 

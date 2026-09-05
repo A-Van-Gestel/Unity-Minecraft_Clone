@@ -1,12 +1,12 @@
 # Documentation Lifecycle & Open-Work Index (DG-*)
 
-**Version:** 1.3  
+**Version:** 1.4  
 **Date:** 2026-09-05  
-**Status:** **Partially implemented.** **DG-0…DG-4 shipped 2026-09-05** — the rule is written in one
-place, [`OPEN_WORK_INDEX.md`](OPEN_WORK_INDEX.md) is live, and both promoted designs are deleted.
-**DG-5 is open**: the arc closed with a hole it then fell into twice the same day (§3.5), and until
-that lands, a document whose state moves *because another document's state moved* drifts with
-nothing to catch it.  
+**Status:** ✅ **Implemented — DG-0…DG-5 all shipped 2026-09-05.** The rule is written in one place,
+[`OPEN_WORK_INDEX.md`](OPEN_WORK_INDEX.md) is live, both promoted designs are deleted, and the
+trigger gap of §3.5 is closed on both halves: `Tools/Python/check_doc_status.py` cross-validates the
+index against each doc's own `**Status:**`, and `docs-sync` Step 3 gained a closure sweep for the
+prerequisite drift no tool can see.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production) — documentation-only, no code
 
 > What happens to a Design doc after its Architecture doc exists. Today two written rules disagree:
@@ -292,7 +292,7 @@ read, so DG-5 has to decide whether that is a finding it reports or a gap it fix
 | **DG-3 — The index** ✅ 2026-09-05 | [`OPEN_WORK_INDEX.md`](OPEN_WORK_INDEX.md), seeded from DG-0's inventory. Shipped **per-document** rather than per-item (§3.2, amended) — 24 area rows plus the six closed-retained docs. **Prerequisite for DG-4**, not a follow-up: deleting a design before its open items have a home is the regression §3.1 accepts only because this exists. | 🟡 | DG-0 | ✅ |
 | **DG-4 — Delete the two** ✅ 2026-09-05 | Apply §3.1 to **tier 1** only (§2.1): `UNDERWATER_AND_SUBMERSION_RENDERING` first, then `TOAST_NOTIFICATION_SYSTEM`. One commit each: add the index row, repoint inbound links (incl. `_FIXED_BUGS.md`), **remove the Architecture doc's "the design this was promoted from" relationship bullet** — a deliberate link, so a zero-hits sweep would read it as breakage rather than as intent — then delete. Tiers 2–4 are untouched; they get DG-2's *closed, retained* status line instead. | 🟢 | DG-2, DG-3 | ✅ |
 
-| **DG-5 — Close the trigger gap** | §3.5. Two halves, both required. **(a)** `Tools/Python/check_doc_status.py` — parse `OPEN_WORK_INDEX.md` §2/§3, resolve each linked doc's `**Status:**` (three shapes), and flag a §2 row whose owner reads closed or a §3 row whose owner reads open. Fail loudly if §2 parses to zero rows or the headings move, and report unparseable docs as their own category rather than skipping them silently. **Prove the classifier against all 57 parseable docs before wiring it in.** **(b)** a `docs-sync` step: when an item, phase or arc closes, grep `Documentation/` for docs citing that ID and re-read their `**Status:**` — the only cover for prerequisite drift, and it is discipline, not enforcement. Wire (a) into the skill's existing checker list, or it will never run. | 🟡 | DG-3 | — |
+| **DG-5 — Close the trigger gap** ✅ 2026-09-05 | §3.5. Two halves, both required. **(a)** `Tools/Python/check_doc_status.py` — parse `OPEN_WORK_INDEX.md` §2/§3, resolve each linked doc's `**Status:**` (three shapes), and flag a §2 row whose owner reads closed or a §3 row whose owner reads open. Fail loudly if §2 parses to zero rows or the headings move, and report unparseable docs as their own category rather than skipping them silently. **Prove the classifier against all 57 parseable docs before wiring it in.** **(b)** a `docs-sync` step: when an item, phase or arc closes, grep `Documentation/` for docs citing that ID and re-read their `**Status:**` — the only cover for prerequisite drift, and it is discipline, not enforcement. Wire (a) into the skill's existing checker list, or it will never run. | 🟡 | DG-3 | ✅ |
 
 *Status: `—` not started · `In progress` · `✅ YYYY-MM-DD` complete · `⏸️ YYYY-MM-DD` deliberately
 not implemented · `⛔ Superseded YYYY-MM-DD — <by what>`.*
@@ -343,6 +343,16 @@ bound.
 
 ## Document History
 
+* **v1.4** - **`DG-5` shipped, closing the arc for the second time (2026-09-05).**
+  `Tools/Python/check_doc_status.py` reads `OPEN_WORK_INDEX.md` §2/§3 and every doc they link,
+  classifying each `**Status:**` with **ordered** rules — OPEN tested first, because "Partially
+  implemented" contains "implemented" and the other order calls every partial doc closed. Calibrated
+  against all 30 index rows (24 open + 6 closed): zero mismatches, zero unclassified. Proven red on
+  three distinct failures — a closed doc listed in §2, an open doc parked in §3, and a moved section
+  heading (exit 2, not a silent pass). Two extractor bugs were caught *by* that calibration and
+  never shipped: counting a prose pointer in §3 as a table row (which silently inverted one doc's
+  verdict) and matching only rows beginning `| [`, which missed all 24 of §2. `docs-sync` Step 3 now
+  runs four checkers and carries the closure sweep; `promotion-protocol.md` Step 4 lists the fourth.
 * **v1.3** - **`DG-5` filed, reopening the arc (2026-09-05).** The rule shipped with a hole and then
   fell into it twice the same day: a `**Next Review:**` trigger fired silently in
   `STEAM_AUDIO_INTEGRATION.md`, and `OPEN_WORK_INDEX.md` went stale for `DG-*` itself within hours.
@@ -381,5 +391,5 @@ bound.
 ---
 
 **Last Updated:** 2026-09-05  
-**Next Review:** when `DG-5` starts — its first step is proving the status classifier against the
-57 parseable docs, before any tool is wired in
+**Next Review:** at the next promotion, or when a doc joins the index that `check_doc_status.py`
+cannot classify — its rule lists are calibrated, not general

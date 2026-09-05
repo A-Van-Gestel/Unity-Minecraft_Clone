@@ -1,6 +1,6 @@
 # Open Work Index
 
-**Version:** 1.2  
+**Version:** 1.3  
 **Date:** 2026-09-05  
 **Status:** **Open backlog.** A pointer map, not a tracker — rows are added and removed as docs
 gain or lose open work, never as individual items move.  
@@ -71,7 +71,6 @@ Nothing else in this file changes as individual items ship.
 | **Chunk palette mapping** | [`CHUNK_PALETTE_MAPPING.md`](CHUNK_PALETTE_MAPPING.md) | — | Draft, unscheduled; nothing built. Re-verify its prerequisites before starting |
 | **World scaling (remaining tiers)** | [`WORLD_SCALING_ANALYSIS.md`](WORLD_SCALING_ANALYSIS.md) | Tiers A–C | Tier B shipped; **Tiers A and C still unbuilt**. Also the standing "what breaks per tier" reference |
 | **Device calibration** | [`OM1_DEVICE_CALIBRATION.md`](OM1_DEVICE_CALIBRATION.md) | `OM-` | Implemented and player-build verified; **pending its final calibration pass** |
-| **Doc lifecycle & drift detection** | [`DOC_LIFECYCLE_AND_OPEN_WORK_INDEX.md`](DOC_LIFECYCLE_AND_OPEN_WORK_INDEX.md) | `DG-` | `DG-0`…`DG-4` shipped; **`DG-5` open** — the status-drift checker and its `docs-sync` step. Also the standing rule this index's §3 cites |
 
 ---
 
@@ -93,6 +92,11 @@ The test that separates these from a promotion is whether an Architecture doc ca
 | [`FLIGHT_PROFILE_CAPTURE.md`](FLIGHT_PROFILE_CAPTURE.md) | `FP-0`…`FP-4` | All shipped |
 | [`WORLD_SCALING_IMPLEMENTATION.md`](WORLD_SCALING_IMPLEMENTATION.md) | `WS-*`, `OQ-1`…`OQ-7` | Track fully closed |
 | [`SUN_APPEARANCE_IMPROVEMENTS.md`](SUN_APPEARANCE_IMPROVEMENTS.md) | `SN-0`…`SN-4` | 2026-08-15 |
+| [`DOC_LIFECYCLE_AND_OPEN_WORK_INDEX.md`](DOC_LIFECYCLE_AND_OPEN_WORK_INDEX.md) | `DG-0`…`DG-5` | 2026-09-05 |
+
+⚠️ The last row is retained for a different reason than the six above it: its arc is closed, but the
+**rule it wrote is live** and governs every future promotion. It is the standing reference, not
+merely a design with no Architecture counterpart.
 
 ---
 
@@ -111,6 +115,10 @@ doc, not to grow an item row here.
 
 ## Document History
 
+* **v1.3** - `DG-5` shipped, so the `DG-*` row returns to §3 (2026-09-05) — its third move in a day.
+  **This one was caught by a tool rather than by a person**: marking DG-5 complete turned the §2 row
+  red in `check_doc_status.py` within a minute, which is exactly the drift the phase was filed to
+  detect, demonstrated on its own document. The three prior moves were all found by hand.
 * **v1.2** - `DG-5` filed, so the `DG-*` row returns to §2 (2026-09-05) — the removal rule exercised
   in the other direction, four hours after §3 gained the row. The §3 caveat written about that row
   went with it rather than being left to dangle onto the entry above. That this file needed three
