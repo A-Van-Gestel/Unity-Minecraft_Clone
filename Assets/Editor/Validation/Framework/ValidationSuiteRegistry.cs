@@ -4,6 +4,7 @@ using Editor.Validation.Behavior;
 using Editor.Validation.Celestial;
 using Editor.Validation.ChunkPipeline;
 using Editor.Validation.ChunkUnload;
+using Editor.Validation.CloudRender;
 using Editor.Validation.Commands;
 using Editor.Validation.DeserializationRobustness;
 using Editor.Validation.Generation;
@@ -62,7 +63,7 @@ namespace Editor.Validation.Framework
     public static class ValidationSuiteRegistry
     {
         /// <summary>The number of standard suites expected on the list — a floor the aggregate runner asserts against.</summary>
-        public const int ExpectedSuiteCount = 28;
+        public const int ExpectedSuiteCount = 29;
 
         /// <summary>The registered suites, in run/report order.</summary>
         public static readonly IReadOnlyList<RegisteredSuite> Suites = new[]
@@ -91,6 +92,7 @@ namespace Editor.Validation.Framework
             new RegisteredSuite("Sky Render", SkyRenderValidationSuite.Execute),
             new RegisteredSuite("UI Blur Render", UIBlurRenderValidationSuite.Execute),
             new RegisteredSuite("Underwater Render", UnderwaterRenderValidationSuite.Execute),
+            new RegisteredSuite("Cloud Render", CloudRenderValidationSuite.Execute),
             new RegisteredSuite("Worm Carver", WormCarverValidationSuite.Execute),
             new RegisteredSuite("Biome Selection", BiomeSelectionValidationSuite.Execute),
             new RegisteredSuite("Sound Engine", SoundEngineValidationSuite.Execute),
