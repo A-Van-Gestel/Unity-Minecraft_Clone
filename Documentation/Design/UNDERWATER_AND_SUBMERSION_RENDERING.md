@@ -1,11 +1,11 @@
 # Underwater & Submersion Rendering (UW-*)
 
-**Version:** 2.4  
+**Version:** 2.5  
 **Date:** 2026-09-05  
-**Status:** Partially implemented — UW-0 through UW-4 all shipped and confirmed in game 2026-09-04, the overlay after eight in-game passes and accepted as a **proxy** whose remaining imprecision is owned by `VX-3`/`VX-5` (§3.2). **UW-5 was built as a screen-space band on 2026-09-05, failed its in-game pass, was reverted whole and is ⏸️ paused on cost/benefit at current priority** — not abandoned: §3.6 records why the band cannot work at all, and what a mesh-displacement version would have to answer when it is picked up. **UW-6 is unblocked and is the only phase active**, with nothing gating it.  
+**Status:** Implemented — every phase now carries a terminal disposition. UW-0 through UW-4 shipped and confirmed in game 2026-09-04, the overlay after eight in-game passes and accepted as a **proxy** whose remaining imprecision is owned by `VX-3`/`VX-5` (§3.2). **UW-5 was built as a screen-space band on 2026-09-05, failed its in-game pass, was reverted whole and is ⏸️ paused on cost/benefit at current priority** — not abandoned: §3.6 records why the band cannot work at all, and what a mesh-displacement version would have to answer when it is picked up. **UW-6 closed 2026-09-05**: lava authored and confirmed, the frame-late publish fixed, the authored tint's color space corrected, and §8's render-scale question closed in game. **Promotion to `Architecture/` is due and is deliberately not done here** — a seven-phase merge wants a clean session (`docs-sync`'s own rule); see the Document History.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
-> Closes the last open bullet of `FLUID_BUGS` **#02** — the one the 2026-09-03 physics ship left
+> Closed the last open bullet of `_FIXED_BUGS` **Fluid #21** (filed as `FLUID_BUGS` #02) — the one the 2026-09-03 physics ship left
 > behind: a submerged player gets no visual signal at all. Three separate defects hide under that
 > sentence: the liquid pass never renders from **inside** a fluid body, there is no screen-space
 > **medium** (tint + fog) while the eye is under a surface, and there is no **waterline** when the
@@ -30,8 +30,8 @@ Unity's defaults apply); no runtime capture was taken.
 
 **Relationship to other documents:**
 
-- [`../Bugs/FLUID_BUGS.md`](../Bugs/FLUID_BUGS.md) — **#02**, whose remaining bullet this design
-  closes. The entry is archived by `archive-fixed-bug` only after UW-6's in-game confirmation.
+- [`../Bugs/_FIXED_BUGS.md`](../Bugs/_FIXED_BUGS.md) — **Fluid #21**, filed as `FLUID_BUGS` #02, whose
+  remaining bullet this design closed. Archived 2026-09-05 on UW-6's in-game confirmation.
 - [`../Architecture/FLUID_SHORELINE_RENDERING.md`](../Architecture/FLUID_SHORELINE_RENDERING.md) —
   owns the liquid shader's vertex-channel contract and shore math. UW-1 changes that shader's
   render state and nothing else; the channel layout is untouched.
@@ -421,6 +421,31 @@ next pass starts from them rather than rediscovering them:
 **What survived the revert:** nothing in code. UW-4's per-pixel split is untouched and still gives a
 geometrically exact boundary — the edge is simply hard, which §8 continues to record as a limitation.
 
+### 3.7 Which color space the authored tint is in
+
+`submersionColor` is authored through a color picker, which means sRGB — but `Shader.SetGlobalColor`
+performs no conversion, and the overlay blends against a linear color target. Consumed raw, every
+authored tint therefore reached the screen lighter and less saturated than its swatch.
+
+The error is invisible on a color already tuned by eye, because the tuning absorbs it, and it is worst
+where a channel is small and the curve steepest. It surfaced on **lava**: an authored deep red
+`(0.80, 0.11, 0.094)` rendered as salmon `(0.91, 0.37, 0.34)`, blue rising from 0.094 to 0.34 — which
+is what turned a red medium pink rather than merely pale.
+
+#### Option A — convert in `Pack` ✅ **CHOSEN**
+
+`SubmersionOverlay.Pack` converts with `.linear`, so the picker's swatch means what it shows. Water's
+confirmed appearance is preserved rather than re-tuned: its authored value is **re-expressed** as the
+sRGB encoding of the linear color it had been rendering with, which round-trips to within 3 × 10⁻⁵ —
+below one 8-bit step, and measured as such in game (§7). So a phase dated `✅ 2026-09-04` keeps the look
+it was dated for, and only its representation changes.
+
+#### Option B — document the mismatch and tune around it ⛔
+
+Costs nothing today and leaves the swatch lying to whoever authors the next fluid. Rejected: the
+conversion is one line, and the alternative is a permanent authoring trap in a system whose values are
+tuned by eye — exactly where a misleading picker does the most damage. §9.
+
 ---
 
 ## 4. Architecture
@@ -428,9 +453,11 @@ geometrically exact boundary — the edge is simply hard, which §8 continues to
 ```
 World.SetGlobalLightValue (every frame)
         │
-        ├─▶ PublishSkyGlobals ─▶ PublishFogGlobals          (existing)
+        └─▶ PublishSkyGlobals ─▶ PublishFogGlobals          (existing)
+
+RenderPipelineManager.beginCameraRendering (player camera)
         │
-        └─▶ PublishSubmersionGlobals                        (UW-4, new)
+        └─▶ PublishSubmersionGlobals                        (UW-4; moved here UW-6)
                     │
                     ▼
         World.GatherEyeSubmersion(unityEyePos, out EyeSubmersion)   (UW-2, new)
@@ -537,15 +564,22 @@ differ by a small amount along that diagonal. §8 records the bound.
 
 ### 4.3 Shader globals
 
-**Seven**, published next to the fog globals by `World.PublishSubmersionGlobals` — a **sibling** of
-`PublishSkyGlobals` under `SetGlobalLightValue`, not a step inside it: that method returns early
+**Seven**, published by `World.PublishSubmersionGlobals` from a
+`RenderPipelineManager.beginCameraRendering` handler, guarded to the player's camera. URP raises that
+event inside the scope that also calls `AddRenderPasses`, so the globals **and** the pass's active flag
+describe the frame about to be drawn (UW-6; `Update` left them describing the previous one, §8). It is
+independent of `PublishSkyGlobals`, which stays under `SetGlobalLightValue`: that method returns early
 without a clock or authored `TimeOfDaySettings`, and the medium the player is swimming through has
 nothing to do with the time of day. All of them live in **Unity/render space**, matching every other
 global the block and liquid shaders consume.
 
+A camera lost mid-dive still reaches the publish — the guard is `_playerCamera != null && camera !=
+_playerCamera` — because the publish's own null check is what disarms the pass. Returning early on any
+non-matching camera would leave the overlay armed with the last frame's tint.
+
 | Global                 | Contents                                                                            |
 |------------------------|-------------------------------------------------------------------------------------|
-| `_SubmersionColor`     | `rgb` = authored fluid tint; `a` = 1 when a fluid is at the eye, 0 in air (a gate, not a fade). |
+| `_SubmersionColor`     | `rgb` = the authored fluid tint **converted to linear** (§3.7); `a` = 1 when a fluid is at the eye, 0 in air (a gate, not a fade). |
 | `_SubmersionParams`    | `x` = fog density (per block) · `y` = the eye's **signed depth** below the drawn surface, positive submerged · `z` = meniscus half-width (UW-5) · `w` = distortion (v2) |
 | `_SubmersionRayParams` | `xy` = the view frustum's half-extents at unit depth (horizontal, vertical) · `zw` = unused |
 | `_SubmersionRayBasisX/Y/Z` | The rows of the camera's world rotation — `xyz` = the world-space X, Y and Z components of its right, up and forward axes. A row at a time, because the fragment consumes them as dot products against a camera-space ray. `Y` alone carried the surface plane; `X` and `Z` arrived with the horizontal bound. |
@@ -647,7 +681,7 @@ initializers on load. No chunk-format change, no `level.dat` bump, no AOT migrat
 | **UW-3 — Audio adopts it**     | `AmbienceResolution.IsSubmerged` → the shared query; `SoundManager.cs:409` call site; SoundEngine baselines updated for sub-cell behavior.                   |   🟢   | UW-2         | ✅ 2026-09-04 |
 | **UW-4 — Overlay pass**        | `Rendering/UnderwaterOverlayRendererFeature` + `Shaders/UnderwaterOverlay.shader` + `Rendering/SubmersionOverlay`; `World.PublishSubmersionGlobals`; wired into `VoxelEngine-URP-Renderer.asset` **above `UIBlurRendererFeature`** (§3.5). **No Graphics setting** — decided 2026-09-04: the pass enqueues nothing unless the eye is submerged, so "off" buys no measurable frame time and only restores the bug. |   🟡   | UW-2         | ✅ 2026-09-04 |
 | **UW-5 — Waterline**           | **Rescoped 2026-09-05 after a failed build, then paused (§3.6).** The screen split is *not* part of this — it shipped with UW-4's per-pixel solve. What remains is making the drawn surface itself undulate: local vertex displacement on the liquid mesh, welded lid-to-walls, with the eye query following the wave and an answer for what that does to the ambience gate. A screen-space band was built and reverted — do not rebuild *that*. The mesh version is still the open route; it is paused on cost/benefit, and wants a fresh plan when it resumes. |   🔴   | UW-4         | ⏸️ 2026-09-05 |
-| **UW-6 — Lava pass & closure** | Lava density/color tuning, in-game confirmation, `docs-sync`, `FLUID_BUGS` #02 archived. **Unblocked 2026-09-05** — pausing UW-5 dropped it from this list, so nothing gates UW-6 and it does not wait on the waterline resuming. |   🟢   | UW-1…UW-4    | —      |
+| **UW-6 — Lava pass & closure** | Lava density/color tuning, in-game confirmation, `docs-sync`, `FLUID_BUGS` #02 archived. **Unblocked 2026-09-05** — pausing UW-5 dropped it from this list, so nothing gates UW-6 and it does not wait on the waterline resuming. Grew two code changes the feel pass exposed: the frame-late publish (§4.3) and the authored tint's color space (§3.7). |   🟢   | UW-1…UW-4    | ✅ 2026-09-05 |
 
 *Status: `—` not started · `In progress` · `✅ YYYY-MM-DD` complete (dated at in-game
 confirmation) · `⏸️ YYYY-MM-DD` deliberately not implemented · `⛔ Superseded YYYY-MM-DD — <by
@@ -774,9 +808,17 @@ All` and the CI entry point pick it up.
 | UW-3  | Existing SoundEngine ambience baselines extended: a head just under a partly-filled surface now reads submerged, where the per-cell test read dry.                                                                                                                            |
 | UW-4  | **Shipped as `B10`–`B24`.** `B10` is the positive control (a saturated medium reaches the authored tint) and must be read first, because "the overlay drew nothing" is the same reading the pass-through scenarios call success. `B11` cross-checks the shader's depth decode against a CPU inversion of `LinearEyeDepth`. **`B12` is the one that earns its keep:** at one uniform depth it measures three screen radii, because the ray-length scale is the arc's most error-prone arithmetic and a center-only check passes with it missing entirely — proven by mutation, center green while edge and corner went red. Then density 0 and strength 0 pass-throughs, far-plane saturation, and `B16` on the packing — which pins the strength as a **gate** that never takes an intermediate value and opens exactly when `IsSubmerged` does. That one is asserted with `ExactValue`, not a tolerance: an epsilon would accept the very intermediate value the baseline exists to forbid, and the gate is a stored literal, so exactness is the contract. The same holds for the fields `Pack` copies through untouched and for `B24`'s claim that an obstruction changes the reach by *nothing*; the measured composites keep their epsilon, because a half-float render target genuinely has one. `B16` also pins so the tint and the ambience filter share one boundary, and that pitch and roll reach the published camera basis. **`B17` is the read-back** of `m_RendererFeatures`, asserting the overlay is present, its shader is **assigned**, and its **index is below `UIBlurRendererFeature`'s** — all three are silent failures the render scenarios cannot see, and a membership-only check catches none of the last two. `B16`/`B17` are deliberately **not** device-gated, so a headless run still asserts something about UW-4. **`B18`** sinks an eye across two cell boundaries inside a body and pins that `SurfaceY` does not move, that `EyeDepth` deepens monotonically, and that the published depth tracks it — the in-game fade-per-cell defect of §4.2, which `B8` could not see because it asserted only the depth's sign. **`B19`** pins the per-pixel submerged length (§3.2): pitched straight down every ray is submerged, pitched straight up none is, level at the surface the screen splits, rolling 180° swaps which half is fogged, and a deep eye stops splitting at all. It asserts the split's **structure** and is proven by mutation — charging every ray its full length reddened exactly the pitched-up and split assertions. **`B20` pins the orientation `B19` leaves out**, which is the gap an inverted vertical sign shipped through: it draws a marker across the bottom half of **clip space** and asserts the fogged rows are the marker's rows, so a flip anywhere in the texture or readback chain moves both together and the assertion needs no platform assumption. Confirmed red against the inverted shader before the fix. Structure and orientation are separate failures and need separate baselines — every `B19` assertion passes with the sign backwards. **`B21`** pins the plane-versus-body gate of §3.2: an eye above the surface fogs neither half, however far below it the geometry sits. It asserts the shader's own guard with the gate forced open, so the fragment is covered independently of C# declining to draw, and confirmed red against the ungated build — the lower half read fully fogged where the backdrop should have survived. **`B22`** pins the horizontal box of §3.2, reproducing the measured shoreline frame: a body ending 2 cm to the west and unbounded east must leave a westward ray nearly clear while an eastward one stays saturated, with an open-water control proving it is the bound that changed rather than the sampling. Proven red by dropping the slab clamp. **`B23`** pins the easing, and is device-free because the step is a pure function — which is what makes the two things most likely to be wrong reachable at all: the **snap** on entering water (proven red by removing it) and the reciprocal **space** the easing happens in, where a linear interpolation would still read ~630 000 blocks one time constant out of open water. |
 | UW-5  | **Rewritten 2026-09-05 for the rescoped phase (§3.6).** The reverted screen-space attempt carried four baselines that were all green and all proven red by mutation — and the feature still failed in play, because every one of them asserted the band against the *plane* the shader was given rather than against the surface the mesher **drew**. That is the gap to close: a mesh-displacement UW-5 wants the displaced vertex height read off real `GenerateFluidMeshData` output and matched against whatever `FluidSurfaceResolver` reports at the same XZ and time, so the drawn surface and the eye query cannot drift — the `B4` pattern, extended with time as an input. Plus: the lid and the side faces' top edges agree at a shared corner (the tearing case), the wave is a pure function of world position and time (so chunk borders cannot seam), and physics' `GatherFluidContact` height is **unaffected** (§3.4's split must survive, or buoyancy oscillates). None of that is measurable from a fullscreen readback, so the harness is `FluidSurfaceFixture`'s, not `OverlayFragmentRenderer`'s. |
+| UW-6  | **Shipped as `B26`** — the authored sRGB tint is packed as linear (§3.7). Its expected values are literals from the sRGB transfer function computed **outside** the engine, because asserting against `Color.linear` would only restate the call under test. It carries its own tolerance: `COLOR_EPSILON` allows half-float quantization, which is *larger* than the gap between the exact curve and a `pow(2.2)` approximation on green and blue, so the suite's normal color tolerance cannot tell the two curves apart — only red separates them there. Proven red by reverting the conversion, which reddened `B26`'s literal check and `B16`'s tint assertion together. The rest of UW-6 is **not baselined and cannot be**: authored values are judged by eye, and the publish point (§4.3) is private and needs a live camera, exactly as the `AddRenderPasses` gate is. |
 
 The final look — how water *feels* to swim through, whether the lava density is right — stays
-verified in game (UW-6).
+verified in game, and was: **UW-6's feel pass, 2026-09-05.** Water's `0.05` was accepted unchanged.
+Lava was authored to a hot orange, `submersionColor` sRGB `(0.85, 0.30, 0.05)` at density `1.5`,
+after §3.7's color-space fix made the picker's swatch match the screen; the earlier
+`(0.80, 0.11, 0.094)` had been chosen against the uncorrected path and rendered salmon. Confirmed in
+game: sinking into a lava pool loses sight of the surface, which is the "near-opaque within about a
+block" of goal 2. The tuning itself is unbaselinable by construction — the suite builds its own
+densities and colors and reads nothing from `BlockDatabase.asset`, which is also why retuning a fluid
+cannot red it.
 
 ### Extension roadmap (post-UW-6, in intended order)
 
@@ -796,12 +838,16 @@ verified in game (UW-6).
    resolve with the downsampled opaque texture at non-100 render scale is unverified here. Resolves at
    UW-4's first in-editor render, and must be re-checked at a non-default render scale rather than only
    at 100%; if the depth read is wrong the fog banding will be obvious immediately.
-   **Narrowed 2026-09-04, not closed.** Two of the three moving parts are now resolution-independent by
+   **Narrowed 2026-09-04.** Two of the three moving parts are resolution-independent by
    construction: the view-ray basis is published from FOV and aspect (§4.3), and the depth UV comes from
    `Blit.hlsl`'s `texcoord`, which is normalized. The overlay also samples the *resolved*
    `_CameraDepthTexture`, never an MSAA target, while writing to an MSAA camera color — a combination the
-   baselines cannot exercise, since the harness renders single-sample. **Still open, and still a range
-   rather than one configuration: this needs looking at in game at a non-default render scale.**
+   baselines cannot exercise, since the harness renders single-sample.
+   ✅ **Closed 2026-09-05 at UW-6, in game.** Confirmed at render scales below 100% with no regression in
+   the overlay. Measured alongside it: a nine-point vertical profile through the fog gradient at 100 %,
+   75 % and 125 % tracks to within ~0.02 with no banding. The measurement had to be taken in **water** —
+   run in lava it read a flat 0.2980 at every scale and every sample, because a saturated medium has no
+   gradient for banding to appear in, so identical numbers there proved nothing.
 2. **A strongly sloped surface under the eye.** ⚠️ **Sharpened 2026-09-05 by the reverted build (§3.6),
    which measured it rather than predicted it: the flat-plane assumption was the *first* of the two
    things that sank the band, and it is worse than "slightly off" at shallow depth.** UW-5 was to split
@@ -854,23 +900,22 @@ overlay and a clip-space reference to travel through the same target.
   front of the terrain without any change to this system.
 - No suite validates the assembled pipeline. The render suites exercise the shaders; the read-back
   check exercises the wiring; only in-game play exercises the two together.
-- **The globals describe the eye one frame before the one being drawn.** `PublishSubmersionGlobals`
-  runs from `World.Update`, and nothing pins `World` after whatever drives the camera, so the ray basis,
-  eye depth and extents are a frame stale. Deferred to `UW-6` rather than fixed: at a high refresh rate
-  it is a few milliseconds of camera lag that the extent easing's own time constant already dwarfs, and
-  moving the publish to `RenderPipelineManager.beginCameraRendering` — the hook that removes the
-  ordering question entirely — is a lifecycle change to a system confirmed in game. It is most visible
-  on a fast look while swimming at a low framerate.
+- ✅ **The globals described the eye one frame late — fixed at UW-6 (2026-09-05).** `PublishSubmersionGlobals`
+  ran from `World.Update`, where nothing pins `World` after whatever drives the camera, so the ray basis,
+  eye depth and extents were a frame stale. It now publishes from
+  `RenderPipelineManager.beginCameraRendering` (§4.3), which removes the ordering question rather than
+  bounding it. Confirmed in game at a **20 fps cap** — the symptom is invisible at this project's normal
+  refresh rate, so a full-speed pass would have been a false green.
 - **A camera lost while submerged is handled by disarming, not by clearing.** `PublishSubmersionGlobals`
   returns early without a camera and drops the easing's primed flag, so the pass stops enqueueing while
   the last frame's values stay in the globals. No baseline covers it: the publish is private and needs a
   live camera, so the guard is asserted only by reading it.
 - **The overlay's fog starts at zero.** Pure Beer–Lambert means a block held right up to the eye is
   essentially untinted, and only distance thickens the medium. That is §3.2's decision working as
-  intended — a flat floor is what makes a filter rather than a medium — but if water ends up reading
-  too clear up close, the fix is a small minimum weight and it belongs to UW-6's feel pass, not here.
-  The first in-game pass moved the opposite way: the fog was too *strong*, and the density came down
-  from `0.14` to `0.05` (§7).
+  intended — a flat floor is what makes a filter rather than a medium. **UW-6's feel pass did not call
+  for a minimum weight**, so none was added: water at `0.05` was accepted unchanged, and lava at `1.5`
+  reads as intended without one. The first in-game pass had moved the opposite way — the fog was too
+  *strong*, and the density came down from `0.14` to `0.05` (§7).
 - **The fluid body is approximated by a box, so an L-shaped or terraced body under-fogs**, and the
   box's dimensions are re-measured per eye cell, so they step as the player swims — eased rather than
   removed, which leaves a **lag**: a swimmer entering a narrow channel is briefly over-fogged for about
@@ -917,12 +962,33 @@ overlay and a clip-space reference to travel through the same target.
 | Floor the strength while any fluid is near (`max(0.5, ramp)`)           | Cheapest way to kill the exploit, but it tints the **sky** half of the screen at 50 % while the eye is at the surface — wrong in the other direction, and it still cannot produce a waterline. §3.2 | 2026-09-04 |
 | **A screen-space meniscus band in the overlay fragment (UW-5, v1)**     | **Built in full, played, and reverted the same day.** Drawn on the surface plane's horizon, which is not where the corner-smoothed mesh the player sees actually is; and even aligned, a sine band against a straight mesh edge leaves a gap the width of the wave amplitude, because it must cross the edge it is meant to decorate. The wobble has to move the geometry. §3.6 | 2026-09-05 |
 | Draw the meniscus where the fog's submerged length falls off            | Weighed while building the above. That locus is real, but it depends on the authored density and the eye's depth as well as on the geometry — no closed form for a baseline to assert, and the line moves when someone retunes the water's color. §3.6 | 2026-09-05 |
+| Leave the authored tint consumed as linear and document the mismatch     | Costs nothing today, but leaves the `BlockEditor`'s swatch permanently lying to whoever authors the next fluid — in a system whose values are tuned by eye, which is where a misleading picker does the most damage. The conversion is one line, and water's confirmed look survives it by re-expressing the authored value rather than re-tuning. §3.7 | 2026-09-05 |
+| Re-tune water after the color-space fix                                  | The obvious reading of "the fix changes what water looks like" — but it does not have to. Setting water's authored value to the sRGB encoding of the linear color it was already rendering reproduces the confirmed frame to within 3 × 10⁻⁵, so a phase dated `✅ 2026-09-04` keeps the look it was dated for. Re-tuning would have reopened it for nothing. §3.7 | 2026-09-05 |
 | Key the waterline's wobble to screen position                           | One fewer dot product, but the wave then stays glued to the view and slides sideways whenever the player turns their head. Still true for a mesh-based wave: it must be a function of world position and time, which is also what keeps chunk borders from seaming. §3.6 | 2026-09-05 |
 
 ---
 
 ## Document History
 
+* **v2.5** - **UW-6 closed `✅ 2026-09-05`, and with it the arc: every phase now carries a terminal
+  disposition.** The feel pass found more than authoring. (1) **Lava was authored blind and rendered
+  salmon.** New §3.7: `submersionColor` is authored through an sRGB picker, `Shader.SetGlobalColor`
+  converts nothing, and the overlay blends against a linear target — so every tint reached the screen
+  lighter and less saturated than its swatch, worst where a channel is small. `Pack` now converts, and
+  **water was re-expressed rather than re-tuned**: its authored value becomes the sRGB encoding of the
+  linear color it was already rendering, measured in game as bit-identical on two of three probes and
+  two 8-bit steps on the third, in the band showing the animated liquid surface. Lava is authored
+  `(0.85, 0.30, 0.05)` at density `1.5`, confirmed in game. New baseline **`B26`** (suite 25 → 26) with
+  literals computed outside the engine and its own tolerance, because the suite's color epsilon is
+  coarser than the gap between the exact sRGB curve and `pow(2.2)`. (2) **The frame-late publish is
+  fixed, not deferred** — §8 had parked it *on* UW-6, so closing the phase without it would have
+  stranded the deferral. It publishes from `RenderPipelineManager.beginCameraRendering` (§4.3),
+  confirmed at a 20 fps cap, since the symptom is invisible at this project's refresh rate. (3) **§8's
+  render-scale question closed in game**, with a measured profile beside it — and a note on why the
+  same measurement taken in lava was blind. (4) §8's "minimum weight belongs to UW-6's feel pass"
+  entry records that the pass did not call for one. **Promotion to `Architecture/` is now due and is
+  deliberately left undone**: `docs-sync` asks for a clean session on a multi-phase merge, and this one
+  must also decide where §3.6's UW-5 resume material lives, which an Architecture doc does not hold.
 * **v2.4** - **Code-review findings closed** (2026-09-05). A full-tree review of the branch returned five
   items; three were in this arc's shipped code. (1) **`FluidReachCells` now breaks on air.** §3.2's rule
   that reading past a gap is correct turns entirely on the block being an **occluder** the depth buffer
@@ -1061,5 +1127,5 @@ overlay and a clip-space reference to travel through the same target.
 ---
 
 **Last Updated:** 2026-09-05  
-**Next Review:** at UW-6 — lava's feel pass, in-game confirmation and `FLUID_BUGS` #02's archival, which
-UW-5's pause unblocked; or earlier, if UW-5 is picked back up
+**Next Review:** at the **promotion** to `Architecture/` — due now that every phase has a terminal
+disposition, and held for a clean session; or earlier, if UW-5 is picked back up

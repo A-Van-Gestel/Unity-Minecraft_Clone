@@ -9,7 +9,7 @@ using Scenario = Editor.Validation.Framework.Scenario;
 namespace Editor.Validation.PhysicsSolver
 {
     /// <summary>
-    /// Fluid buoyancy, drag and flow-push baselines (<c>FLUID_BUGS</c> #14 / #02) — the solver reading fluid
+    /// Fluid buoyancy, drag and flow-push baselines (<c>FLUID_BUGS</c> #14 / <c>_FIXED_BUGS</c> Fluid #21) — the solver reading fluid
     /// cells, which every other query in the engine deliberately discards.
     /// <para>
     /// <b>B27 is the positive control and must be read first.</b> The other 26 baselines would all stay green

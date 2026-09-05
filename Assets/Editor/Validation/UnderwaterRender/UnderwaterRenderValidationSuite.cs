@@ -9,7 +9,7 @@ using UnityEngine;
 namespace Editor.Validation.UnderwaterRender
 {
     /// <summary>
-    /// The submersion arc's baselines (<c>FLUID_BUGS</c> #02, design <c>UW-*</c>): that a fluid body renders
+    /// The submersion arc's baselines (<c>_FIXED_BUGS</c> Fluid #21, design <c>UW-*</c>): that a fluid body renders
     /// from inside it, and that the shared eye query reports the surface the mesher actually drew.
     /// <para>
     /// B1–B3 render <c>UberLiquidShader</c> in edit mode and compare against computed values rather than
@@ -186,8 +186,8 @@ namespace Editor.Validation.UnderwaterRender
         }
 
         /// <summary>
-        /// B2 — a fluid body must be visible from inside it, which is goal 1 of the design and the root cause
-        /// of <c>FLUID_BUGS</c> #02's remaining bullet.
+        /// B2 — a fluid body must be visible from inside it, which is goal 1 of the design and was the root
+        /// cause of <c>_FIXED_BUGS</c> Fluid #21's visual half.
         /// </summary>
         /// <remarks>
         /// A submerged camera sits inside a shell whose faces all point away from it. The geometry is emitted;

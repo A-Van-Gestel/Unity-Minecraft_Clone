@@ -47,8 +47,8 @@ that unblocks MR-8's smooth-lighting constraint), VX-9 (heat-haze distortion), V
   **shipped VX-3's cheap half** in 2026-09-04's `UW-4`, as a screen-space pass integrating
   Beer–Lambert absorption against an analytic box. **VX-3 + VX-5 are the exact replacement for that
   box**: a per-pixel DDA march of fluid occupancy removes both the shape error (L-shaped bodies
-  under-fog) and the per-cell stepping of the eye-cell extent scan. `UW-6` closes `FLUID_BUGS` #02
-  with the approximation in place; this report owns the upgrade.
+  under-fog) and the per-cell stepping of the eye-cell extent scan. `UW-6` closed
+  `_FIXED_BUGS` Fluid #21 on 2026-09-05 with the approximation in place; this report owns the upgrade.
 - [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](PERFORMANCE_IMPROVEMENTS_REPORT.md) — `GS-2` (opaque
   texture) still constrains every render-feature addition here. `GS-4` (render-tier audit) **closed
   2026-08-15 and constrains nothing**: it shipped Render Scale and MSAA settings but no device-tier

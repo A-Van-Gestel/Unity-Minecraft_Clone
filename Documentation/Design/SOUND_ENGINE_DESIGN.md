@@ -341,7 +341,7 @@ footfall and resets the accumulator.
 >
 > **Still open:** `Update` returns early whenever `IsGrounded` is false, so swimming produces no footsteps.
 > Deliberately deferred rather than fixed here — there is no swimming *mechanic* to sound
-> ([`../Bugs/FLUID_BUGS.md`](../Bugs/FLUID_BUGS.md) §02 "No player effect": no buoyancy or swimming
+> ([`../Bugs/_FIXED_BUGS.md`](../Bugs/_FIXED_BUGS.md) Fluid #21 "No player effect": no buoyancy or swimming
 > simulation, fluids are merely non-solid), and strokes would want their own clips distinct from walking and
 > wading. `Assets/Scripts/Physics/` still computes **no** liquid contact state at all — but that turned out not to
 > block `AudioContext.Submerged` (§5.3): S2 reads the block filling the listener's head cell and asks whether its
@@ -755,7 +755,7 @@ job and the managed query) and is seed-safe by construction.
 | **S7 — Per-track gain** ✅ | **Shipped 2026-08-30.** `AmbienceTrack.volume` plus per-clip trims for the database's own two beds, composed by `AmbienceResolution.BedSourceVolume`; the Loudness tab writes the Ambient role. Detail in §12. |   🟢   | S2 ✅; S6 ✅        |
 | **S8 — Music pools** ✅   | **Shipped 2026-08-30.** `MusicTrack` (clip + weight + volume) replacing both bare `AudioClip[]` pools, the `MusicResolution` layer (biome-share pool roll, then a weighted roulette, with a cross-pool repeat guard), a fourth import profile, `/music`, and the first music content (§9). Detail in §13. |   🟡   | S2 ✅; S7 ✅        |
 | **S10 — Music fades** ✅ | **Shipped 2026-08-31.** A single fade position on the music source driven by targets (opening fade-in, tail, stop, queued replacement), a decibel-linear `MusicResolution.GainFromFade` with an exact zero, `TailFadeTarget` and the short-clip `EffectiveFadeSeconds` clamp, a pending-track queue so an interruption fades across, and a listener fade before the world scene is torn down. Detail in §15. |   🟢   | S8 ✅              |
-| **S4 — Later**            | **Two-cell footstep sampling** ✅ (occupied cell + supporting cell, a non-solid occupant layered over the support — see the §5.1 note; shipped 2026-08-29). Still open: ungrounded/swimming steps (deferred — no swimming mechanic exists, `FLUID_BUGS.md` §02), v2 apply-site break/place hook (`VoxelModSource.Live` filter), hit/mining sounds, weather (RF-7), time-of-day (RF-1), `LEAVES` wind emitters.                                                                                                                                                                                                              |   —    | feature-gated     |
+| **S4 — Later**            | **Two-cell footstep sampling** ✅ (occupied cell + supporting cell, a non-solid occupant layered over the support — see the §5.1 note; shipped 2026-08-29). Still open: ungrounded/swimming steps (deferred — no swimming mechanic exists, `_FIXED_BUGS.md` Fluid #21), v2 apply-site break/place hook (`VoxelModSource.Live` filter), hit/mining sounds, weather (RF-7), time-of-day (RF-1), `LEAVES` wind emitters.                                                                                                                                                                                                              |   —    | feature-gated     |
 
 S0+S1 alone deliver the largest perceived-quality jump (block feedback + footsteps) and validate
 the whole data model; S2 and S3 are independent of each other and can land in either order.

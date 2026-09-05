@@ -348,7 +348,7 @@ namespace Editor.BlockEditor
                     _selectedBlock.infiniteSourceRegeneration = EditorGUILayout.Toggle(new GUIContent("Infinite Source Regeneration", "If true, this fluid will generate a new source block if it is horizontally adjacent to 2 other source blocks and has a solid floor."), _selectedBlock.infiniteSourceRegeneration);
                     _selectedBlock.spreadChance = EditorGUILayout.Slider(new GUIContent("Spread Chance", "Chance between 0.0 and 1.0 that this fluid will successfully spread horizontally on a given tick. 1.0 is fast, lower numbers are physically slower/thicker."), _selectedBlock.spreadChance, 0f, 1f);
 
-                    // --- Body Physics (FLUID_BUGS #14 / #02) ---
+                    // --- Body Physics (FLUID_BUGS #14 / _FIXED_BUGS Fluid #21) ---
                     EditorGUILayout.Space();
                     EditorGUILayout.LabelField("Body Physics", EditorStyles.boldLabel);
                     _selectedBlock.buoyancy = EditorGUILayout.Slider(new GUIContent("Buoyancy", "How strongly this fluid lifts a body inside it, as a fraction of gravity that gets cancelled. 0 = no support, 1 = neutral float, above 1 pushes the body up to the surface. Scaled by how much of the body is actually under the surface."), _selectedBlock.buoyancy, 0f, 2f);

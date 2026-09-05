@@ -5017,7 +5017,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
 
     /// <summary>
     /// Resolves what fluid, if any, a body's AABB is sitting in — the waterline, the current, and the
-    /// authored coefficients of the fluid responsible (<c>FLUID_BUGS</c> #14 / #02).
+    /// authored coefficients of the fluid responsible (<c>FLUID_BUGS</c> #14 / <c>_FIXED_BUGS</c> Fluid #21).
     /// </summary>
     /// <param name="bodyAABB">The body's <b>Unity-space</b> AABB.</param>
     /// <param name="contact">The resolved contact; <c>default</c> (no fluid) when the body is in air.</param>
