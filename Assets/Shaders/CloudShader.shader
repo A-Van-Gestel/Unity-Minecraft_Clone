@@ -25,6 +25,13 @@ Shader "Minecraft/CloudShader"
         {
             Name "CloudPass"
 
+            // A LightMode URP does not draw itself, so the pass is drawn early enough to land in
+            // _CameraOpaqueTexture. The queue stays Transparent: it still sorts and blends as one.
+            Tags
+            {
+                "LightMode"="VoxelCloud"
+            }
+
             HLSLPROGRAM
             #pragma vertex vert
             #pragma fragment frag

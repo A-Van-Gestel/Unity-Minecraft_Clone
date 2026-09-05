@@ -110,10 +110,12 @@ still present.
   good enough at the eighth pass rather than tuned further: `VX-3` on `VX-5` is the exact replacement
   and deletes both `_SubmersionBounds` and `World.MeasureHorizontalExtent`.
 
-**Adjacent limitation, not part of this entry:** clouds are not visible through a water surface. The
-liquid shader reads what is behind it from `_CameraOpaqueTexture`, which URP fills before any
-transparent geometry draws, and `CloudShader` is `Queue="Transparent"`. Cause, consequences and the two
-possible fixes are recorded in the design doc's §8; the work belongs to the cloud backlog.
+**Adjacent limitation, fixed by `CL-9` (2026-09-05):** clouds were not visible through a water surface.
+The liquid shader reads what is behind it from `_CameraOpaqueTexture`, which URP fills before any
+transparent geometry draws, and `CloudShader` was `Queue="Transparent"`. The cloud draw now runs from
+`CloudPrepassRendererFeature` at `AfterRenderingSkybox`, on the near side of that copy. Everything else
+transparent seen through water — glass, leaves — is still missing for the original reason, and the trade
+runs the other way too: a fluid surface viewed from *above* the cloud layer is invisible through the cloud.
 
 Lava is authored a first pass thicker than water, but a proper lava feel pass has not been done —
 `UW-6` owns it.
