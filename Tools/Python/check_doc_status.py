@@ -49,6 +49,7 @@ STATUS FIELD SHAPES HANDLED (all three occur in this tree)
     * own line, possibly wrapping   — `**Status:** ...`      (51 of 60 docs)
     * blockquoted                   — `> **Status:** ...`    (3)
     * inline beside other fields    — `**Version:** 1.0 **Status:** ...` (3)
+    Row targets are percent-DECODED before resolution, so `Testing%20Framework/` resolves.
     Three docs carry no Status field at all; they are Architecture docs the index does not link, so
     they surface here only if one is ever added to it.
 
@@ -68,6 +69,7 @@ import io
 import os
 import re
 import sys
+from urllib.parse import unquote
 
 # Tested BEFORE the open rules, and deliberately only one entry long. Which markers are safe here
 # was measured, not assumed: "superseded" appears in the Status of three currently-OPEN docs and
@@ -209,7 +211,9 @@ def main():
     index_dir = os.path.dirname(index_path)
     for target, want in listed:
         # Resolved against the index's own directory, which is what the row's relative link means.
-        path = os.path.normpath(os.path.join(index_dir, target))
+        # Percent-decoded first: `Architecture/Testing%20Framework/…` is the CORRECT markdown
+        # spelling of a path with a space, and resolving it raw reports a live doc as missing.
+        path = os.path.normpath(os.path.join(index_dir, unquote(target)))
         if not os.path.exists(path):
             findings.append((target, 'MISSING', want, 'the index links a file that does not exist'))
             continue

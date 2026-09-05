@@ -1,6 +1,6 @@
 # Open Work Index
 
-**Version:** 1.3  
+**Version:** 1.4  
 **Date:** 2026-09-05  
 **Status:** **Open backlog.** A pointer map, not a tracker — rows are added and removed as docs
 gain or lose open work, never as individual items move.  
@@ -42,6 +42,22 @@ that repeated them would go stale the first time it did.
 **Adding a row:** when a document starts owning open work. **Removing a row:** when it stops.
 Nothing else in this file changes as individual items ship.
 
+**Scope — which documents can appear here at all.** Any document that *owns* unfinished work,
+wherever it lives. That is mostly `Design/`, plus the `Architecture/Testing Framework/` harness
+docs, which are backlogs that happen to sit in the Architecture tree. Two categories are excluded
+**on purpose**, not by oversight:
+
+- **Current-state Architecture docs.** `CAVE_GENERATION`, `DATA_STRUCTURES` and the ~20 like them
+  describe code and own no items. Nothing about them belongs on a map of unfinished work.
+- **Architecture docs that *name* a deferral.** An Architecture doc's limitations section records
+  what a shipped system deliberately does not do, and often names the ID that will fix it — §4. The
+  **owner** of that ID is a document in §2, and that is the row. The mention is not a second one.
+
+The distinction is load-bearing rather than tidy: `Architecture/UNDERWATER_AND_SUBMERSION_RENDERING.md`
+reads as OPEN to `check_doc_status.py` purely because its Status names the ⏸️ paused `UW-5` — an
+Implemented doc whose paused item is owned by `ANIMATED_LIQUID_SURFACE.md`. Admitting that category
+would put the same item on the map twice and mis-sort the doc.
+
 ---
 
 ## 2. Where the open work lives
@@ -71,6 +87,9 @@ Nothing else in this file changes as individual items ship.
 | **Chunk palette mapping** | [`CHUNK_PALETTE_MAPPING.md`](CHUNK_PALETTE_MAPPING.md) | — | Draft, unscheduled; nothing built. Re-verify its prerequisites before starting |
 | **World scaling (remaining tiers)** | [`WORLD_SCALING_ANALYSIS.md`](WORLD_SCALING_ANALYSIS.md) | Tiers A–C | Tier B shipped; **Tiers A and C still unbuilt**. Also the standing "what breaks per tier" reference |
 | **Device calibration** | [`OM1_DEVICE_CALIBRATION.md`](OM1_DEVICE_CALIBRATION.md) | `OM-` | Implemented and player-build verified; **pending its final calibration pass** |
+| **Meshing harness coverage** | [`MESHING_VALIDATION_HARNESS_FIDELITY.md`](../Architecture/Testing%20Framework/MESHING_VALIDATION_HARNESS_FIDELITY.md) | `MH-` | Active backlog; Waves 1–3 and 5 closed, optimization items open |
+| **Chunk-pipeline harness coverage** | [`CHUNK_PIPELINE_VALIDATION_HARNESS_FIDELITY.md`](../Architecture/Testing%20Framework/CHUNK_PIPELINE_VALIDATION_HARNESS_FIDELITY.md) | `NS-` | Active backlog; slice 1 shipped (`NS-3`), 7 baselines |
+| **Lighting harness coverage** | [`LIGHTING_VALIDATION_HARNESS_FIDELITY.md`](../Architecture/Testing%20Framework/LIGHTING_VALIDATION_HARNESS_FIDELITY.md) | `C`-numbered gaps | Living document; the `OPEN` rows of its gap table remain, `B5` among them |
 
 ---
 
@@ -115,6 +134,17 @@ doc, not to grow an item row here.
 
 ## Document History
 
+* **v1.4** - **Scope settled and the harness backlogs admitted (2026-09-06).** §1 now states which
+  documents can appear here at all, because the `Architecture/` tree is three populations and only
+  one is a candidate: its ~20 current-state docs own nothing, its limitation sections only *name*
+  deferrals owned elsewhere, and its `Testing Framework/` harness docs are backlogs that happen to
+  live there. The last group gains rows — `MH-*`, `NS-*` and the lighting gap table — so the index
+  covers work it was previously blind to by accident rather than by rule.
+  `BEHAVIOR_VALIDATION_HARNESS_FIDELITY` was checked and gets **no** row: `BH-1`…`BH-8` and `BH-D1`
+  are all closed, retracted or built (`BH-6`'s determinism invariant is live in
+  `BehaviorValidationSuite.Baseline.cs`), and only two stale pre-build headers suggest otherwise.
+  `LIGHTING_VALIDATION_HARNESS_FIDELITY`'s bare "Living document" status was amended to say it owns
+  gaps, which is both true and what makes it classifiable.
 * **v1.3** - `DG-5` shipped, so the `DG-*` row returns to §3 (2026-09-05) — its third move in a day.
   **This one was caught by a tool rather than by a person**: marking DG-5 complete turned the §2 row
   red in `check_doc_status.py` within a minute, which is exactly the drift the phase was filed to
