@@ -1,11 +1,12 @@
 # Documentation Lifecycle & Open-Work Index (DG-*)
 
-**Version:** 1.2  
+**Version:** 1.3  
 **Date:** 2026-09-05  
-**Status:** ✅ **Implemented — DG-0…DG-4 all shipped 2026-09-05.** The inventory corrected this
-document's own scope (§2.1), the README and the promotion protocol state one rule,
-[`OPEN_WORK_INDEX.md`](OPEN_WORK_INDEX.md) is live, and both promoted designs are deleted. The rule
-now applies to future promotions; §2.1's tiers 2–4 stay in `Design/` by design.  
+**Status:** **Partially implemented.** **DG-0…DG-4 shipped 2026-09-05** — the rule is written in one
+place, [`OPEN_WORK_INDEX.md`](OPEN_WORK_INDEX.md) is live, and both promoted designs are deleted.
+**DG-5 is open**: the arc closed with a hole it then fell into twice the same day (§3.5), and until
+that lands, a document whose state moves *because another document's state moved* drifts with
+nothing to catch it.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production) — documentation-only, no code
 
 > What happens to a Design doc after its Architecture doc exists. Today two written rules disagree:
@@ -230,6 +231,55 @@ a session for a document written that same day — so six is a multi-session arc
 in a folder that would still hold them meanwhile. If any is promoted later on its own merits, §3.1
 applies to it then.
 
+### 3.5 The trigger gap: drift with no code change behind it
+
+**Found by falling into it twice on 2026-09-05, hours apart, in docs this arc had just touched.**
+
+1. [`STEAM_AUDIO_INTEGRATION.md`](STEAM_AUDIO_INTEGRATION.md)'s Status said the base sound engine
+   "has not started". `S0`–`S3` had shipped weeks earlier. Its `**Next Review:**` trigger —
+   *"only when `SOUND_ENGINE_DESIGN.md` S0–S3 have shipped"* — had **fired silently**. It surfaced by
+   accident, while status lines were being read for something else.
+2. [`OPEN_WORK_INDEX.md`](OPEN_WORK_INDEX.md) listed `DG-*` as owning open work hours after DG-4
+   closed it. The index went stale **for its own arc**, and a person caught it, not a tool.
+
+**The cause is structural, not carelessness.** `docs-sync` fires on a **code change** or on a
+**promotion**. Neither happened in either case: the code was months old and no promotion occurred —
+what moved was *another document's state*. And the three checkers read links
+(`check_doc_links.py`), `@`-references (`check_doc_refs.py`) and trailing whitespace
+(`check_markdown_breaks.py`). **None of them can read a status claim**, so all three stayed green
+through both.
+
+**The two halves are not equally tractable, and the design turns on that.** Measured 2026-09-05:
+
+| | Index-vs-owner drift (case 2) | Prerequisite drift (case 1) |
+|---|---|---|
+| Shape | `OPEN_WORK_INDEX.md` §2 lists a doc; that doc's own Status says closed | Doc A's Status describes doc B's state; B moved |
+| Inputs | Both sides are `**Status:**` fields | A's claim is prose; the trigger is prose |
+| Tractable? | **Yes** — 57 of 60 `Design/`+`Architecture/` docs expose a parseable Status (51 at line start, 3 blockquoted `> **Status`, 3 inline beside other fields) | **No** — `**Next Review:**` exists in 38 docs and only **6** cite a backticked ID, so an ID-resolver would miss ~84 % |
+| Fix | A checker | A `docs-sync` step |
+
+⚠️ **A checker alone would not have caught either case, because nothing runs it.** There is **no CI
+in this repo — no `.github` directory at all.** The three existing checkers run only when an agent
+invokes them, mandated by `docs-sync` SKILL.md and `promotion-protocol.md`. So the enforcement point
+is the **skill**, and a tool is only worth adding where it is *also* wired into a step the skill
+already requires.
+
+⚠️ **The classifier is the risk, and it must be proven before it is trusted.** Deciding "closed" vs
+"open" from prose is not obviously reliable: `SOUND_ENGINE_DESIGN.md` reads *"Partially implemented —
+S0–S3 … shipped"*, which contains "shipped" and is open. A checker that false-positives gets ignored,
+which is strictly worse than no checker. DG-5's first step is therefore to run the classifier over
+all 57 parseable docs and confirm zero false positives — **not** to ship the tool and see.
+
+**Deferred, not rejected: a structured `**Blocked-by:**` field.** It would make prerequisite drift
+mechanically checkable too, and is the only thing that would. It is also a 38-doc migration and a
+new authoring convention, so it should earn its way in after the cheaper halves have proved useful
+(§6).
+
+**Also found while measuring, and out of scope here:** `DATA_STRUCTURES.md`,
+`FLUID_SHORELINE_RENDERING.md` and `PERFORMANCE_PROFILER_OVERHAUL.md` carry **no `**Status:**` field
+at all**, which `create-design-doc` Step 3 makes mandatory. They are the 3 of 60 the parser cannot
+read, so DG-5 has to decide whether that is a finding it reports or a gap it fixes first.
+
 ---
 
 ## 4. Phased implementation plan
@@ -241,6 +291,8 @@ applies to it then.
 | **DG-2 — Protocol** ✅ 2026-09-05 | Rewrite `promotion-protocol.md` Step 4 and `docs-sync` SKILL.md Step 2b/2c to match: delete rather than retain, state the `## ID index` test that separates a promotion from a closed arc (§3.4), add the *closed, retained* disposition, carve the explicit `Documentation/Bugs/` exception for repointing inbound links, and require the DG-3 index row before deletion. **Lands in the same commit as DG-1** (§3.3). `.agents/` and `.claude/` are the same inode — one edit, both twins. | 🟢 | DG-1 | — |
 | **DG-3 — The index** ✅ 2026-09-05 | [`OPEN_WORK_INDEX.md`](OPEN_WORK_INDEX.md), seeded from DG-0's inventory. Shipped **per-document** rather than per-item (§3.2, amended) — 24 area rows plus the six closed-retained docs. **Prerequisite for DG-4**, not a follow-up: deleting a design before its open items have a home is the regression §3.1 accepts only because this exists. | 🟡 | DG-0 | ✅ |
 | **DG-4 — Delete the two** ✅ 2026-09-05 | Apply §3.1 to **tier 1** only (§2.1): `UNDERWATER_AND_SUBMERSION_RENDERING` first, then `TOAST_NOTIFICATION_SYSTEM`. One commit each: add the index row, repoint inbound links (incl. `_FIXED_BUGS.md`), **remove the Architecture doc's "the design this was promoted from" relationship bullet** — a deliberate link, so a zero-hits sweep would read it as breakage rather than as intent — then delete. Tiers 2–4 are untouched; they get DG-2's *closed, retained* status line instead. | 🟢 | DG-2, DG-3 | ✅ |
+
+| **DG-5 — Close the trigger gap** | §3.5. Two halves, both required. **(a)** `Tools/Python/check_doc_status.py` — parse `OPEN_WORK_INDEX.md` §2/§3, resolve each linked doc's `**Status:**` (three shapes), and flag a §2 row whose owner reads closed or a §3 row whose owner reads open. Fail loudly if §2 parses to zero rows or the headings move, and report unparseable docs as their own category rather than skipping them silently. **Prove the classifier against all 57 parseable docs before wiring it in.** **(b)** a `docs-sync` step: when an item, phase or arc closes, grep `Documentation/` for docs citing that ID and re-read their `**Status:**` — the only cover for prerequisite drift, and it is discipline, not enforcement. Wire (a) into the skill's existing checker list, or it will never run. | 🟡 | DG-3 | — |
 
 *Status: `—` not started · `In progress` · `✅ YYYY-MM-DD` complete · `⏸️ YYYY-MM-DD` deliberately
 not implemented · `⛔ Superseded YYYY-MM-DD — <by what>`.*
@@ -280,6 +332,9 @@ bound.
 | Rely on Architecture docs' limitation sections for open items | They record deferrals well but are reachable only by already knowing which system to read. §3.2 | 2026-09-05 |
 | Promote the six closed-but-unpromoted arcs, then delete them | Each is a full promotion — the `UW-*` one took a session for a doc written that same day — so six is a multi-session arc bought for tidiness, in a folder that holds them meanwhile either way. §3.4 | 2026-09-05 |
 | Delete the closed-but-unpromoted arcs anyway, repointing links at `Architecture/` | Fastest route to a clean `Design/`, and it discards content the Architecture docs explicitly defer to — `CHUNK_LIFECYCLE_PIPELINE.md:427` sends the reader to "the CP doc §3.3/§7 CP-3". §3.4 | 2026-09-05 |
+| A structured `**Blocked-by:**` field so prerequisite drift becomes checkable | **Deferred, not refused** (§3.5). It is the only mechanism that would catch the `STEAM_AUDIO_INTEGRATION` case mechanically, and it is a 38-doc migration plus a new authoring convention — it should follow DG-5's cheaper halves rather than ride in with them. | 2026-09-05 |
+| Ship a status checker without a `docs-sync` step | There is **no CI in this repo** (no `.github` at all), so a checker nobody is told to run catches nothing. The enforcement point here is the skill; a tool has to be wired into a step the skill already requires. §3.5 | 2026-09-05 |
+| Cover prerequisite drift by resolving IDs out of `**Next Review:**` | The obvious automation, refuted by measurement: 38 docs carry the field and only **6** cite a backticked ID, so a resolver would miss ~84 % of triggers while looking authoritative. §3.5 | 2026-09-05 |
 | Treat "the Architecture docs cite this design's IDs" as proof of promotion | It is the intuitive test and it is wrong: ten of twelve closed designs are cited without ever having been merged. The `## ID index` — the promotion's own artifact — is the test that separates them. §3.4 | 2026-09-05 |
 | Fix `README.md` alone and leave the protocol as-is | Recreates the split in the other direction: README is referenced by nothing, the skill is loaded every invocation, so the skill would keep winning. §3.3 | 2026-09-05 |
 | Delete and leave `_FIXED_BUGS.md`'s inbound link broken | Respects `docs-sync`'s no-editing-`Bugs/` constraint, but a knowingly broken link in the bug archive is worse than the boundary crossing. DG-2 carves the exception instead. §3.1 | 2026-09-05 |
@@ -288,6 +343,14 @@ bound.
 
 ## Document History
 
+* **v1.3** - **`DG-5` filed, reopening the arc (2026-09-05).** The rule shipped with a hole and then
+  fell into it twice the same day: a `**Next Review:**` trigger fired silently in
+  `STEAM_AUDIO_INTEGRATION.md`, and `OPEN_WORK_INDEX.md` went stale for `DG-*` itself within hours.
+  New §3.5 names the cause — `docs-sync` fires on a code change or a promotion, and neither happened;
+  what moved was another document's state — and measures which half is fixable by tooling. Index-vs-
+  owner drift **is** (57 of 60 docs expose a parseable `**Status:**`); prerequisite drift **is not**
+  (only 6 of 38 `**Next Review:**` lines cite an ID). With no CI in the repo, the checker only counts
+  if the skill requires it, so DG-5 carries both halves. §6 gains three rejected/deferred rows.
 * **v1.2** - **DG-1…DG-4 shipped (2026-09-05), closing the arc.** README and
   `promotion-protocol.md` Step 4 now state one rule, with the `## ID index` test that separates a
   promotion from a merely-closed arc and the narrow `Documentation/Bugs/` exception for repointing
@@ -318,4 +381,5 @@ bound.
 ---
 
 **Last Updated:** 2026-09-05  
-**Next Review:** at the next promotion — it is the first use of the rule this arc wrote
+**Next Review:** when `DG-5` starts — its first step is proving the status classifier against the
+57 parseable docs, before any tool is wired in
