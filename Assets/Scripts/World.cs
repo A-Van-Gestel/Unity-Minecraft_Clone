@@ -5144,8 +5144,9 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     {
         submersion = default;
 
-        // Published from Update, which can outlive a world unload by a frame. Guarded on IsDisposed, not on
-        // the arrays' IsCreated, which stays true after disposal — see JobDataManager.Dispose's remarks.
+        // Fails soft: reachable on a World whose native data is already torn down (a world unload, or an
+        // edit-mode fixture built without StartWorld). Guarded on IsDisposed, not the arrays' IsCreated,
+        // which stays true after disposal — see JobDataManager.Dispose's remarks.
         if (FluidVertexTemplates == null || FluidVertexTemplates.IsDisposed) return;
         if (JobDataManager == null || JobDataManager.IsDisposed) return;
 
