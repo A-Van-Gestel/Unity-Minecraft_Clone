@@ -51,7 +51,13 @@ from urllib.parse import unquote, urlsplit
 
 # Inline markdown link: [label](target). The label may contain backticks and nested brackets are
 # rare enough in this tree that a non-greedy label is the right trade.
-LINK = re.compile(r'\[[^\]]*\]\(([^()\s]+)\)')
+#
+# The target deliberately allows spaces and parentheses. A raw space is BROKEN markdown that no
+# renderer resolves — `Architecture/World Generation/` makes it an easy mistake here — and the
+# earlier `[^()\s]+` form skipped those links silently, reporting "all links resolve" over them.
+# Reporting a broken link beats not seeing it. `.md` anchoring keeps the looser match from eating
+# ordinary prose parentheses that follow a link.
+LINK = re.compile(r'\[[^\]]*\]\(([^()]*?\.md(?:#[^()\s]*)?)\)|\[[^\]]*\]\(([^()\s]+)\)')
 
 SKIPPED_SCHEMES = ('http://', 'https://', 'mailto:', 'ftp://')
 
@@ -100,6 +106,51 @@ def _target_of(raw):
     return path
 
 
+_LISTING = {}
+
+
+def _listing(directory):
+    """The real names in `directory`, cached — one listdir per directory, not per link."""
+    if directory not in _LISTING:
+        try:
+            _LISTING[directory] = set(os.listdir(directory))
+        except OSError:
+            _LISTING[directory] = set()
+    return _LISTING[directory]
+
+
+def _resolves(path):
+    """Whether `path` exists with EXACTLY this spelling, case included, in every component.
+
+    `os.path.exists` is case-insensitive on Windows, where this repo is developed — so a link whose
+    case drifted from the file (after a case-only rename, say) passes locally and breaks on GitHub
+    and on any case-sensitive checkout. Since this checker is the stated gate before moving,
+    renaming or deleting a doc, that is exactly the operation it would wave through.
+
+    Every component is checked, not just the filename: `Documentation/design/X.md` is as broken as
+    `Documentation/Design/x.md`, and only the second is caught by testing the leaf alone.
+    """
+    path = os.path.abspath(path)
+    if not os.path.exists(path):
+        return False
+
+    components = []
+    head = path
+    while True:
+        head, tail = os.path.split(head)
+        if not tail:
+            break
+        components.append(tail)
+
+    current = head  # the drive or filesystem root, whose own spelling is not ours to police
+    for component in reversed(components):
+        if component not in _listing(current):
+            return False
+        current = os.path.join(current, component)
+
+    return True
+
+
 def scan(roots):
     """Return (links, files_scanned, skipped) — links are (target, source_file, line) triples."""
     links = []
@@ -110,7 +161,8 @@ def scan(roots):
             files_scanned += 1
             with open(path, 'r', encoding='utf-8', errors='replace') as handle:
                 for number, line in enumerate(handle, start=1):
-                    for raw in LINK.findall(line):
+                    for match in LINK.finditer(line):
+                        raw = match.group(1) or match.group(2)
                         target = _target_of(raw)
                         if target:
                             links.append((target, path, number))
@@ -145,7 +197,7 @@ def main():
     # Resolved against the LINKING file's directory, which is what a relative link means.
     missing = {}
     for target, source, number in links:
-        if os.path.exists(os.path.normpath(os.path.join(os.path.dirname(source), target))):
+        if _resolves(os.path.normpath(os.path.join(os.path.dirname(source), target))):
             continue
         missing.setdefault((_display(source), target), []).append(number)
 

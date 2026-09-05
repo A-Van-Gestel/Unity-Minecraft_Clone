@@ -15,7 +15,8 @@ WHAT THIS GUARDS
 WHAT IT CHECKS
     §2 of the index ("Where the open work lives") — every linked doc must read as OPEN.
     §3 ("Closed arcs retained") — every linked doc must read as CLOSED.
-    A row on the wrong side, or a doc this cannot classify, is a finding.
+    A row on the wrong side, a doc listed in BOTH sections (the half-finished move: §3 row added,
+    §2 row never removed), or a doc this cannot classify, is a finding.
 
 WHAT IT DOES NOT CHECK
     **Prerequisite drift** — doc A's Status describing doc B's state, the other half of `DG-5`.
@@ -27,14 +28,22 @@ WHAT IT DOES NOT CHECK
     unbounded — there is no list of what should have been listed.
 
 THE CLASSIFIER, AND WHY IT IS ORDERED
-    Ordered keyword rules over the Status text, not a general reading of it. OPEN is tested FIRST
-    and that order is load-bearing: "Partially implemented" contains "implemented", and testing
-    CLOSED first would call every partially-implemented doc closed. Anything matching neither list
-    is **UNKNOWN and reported**, never quietly passed — a checker that silently skips what it cannot
-    parse is the false green this exists to remove.
+    Ordered keyword rules over the Status text, not a general reading of it. Three tiers, in order:
+      1. STRONG_CLOSED — the `⛔` taxonomy symbol only, so an explicitly-superseded doc cannot be
+         dragged open by incidental prose.
+      2. OPEN — tested before CLOSED, and that order is load-bearing: "Partially implemented"
+         contains "implemented", so the other order calls every partially-implemented doc closed.
+      3. CLOSED.
+    Anything matching no tier is **UNKNOWN and reported**, never quietly passed — a checker that
+    silently skips what it cannot parse is the false green this exists to remove.
 
-    Calibrated 2026-09-05 against all 30 rows the index then carried (24 open + 6 closed): zero
-    mismatches, zero unclassified. Re-run that calibration before trusting a rule change.
+    Calibrated against every row the index carries: zero mismatches, zero unclassified. **Re-run
+    that calibration AND the fixtures before trusting a rule change** — calibration alone passed
+    30/30 while four extractor bugs were live, because it exercises `classify` and barely touches
+    `_rows`.
+
+    Known limit: the rules cannot read negation. A status saying "nothing remains open" reads as
+    OPEN. No current doc is phrased that way, and fixing it needs more than keywords.
 
 STATUS FIELD SHAPES HANDLED (all three occur in this tree)
     * own line, possibly wrapping   — `**Status:** ...`      (51 of 60 docs)
@@ -60,15 +69,21 @@ import os
 import re
 import sys
 
-# Ordered rules over the lower-cased Status text. OPEN first — see the module docstring.
+# Tested BEFORE the open rules, and deliberately only one entry long. Which markers are safe here
+# was measured, not assumed: "superseded" appears in the Status of three currently-OPEN docs and
+# "arc is complete" in a fourth, so promoting either would invent four false failures.
+STRONG_CLOSED_RULES = [r'⛔']
+
+# Ordered rules over the lower-cased Status text — see the module docstring for why.
 OPEN_RULES = [
     r'open backlog', r'living backlog', r'active backlog', r'partially implemented',
     r'proposed design', r'\bdraft\b', r'in progress', r'not implemented', r'not started',
-    r'unbuilt', r'remains?\b', r'still open', r'⏸️', r'pending', r'is open\b', r'are open\b',
+    r'unbuilt', r'remains? (open|unbuilt|outstanding|to be)', r'still open', r'⏸️', r'pending',
+    r'is open\b', r'are open\b',
 ]
 CLOSED_RULES = [
     r'⛔', r'superseded', r'arc closed', r'fully closed', r'all shipped', r'historical record',
-    r'core question is closed', r'arc is complete', r'\bimplemented\b', r'is closed\b',
+    r'core question is closed', r'arc is complete', r'closed arc', r'\bimplemented\b', r'is closed\b',
 ]
 
 INDEX = 'Documentation/Design/OPEN_WORK_INDEX.md'
@@ -109,6 +124,9 @@ def classify(text):
         return 'NO-STATUS', ''
 
     lowered = text.lower()
+    for rule in STRONG_CLOSED_RULES:
+        if re.search(rule, lowered):
+            return 'CLOSED', rule
     for rule in OPEN_RULES:
         if re.search(rule, lowered):
             return 'OPEN', rule
@@ -120,17 +138,27 @@ def classify(text):
 
 
 def _rows(section):
-    """Yield the doc filename linked by each table row in one index section.
+    """Yield the link target of each table row in one index section, exactly as written.
 
     Only table rows count. A prose pointer inside the section — the §3 intro links the design doc
     that defines the rule — is not a row, and counting it silently inverts that doc's verdict.
+
+    The target is yielded verbatim rather than reduced to a basename, so the caller resolves it
+    relative to the index: `Architecture/X.md` and `Design/X.md` coexist during every promotion, and
+    a basename lookup silently reads whichever the directory walk happened to reach first.
     """
     for line in section.splitlines():
-        if not line.startswith('|') or '---' in line:
+        if not line.startswith('|'):
             continue
-        match = re.search(r'\]\(([A-Za-z_0-9%./]+\.md)\)', line)
+        # A separator row is ONLY pipes, dashes, colons and whitespace. Testing for '---' anywhere
+        # in the line silently dropped any row whose text cell contained a dash run.
+        if re.fullmatch(r'[\s|:\-]+', line):
+            continue
+        # The charset must include '-': Documentation/Performance/ is full of dated filenames, and
+        # a row linking one used to match nothing and be skipped without a word.
+        match = re.search(r'\]\(([A-Za-z0-9_%./\-]+\.md)\)', line)
         if match:
-            yield os.path.basename(match.group(1))
+            yield match.group(1)
 
 
 def main():
@@ -151,13 +179,16 @@ def main():
               .format(INDEX, OPEN_SECTION, CLOSED_SECTION, END_SECTION), file=sys.stderr)
         return 2
 
-    expected = {}
-    for name in _rows(index.split(OPEN_SECTION)[1].split(CLOSED_SECTION)[0]):
-        expected[name] = 'OPEN'
-    open_count = len(expected)
-    for name in _rows(index.split(CLOSED_SECTION)[1].split(END_SECTION)[0]):
-        expected[name] = 'CLOSED'
-    closed_count = len(expected) - open_count
+    # Collected as a LIST of (target, section), never a dict keyed on the doc. A doc listed in both
+    # sections is precisely the half-finished move this tool guards — §3 row added, §2 row not
+    # removed — and a dict would let the second write overwrite the first, hiding the contradiction
+    # and corrupting the counts along with it.
+    listed = [(target, 'OPEN') for target in _rows(
+        index.split(OPEN_SECTION)[1].split(CLOSED_SECTION)[0])]
+    open_count = len(listed)
+    listed += [(target, 'CLOSED') for target in _rows(
+        index.split(CLOSED_SECTION)[1].split(END_SECTION)[0])]
+    closed_count = len(listed) - open_count
 
     # A section that yields nothing means the scan broke, not that the tree is clean.
     if not open_count or not closed_count:
@@ -165,30 +196,34 @@ def main():
               .format(INDEX, open_count, closed_count), file=sys.stderr)
         return 2
 
-    on_disk = {}
-    for dirpath, _dirnames, filenames in os.walk(os.path.join(REPO_ROOT, 'Documentation')):
-        for name in filenames:
-            if name.lower().endswith('.md'):
-                on_disk.setdefault(name, os.path.join(dirpath, name))
-
     findings = []
-    for name in sorted(expected):
-        want = expected[name]
-        path = on_disk.get(name)
-        if path is None:
-            findings.append((name, 'MISSING', want, 'the index links a file that does not exist'))
+
+    # A doc in both sections contradicts itself regardless of what its Status says.
+    seen = {}
+    for target, section in listed:
+        if target in seen and seen[target] != section:
+            findings.append((target, 'BOTH', section,
+                             'listed in §2 AND §3 — one of the two rows was never removed'))
+        seen[target] = section
+
+    index_dir = os.path.dirname(index_path)
+    for target, want in listed:
+        # Resolved against the index's own directory, which is what the row's relative link means.
+        path = os.path.normpath(os.path.join(index_dir, target))
+        if not os.path.exists(path):
+            findings.append((target, 'MISSING', want, 'the index links a file that does not exist'))
             continue
 
         verdict, rule = classify(status_text(path))
         if args.list:
-            print('  {:52s} {:9s} (index says {})'.format(name, verdict, want))
+            print('  {:52s} {:9s} (index says {})'.format(target, verdict, want))
         if verdict in ('UNKNOWN', 'NO-STATUS'):
-            findings.append((name, verdict, want, 'cannot classify this doc\'s Status field'))
+            findings.append((target, verdict, want, 'cannot classify this doc\'s Status field'))
         elif verdict != want:
-            findings.append((name, verdict, want, 'matched rule: {}'.format(rule)))
+            findings.append((target, verdict, want, 'matched rule: {}'.format(rule)))
 
     print('Checked {} index rows ({} in §2 open, {} in §3 closed)'
-          .format(len(expected), open_count, closed_count))
+          .format(len(listed), open_count, closed_count))
 
     if not findings:
         print('Every row agrees with its document.')
@@ -196,8 +231,11 @@ def main():
 
     print('\n{} row(s) disagree with their document:'.format(len(findings)))
     for name, verdict, want, why in findings:
-        print('  {}\n      index section says {}, the document reads {} — {}'
-              .format(name, want, verdict, why))
+        if verdict == 'BOTH':
+            print('  {}\n      {}'.format(name, why))
+        else:
+            print('  {}\n      index section says {}, the document reads {} — {}'
+                  .format(name, want, verdict, why))
     return 1
 
 
