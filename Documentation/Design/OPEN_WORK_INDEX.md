@@ -1,6 +1,6 @@
 # Open Work Index
 
-**Version:** 1.0  
+**Version:** 1.1  
 **Date:** 2026-09-05  
 **Status:** **Open backlog.** A pointer map, not a tracker — rows are added and removed as docs
 gain or lose open work, never as individual items move.  
@@ -71,7 +71,6 @@ Nothing else in this file changes as individual items ship.
 | **Chunk palette mapping** | [`CHUNK_PALETTE_MAPPING.md`](CHUNK_PALETTE_MAPPING.md) | — | Draft, unscheduled; nothing built. Re-verify its prerequisites before starting |
 | **World scaling (remaining tiers)** | [`WORLD_SCALING_ANALYSIS.md`](WORLD_SCALING_ANALYSIS.md) | Tiers A–C | Tier B shipped; **Tiers A and C still unbuilt**. Also the standing "what breaks per tier" reference |
 | **Device calibration** | [`OM1_DEVICE_CALIBRATION.md`](OM1_DEVICE_CALIBRATION.md) | `OM-` | Implemented and player-build verified; **pending its final calibration pass** |
-| **Doc lifecycle** | [`DOC_LIFECYCLE_AND_OPEN_WORK_INDEX.md`](DOC_LIFECYCLE_AND_OPEN_WORK_INDEX.md) | `DG-` | `DG-0`…`DG-3` done; **`DG-4` remains** |
 
 ---
 
@@ -93,6 +92,11 @@ The test that separates these from a promotion is whether an Architecture doc ca
 | [`FLIGHT_PROFILE_CAPTURE.md`](FLIGHT_PROFILE_CAPTURE.md) | `FP-0`…`FP-4` | All shipped |
 | [`WORLD_SCALING_IMPLEMENTATION.md`](WORLD_SCALING_IMPLEMENTATION.md) | `WS-*`, `OQ-1`…`OQ-7` | Track fully closed |
 | [`SUN_APPEARANCE_IMPROVEMENTS.md`](SUN_APPEARANCE_IMPROVEMENTS.md) | `SN-0`…`SN-4` | 2026-08-15 |
+| [`DOC_LIFECYCLE_AND_OPEN_WORK_INDEX.md`](DOC_LIFECYCLE_AND_OPEN_WORK_INDEX.md) | `DG-0`…`DG-4` | 2026-09-05 |
+
+⚠️ The last row is not like the others. Its arc is closed, but the **rule it wrote is live** and
+governs every future promotion — including whether a design may be deleted at all. It is retained
+because it is the standing reference, not merely because it has no Architecture counterpart.
 
 ---
 
@@ -111,6 +115,12 @@ doc, not to grow an item row here.
 
 ## Document History
 
+* **v1.1** - `DG-4` shipped, so the `DG-*` row left §2 for §3 (2026-09-05). Per §1 a row is *removed*
+  when its document stops owning open work, not edited to say "done" — otherwise §2 slowly becomes
+  the completed-work list it exists not to be. Noted as the first exercise of that rule, and the
+  first time this index went stale: it did so within hours, for its own arc, with nothing to catch
+  it. Nothing triggers an index review when a document's last item closes; the owning doc's author
+  has to remember.
 * **v1.0** - Initial index (`DG-3`). Built per-document rather than per-item: ~144 item rows already
   exist across seven master tables, and mirroring them would create the second source of truth
   `DOC_LIFECYCLE_AND_OPEN_WORK_INDEX.md` §3.2 forbids. The orphan set that motivated a per-item
