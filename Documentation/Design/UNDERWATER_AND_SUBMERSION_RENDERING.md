@@ -1,8 +1,9 @@
 # Underwater & Submersion Rendering (UW-*)
 
-**Version:** 2.5  
+**Version:** 2.6  
 **Date:** 2026-09-05  
-**Status:** Implemented — every phase now carries a terminal disposition. UW-0 through UW-4 shipped and confirmed in game 2026-09-04, the overlay after eight in-game passes and accepted as a **proxy** whose remaining imprecision is owned by `VX-3`/`VX-5` (§3.2). **UW-5 was built as a screen-space band on 2026-09-05, failed its in-game pass, was reverted whole and is ⏸️ paused on cost/benefit at current priority** — not abandoned: §3.6 records why the band cannot work at all, and what a mesh-displacement version would have to answer when it is picked up. **UW-6 closed 2026-09-05**: lava authored and confirmed, the frame-late publish fixed, the authored tint's color space corrected, and §8's render-scale question closed in game. **Promotion to `Architecture/` is due and is deliberately not done here** — a seven-phase merge wants a clean session (`docs-sync`'s own rule); see the Document History.  
+**Status:** ⛔ **Superseded 2026-09-05 by [`../Architecture/UNDERWATER_AND_SUBMERSION_RENDERING.md`](../Architecture/UNDERWATER_AND_SUBMERSION_RENDERING.md)** — UW-0…UW-4 and UW-6 shipped and in-game confirmed; UW-5 ⏸️ paused, its resume material moved to [`ANIMATED_LIQUID_SURFACE.md`](ANIMATED_LIQUID_SURFACE.md). This document is frozen: it remains the dated record of intent — including §3.6's account of the reverted screen-space band — and the Architecture doc describes the code as it stands. The status line below is what it said on the day it closed.  
+**Status (at closure):** Implemented — every phase now carries a terminal disposition. UW-0 through UW-4 shipped and confirmed in game 2026-09-04, the overlay after eight in-game passes and accepted as a **proxy** whose remaining imprecision is owned by `VX-3`/`VX-5` (§3.2). **UW-5 was built as a screen-space band on 2026-09-05, failed its in-game pass, was reverted whole and is ⏸️ paused on cost/benefit at current priority** — not abandoned: §3.6 records why the band cannot work at all, and what a mesh-displacement version would have to answer when it is picked up. **UW-6 closed 2026-09-05**: lava authored and confirmed, the frame-late publish fixed, the authored tint's color space corrected, and §8's render-scale question closed in game. **Promotion to `Architecture/` is due and is deliberately not done here** — a seven-phase merge wants a clean session (`docs-sync`'s own rule); see the Document History.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > Closed the last open bullet of `_FIXED_BUGS` **Fluid #21** (filed as `FLUID_BUGS` #02) — the one the 2026-09-03 physics ship left
@@ -970,6 +971,18 @@ overlay and a clip-space reference to travel through the same target.
 
 ## Document History
 
+* **v2.6** - **Promoted and frozen.**
+  [`../Architecture/UNDERWATER_AND_SUBMERSION_RENDERING.md`](../Architecture/UNDERWATER_AND_SUBMERSION_RENDERING.md)
+  v1.0 now describes the code; every claim there was re-verified against source at `cb1508ed`
+  rather than carried over from this text, and the `UW-*` IDs travel with it in its ID index. The
+  two decisions the merge was held for: §3.6's UW-5 resume material — the mesh-displacement route
+  and the three findings it banks — is now
+  [`ANIMATED_LIQUID_SURFACE.md`](ANIMATED_LIQUID_SURFACE.md), a live Draft that can be edited when
+  the phase resumes, since a frozen doc is a poor home for a plan and an Architecture doc holds no
+  plans at all; and **UW-5 keeps its ID** as an index row marked ⏸️ with no body section, because it
+  describes no shipped code — what the Architecture doc records instead is the *consequence*, the
+  hard-edged waterline, as a limitation by choice. Nothing else in this document changed, and
+  nothing further will: the freeze rule now applies to the whole of it.
 * **v2.5** - **UW-6 closed `✅ 2026-09-05`, and with it the arc: every phase now carries a terminal
   disposition.** The feel pass found more than authoring. (1) **Lava was authored blind and rendered
   salmon.** New §3.7: `submersionColor` is authored through an sRGB picker, `Shader.SetGlobalColor`
@@ -1127,5 +1140,4 @@ overlay and a clip-space reference to travel through the same target.
 ---
 
 **Last Updated:** 2026-09-05  
-**Next Review:** at the **promotion** to `Architecture/` — due now that every phase has a terminal
-disposition, and held for a clean session; or earlier, if UW-5 is picked back up
+**Next Review:** none — frozen on promotion.

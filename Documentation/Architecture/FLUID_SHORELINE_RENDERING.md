@@ -4,7 +4,8 @@ This document describes the algorithm and techniques used to render the foam sho
 
 **Relationship to other documents:**
 
-- [`../Design/UNDERWATER_AND_SUBMERSION_RENDERING.md`](../Design/UNDERWATER_AND_SUBMERSION_RENDERING.md) — how the same liquid shader is seen from *inside* a fluid body, plus the screen-space submersion overlay. It changes this shader's `Cull` state (`UW-1`) and nothing about the vertex-channel contract below.
+- [`UNDERWATER_AND_SUBMERSION_RENDERING.md`](UNDERWATER_AND_SUBMERSION_RENDERING.md) — how the same liquid shader is seen from *inside* a fluid body, plus the screen-space submersion overlay. It changes this shader's `Cull` state (`UW-1`) and nothing about the vertex-channel contract below.
+- [`../Design/ANIMATED_LIQUID_SURFACE.md`](../Design/ANIMATED_LIQUID_SURFACE.md) — `UW-5`, paused. Its §4.2 finds that this document's vertex-channel contract has no room left for a surface-distance channel.
 
 ---
 

@@ -43,7 +43,7 @@ that unblocks MR-8's smooth-lighting constraint), VX-9 (heat-haze distortion), V
   read VX-1's sky channel instead of its own 2D upload, but has no dependency on it.
 - [`FOLIAGE_LIVELINESS_IMPROVEMENTS_REPORT.md`](FOLIAGE_LIVELINESS_IMPROVEMENTS_REPORT.md)
   (`FL-*`) — no direct coupling; FL-6's fireflies pair visually with VX-2's night fog.
-- [`UNDERWATER_AND_SUBMERSION_RENDERING.md`](UNDERWATER_AND_SUBMERSION_RENDERING.md) (`UW-*`) —
+- [`../Architecture/UNDERWATER_AND_SUBMERSION_RENDERING.md`](../Architecture/UNDERWATER_AND_SUBMERSION_RENDERING.md) (`UW-*`) —
   **shipped VX-3's cheap half** in 2026-09-04's `UW-4`, as a screen-space pass integrating
   Beer–Lambert absorption against an analytic box. **VX-3 + VX-5 are the exact replacement for that
   box**: a per-pixel DDA march of fluid occupancy removes both the shape error (L-shaped bodies
@@ -354,7 +354,7 @@ degrades to fixed noon); RF-7 (weather density — soft); a tier capture of its 
 its cheap half without it.
 
 **What exists today:** ⚠️ **Updated 2026-09-04 — the cheap half of this item SHIPPED as `UW-4`**
-([`UNDERWATER_AND_SUBMERSION_RENDERING.md`](UNDERWATER_AND_SUBMERSION_RENDERING.md)). Being
+([`../Architecture/UNDERWATER_AND_SUBMERSION_RENDERING.md`](../Architecture/UNDERWATER_AND_SUBMERSION_RENDERING.md)). Being
 underwater now applies a per-pixel Beer–Lambert medium in the fluid's authored color, driven by a
 shared sub-cell eye query. Still absent: per-channel absorption (red dying first), the
 skylight-scaled darkening, caustics, and god rays.

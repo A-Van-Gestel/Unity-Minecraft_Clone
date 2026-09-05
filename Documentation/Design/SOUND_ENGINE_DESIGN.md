@@ -352,7 +352,7 @@ footfall and resets the accumulator.
 > `World.GatherEyeSubmersion`, a sub-cell query against the fluid's *drawn* surface height, so the muffling engages
 > at the waterline and on the same boundary as the underwater visuals. It is still a pure read over the eye point —
 > not the solver's contact state — so this layer keeps its own 4 Hz cadence and takes on no physics timing. See
-> [`UNDERWATER_AND_SUBMERSION_RENDERING.md`](UNDERWATER_AND_SUBMERSION_RENDERING.md) §3.3.
+> [`../Architecture/UNDERWATER_AND_SUBMERSION_RENDERING.md`](../Architecture/UNDERWATER_AND_SUBMERSION_RENDERING.md) §6.
 
 > **Gait and jump events** (`S11`, shipped and confirmed in game 2026-08-31, §16). A footfall is not always a walking step:
 > `Sprint`, `JumpStart` and `JumpLand` are separate `BlockSoundEvent`s resolving against their own clip
