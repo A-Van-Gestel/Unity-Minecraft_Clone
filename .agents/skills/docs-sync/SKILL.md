@@ -171,8 +171,10 @@ The three rules that decide whether the result can be trusted:
 
 ### Step 3 — Verify cross-references
 
-Three checks. The first runs **every time** this skill runs; the second only when a doc's path or
-name changed; the third only when something **closed**.
+Three checks, in the order they appear below: **(1)** the checker sweep, which runs **every time**
+this skill runs; **(2)** the inbound-reference sweep, only when a doc's path or name changed; and
+**(3)** the closure sweep, only when an item, phase or arc **closed**. All four scripts belong to
+check (1) — run the set, not a subset.
 
 **Always — `@Documentation/` reference integrity.** This repo wires several dozen
 `@Documentation/...` references from `CLAUDE.md`, `AGENTS.md`, and `.agents/skills/` into the doc
@@ -185,9 +187,9 @@ python Tools/Python/check_doc_links.py     # relative markdown links between doc
 python Tools/Python/check_doc_status.py    # OPEN_WORK_INDEX vs each doc's own **Status:**
 ```
 
-The second is not optional on a move, rename or deletion: `check_doc_refs.py` reads only the
-`@`-prefixed form, so a doc whose inbound links are ordinary markdown can be deleted with both the
-reference checker and the line-break checker fully green.
+`check_doc_links.py` is the one that matters on a move, rename or deletion: `check_doc_refs.py`
+reads only the `@`-prefixed form, so a doc whose inbound links are ordinary markdown can be deleted
+with both the reference checker and the line-break checker fully green.
 
 It prints the number of references it found and lists any that do not resolve, exiting non-zero
 on failure. **A "0 unresolved" result only means something if the found-count is plausible** — a
@@ -211,7 +213,7 @@ Sweep on the **bare filename**, because references come in two shapes and a link
 one:
 
 ```bash
-grep -rn "OldDocName.md" CLAUDE.md AGENTS.md Documentation/ .agents/
+grep -rn "OldDocName.md" CLAUDE.md AGENTS.md Documentation/ .agents/ Assets/
 ```
 
 - **`@Documentation/...` references and markdown links** are relative, so they break on a *move*

@@ -94,8 +94,12 @@ Structure, top to bottom:
   deletable — see `Documentation/Design/DOC_LIFECYCLE_AND_OPEN_WORK_INDEX.md` §2.1/§3.4 for the
   tiering and the current inventory.
 - **Sweep inbound references** per `docs-sync` Step 3: `@`-prefixed doc refs, markdown links, and
-  bare prose mentions of the old filename across `CLAUDE.md`, `AGENTS.md`, `Documentation/`, and
-  `.agents/`. Run **all four** checkers — `check_doc_refs.py` (confirm the found-count is
+  bare prose mentions of the old filename across `CLAUDE.md`, `AGENTS.md`, `Documentation/`,
+  `.agents/` **and `Assets/`**. `Assets/` is not optional and is the one people forget: this repo
+  cites design docs from XML docstrings (`SOUND_ENGINE_DESIGN.md §5.3` and dozens like it), those
+  citations are **prose, not links**, so no checker can see them — and deleting a design strands
+  every one. Watch for the bare form too: a comment reading "the design doc's §8" names no file and
+  will not match a filename grep, so also sweep `grep -rn "design doc" Assets/`. Run **all four** checkers — `check_doc_refs.py` (confirm the found-count is
   plausible, not just that unresolved is zero), `check_markdown_breaks.py`,
   **`check_doc_links.py`**, which is the only one that can see a broken *relative markdown link*
   and therefore the only one that can see a deletion at all, and **`check_doc_status.py`**, which
