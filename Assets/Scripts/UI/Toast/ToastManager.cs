@@ -262,7 +262,8 @@ namespace UI.Toast
                 ? _free.Pop()
                 : ToastCard.Create(stack.Container, backdrop, in style);
 
-            card.transform.SetParent(stack.Container, false);
+            // Attach, not SetParent: a pooled card can change stacks, and its layer must follow.
+            RuntimeUIFactory.Attach(card.gameObject, stack.Container);
 
             stack.Live.Add(card);
 
@@ -325,7 +326,7 @@ namespace UI.Toast
         private AnchorStack CreateStack(ToastAnchor anchor, Vector2 corner)
         {
             GameObject obj = new GameObject($"Stack_{anchor}", typeof(RectTransform));
-            obj.transform.SetParent(transform, false);
+            RuntimeUIFactory.Attach(obj, transform);
 
             RectTransform rect = (RectTransform)obj.transform;
             rect.anchorMin = corner;

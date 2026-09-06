@@ -411,7 +411,7 @@ namespace UI
         {
             // Panel: bottom-left frosted backdrop.
             _panel = new GameObject("ConsolePanel", typeof(RectTransform), typeof(Image));
-            _panel.transform.SetParent(transform, false);
+            RuntimeUIFactory.Attach(_panel, transform);
             RectTransform panelRect = (RectTransform)_panel.transform;
             panelRect.anchorMin = Vector2.zero;
             panelRect.anchorMax = Vector2.zero;
@@ -434,7 +434,7 @@ namespace UI
         {
             GameObject scrollGo = DefaultControls.CreateScrollView(new DefaultControls.Resources());
             scrollGo.name = "History";
-            scrollGo.transform.SetParent(panelRect, false);
+            RuntimeUIFactory.Attach(scrollGo, panelRect);
 
             RectTransform scrollRectTransform = (RectTransform)scrollGo.transform;
             scrollRectTransform.anchorMin = new Vector2(0f, 0f);
@@ -452,7 +452,7 @@ namespace UI
             // Content: a single wrapped TMP text that grows vertically; ContentSizeFitter drives content height.
             RectTransform content = _scrollRect.content;
             GameObject textGo = new GameObject("HistoryText", typeof(RectTransform));
-            textGo.transform.SetParent(content, false);
+            RuntimeUIFactory.Attach(textGo, content);
             RectTransform textRect = (RectTransform)textGo.transform;
             textRect.anchorMin = new Vector2(0f, 1f);
             textRect.anchorMax = new Vector2(1f, 1f);
@@ -482,7 +482,7 @@ namespace UI
         {
             GameObject inputGo = TMP_DefaultControls.CreateInputField(new TMP_DefaultControls.Resources());
             inputGo.name = "Input";
-            inputGo.transform.SetParent(panelRect, false);
+            RuntimeUIFactory.Attach(inputGo, panelRect);
             inputGo.AddComponent<InputFieldDeathSentinel>(); // UI_BUGS #04 tripwire — see the class below.
 
             RectTransform inputRect = (RectTransform)inputGo.transform;
@@ -521,7 +521,7 @@ namespace UI
             TMP_Text src = _inputField.textComponent;
 
             GameObject ghostGo = new GameObject("GhostSuggestion", typeof(RectTransform));
-            ghostGo.transform.SetParent(src.rectTransform.parent, false);
+            RuntimeUIFactory.Attach(ghostGo, src.rectTransform.parent);
 
             RectTransform srcRect = src.rectTransform;
             RectTransform ghostRect = (RectTransform)ghostGo.transform;

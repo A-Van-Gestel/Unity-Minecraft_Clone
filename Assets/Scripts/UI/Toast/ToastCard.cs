@@ -100,7 +100,7 @@ namespace UI.Toast
         public static ToastCard Create(Transform parent, Material blurInstance, in ToastStyle style)
         {
             GameObject root = new GameObject("ToastCard", typeof(RectTransform));
-            root.transform.SetParent(parent, false);
+            RuntimeUIFactory.Attach(root, parent);
 
             ToastCard card = root.AddComponent<ToastCard>();
             card.Build(blurInstance, in style);
@@ -169,7 +169,7 @@ namespace UI.Toast
         private void BuildIcon()
         {
             _iconObject = new GameObject("Icon", typeof(RectTransform));
-            _iconObject.transform.SetParent(transform, false);
+            RuntimeUIFactory.Attach(_iconObject, transform);
 
             _iconImage = _iconObject.AddComponent<Image>();
             _iconImage.preserveAspect = true;
@@ -194,7 +194,7 @@ namespace UI.Toast
         private void BuildGlyphSlot()
         {
             _glyphObject = new GameObject("Glyph", typeof(RectTransform));
-            _glyphObject.transform.SetParent(transform, false);
+            RuntimeUIFactory.Attach(_glyphObject, transform);
 
             _glyphText = _glyphObject.AddComponent<TextMeshProUGUI>();
             _glyphText.fontSize = ICON_SIZE * GLYPH_FONT_SCALE;
@@ -214,7 +214,7 @@ namespace UI.Toast
         private void BuildTextColumn(in ToastStyle style)
         {
             GameObject column = new GameObject("Text", typeof(RectTransform));
-            column.transform.SetParent(transform, false);
+            RuntimeUIFactory.Attach(column, transform);
 
             VerticalLayoutGroup columnLayout = column.AddComponent<VerticalLayoutGroup>();
             columnLayout.spacing = TEXT_SPACING;

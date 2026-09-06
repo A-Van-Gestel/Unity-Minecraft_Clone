@@ -1,4 +1,5 @@
 using TMPro;
+using UI.Blur;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -26,6 +27,27 @@ namespace UI.Builders
         private static readonly int s_multiplyColorId = Shader.PropertyToID("_MultiplyColor");
         private static readonly int s_additiveColorId = Shader.PropertyToID("_AdditiveColor");
 
+        #region Layers
+
+        /// <summary>
+        /// Parents a freshly created UI object and gives it the parent's layer.
+        /// </summary>
+        /// <param name="obj">The object to attach.</param>
+        /// <param name="parent">Transform to parent under.</param>
+        /// <remarks>
+        /// The layer copy is the point: Unity does not inherit a layer on reparent, and compositing bands
+        /// are keyed on it (<see cref="UIBandLayers"/>), so an object built after its band root enabled
+        /// would otherwise fall outside every band. Applied to the whole subtree, so a helper that returns
+        /// a ready-made hierarchy lands entirely on the band.
+        /// </remarks>
+        public static void Attach(GameObject obj, Transform parent)
+        {
+            obj.transform.SetParent(parent, false);
+            if (parent != null) UIBandLayers.SetLayerRecursively(obj, parent.gameObject.layer);
+        }
+
+        #endregion
+
         #region Canvas
 
         /// <summary>Creates a new screen-space overlay canvas GameObject with a scaler and raycaster.</summary>
@@ -33,10 +55,11 @@ namespace UI.Builders
         /// <param name="sortingOrder">Canvas sorting order (the scene UI canvas sits at 0).</param>
         /// <param name="matchWidthOrHeight">Scaler width/height match blend.</param>
         /// <returns>The created canvas GameObject.</returns>
-        public static GameObject CreateCanvas(string name, int sortingOrder, float matchWidthOrHeight = 0.5f)
+        public static GameObject CreateCanvas(string name, int sortingOrder, float matchWidthOrHeight = 0.5f,
+            UIBandId band = UIBandId.Hud)
         {
             GameObject obj = new GameObject(name);
-            ConfigureCanvas(obj, sortingOrder, matchWidthOrHeight);
+            ConfigureCanvas(obj, sortingOrder, matchWidthOrHeight, band);
             return obj;
         }
 
@@ -47,9 +70,15 @@ namespace UI.Builders
         /// <param name="target">The GameObject to turn into an overlay canvas.</param>
         /// <param name="sortingOrder">Canvas sorting order (the scene UI canvas sits at 0).</param>
         /// <param name="matchWidthOrHeight">Scaler width/height match blend.</param>
+        /// <param name="band">Compositing band this canvas draws in, which decides its layer.</param>
         /// <returns>The added <see cref="Canvas"/>.</returns>
-        public static Canvas ConfigureCanvas(GameObject target, int sortingOrder, float matchWidthOrHeight = 0.5f)
+        /// <remarks>Carries a <see cref="UIBlurBand"/>, so the subtree owns a band layer from the start.</remarks>
+        public static Canvas ConfigureCanvas(GameObject target, int sortingOrder, float matchWidthOrHeight = 0.5f,
+            UIBandId band = UIBandId.Hud)
         {
+            // Before the children are built, so everything Attach()ed under it inherits the band layer.
+            target.AddComponent<UIBlurBand>().SetBand(band);
+
             Canvas canvas = target.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
             canvas.sortingOrder = sortingOrder;
@@ -163,7 +192,7 @@ namespace UI.Builders
         public static GameObject CreatePanel(string name, Transform parent)
         {
             GameObject obj = new GameObject(name, typeof(RectTransform));
-            obj.transform.SetParent(parent, false);
+            Attach(obj, parent);
             return obj;
         }
 
@@ -188,7 +217,7 @@ namespace UI.Builders
             TextAlignmentOptions alignment, Color color)
         {
             GameObject obj = new GameObject(name, typeof(RectTransform));
-            obj.transform.SetParent(parent, false);
+            Attach(obj, parent);
 
             TextMeshProUGUI text = obj.AddComponent<TextMeshProUGUI>();
             text.fontSize = fontSize;
@@ -218,7 +247,7 @@ namespace UI.Builders
             const float scrollbarWidth = 12f;
 
             GameObject scrollObj = new GameObject(name, typeof(RectTransform));
-            scrollObj.transform.SetParent(parent, false);
+            Attach(scrollObj, parent);
             StretchToParent((RectTransform)scrollObj.transform);
 
             Image scrollBg = scrollObj.AddComponent<Image>();
@@ -242,7 +271,7 @@ namespace UI.Builders
 
             // Vertical scrollbar
             GameObject scrollbarObj = new GameObject("Scrollbar", typeof(RectTransform));
-            scrollbarObj.transform.SetParent(scrollObj.transform, false);
+            Attach(scrollbarObj, scrollObj.transform);
             RectTransform scrollbarRect = scrollbarObj.GetComponent<RectTransform>();
             scrollbarRect.anchorMin = new Vector2(1, 0);
             scrollbarRect.anchorMax = Vector2.one;
@@ -310,7 +339,7 @@ namespace UI.Builders
             ButtonColors colors, Color labelColor, float labelFontSize)
         {
             GameObject btnObj = new GameObject($"Button_{label.Replace(" ", "")}", typeof(RectTransform));
-            btnObj.transform.SetParent(parent, false);
+            Attach(btnObj, parent);
 
             Image btnImage = btnObj.AddComponent<Image>();
             btnImage.color = colors.Normal;

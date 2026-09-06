@@ -125,6 +125,8 @@ namespace UI
                 if (pauseMenuController == null) Debug.LogError("PauseMenuController is not assigned.");
 
                 // Spawn the command console view (runtime-built UI — TouchControls precedent, no scene edit).
+                // Band roots: each AddComponent below configures its own canvas and assigns the band
+                // layer, so Attach would wrongly hand them this manager's layer instead.
                 GameObject consoleObj = new GameObject("Console");
                 consoleObj.transform.SetParent(transform, false);
                 _console = consoleObj.AddComponent<ConsoleUI>();

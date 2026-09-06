@@ -1,5 +1,6 @@
 using System.Collections;
 using TMPro;
+using UI.Blur;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.UI;
@@ -106,6 +107,9 @@ namespace UI.Tooltip
             if (_activeTooltip == null)
             {
                 _activeTooltip = Instantiate(_tooltipPrefab, _parentCanvas.transform);
+
+                // A prefab instance keeps the prefab's layer, so the band is applied over the subtree.
+                UIBandLayers.SetLayerRecursively(_activeTooltip, _parentCanvas.gameObject.layer);
                 _tooltipRect = _activeTooltip.GetComponent<RectTransform>();
                 _tooltipText = _activeTooltip.GetComponentInChildren<TextMeshProUGUI>();
 
