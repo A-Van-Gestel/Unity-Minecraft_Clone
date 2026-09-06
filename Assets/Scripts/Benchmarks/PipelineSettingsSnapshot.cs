@@ -57,12 +57,6 @@ namespace Benchmarks
 
         #region Time ceilings — drive the Ceiling stop reason
 
-        /// <summary>Whether the P-4 §3.4 time budgets are active at all.</summary>
-        public readonly bool TimeBudgetsEnabled;
-
-        /// <summary>Whether ceilings scale proportionally with a voluntary FPS cap.</summary>
-        public readonly bool ScaleCeilingsWithFpsCap;
-
         /// <summary>Generation-completion pass ceiling, milliseconds (≤ 0 disables it).</summary>
         public readonly float GenProcessBudgetMs;
 
@@ -78,9 +72,6 @@ namespace Benchmarks
         #endregion
 
         #region Admission gate — withholds admissions entirely, outside the four instrumented passes
-
-        /// <summary>Whether the P-4 §3.5 generation panic gate is active.</summary>
-        public readonly bool PanicGateEnabled;
 
         /// <summary>Configured close threshold, as persisted — stated at the reference view distance.</summary>
         public readonly int PanicGateCloseThreshold;
@@ -105,13 +96,6 @@ namespace Benchmarks
         /// ready count, so with lighting off the gate never closes regardless of its thresholds.
         /// </summary>
         public readonly bool LightingEnabled;
-
-        /// <summary>
-        /// Whether P9-2's convergent edge-check cascade is active for this run. Printed because a capture
-        /// that cannot show its own rollback-flag state is not self-verifying: an ON leg whose flag failed
-        /// to take is otherwise indistinguishable from a lever that does not work (§7.0 defect 2).
-        /// </summary>
-        public readonly bool ConvergentEdgeCheckCascade;
 
         #endregion
 
@@ -159,19 +143,15 @@ namespace Benchmarks
             MaxInFlightLightingJobs = settings.maxInFlightLightingJobs;
             MaxInFlightMeshJobs = settings.maxInFlightMeshJobs;
 
-            TimeBudgetsEnabled = settings.enablePipelineTimeBudgets;
-            ScaleCeilingsWithFpsCap = settings.scaleBudgetCeilingsWithFpsCap;
             GenProcessBudgetMs = settings.genProcessBudgetMs;
             LightScheduleBudgetMs = settings.lightScheduleBudgetMs;
             MeshScheduleBudgetMs = settings.meshScheduleBudgetMs;
             MeshApplyBudgetMs = settings.meshApplyBudgetMs;
 
-            PanicGateEnabled = settings.enableGenerationPanicGate;
             PanicGateCloseThreshold = settings.panicGateCloseThreshold;
             PanicGateReopenThreshold = settings.panicGateReopenThreshold;
             ScalePanicGateWithResidency = settings.scalePanicGateThresholdsWithResidency;
             LightingEnabled = settings.enableLighting;
-            ConvergentEdgeCheckCascade = settings.enableConvergentEdgeCheckCascade;
 
             // Through the same helper the gate itself calls, never a re-derivation here: a report that
             // computed its own version of the thresholds could disagree with the run it describes.
@@ -202,7 +182,6 @@ namespace Benchmarks
             sb.AppendLine($"Load distance:       {LoadDistance} chunks  " +
                           $"({ResidentWidth}x{ResidentWidth} = {ResidentChunks:N0} resident)");
             sb.AppendLine($"Lighting engine:     {(LightingEnabled ? "ON" : "OFF")}");
-            sb.AppendLine($"Edge-check cascade:  {(ConvergentEdgeCheckCascade ? "CONVERGENT (P9-2, default)" : "LEGACY (rollback)")}");
             sb.AppendLine();
 
             sb.AppendLine("  Per-frame quotas -> 'Quota' stop reason (rate = cap x frame duration x 60):");
@@ -217,8 +196,7 @@ namespace Benchmarks
             sb.AppendLine($"    Mesh jobs:         {MaxInFlightMeshJobs}");
             sb.AppendLine();
 
-            sb.AppendLine($"  Time ceilings -> 'Ceiling' stop reason  [budgets {(TimeBudgetsEnabled ? "ON" : "OFF")}, " +
-                          $"FPS-cap scaling {(ScaleCeilingsWithFpsCap ? "ON" : "OFF")}]:");
+            sb.AppendLine("  Time ceilings -> 'Ceiling' stop reason  [scaled by any voluntary FPS cap]:");
             sb.AppendLine($"    Generation process:{FormatCeiling(GenProcessBudgetMs)}");
             sb.AppendLine($"    Light schedule:    {FormatCeiling(LightScheduleBudgetMs)}");
             sb.AppendLine($"    Mesh schedule:     {FormatCeiling(MeshScheduleBudgetMs)}");
@@ -230,8 +208,7 @@ namespace Benchmarks
             // gate-closed % per phase. The ratio is printed because the threshold is absolute while the
             // backlog it guards scales with the resident square.
             sb.AppendLine("  Admission gate -> no stop reason; see 'Panic gate closed' per phase  " +
-                          $"[gate {(PanicGateEnabled ? "ON" : "OFF")}, residency scaling " +
-                          $"{(ScalePanicGateWithResidency ? "ON" : "OFF")}]:");
+                          $"[residency scaling {(ScalePanicGateWithResidency ? "ON" : "OFF")}]:");
             sb.AppendLine($"    Configured:        {PanicGateCloseThreshold} / {PanicGateReopenThreshold} " +
                           $"lighting-backlog chunks (stated at resident width " +
                           $"{GenerationPanicGate.ReferenceResidentWidth})");

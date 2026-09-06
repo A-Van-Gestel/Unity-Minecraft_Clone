@@ -10,16 +10,13 @@ using UnityEngine.InputSystem;
 namespace Benchmarks
 {
     /// <summary>
-    /// Standing A/B capture harness for the P-4 §3.4/§3.5 pipeline backpressure family. Runs a leg
-    /// matrix in ONE unattended pass — per leg: set the backpressure flags
-    /// (<c>enablePipelineTimeBudgets</c>, <c>enableGenerationPanicGate</c>,
-    /// <c>scaleBudgetCeilingsWithFpsCap</c>), impose an FPS condition, teleport to fresh
-    /// never-generated terrain, and measure wall-clock fill time plus frame-health metrics — then
-    /// writes a single results log via <see cref="BenchmarkEnvironment.WriteReportToDisk"/> and
-    /// restores every touched setting. The default matrix is the <b>ceiling-scaling</b> A/B
-    /// (<c>scaleBudgetCeilingsWithFpsCap</c> off vs on at 30/15 cap, budgets on throughout); the
-    /// <see cref="LegResult"/> struct also carries the budgets flag so the original budgets-vs-legacy
-    /// legs can be reinstated by editing the leg array.
+    /// Standing capture harness for the P-4 §3.4/§3.5 pipeline backpressure family. Runs a leg matrix
+    /// in ONE unattended pass — per leg: impose an FPS condition, teleport to fresh never-generated
+    /// terrain, and measure wall-clock fill time plus frame-health metrics — then writes a single
+    /// results log via <see cref="BenchmarkEnvironment.WriteReportToDisk"/> and restores every touched
+    /// setting. The matrix varies the <b>frame cap</b>: ceilings scale in proportion to a voluntarily
+    /// lowered cap, so the capped legs measure whether a 30/15-FPS session still fills at an acceptable
+    /// rate without losing the smoothness the cap was chosen for.
     /// <para><b>Usage (Development Build or editor):</b> load any world, then press <b>F10</b>
     /// (gameplay-gated via <see cref="InputManager.DebugKeyPressed"/>). The run takes a few minutes
     /// and teleports the player; progress is logged as <c>[P4Bench]</c> lines. Dev-build/editor only
@@ -47,8 +44,6 @@ namespace Benchmarks
         private struct LegResult
         {
             public string Name;
-            public bool BudgetsOn;
-            public bool ScalingOn; // scaleBudgetCeilingsWithFpsCap for this leg (no effect uncapped)
             public int TargetFps; // -1 = uncapped
             public float FillSeconds;
             public int Frames;
@@ -122,9 +117,6 @@ namespace Benchmarks
             _abortRun = false;
 
             // Capture everything the legs mutate.
-            bool origBudgets = world.settings.enablePipelineTimeBudgets;
-            bool origGate = world.settings.enableGenerationPanicGate;
-            bool origScaling = world.settings.scaleBudgetCeilingsWithFpsCap;
             int origTargetFps = Application.targetFrameRate;
             int origVsync = QualitySettings.vSyncCount;
 
@@ -137,36 +129,29 @@ namespace Benchmarks
 
             QualitySettings.vSyncCount = 0;
 
-            // Everything past here mutates session-global state (the flags, targetFrameRate, vSync); the
-            // finally guarantees the advertised "restores every touched setting" contract holds even if a
-            // leg throws — otherwise an exception would strand the editor at e.g. 15 fps with the flags
-            // forced until a domain reload.
+            // Everything past here mutates session-global state (targetFrameRate, vSync); the finally
+            // guarantees the advertised "restores every touched setting" contract holds even if a leg
+            // throws — otherwise an exception would strand the editor at e.g. 15 fps until a domain reload.
             try
             {
                 // Per-run salt keeps repeat captures on virgin terrain (generated chunks persist).
                 int salt = (int)(DateTime.Now.Ticks % SALT_PRIME_MODULUS) * SALT_VOXEL_STRIDE;
 
-                // Default matrix: the ceiling-scaling A/B. Budgets stay ON throughout (scaling has no meaning
-                // without them); an uncapped anchor leg (scaling is a no-op uncapped) plus off/on pairs at
-                // 30 and 15 cap. All legs converge — none rely on the 300 s timeout — so a full run is a few
-                // minutes. To reinstate the original budgets-vs-legacy capture, swap in BudgetsOn=false legs
-                // (those TIME OUT under the tail-inclusive predicate — see the 2026-07-23 IL2CPP report).
+                // Frame-cap matrix: an uncapped anchor plus the two caps whose ceiling scaling the P-4
+                // refinement was built for. All legs converge — none rely on the 300 s timeout — so a full
+                // run is a few minutes. WriteReport's derived block assumes exactly these three legs in
+                // this order; changing the array means changing that block too.
                 LegResult[] legs =
                 {
-                    new LegResult { Name = "L1 scaling=OFF fps=uncapped", BudgetsOn = true, ScalingOn = false, TargetFps = -1 },
-                    new LegResult { Name = "L2 scaling=OFF fps=30cap", BudgetsOn = true, ScalingOn = false, TargetFps = 30 },
-                    new LegResult { Name = "L3 scaling=ON  fps=30cap", BudgetsOn = true, ScalingOn = true, TargetFps = 30 },
-                    new LegResult { Name = "L4 scaling=OFF fps=15cap", BudgetsOn = true, ScalingOn = false, TargetFps = 15 },
-                    new LegResult { Name = "L5 scaling=ON  fps=15cap", BudgetsOn = true, ScalingOn = true, TargetFps = 15 },
+                    new LegResult { Name = "L1 fps=uncapped", TargetFps = -1 },
+                    new LegResult { Name = "L2 fps=30cap", TargetFps = 30 },
+                    new LegResult { Name = "L3 fps=15cap", TargetFps = 15 },
                 };
 
-                Debug.Log($"[P4Bench] Starting {legs.Length.ToString()}-leg A/B capture — do not touch the player until the report path is logged.");
+                Debug.Log($"[P4Bench] Starting {legs.Length.ToString()}-leg frame-cap capture — do not touch the player until the report path is logged.");
 
                 for (int i = 0; i < legs.Length; i++)
                 {
-                    world.settings.enablePipelineTimeBudgets = legs[i].BudgetsOn;
-                    world.settings.enableGenerationPanicGate = legs[i].BudgetsOn;
-                    world.settings.scaleBudgetCeilingsWithFpsCap = legs[i].ScalingOn;
                     Application.targetFrameRate = legs[i].TargetFps;
 
                     // Unique far destination per leg, spread on a ring so legs never overlap each other.
@@ -192,9 +177,6 @@ namespace Benchmarks
                 // Restore the session exactly as found (settings object is live — no save is triggered).
                 // Runs on every exit path — normal, abort, or a thrown leg — so the harness never leaves
                 // the editor session in a mutated state.
-                world.settings.enablePipelineTimeBudgets = origBudgets;
-                world.settings.enableGenerationPanicGate = origGate;
-                world.settings.scaleBudgetCeilingsWithFpsCap = origScaling;
                 Application.targetFrameRate = origTargetFps;
                 QualitySettings.vSyncCount = origVsync;
                 _running = false;
@@ -334,13 +316,13 @@ namespace Benchmarks
             int squareChunks = side * side;
 
             StringBuilder sb = new StringBuilder(capacity: 4096);
-            sb.AppendLine("=== P-4 §3.4/§3.5 Backpressure A/B — single-run capture ===");
+            sb.AppendLine("=== P-4 §3.4/§3.5 Backpressure frame-cap sweep — single-run capture ===");
             sb.AppendLine($"Timestamp:      {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
             sb.AppendLine($"World:          '{world.worldData.worldName}' (LoadDistance {world.settings.LoadDistance.ToString()} → {squareChunks.ToString()}-chunk square)");
             sb.AppendLine($"Caps (quota anchors): light/frame {world.settings.maxLightJobsPerFrame.ToString()}, mesh/frame {world.settings.maxMeshRebuildsPerFrame.ToString()}");
             sb.AppendLine($"Base ceilings ms: light {world.settings.lightScheduleBudgetMs:F1}, meshSched {world.settings.meshScheduleBudgetMs:F1}, " +
                           $"genProc {world.settings.genProcessBudgetMs:F1}, meshApply {world.settings.meshApplyBudgetMs:F1} " +
-                          "(scaling legs multiply these by 60/targetFps, clamped x8)");
+                          "(a capped leg multiplies these by 60/targetFps, clamped x8)");
             // Configured AND effective: with P-8 residency scaling on, the configured pair is stated at the
             // reference view distance and is NOT what the gate compares against at this run's view distance.
             GenerationPanicGate.DeriveThresholds(
@@ -379,19 +361,18 @@ namespace Benchmarks
             }
 
             sb.AppendLine();
-            sb.AppendLine("-- Derived (the ceiling-scaling claims; legs L1..L5 above) --");
-            sb.AppendLine("Fill gain = scaling-OFF fill / scaling-ON fill at the same cap (>1 = scaling ON fills faster).");
-            sb.AppendLine($"30-cap fill gain OFF->ON: x{Ratio(legs[1].FillSeconds, legs[2].FillSeconds):F2}   (OFF {legs[1].FillSeconds:F1}s -> ON {legs[2].FillSeconds:F1}s)");
-            sb.AppendLine($"15-cap fill gain OFF->ON: x{Ratio(legs[3].FillSeconds, legs[4].FillSeconds):F2}   (OFF {legs[3].FillSeconds:F1}s -> ON {legs[4].FillSeconds:F1}s)");
-            sb.AppendLine($"30-cap worst frame ms  OFF: {legs[1].MaxFrameMs:F1}   ON: {legs[2].MaxFrameMs:F1}   (both should stay under the 33.3 ms frame budget)");
-            sb.AppendLine($"15-cap worst frame ms  OFF: {legs[3].MaxFrameMs:F1}   ON: {legs[4].MaxFrameMs:F1}   (both should stay under the 66.7 ms frame budget)");
-            sb.AppendLine($"Uncapped anchor (scaling no-op): fill {legs[0].FillSeconds:F1}s, worst frame {legs[0].MaxFrameMs:F1} ms");
+            sb.AppendLine("-- Derived (frame-cap cost; legs L1..L3 above) --");
+            sb.AppendLine("Fill cost = capped fill / uncapped fill (>1 = the cap slows the fill; ceiling scaling");
+            sb.AppendLine("is what keeps this near 1 rather than tracking the frame-rate ratio).");
+            sb.AppendLine($"30-cap fill cost vs uncapped: x{Ratio(legs[1].FillSeconds, legs[0].FillSeconds):F2}   (uncapped {legs[0].FillSeconds:F1}s -> 30cap {legs[1].FillSeconds:F1}s)");
+            sb.AppendLine($"15-cap fill cost vs uncapped: x{Ratio(legs[2].FillSeconds, legs[0].FillSeconds):F2}   (uncapped {legs[0].FillSeconds:F1}s -> 15cap {legs[2].FillSeconds:F1}s)");
+            sb.AppendLine($"Worst frame ms  uncapped: {legs[0].MaxFrameMs:F1}   30cap: {legs[1].MaxFrameMs:F1} (budget 33.3)   15cap: {legs[2].MaxFrameMs:F1} (budget 66.7)");
             sb.AppendLine();
-            sb.AppendLine("Verdict: fill by hand into the Documentation/Performance report (GO expectation: scaling ON");
-            sb.AppendLine("fills faster at capped FPS with worst-frame staying under the chosen frame budget).");
+            sb.AppendLine("Verdict: fill by hand into the Documentation/Performance report (healthy expectation: a");
+            sb.AppendLine("capped leg fills well ahead of its frame-rate ratio, worst frame under its frame budget).");
 
             string report = sb.ToString();
-            string location = BenchmarkEnvironment.WriteReportToDisk(report, "P4BackpressureAB");
+            string location = BenchmarkEnvironment.WriteReportToDisk(report, "P4BackpressureFrameCap");
             Debug.Log(location != null
                 ? $"[P4Bench] Capture complete — report written to: {location}"
                 : "[P4Bench] Capture complete — report write FAILED; results above in the log.");

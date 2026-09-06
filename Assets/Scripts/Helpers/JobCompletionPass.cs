@@ -70,7 +70,7 @@ namespace Helpers
     /// <para><b>P-4 §3.4 (the MP-4 reconcile).</b> The budgeted passes additionally need a time ceiling and a
     /// rotating visit start; both are optional parameters on <see cref="RunMergeLoop{TKey}"/> so the unbudgeted
     /// callers stay byte-identical. The <i>cursor</i> itself stays owned by the caller — advancing it is per-pass
-    /// policy (production gates the advance on <c>window.HasBudget</c> so the flag-off legs keep legacy order),
+    /// policy (production gates the advance on <c>window.HasBudget</c> so unbudgeted callers keep plain order),
     /// not a property of the skeleton.</para>
     /// </summary>
     public static class JobCompletionPass

@@ -14,8 +14,7 @@ namespace Editor.Validation.Lighting
     /// <c>CHUNK_PIPELINE_SCHEDULE_QUOTA_THROUGHPUT.md</c> §6, Option B1). Two layers are guarded, both
     /// below the level the world harness can reach:
     /// <list type="bullet">
-    /// <item><see cref="EdgeCheckCascadeDecision.Evaluate"/> — the pure predicate, including its
-    /// flag-off reduction to the legacy stability-only rule.</item>
+    /// <item><see cref="EdgeCheckCascadeDecision.Evaluate"/> — the pure predicate.</item>
     /// <item><c>ChunkData.ApplyJobLightMap</c>'s change signal — the input that predicate is only as good
     /// as, exercised across the uniform-sky compaction boundary where a naive
     /// <c>section.LightData</c> comparison silently reads the wrong pre-merge value.</item>
@@ -29,11 +28,8 @@ namespace Editor.Validation.Lighting
         static partial void AddP92CascadeBaselineScenarios(List<Scenario> scenarios)
         {
             scenarios.Add(new Scenario(
-                "B97: EdgeCheckCascadeDecision — flag OFF reproduces the legacy stability-only rule for every input (P9-2 rollback guard)",
-                Baseline_CascadeDecisionFlagOffIsLegacy));
-            scenarios.Add(new Scenario(
-                "B98: EdgeCheckCascadeDecision — flag ON re-arms only on effect (changed light or pending work), and never past an exhausted budget (P9-2)",
-                Baseline_CascadeDecisionFlagOnRequiresEffect));
+                "B98: EdgeCheckCascadeDecision — re-arms only on effect (changed light or pending work), and never past an exhausted budget (P9-2)",
+                Baseline_CascadeDecisionRequiresEffect));
             scenarios.Add(new Scenario(
                 "B99: ChunkData.ApplyJobLightMap reports change vs no-change, including across the uniform-sky compaction boundary (P9-2 cascade signal)",
                 Baseline_ApplyJobLightMapReportsChange));
@@ -46,37 +42,7 @@ namespace Editor.Validation.Lighting
         }
 
         /// <summary>
-        /// B97: with the P9-2 flag off, <see cref="EdgeCheckCascadeDecision.Evaluate"/> must depend on the
-        /// round budget ALONE and must never yield <c>SpendOnly</c> — exactly the legacy
-        /// <c>RemainingEdgeCheckRounds &gt; 0</c> test the merge ran before this decision existed. This is
-        /// the rollback leg's guard: a regression that leaks the effect condition into the flag-off path
-        /// would silently change shipped lighting behavior while every capture still reported the flag as
-        /// disabled.
-        /// </summary>
-        private static bool Baseline_CascadeDecisionFlagOffIsLegacy()
-        {
-            bool passed = true;
-
-            foreach (int rounds in new[] { -1, 0, 1, 2 })
-            foreach (bool changed in new[] { false, true })
-            foreach (bool pending in new[] { false, true })
-            {
-                EdgeCheckCascadeDecision.CascadeOutcome actual =
-                    EdgeCheckCascadeDecision.Evaluate(false, rounds, changed, pending);
-                EdgeCheckCascadeDecision.CascadeOutcome expected = rounds > 0
-                    ? EdgeCheckCascadeDecision.CascadeOutcome.SpendAndRearm
-                    : EdgeCheckCascadeDecision.CascadeOutcome.None;
-
-                passed &= LightingAssert.IsTrue(actual == expected,
-                    $"B97: flag OFF, rounds={rounds.ToString()} changed={changed} pending={pending} → legacy budget-only result",
-                    $"expected {expected.ToString()}, got {actual.ToString()}");
-            }
-
-            return passed;
-        }
-
-        /// <summary>
-        /// B98: with the flag on, the cascade PROPAGATES only when the completed pass actually moved light
+        /// B98: the cascade PROPAGATES only when the completed pass actually moved light
         /// (<c>lightChanged</c>) or left the chunk flagged for another pass (<c>hasPendingLightWork</c> —
         /// the deferred cross-chunk drain and the pull-back verification write through that flag).
         /// <para>
@@ -84,31 +50,43 @@ namespace Editor.Validation.Lighting
         /// <c>None</c>: the round must still be spent. Only the flags buy lighting schedules, so declining
         /// the round saves nothing — while letting a converged chunk hoard budget for its whole residency
         /// would break the premise <c>ChunkData.ModifyVoxel</c>'s Bug-05 top-up rests on (post-generation
-        /// the rounds are already spent) and arm cascades on ordinary edits legacy never armed.
+        /// the rounds are already spent) and arm cascades on ordinary edits.
         /// </para>
-        /// An exhausted budget still returns <c>None</c>, so the flag can never manufacture rounds the
-        /// legacy rule would not have allowed.
+        /// An exhausted budget still returns <c>None</c>, so the decision can never manufacture a round the
+        /// budget did not grant.
         /// </summary>
-        private static bool Baseline_CascadeDecisionFlagOnRequiresEffect()
+        private static bool Baseline_CascadeDecisionRequiresEffect()
         {
             bool passed = true;
 
             passed &= LightingAssert.IsTrue(
-                EdgeCheckCascadeDecision.Evaluate(true, 2, false, false)
+                EdgeCheckCascadeDecision.Evaluate(2, false, false)
                 == EdgeCheckCascadeDecision.CascadeOutcome.SpendOnly,
                 "B98: a no-effect pass with budget left SPENDS its round but does not propagate (the redundant schedules P9-2 removes)");
             passed &= LightingAssert.IsTrue(
-                EdgeCheckCascadeDecision.Evaluate(true, 2, true, false)
+                EdgeCheckCascadeDecision.Evaluate(2, true, false)
                 == EdgeCheckCascadeDecision.CascadeOutcome.SpendAndRearm,
                 "B98: a pass that changed light re-arms");
             passed &= LightingAssert.IsTrue(
-                EdgeCheckCascadeDecision.Evaluate(true, 2, false, true)
+                EdgeCheckCascadeDecision.Evaluate(2, false, true)
                 == EdgeCheckCascadeDecision.CascadeOutcome.SpendAndRearm,
                 "B98: a no-effect merge whose post-merge writers left pending work still re-arms");
-            passed &= LightingAssert.IsTrue(
-                EdgeCheckCascadeDecision.Evaluate(true, 0, true, true)
-                == EdgeCheckCascadeDecision.CascadeOutcome.None,
-                "B98: an exhausted budget refuses regardless of effect");
+
+            // The exhausted-budget refusal is swept rather than spot-checked: a non-positive counter must
+            // out-rank every effect combination, which is what stops the decision manufacturing a round the
+            // budget never granted.
+            foreach (int rounds in new[] { -1, 0 })
+            foreach (bool changed in new[] { false, true })
+            foreach (bool pending in new[] { false, true })
+            {
+                EdgeCheckCascadeDecision.CascadeOutcome actual =
+                    EdgeCheckCascadeDecision.Evaluate(rounds, changed, pending);
+                passed &= LightingAssert.IsTrue(
+                    actual == EdgeCheckCascadeDecision.CascadeOutcome.None,
+                    $"B98: an exhausted budget (rounds={rounds.ToString()}) refuses regardless of effect "
+                    + $"(changed={changed} pending={pending})",
+                    $"expected None, got {actual.ToString()}");
+            }
 
             return passed;
         }
@@ -277,13 +255,12 @@ namespace Editor.Validation.Lighting
         {
             List<string> failures = new List<string>();
 
-            foreach (bool flagEnabled in new[] { false, true })
             foreach (int rounds in new[] { 0, 1, 2 })
             foreach (bool changed in new[] { false, true })
             foreach (bool pending in new[] { false, true })
             {
                 EdgeCheckCascadeDecision.CascadeOutcome outcome =
-                    EdgeCheckCascadeDecision.Evaluate(flagEnabled, rounds, changed, pending);
+                    EdgeCheckCascadeDecision.Evaluate(rounds, changed, pending);
 
                 LightingWork startWork = pending ? LightingWork.LightChanges : LightingWork.None;
                 ChunkData subject = MakeChunkWithWork(startWork);
@@ -299,7 +276,7 @@ namespace Editor.Validation.Lighting
                 bool spent = outcome != EdgeCheckCascadeDecision.CascadeOutcome.None;
                 int wantRounds = spent ? roundsBefore - 1 : roundsBefore;
                 if (subject.RemainingEdgeCheckRounds != wantRounds)
-                    failures.Add($"{outcome} (flag={flagEnabled} rounds={rounds} changed={changed} pending={pending}): "
+                    failures.Add($"{outcome} (rounds={rounds} changed={changed} pending={pending}): "
                                  + $"rounds {roundsBefore} -> {subject.RemainingEdgeCheckRounds} (expected {wantRounds})");
 
                 LightingWork wantWork =
@@ -307,7 +284,7 @@ namespace Editor.Validation.Lighting
                         ? startWork | LightingWork.EdgeCheck | LightingWork.LightChanges
                         : startWork;
                 if (subject.Work != wantWork)
-                    failures.Add($"{outcome} (flag={flagEnabled} rounds={rounds} changed={changed} pending={pending}): "
+                    failures.Add($"{outcome} (rounds={rounds} changed={changed} pending={pending}): "
                                  + $"work {startWork} -> {subject.Work} (expected {wantWork})");
             }
 

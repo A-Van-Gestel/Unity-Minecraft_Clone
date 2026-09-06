@@ -237,7 +237,7 @@ shipped 2026-07-23 — see the next "Implemented" note.
 
 ### ✅ Implemented (2026-07-23): Recommendations 4 (time-based budgets) + 5 (panic gate) + the §5.3 draw-queue rider
 
-The final two items of the §3 backpressure family. Both ship default-ON behind rollback flags (`Settings.enablePipelineTimeBudgets` / `enableGenerationPanicGate`; flag off restores the exact legacy behavior by construction). Runtime scheduling only — on-disk format unchanged.
+The final two items of the §3 backpressure family. Both shipped default-ON behind rollback flags (`Settings.enablePipelineTimeBudgets` / `enableGenerationPanicGate`, each of whose off state restored the exact legacy behavior by construction); those flags — and `scaleBudgetCeilingsWithFpsCap` — were **retired 2026-09-06**, so the family is now unconditional. Runtime scheduling only — on-disk format unchanged.
 
 - **§3.4 time budgets — rate quota + ms ceiling, not a pure Stopwatch budget.** A Stopwatch-only budget keeps throughput ∝ FPS (fixed work/frame × frames/sec), so it cannot deliver this recommendation's stated goal. Each budgeted pass instead gets **two** cooperating limits (`Helpers/PipelinePassBudget`, pure + suite-pinned):
     - **Rate quota** — `ceil(existing per-frame cap × unscaledDeltaTime × 60)`, clamped [1, 8×cap]:
@@ -273,8 +273,10 @@ The final two items of the §3 backpressure family. Both ship default-ON behind 
 
 #### ✅ Implemented refinement — FPS-cap-proportional ceilings (the "frame-fraction ceiling")
 
-The deep-cap limitation above (absolute-ms ceilings collapse per-second pipeline time ∝ FPS, so a *voluntarily* low cap — AFK, battery, mobile — throttles as hard as an overloaded machine) is now addressed. `PipelinePassBudget.ScaleCeilingMs(configuredMs, intendedFrameIntervalSeconds)` scales each ms ceiling by the intended frame interval, anchored at 60 FPS exactly like the quota (30-cap → ×2, 15-cap → ×4, clamped ×8, floored ×1 so a >60 Hz cap never shrinks a ceiling). Behind `Settings.scaleBudgetCeilingsWithFpsCap` (default-ON, rollback lever;
-flag-off is byte-identical to the fixed ceilings above).
+The deep-cap limitation above (absolute-ms ceilings collapse per-second pipeline time ∝ FPS, so a *voluntarily* low cap — AFK, battery, mobile — throttles as hard as an overloaded machine) is now addressed. `PipelinePassBudget.ScaleCeilingMs(configuredMs, intendedFrameIntervalSeconds)` scales each ms ceiling by the intended frame interval, anchored at 60 FPS exactly like the quota (30-cap → ×2, 15-cap → ×4, clamped ×8, floored ×1 so a >60 Hz cap never shrinks a ceiling). Shipped behind `Settings.scaleBudgetCeilingsWithFpsCap` (default-ON, rollback lever whose off state
+was byte-identical to the fixed ceilings above); that flag was **retired 2026-09-06** and the scaling
+is now unconditional. An uncapped session passes an interval of 0, for which `ScaleCeilingMs` returns
+each ceiling unchanged — so the fixed-ceiling behavior is still what a default install gets.
 
 - **Intent, not measurement — the death-spiral discriminator.** The scale keys off the *configured* cap (`World.ComputeIntendedFrameIntervalSeconds`: vSync interval when active, else `Application.targetFrameRate`, else no scaling), never measured `deltaTime`. An uncapped machine merely running slow gets **no** boost, so this can never widen the ceiling into the §3 spiral the ceilings exist to bound — the whole reason a pure frame-fraction-of-`dt` ceiling was unsafe.
 - **No cross-ceiling governor** (deliberate): the ×8 clamp is the only bound; the scaled ceilings can transiently sum above the intended frame at a deep cap under heavy fill (a bounded sub-cap FPS dip that converges), accepted over coupling them into a shared failure surface. *(Five ceilings when this shipped; four since MP-6 retired the draw budget — see the §5.3 note above.)*
@@ -346,9 +348,8 @@ Interpretation: if the **same handful of coords** reschedules every sweep with `
 > - **`Settings.drawApplyBudgetMs` is retired** (§3.4's ceiling list is now four: light schedule 8 ms, mesh
 >   schedule 6 ms, gen process 6 ms, mesh apply 4 ms). `meshApplyBudgetMs` is now the whole mesh tail's
 >   ceiling, which is also what the standing `P4BackpressureBenchmark`'s drain predicate keys on.
-> - **`enablePipelineTimeBudgets = false` no longer restores a one-per-frame draw trickle** — that legacy leg
->   went with the stage. The flag's off state still restores legacy behavior for every *other* budgeted pass,
->   so the P-4 A/B legs and the pending flag-retirement pass remain valid; only the draw row is gone.
+> - **`enablePipelineTimeBudgets = false` no longer restored a one-per-frame draw trickle** — that legacy leg
+>   went with the stage, ahead of the flag itself, which was retired 2026-09-06.
 
 ---
 

@@ -170,7 +170,7 @@ namespace Helpers
         public static float ScaleCeilingMs(float configuredMs, float intendedFrameIntervalSeconds)
         {
             // A disabled ceiling (≤ 0 = "no bound") and the no-cap case both return the input verbatim,
-            // so the feature-off path is byte-identical to the legacy fixed ceilings (no ×1.0f rounding).
+            // so neither pays a ×1.0f rounding step.
             if (configuredMs <= 0f || intendedFrameIntervalSeconds <= 0f) return configuredMs;
 
             // Floor at 1× (a >60 Hz cap must never SHRINK a ceiling); ceil at MAX_QUOTA_SCALE (an extreme
@@ -250,8 +250,8 @@ namespace Helpers
             /// <summary>
             /// Whether the window's ceiling has been reached (always false without a budget). The
             /// zero-budget short-circuit precedes the <see cref="Stopwatch.GetTimestamp"/> read so
-            /// unbudgeted windows in hot loops (the flag-off legacy legs, the startup coroutine) pay
-            /// no per-iteration timer call.
+            /// unbudgeted windows in hot loops (the startup coroutine, benchmarks, and a ceiling
+            /// configured to 0) pay no per-iteration timer call.
             /// </summary>
             public bool Expired => _budgetTicks > 0
                                    && IsExpired(Stopwatch.GetTimestamp() - _startTimestamp, _budgetTicks);
