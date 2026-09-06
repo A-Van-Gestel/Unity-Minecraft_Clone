@@ -1,6 +1,6 @@
 # UI Blur Banded Compositing Design
 
-**Version:** 1.1  
+**Version:** 1.2  
 **Date:** 2026-09-06  
 **Status:** Proposed design — not implemented.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
@@ -96,7 +96,7 @@ itself is preserved on branch `spike/ub0-inpipeline-ui` at commit `e369f061`; it
 | Canvas draw path            | URP's `DrawObjectsPass` includes `SortingCriteria.CanvasOrder` in its sort flags (`DrawObjectsPass.cs:205`), and URP's runtime contains **no** special-casing for `ScreenSpaceCamera` canvases — so such canvases already render through the standard cull-results → `DrawRenderers` path this design filters. |
 | Tooltip positioning         | `TooltipManager` assigns screen-pixel coordinates straight into a world-space transform — `_tooltipRect.position = finalPos` at `:244`, `:282`, `:316`, with the comment *"Setting position directly works perfectly for Overlay canvases"* at `:243`. That identity holds **only** for Overlay canvases. Tooltips are also instantiated into `_parentCanvas` (`:108`), which in `World.unity` is the single scene canvas. |
 | Layer / sorting budget      | `TagManager.asset`: layer 5 is `UI`; layers 3 and 7–31 are free. **Only one sorting layer (`Default`) exists**, so bands must key on GameObject layer, not `SortingLayer`.        |
-| Layer discipline            | **None exists.** A repo-wide grep for `.layer =` / `SetLayerRecursively` returns *zero* hits, so every runtime-built UI object (`RuntimeUIFactory.cs:38,165,190,220,244,312`, `ToastCard.cs:102,171,196,216`, `ToastManager.cs:327`, `TooltipManager.cs:108`) lands on layer 0 `Default` — **the same layer as world geometry**. Only the 27 scene-authored objects in `World.unity` are on layer 5. Layer-based band filtering therefore has no foundation to build on; UB-1 has to create one. |
+| Layer discipline            | **None existed before UB-1.** A repo-wide grep for `.layer =` / `SetLayerRecursively` returns *zero* hits, so every runtime-built UI object (`RuntimeUIFactory.cs:38,165,190,220,244,312`, `ToastCard.cs:102,171,196,216`, `ToastManager.cs:327`, `TooltipManager.cs:108`) lands on layer 0 `Default` — **the same layer as world geometry**. Only the 27 scene-authored objects in `World.unity` are on layer 5. Layer-based band filtering therefore has no foundation to build on; UB-1 has to create one. |
 | Camera setup                | One camera per scene, `m_CullingMask: 4294967295` in both — UI is already in `cullResults`, so no culling-mask change is needed.                                                  |
 | Renderer feature order      | `VoxelEngine-URP-Renderer.asset`: Underwater overlay, then UI blur, then cloud prepass. Underwater-before-blur is a load-bearing invariant, asserted by Underwater **B17**.       |
 | Validation reach            | `Validate UI Blur Render` (5 baselines) drives the material **offscreen with a synthetic texture**. It tests the consumer contract in isolation and **cannot observe anything in this design** — it will stay green whether or not banding works. |
@@ -416,7 +416,7 @@ misconfiguration ships.
 | Phase                              | Scope                                                                                                                                                                                                                                    | Effort | Depends on   | Status |
 |------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|--------------|--------|
 | **UB-0 — Feasibility spike**       | Throwaway branch. One canvas → Screen Space - Camera, one band pass at `AfterRendering`, all three layer masks cleared. Measured against `main`; results in §8. Gated on row 1. Shipped nothing. | 🟡     | —            | ✅ 2026-09-06 (GO) |
-| **UB-1 — Layer discipline**        | The foundation §2 says does not exist: band-layer constants, layer assignment **at creation** in `RuntimeUIFactory`'s six creation helpers, `UIBlurBand`'s enable-time repair pass, and the no-foreign-layer baseline.                     | 🟡     | UB-0 = GO    | —      |
+| **UB-1 — Layer discipline**        | The foundation §2 says does not exist: `UIBandId`/`UIBandLayers`, the four band layers in the Tag Manager, layer assignment **at creation** via `RuntimeUIFactory.Attach` (15 call sites), `UIBlurBand`'s enable-time repair pass, and the no-foreign-layer baselines. | 🟡     | UB-0         | ✅ 2026-09-06 |
 | **UB-2 — Band infrastructure**     | `UIBlurChain` lifted out of `UIBlurRendererFeature`, which is then **absorbed** (§5); `UIBandRegistry`; `UIBandCompositeRendererFeature` at `AfterRendering`, Game camera only; all three renderer-asset masks; **rewrite Underwater B17**, which breaks by construction. | 🔴     | UB-1         | —      |
 | **UB-3 — Canvas conversion**       | Render mode at `RuntimeUIFactory.cs:54`; `UIBlurBand` on the four band roots in `World.unity` + the four code-built canvases; **`TooltipManager` repositioning rewrite** (§5) and its new band-3 root.                                     | 🔴     | UB-2         | —      |
 | **UB-4 — Look reconciliation**     | Re-tune the six authored tints against the new post-processed capture — all eight blurred surfaces now show bloom (§5). In-game A/B against pre-UB-3 captures; closes the lighting report's accepted limitation 2. | 🟡     | UB-3         | —      |
@@ -512,6 +512,8 @@ Neither was visible from static reading, which is what the spike existed to catc
 
 ## Document History
 
+* **v1.2** - UB-1 shipped and was confirmed in game: band layers declared, layer assignment moved to
+  creation across 15 sites, `UI Band Layers` suite registered (aggregate 29 -> 30 suites).
 * **v1.1** - UB-0 ran and returned GO: §8 replaced with its measured results, §4.4 corrected on the
   sort criteria (`CommonTransparent`, not `CanvasOrder`) and on the mandatory
   `AllowGlobalStateModification(true)`, UB-0 marked complete in §5 and §7.
