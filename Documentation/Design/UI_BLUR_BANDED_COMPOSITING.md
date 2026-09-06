@@ -1,6 +1,6 @@
 # UI Blur Banded Compositing Design
 
-**Version:** 1.0  
+**Version:** 1.1  
 **Date:** 2026-09-06  
 **Status:** Proposed design — not implemented.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
@@ -21,6 +21,10 @@ the `Assets/Editor/Validation/UIBlur/` suite and quad renderer, `VoxelEngine-URP
 `ProjectSettings/TagManager.asset`, `EditorBuildSettings.asset`, and the serialized canvases and
 cameras of `World.unity` and `MainMenu.unity`. Scene render modes, sorting orders, culling masks and
 material references were read out of the serialized scenes, not assumed.
+
+**Amended:** 2026-09-06 — UB-0 ran and returned **GO**. §8 now carries its measured results, and §4.4
+gains two corrections the spike forced: the sort criteria and the global-state permission. The spike
+itself is preserved on branch `spike/ub0-inpipeline-ui` at commit `e369f061`; it ships nothing.
 
 **Relationship to other documents:**
 
@@ -292,9 +296,20 @@ Modeled directly on `CloudPrepassRendererFeature.CloudPrepass`:
 - `FilteringSettings` — `RenderQueueRange.transparent`, `layerMask` = the band's layer.
 - `DrawingSettings` — shader tags `SRPDefaultUnlit` and `UniversalForward` (UGUI, TMP and
   `MaskedUIBlur` all declare passes with no `LightMode`, so they resolve under `SRPDefaultUnlit`),
-  `SortingCriteria.CanvasOrder`.
+  and **`SortingCriteria.CommonTransparent`**, which is also what `CloudPrepass` uses.
+  **Not `CanvasOrder`.** UB-0 swept the options against a pause menu with title text: `CanvasOrder`
+  (0x20) and `RenderQueue | CanvasOrder` (0x22) both render the panel *over* its own child text,
+  while `CommonTransparent` (0x17), URP's opaque combo (0x33) and even `None` all order it
+  correctly. The natural renderer-list order is already right; `CanvasOrder` without `SortingLayer`
+  is what breaks it. The failure is silent — the panel still draws, so only the missing text
+  reveals it.
 - `SetRenderAttachment(activeColorTexture, 0, AccessFlags.ReadWrite)` — read-write, not write, for
   the same reason the cloud pass documents: UI alpha-blends against what is already there.
+- **`builder.AllowGlobalStateModification(true)` is mandatory**, and must be set at record time. A
+  raster pass otherwise rejects the `unity_GUIZTestMode` write below with
+  `InvalidOperationException: Modifying global state from this command buffer is not allowed` — the
+  same rule that forces `UIBlurRendererFeature`'s `SetGlobalTexture` into an unsafe pass. Measured
+  in UB-0, where it aborted the whole render graph rather than degrading quietly.
 - **No depth attachment, and `unity_GUIZTestMode` = `CompareFunction.Always`.** These two go
   together and the precedent gets it the other way round: `CloudPrepass` also calls
   `SetRenderAttachmentDepth(activeDepthTexture, ReadWrite)`, because clouds *are* world geometry.
@@ -325,10 +340,10 @@ misconfiguration ships.
 
 ## 5. Prerequisites & integration points
 
-- ⚠️ **UB-0 is a hard gate**, but a narrow one. §8's checklist has five rows and only row 1 — does
-  band UI draw at all — can end the arc; the rest shape UB-3 and UB-4. UB-0 is a throwaway spike
-  that answers it before a line of production code is written; a NO-GO returns the arc to Option A
-  with a measurement rather than an argument.
+- ✅ **UB-0 has run and returned GO** (§8). Row 1 — the only gating row — confirmed that canvas
+  geometry draws from a URP raster pass at `AfterRendering`, and row 3 retired the colour-space
+  NO-GO branch by measurement. The spike is preserved on `spike/ub0-inpipeline-ui` (`e369f061`)
+  as a working reference for UB-2; it ships nothing.
 - ⚠️ **`TooltipManager` is a guaranteed rewrite, not a verification item.** It assigns screen-pixel
   coordinates directly into a world-space transform at `:244`, `:282` and `:316`, and says so in a
   comment at `:243`: *"Setting position directly works perfectly for Overlay canvases."* That
@@ -400,7 +415,7 @@ misconfiguration ships.
 
 | Phase                              | Scope                                                                                                                                                                                                                                    | Effort | Depends on   | Status |
 |------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|--------------|--------|
-| **UB-0 — Feasibility spike**       | Throwaway branch. One canvas → Screen Space - Camera, one band pass at `AfterRendering`, all three layer masks cleared. Work the §8 checklist against `main`. GO/NO-GO on row 1. Ships nothing. | 🟡     | —            | —      |
+| **UB-0 — Feasibility spike**       | Throwaway branch. One canvas → Screen Space - Camera, one band pass at `AfterRendering`, all three layer masks cleared. Measured against `main`; results in §8. Gated on row 1. Shipped nothing. | 🟡     | —            | ✅ 2026-09-06 (GO) |
 | **UB-1 — Layer discipline**        | The foundation §2 says does not exist: band-layer constants, layer assignment **at creation** in `RuntimeUIFactory`'s six creation helpers, `UIBlurBand`'s enable-time repair pass, and the no-foreign-layer baseline.                     | 🟡     | UB-0 = GO    | —      |
 | **UB-2 — Band infrastructure**     | `UIBlurChain` lifted out of `UIBlurRendererFeature`, which is then **absorbed** (§5); `UIBandRegistry`; `UIBandCompositeRendererFeature` at `AfterRendering`, Game camera only; all three renderer-asset masks; **rewrite Underwater B17**, which breaks by construction. | 🔴     | UB-1         | —      |
 | **UB-3 — Canvas conversion**       | Render mode at `RuntimeUIFactory.cs:54`; `UIBlurBand` on the four band roots in `World.unity` + the four code-built canvases; **`TooltipManager` repositioning rewrite** (§5) and its new band-3 root.                                     | 🔴     | UB-2         | —      |
@@ -453,24 +468,32 @@ own baselines:
 
 ---
 
-## 8. Verification checklist (what UB-0 must measure)
+## 8. UB-0 results
 
-Nothing here is an open design question. Every point that looked like one on first drafting turned
-out to be settled by reading Unity's own code, or to be a calibration task with a known lever — the
-record of that is in §2's colour-space and draw-path rows. What remains is the ordinary risk that
-static reading is not a running frame, which is exactly and only what a spike is for.
+UB-0 ran on 2026-09-06 (branch `spike/ub0-inpipeline-ui`, commit `e369f061`): one canvas converted to
+Screen Space - Camera, one band pass at `AfterRendering`, all three layer masks cleared. Measurements
+are rendered-pixel readbacks from the Game camera, not visual inspection.
 
-UB-0 must come back with an answer to each of these, measured against `main`:
+**Verdict: GO.** Row 1 was the only gating row. Nothing in rows 2-5 argues against proceeding, and
+row 3 removed the design's largest stated risk.
 
-| # | What to measure                                                        | Why it is not a question                                                                                                                                                       | If it fails                                                                              |
-|---|------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------|
-| 1 | Does band UI draw at all? Capture the toolbar with the band pass live.  | URP sorts its own object passes by `CanvasOrder` and special-cases `ScreenSpaceCamera` nowhere, so canvas geometry is already in the path this design filters (§2).             | The approach is dead — NO-GO to Option A. This is the one that would end the arc.        |
-| 2 | Does TMP text render correctly from the band pass?                      | `TMP_SDF.shader` declares `Queue=Transparent` and no `LightMode`, so `SRPDefaultUnlit` matches it. Residual risk is only that it is a Built-in CG shader in a URP pass.          | Widen the band draw's shader-tag list, or give the vendored TMP shaders a URP SubShader.  |
-| 3 | How far do UI colours shift, with `vertexColorAlwaysGammaSpace` 0 and 1? | Direction is predictable: UI now passes through `FinalBlitPass`'s linear→sRGB encode that overlay UI escapes today. Blurred panels are unaffected — `MaskedUIBlur` is linear in and linear out. | Calibration, not viability: settle the Canvas flag per scene in UB-3, tints in UB-4.      |
-| 4 | Do clicks still land? Toolbar slot and a settings control.              | `GraphicRaycaster.eventCamera` returns `canvas.worldCamera` under `ScreenSpaceCamera` (`:289-301`), and `planeDistance` 100 sits well inside the 1000 far clip that `:322` tests. | Smoke test only; a failure here points at canvas wiring, not at the design.                |
-| 5 | What does the extra pass cost? Matched-fps run with the HUD up.         | Not a risk, a number — an idle frame still records one blur and one draw (§4.1).                                                                                              | Informs whether band count needs a budget, nothing more.                                  |
+| # | What was measured                          | Result                                                                                                                                                                     |
+|---|--------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 1 | Does band UI draw at all?                  | ✅ **GO.** The lit region is exactly the toolbar's rect (218 of 640 columns; the toolbar spans ~218). The value is *predicted* by `UI_BLUR_BACKDROP_SYSTEM.md` §3: a `0.0682` background blurred and scaled by `_MultiplyColor` (linear `0.1437`) gives `0.0098`; measured `0.0100`. The consumer contract survives the move untouched. |
+| 2 | Does TMP render from the band pass?        | ✅ Yes — 732 glyph pixels at `0.9995`. The Built-in-CG-shader concern was unfounded. What looked like a TMP failure was §4.4's sort criteria hiding text behind its own panel; see the correction there. |
+| 3 | How far do UI colours shift?               | ✅ **No shift.** Glyph `0.9995` against an authored `1.000`, and the panel matches its formula to 2%. The linear→sRGB encode this design was expected to introduce does not materialise at this injection point — which retires the NO-GO branch that stood here. |
+| 4 | Do clicks still land?                      | ✅ One hit at the toolbar centre (`ItemSlot (4)`), zero at a control point away from UI. `GraphicRaycaster.eventCamera` resolves to `Main Camera` on the converted canvas, as its source predicted. |
+| 5 | What does the extra pass cost?             | ⚠️ **Not measurable from a one-band spike**, and reported as such rather than dressed up. Single samples 9.35 ms (on) vs 9.23 ms (off) sit inside the ±1-5% noise floor and were taken at different stages of world load. Structurally the band draw *replaces* work URP's transparent pass already did, so its marginal cost is ~0; the design's real added cost is the per-band blur chain that UB-2 introduces. UB-2 owns that number. |
 
-The spike's verdict is decided by row 1 alone. Rows 2–5 shape UB-3 and UB-4 rather than gate them.
+Two further results worth keeping:
+
+- **The layer-mask exclusion works, and URP does not double-draw.** A same-pixel A/B with the band
+  pass toggled off and on moved the toolbar pixel by `0.8426`, so the band pass is the only thing
+  drawing UI once the three masks exclude its layer.
+- **A full world load and play session produced zero console errors** with UI rendering in-pipeline.
+
+Both §4.4 corrections came out of this run: the sort criteria, and the global-state permission.
+Neither was visible from static reading, which is what the spike existed to catch.
 
 ---
 
@@ -489,9 +512,12 @@ The spike's verdict is decided by row 1 alone. Rows 2–5 shape UB-3 and UB-4 ra
 
 ## Document History
 
+* **v1.1** - UB-0 ran and returned GO: §8 replaced with its measured results, §4.4 corrected on the
+  sort criteria (`CommonTransparent`, not `CanvasOrder`) and on the mandatory
+  `AllowGlobalStateModification(true)`, UB-0 marked complete in §5 and §7.
 * **v1.0** - Initial design
 
 ---
 
 **Last Updated:** 2026-09-06  
-**Next Review:** when UB-0 reports row 1 of the §8 checklist
+**Next Review:** when UB-1 (layer discipline) starts
