@@ -36,15 +36,15 @@ public class Clouds : MonoBehaviour
         [Range(1, 6)]
         public int noiseOctaves = 4;
 
-        [Tooltip("Lattice cells across the pattern at the first octave — the blob scale. Higher = smaller cloud masses. 32 calibrated against the classic clouds.png blob statistics.")]
+        [Tooltip("Lattice cells across the pattern at the first octave — the blob scale. Higher = smaller cloud masses.")]
         [Range(2, 64)]
         public int noiseBasePeriodCells = 32;
 
-        [Tooltip("FBM amplitude falloff per octave. 0.5 = smooth blobs; higher keeps more high-frequency raggedness (MC-style speckled edges). 0.6 calibrated against the classic clouds.png.")]
+        [Tooltip("FBM amplitude falloff per octave. 0.5 = smooth blobs; higher keeps more high-frequency raggedness (speckled edges).")]
         [Range(0.3f, 0.9f)]
         public float noisePersistence = 0.6f;
 
-        [Tooltip("Fraction of the sky covered by cloud. 0.23 matches the classic clouds.png density.")]
+        [Tooltip("Fraction of the sky covered by cloud.")]
         [Range(0.05f, 0.6f)]
         public float cloudCoverage = 0.23f;
 
@@ -88,11 +88,11 @@ public class Clouds : MonoBehaviour
         public readonly Stack<MeshFilter> TilePool = new Stack<MeshFilter>();
     }
 
-    [Tooltip("ON = the FIRST layer loads its pattern from the classic texture below (pre-CL-3 look); other layers stay procedural. OFF = all layers procedural.")]
+    [Tooltip("ON = the FIRST layer loads its pattern from the texture below instead of generating one; other layers stay procedural. OFF = all layers procedural.\n\nNo texture ships with the project — assign one to use this.")]
     [SerializeField]
     private bool _useClassicPattern = false;
 
-    [Tooltip("Classic pattern texture — only used (and only required) when Use Classic Pattern is on.")]
+    [Tooltip("Hand-authored pattern texture — only used (and then required) when Use Classic Pattern is on. Ships unassigned; supply one for an art-directed or per-dimension cloud layout.")]
     [SerializeField]
     private Texture2D _cloudPattern = null;
 
@@ -140,8 +140,8 @@ public class Clouds : MonoBehaviour
     // Fraction of the coverage radius over which the shader fades the cloudscape's outer edge.
     private const float EDGE_FADE_FRACTION = 0.15f;
 
-    // Width of the procedurally generated pattern (the classic texture happens to match). The pattern —
-    // and therefore the drift wrap and the visible repeat — is periodic at this width.
+    // Width of the procedurally generated pattern. The pattern — and therefore the drift wrap and the
+    // visible repeat — is periodic at this width.
     private const int PROCEDURAL_PATTERN_WIDTH = 512;
 
     // Histogram resolution for the coverage-percentile threshold; 256 bins ≈ 0.4% density granularity.
@@ -244,7 +244,7 @@ public class Clouds : MonoBehaviour
         state.Material.SetColor(s_shaderColor, color);
         state.Material.SetFloat(s_shaderCloudFaceShading, state.EffectiveStyle == CloudStyle.Fancy ? 1f : 0f);
 
-        // Pattern source: the classic texture only ever describes the original (first) layer.
+        // Pattern source: an authored texture only ever describes the first layer.
         if (_useClassicPattern && layerIndex == 0)
         {
             if (!LoadClassicCloudData(state)) return null;
@@ -395,8 +395,8 @@ public class Clouds : MonoBehaviour
     }
 
     /// <summary>
-    /// Classic pattern source: thresholds the <see cref="_cloudPattern"/> texture's alpha channel.
-    /// Kept as an instant rollback while the procedural pattern is evaluated (CL-3).
+    /// Authored pattern source: thresholds the <see cref="_cloudPattern"/> texture's alpha channel, for a
+    /// layer whose layout is art-directed rather than derived from noise.
     /// </summary>
     /// <param name="state">The layer receiving the pattern.</param>
     /// <returns>False when the texture is unreadable (the component disables itself).</returns>
