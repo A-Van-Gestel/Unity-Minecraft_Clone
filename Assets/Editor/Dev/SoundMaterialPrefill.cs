@@ -77,7 +77,8 @@ namespace Editor.Dev
         /// <remarks>
         /// Pure and deterministic so the validation suite can pin its output. Order is significant: the
         /// flora tags outrank the name overrides (so "Grass Blades" resolves to Plant, not Grass), and
-        /// "snow" outranks "grass" (so "Grass Snowy" resolves to Snow).
+        /// "snow" outranks "grass" (so "Grass Snowy" resolves to Snow). The LIQUID tag is split by name
+        /// rather than by <c>fluidType</c>, which a non-fluid block carrying the tag would not set.
         /// </remarks>
         public static SoundMaterial Suggest(BlockType block)
         {
@@ -89,7 +90,9 @@ namespace Editor.Dev
             // Air is the only genuinely silent block: everything placeable should give the player feedback.
             if (name == "air") return SoundMaterial.None;
 
-            if ((tags & BlockTags.LIQUID) != 0) return SoundMaterial.Liquid;
+            // Molten fluid before the generic one: LIQUID covers both, and lava has its own group.
+            if ((tags & BlockTags.LIQUID) != 0)
+                return name.Contains("lava") || name.Contains("magma") ? SoundMaterial.Lava : SoundMaterial.Liquid;
 
             if ((tags & BlockTags.LEAVES) != 0) return SoundMaterial.Leaves;
             if ((tags & BlockTags.PLANT) != 0) return SoundMaterial.Plant;

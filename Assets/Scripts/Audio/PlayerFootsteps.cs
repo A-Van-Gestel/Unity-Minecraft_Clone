@@ -8,12 +8,13 @@ namespace Audio
 {
     /// <summary>
     /// Plays a footstep one-shot for the block under the player every fixed distance traveled on the
-    /// ground, and dedicated one-shots for sprinting, jumping off and landing (SOUND_ENGINE_DESIGN.md §5.1).
+    /// ground, dedicated one-shots for sprinting, jumping off and landing, and — once nothing is holding the
+    /// body up — swim strokes and an entry splash for the surrounding fluid (SOUND_ENGINE_DESIGN.md §5.1).
     /// </summary>
     /// <remarks>
-    /// Read-only with respect to physics: it polls <see cref="VoxelRigidbody.IsGrounded"/> and the
-    /// transform rather than having the solver raise events, so the physics hot path and its validation
-    /// suite stay untouched by an audio feature.
+    /// Read-only with respect to physics: it polls <see cref="VoxelRigidbody.IsGrounded"/>,
+    /// <see cref="VoxelRigidbody.FluidContact"/> and the transform rather than having the solver raise
+    /// events, so the physics hot path and its validation suite stay untouched by an audio feature.
     /// </remarks>
     [RequireComponent(typeof(VoxelRigidbody))]
     public class PlayerFootsteps : MonoBehaviour
@@ -22,6 +23,12 @@ namespace Audio
         [Range(0.5f, 4f)]
         [SerializeField]
         private float _strideLength = 1.5f;
+
+        [Tooltip("Distance in blocks between swim strokes. Measured in 3D, unlike the walking stride, so " +
+                 "climbing a waterfall still strokes.")]
+        [Range(0.5f, 4f)]
+        [SerializeField]
+        private float _strokeLength = 1.2f;
 
         [Tooltip("Volume of the layered step from a non-solid block occupying the player's own cell " +
                  "(water, flora), relative to the step from the block underneath.")]
@@ -33,6 +40,15 @@ namespace Audio
         private World _world;
         private Vector3 _lastStepPosition;
         private bool _wasGrounded;
+
+        /// <summary>
+        /// Whether the body was touching a fluid last frame, so entering one can be heard exactly once.
+        /// </summary>
+        /// <remarks>
+        /// Seeded alongside <see cref="_wasGrounded"/> rather than in <c>Awake</c>: a player who spawns
+        /// already in water would otherwise splash for an entry that never happened.
+        /// </remarks>
+        private bool _wasInFluid;
 
         /// <summary>
         /// The <see cref="VoxelRigidbody.JumpCount"/> already sounded, so a jump is heard exactly once.
@@ -68,11 +84,14 @@ namespace Audio
             if (_world == null || SoundManager.Instance == null) return;
 
             bool grounded = _body.IsGrounded;
+            bool flying = _body.isFlying;
+            bool inFluid = _body.FluidContact.InFluid;
 
             if (!_groundedSeeded)
             {
                 _groundedSeeded = true;
                 _wasGrounded = grounded;
+                _wasInFluid = inFluid;
                 _lastStepPosition = transform.position;
                 _lastJumpCount = _body.JumpCount;
                 return;
@@ -81,6 +100,24 @@ namespace Audio
             // Polled before the grounded branches: the take-off leaves the ground in the same fixed step,
             // so the jump would otherwise be indistinguishable from stepping off a ledge.
             TryPlayJumpStart();
+
+            // A flown body is not entering anything, even though the solver still reports its contact.
+            TryPlaySplash(inFluid && !flying);
+
+            if (SoundResolution.IsSwimming(grounded, flying, inFluid))
+            {
+                // Cleared here too, so sinking onto the bottom still lands rather than resuming mid-stride.
+                _wasGrounded = false;
+
+                // 3D, unlike the walking stride: a swimmer climbing a water column covers no horizontal
+                // distance, and would stroke only once for the whole climb.
+                if ((transform.position - _lastStepPosition).sqrMagnitude < _strokeLength * _strokeLength)
+                    return;
+
+                _lastStepPosition = transform.position;
+                PlayStroke(SoundResolution.SelectStrideEvent(swimming: true, _body.isSprinting));
+                return;
+            }
 
             if (!grounded)
             {
@@ -107,7 +144,48 @@ namespace Audio
 
             // The stride is deliberately not shortened while sprinting: it is a distance, so a faster body
             // already crosses it more often, which is what a running cadence is.
-            PlayFootfall(_body.isSprinting ? BlockSoundEvent.Sprint : BlockSoundEvent.Step);
+            PlayFootfall(SoundResolution.SelectStrideEvent(swimming: false, _body.isSprinting));
+        }
+
+        /// <summary>
+        /// Sounds a splash on the frame the body first touches a fluid.
+        /// </summary>
+        /// <param name="inFluid">Whether the body counts as touching a fluid this frame.</param>
+        /// <remarks>
+        /// Entry only. Leaving a fluid is deliberately silent: a body climbing out is already sounding the
+        /// footfall of whatever it climbed onto, and a second one-shot over it reads as a double hit.
+        /// </remarks>
+        private void TryPlaySplash(bool inFluid)
+        {
+            if (inFluid == _wasInFluid) return;
+
+            _wasInFluid = inFluid;
+            if (!inFluid) return;
+
+            // Entry re-bases the stroke accumulator, so the splash is not chased by a stroke fired from
+            // distance banked on the way in.
+            _lastStepPosition = transform.position;
+            PlayStroke(BlockSoundEvent.Splash);
+        }
+
+        /// <summary>
+        /// Plays one in-fluid one-shot: the fluid the solver put the body in, and nothing else.
+        /// </summary>
+        /// <param name="evt">Which in-fluid one-shot this is — a stroke or an entry splash.</param>
+        /// <remarks>
+        /// Deliberately <i>not</i> the two-cell footfall <see cref="PlayFootfall"/> resolves: a swimmer a
+        /// block above a seabed is touching nothing, so layering the cell below would sound sand under them.
+        /// The fluid comes from <see cref="FluidContact.BlockId"/>, so the ear names the same waterline the
+        /// solver is pushing the body with.
+        /// </remarks>
+        private void PlayStroke(BlockSoundEvent evt)
+        {
+            SoundMaterial material = SoundResolution.ResolveMaterial(_world.BlockTypes, _body.FluidContact.BlockId);
+
+            // Body center, not the feet: a stroke is the whole body moving through the fluid, and a one-shot
+            // at the feet reads as coming from below a listener whose ears are at eye height.
+            Vector3 strokePos = transform.position + new Vector3(0f, _body.collisionHeight * 0.5f, 0f);
+            SoundManager.Instance.PlayBlockSound(material, evt, strokePos);
         }
 
         /// <summary>

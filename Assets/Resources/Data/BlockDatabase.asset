@@ -1055,7 +1055,7 @@ MonoBehaviour:
     tags: 2
     worldGenCanReplaceTags: 8258
     placementCanReplaceTags: 8194
-    soundMaterial: 12
+    soundMaterial: 14
     isActive: 1
     metadataSchema: 0
     placementMetadataMode: 0

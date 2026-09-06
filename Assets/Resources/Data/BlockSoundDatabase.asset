@@ -20,6 +20,8 @@ MonoBehaviour:
     sprintClips: []
     jumpStartClips: []
     jumpLandClips: []
+    swimClips: []
+    splashClips: []
     volume: 1
     pitchMin: 0.9
     pitchMax: 1.1
@@ -66,6 +68,8 @@ MonoBehaviour:
     - {fileID: 8300000, guid: cae3389e6ff1082419c0be5d4a27a3eb, type: 3}
     - {fileID: 8300000, guid: 9bc90af93dca0414faa72101a73ecb4b, type: 3}
     - {fileID: 8300000, guid: c8057b8b41ef2c246adc65e32b2ba365, type: 3}
+    swimClips: []
+    splashClips: []
     volume: 1
     pitchMin: 0.9
     pitchMax: 1.1
@@ -107,6 +111,8 @@ MonoBehaviour:
     - {fileID: 8300000, guid: 45059062b7bc2934aa131a000803462e, type: 3}
     - {fileID: 8300000, guid: d387201c7f6c0df4c9be6a662173374e, type: 3}
     - {fileID: 8300000, guid: 034ecfa6222565740915149e5d939541, type: 3}
+    swimClips: []
+    splashClips: []
     volume: 1
     pitchMin: 0.9
     pitchMax: 1.1
@@ -191,6 +197,8 @@ MonoBehaviour:
     - {fileID: 8300000, guid: 1cb52cf2ad2ddd64d9ff6893572cc108, type: 3}
     - {fileID: 8300000, guid: 46344460cc8aac24aa87b41c1a048551, type: 3}
     - {fileID: 8300000, guid: 448fcd1704315ec459c2df0dd76020b2, type: 3}
+    swimClips: []
+    splashClips: []
     volume: 1
     pitchMin: 0.9
     pitchMax: 1.1
@@ -271,6 +279,8 @@ MonoBehaviour:
     - {fileID: 8300000, guid: 6be96be58f5dc1246b42f9220e0cee05, type: 3}
     - {fileID: 8300000, guid: 6cea0823694b9754bae17c86047821e4, type: 3}
     - {fileID: 8300000, guid: fc8b63b24da457646a2e087ffdf17e6f, type: 3}
+    swimClips: []
+    splashClips: []
     volume: 1
     pitchMin: 0.9
     pitchMax: 1.1
@@ -311,6 +321,8 @@ MonoBehaviour:
     - {fileID: 8300000, guid: 7ccb7e9bf96563d489fcbd2d77d3fe7d, type: 3}
     jumpStartClips: []
     jumpLandClips: []
+    swimClips: []
+    splashClips: []
     volume: 1
     pitchMin: 0.9
     pitchMax: 1.1
@@ -355,6 +367,8 @@ MonoBehaviour:
     jumpLandClips:
     - {fileID: 8300000, guid: d8b3b44f0e39e8544a5c1dfa2ed39bae, type: 3}
     - {fileID: 8300000, guid: 14f059cfa2040cb4985d2c4ed2117e44, type: 3}
+    swimClips: []
+    splashClips: []
     volume: 1
     pitchMin: 0.9
     pitchMax: 1.1
@@ -387,6 +401,8 @@ MonoBehaviour:
     jumpLandClips:
     - {fileID: 8300000, guid: 06f7ecece2176dd43a4c735c3f43976c, type: 3}
     - {fileID: 8300000, guid: b4bd19a57f4e4654886ca75b983109eb, type: 3}
+    swimClips: []
+    splashClips: []
     volume: 1
     pitchMin: 0.9
     pitchMax: 1.1
@@ -415,6 +431,8 @@ MonoBehaviour:
     sprintClips: []
     jumpStartClips: []
     jumpLandClips: []
+    swimClips: []
+    splashClips: []
     volume: 1
     pitchMin: 0.9
     pitchMax: 1.1
@@ -455,6 +473,8 @@ MonoBehaviour:
     - {fileID: 8300000, guid: aabd59c4de3941e4a882acf242621de0, type: 3}
     - {fileID: 8300000, guid: 9f8218948317c4643b08778ff3fecd42, type: 3}
     - {fileID: 8300000, guid: cccb11c9fbd4b6342a1d8d281ffa5b8d, type: 3}
+    swimClips: []
+    splashClips: []
     volume: 1
     pitchMin: 0.9
     pitchMax: 1.1
@@ -475,6 +495,8 @@ MonoBehaviour:
     sprintClips: []
     jumpStartClips: []
     jumpLandClips: []
+    swimClips: []
+    splashClips: []
     volume: 1
     pitchMin: 0.9
     pitchMax: 1.1
@@ -533,6 +555,8 @@ MonoBehaviour:
     - {fileID: 8300000, guid: fa3e9fba65a57804b80604e2fe62dad4, type: 3}
     - {fileID: 8300000, guid: e7ba9ee3991cda3428cafc31daa6bb08, type: 3}
     - {fileID: 8300000, guid: d63189e4883086b4cb72fe89a9d29230, type: 3}
+    swimClips: []
+    splashClips: []
     volume: 1
     pitchMin: 0.9
     pitchMax: 1.1
@@ -573,6 +597,13 @@ MonoBehaviour:
     - {fileID: 8300000, guid: 1b4ef027ca47bb1439cef39f63c9711b, type: 3}
     - {fileID: 8300000, guid: 19463d156280f994c90f27241ec5048a, type: 3}
     - {fileID: 8300000, guid: b4823743e77142e4bbc642a7f84cf924, type: 3}
+    swimClips:
+    - {fileID: 8300000, guid: b408bc38215d1384091fffaa8e8cd490, type: 3}
+    - {fileID: 8300000, guid: ffd14877a927ffb419aa882d5dbc401b, type: 3}
+    - {fileID: 8300000, guid: 01814a094421b5c4a97d224c92bab711, type: 3}
+    - {fileID: 8300000, guid: 017bdfea82363b047b096017b6d50d18, type: 3}
+    - {fileID: 8300000, guid: e5c27c2e93d5e954aaf97b3810cb9427, type: 3}
+    splashClips: []
     volume: 1
     pitchMin: 0.9
     pitchMax: 1.1
@@ -622,6 +653,55 @@ MonoBehaviour:
     - {fileID: 8300000, guid: b55db327e2cd3014786f978946d8dfd5, type: 3}
     - {fileID: 8300000, guid: 76d84e6342ee81c45920eb09631329c7, type: 3}
     - {fileID: 8300000, guid: 5b389d68fb62e7942b0c2846f375f11f, type: 3}
+    swimClips: []
+    splashClips: []
+    volume: 1
+    pitchMin: 0.9
+    pitchMax: 1.1
+  - breakClips:
+    - {fileID: 8300000, guid: 493de4653ab2c8c4c9ab56363628690d, type: 3}
+    - {fileID: 8300000, guid: 43483c1ccef06544098ce1eb4d0fcf74, type: 3}
+    - {fileID: 8300000, guid: 5c38a7f005bcfdf46813d51fea1bfcb0, type: 3}
+    - {fileID: 8300000, guid: e8e392236be031d4288ad550112da1c5, type: 3}
+    - {fileID: 8300000, guid: 4eef08ac8495fc04ab28aa1b40234223, type: 3}
+    - {fileID: 8300000, guid: 39d1d56c747c16640b0c13bcc61a95ea, type: 3}
+    placeClips: []
+    stepClips:
+    - {fileID: 8300000, guid: 64396a757a5031e49ac457b2c807ce6f, type: 3}
+    - {fileID: 8300000, guid: 85c0aac01432f3644bf9812ceaff10ee, type: 3}
+    - {fileID: 8300000, guid: fc1fc0afcbbe68149bd65a8eb6690bbd, type: 3}
+    - {fileID: 8300000, guid: 9e3502c41945ba1488286e5237bfd88e, type: 3}
+    - {fileID: 8300000, guid: 02ddec5c1352e7849a8f9dc72429a25c, type: 3}
+    - {fileID: 8300000, guid: 5140f16b36647d64482f6fc51235c858, type: 3}
+    - {fileID: 8300000, guid: 1fccc0b16ec140e4fae84639f15b6530, type: 3}
+    - {fileID: 8300000, guid: 1dce8ee8774e2764bbce4238e51eb9da, type: 3}
+    - {fileID: 8300000, guid: 2d8b21ecaa777aa40a718f4d1105be79, type: 3}
+    - {fileID: 8300000, guid: 0c2fa8df23c4e8847a72f473b93fdcd6, type: 3}
+    hitClips: []
+    sprintClips:
+    - {fileID: 8300000, guid: b408bc38215d1384091fffaa8e8cd490, type: 3}
+    - {fileID: 8300000, guid: ffd14877a927ffb419aa882d5dbc401b, type: 3}
+    - {fileID: 8300000, guid: 01814a094421b5c4a97d224c92bab711, type: 3}
+    - {fileID: 8300000, guid: 017bdfea82363b047b096017b6d50d18, type: 3}
+    - {fileID: 8300000, guid: e5c27c2e93d5e954aaf97b3810cb9427, type: 3}
+    jumpStartClips:
+    - {fileID: 8300000, guid: 493de4653ab2c8c4c9ab56363628690d, type: 3}
+    - {fileID: 8300000, guid: 43483c1ccef06544098ce1eb4d0fcf74, type: 3}
+    - {fileID: 8300000, guid: 5c38a7f005bcfdf46813d51fea1bfcb0, type: 3}
+    - {fileID: 8300000, guid: e8e392236be031d4288ad550112da1c5, type: 3}
+    - {fileID: 8300000, guid: 4eef08ac8495fc04ab28aa1b40234223, type: 3}
+    - {fileID: 8300000, guid: 39d1d56c747c16640b0c13bcc61a95ea, type: 3}
+    jumpLandClips:
+    - {fileID: 8300000, guid: 1b4ef027ca47bb1439cef39f63c9711b, type: 3}
+    - {fileID: 8300000, guid: 19463d156280f994c90f27241ec5048a, type: 3}
+    - {fileID: 8300000, guid: b4823743e77142e4bbc642a7f84cf924, type: 3}
+    swimClips:
+    - {fileID: 8300000, guid: b408bc38215d1384091fffaa8e8cd490, type: 3}
+    - {fileID: 8300000, guid: ffd14877a927ffb419aa882d5dbc401b, type: 3}
+    - {fileID: 8300000, guid: 01814a094421b5c4a97d224c92bab711, type: 3}
+    - {fileID: 8300000, guid: 017bdfea82363b047b096017b6d50d18, type: 3}
+    - {fileID: 8300000, guid: e5c27c2e93d5e954aaf97b3810cb9427, type: 3}
+    splashClips: []
     volume: 1
     pitchMin: 0.9
     pitchMax: 1.1

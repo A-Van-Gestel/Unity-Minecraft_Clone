@@ -906,6 +906,9 @@ namespace Editor.BlockEditor
                 BlockSoundEvent.Sprint when group.sprintClips is not { Length: > 0 } => "Step",
                 BlockSoundEvent.JumpStart when group.jumpStartClips is not { Length: > 0 } => "Step",
                 BlockSoundEvent.JumpLand when group.jumpLandClips is not { Length: > 0 } => "Step",
+                BlockSoundEvent.Swim when group.swimClips is not { Length: > 0 } => "Step",
+                BlockSoundEvent.Splash when group.splashClips is not { Length: > 0 } =>
+                    group.jumpLandClips is { Length: > 0 } ? "Jump Land" : "Step",
                 _ => null,
             };
         }
@@ -923,6 +926,8 @@ namespace Editor.BlockEditor
                 BlockSoundEvent.Sprint => "Played as the player runs on this block. Falls back to the Step clips when unauthored.",
                 BlockSoundEvent.JumpStart => "Played when the player jumps off this block. Falls back to the Step clips when unauthored.",
                 BlockSoundEvent.JumpLand => "Played when the player lands on this block. Falls back to the Step clips when unauthored.",
+                BlockSoundEvent.Swim => "Played as the player swims through this block. Falls back to the Step clips when unauthored.",
+                BlockSoundEvent.Splash => "Played when the player drops into this block's fluid. Falls back to the Jump Land clips when unauthored.",
                 _ => "Played while mining. Not triggered by the current engine.",
             };
         }

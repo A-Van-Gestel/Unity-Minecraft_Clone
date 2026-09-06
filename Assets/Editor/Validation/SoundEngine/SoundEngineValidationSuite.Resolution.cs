@@ -29,6 +29,9 @@ namespace Editor.Validation.SoundEngine
             scenarios.Add(new Scenario("Block ID Resolves To Its Authored Sound Material", RunResolveMaterial));
             scenarios.Add(new Scenario("Unauthored Place Clips Fall Back To Break Clips", RunPlaceFallback));
             scenarios.Add(new Scenario("Unauthored Gait And Jump Clips Fall Back To Step Clips", RunGaitFallback));
+            scenarios.Add(new Scenario("Unauthored Swim Falls Back To Step And Splash To Jump Land",
+                RunSwimFallback));
+            scenarios.Add(new Scenario("Swimming Is Selected Only Off The Ground In A Fluid", RunSwimSelection));
             scenarios.Add(new Scenario("Clip Pick Is Deterministic And Always In Range", RunClipPick));
             scenarios.Add(new Scenario("Pitch Stays Inside The Group's Envelope", RunPitchEnvelope));
             scenarios.Add(new Scenario("Event Hash Separates Materials And Events", RunEventHash));
@@ -270,6 +273,97 @@ namespace Editor.Validation.SoundEngine
                 if (breakOnly.GetClips(evt) != null)
                     return FailSound(scenario, $"{evt} fell through an empty Step to the break clips; it must stay silent.");
             }
+
+            return true;
+        }
+
+        /// <summary>
+        /// The two in-fluid events borrow along different chains, and the difference is the point: a stroke
+        /// is a stride, so it borrows the step clips; hitting the water is a landing, so a splash borrows the
+        /// heavier jump-land clip first and only settles for a footstep when the group authors no landing.
+        /// </summary>
+        /// <remarks>
+        /// The last block is the load-bearing one. Splash reaching Step <i>through</i> an authored JumpLand
+        /// would put a footfall under a body dropping into a lake — audible, plausible, and wrong; and a
+        /// Splash that stopped at an empty JumpLand rather than continuing to Step would go silent for every
+        /// material that authors only walking clips.
+        /// </remarks>
+        private static bool RunSwimFallback()
+        {
+            const string scenario = "Unauthored Swim Falls Back To Step And Splash To Jump Land";
+
+            AudioClip[] steps = MakeClips(3);
+            AudioClip[] lands = MakeClips(2);
+            AudioClip[] own = MakeClips(4);
+
+            BlockSoundGroup stepOnly = new BlockSoundGroup { stepClips = steps };
+            if (!ReferenceEquals(stepOnly.GetClips(BlockSoundEvent.Swim), steps))
+                return FailSound(scenario, "an unauthored Swim did not fall back to the step clips.");
+
+            BlockSoundGroup emptySwim = new BlockSoundGroup { stepClips = steps, swimClips = Array.Empty<AudioClip>() };
+            if (!ReferenceEquals(emptySwim.GetClips(BlockSoundEvent.Swim), steps))
+                return FailSound(scenario, "an empty (not null) Swim array did not fall back.");
+
+            BlockSoundGroup authoredSwim = new BlockSoundGroup { stepClips = steps, swimClips = own };
+            if (!ReferenceEquals(authoredSwim.GetClips(BlockSoundEvent.Swim), own))
+                return FailSound(scenario, "an authored Swim array was overridden by the fallback.");
+
+            BlockSoundGroup authoredSplash = new BlockSoundGroup
+            {
+                stepClips = steps, jumpLandClips = lands, splashClips = own,
+            };
+            if (!ReferenceEquals(authoredSplash.GetClips(BlockSoundEvent.Splash), own))
+                return FailSound(scenario, "an authored Splash array was overridden by the fallback.");
+
+            BlockSoundGroup landing = new BlockSoundGroup { stepClips = steps, jumpLandClips = lands };
+            if (!ReferenceEquals(landing.GetClips(BlockSoundEvent.Splash), lands))
+                return FailSound(scenario, "Splash skipped an authored JumpLand and took the step clips.");
+
+            if (!ReferenceEquals(stepOnly.GetClips(BlockSoundEvent.Splash), steps))
+                return FailSound(scenario, "Splash stopped at an empty JumpLand instead of reaching Step.");
+
+            // Neither event may climb past Step into the break clips: a shattering block under a swimmer.
+            BlockSoundGroup breakOnly = new BlockSoundGroup { breakClips = MakeClips(2) };
+            if (breakOnly.GetClips(BlockSoundEvent.Swim) != null)
+                return FailSound(scenario, "Swim fell through an empty Step to the break clips.");
+            if (breakOnly.GetClips(BlockSoundEvent.Splash) != null)
+                return FailSound(scenario, "Splash fell through an empty Step to the break clips.");
+
+            return true;
+        }
+
+        /// <summary>
+        /// Which of the two footfall worlds a body is in. Wading and swimming differ by exactly one bit —
+        /// whether anything is holding the body up — and getting it wrong is inaudible in the direction that
+        /// matters: a wading player who resolved as swimming would lose the riverbed under their feet.
+        /// </summary>
+        /// <remarks>
+        /// The flying case is pinned because the solver does <i>not</i> clear the contact for a flown body
+        /// (only noclip does), so "in fluid and not grounded" is true for every flier crossing a lake. The
+        /// sprint case is pinned because the two conditions are checked in one expression: an ordering that
+        /// tested sprinting first would put run-on-water clips under a swimmer.
+        /// </remarks>
+        private static bool RunSwimSelection()
+        {
+            const string scenario = "Swimming Is Selected Only Off The Ground In A Fluid";
+
+            if (!SoundResolution.IsSwimming(grounded: false, flying: false, inFluid: true))
+                return FailSound(scenario, "a floating body in a fluid did not count as swimming.");
+            if (SoundResolution.IsSwimming(grounded: true, flying: false, inFluid: true))
+                return FailSound(scenario, "a body standing in shallow water counted as swimming, not wading.");
+            if (SoundResolution.IsSwimming(grounded: false, flying: false, inFluid: false))
+                return FailSound(scenario, "a body falling through air counted as swimming.");
+            if (SoundResolution.IsSwimming(grounded: false, flying: true, inFluid: true))
+                return FailSound(scenario, "a body flying through a fluid counted as swimming.");
+
+            if (SoundResolution.SelectStrideEvent(swimming: true, sprinting: false) != BlockSoundEvent.Swim)
+                return FailSound(scenario, "a swimming stride did not select Swim.");
+            if (SoundResolution.SelectStrideEvent(swimming: true, sprinting: true) != BlockSoundEvent.Swim)
+                return FailSound(scenario, "a sprinting swimmer selected Sprint instead of Swim.");
+            if (SoundResolution.SelectStrideEvent(swimming: false, sprinting: true) != BlockSoundEvent.Sprint)
+                return FailSound(scenario, "a sprinting stride on land did not select Sprint.");
+            if (SoundResolution.SelectStrideEvent(swimming: false, sprinting: false) != BlockSoundEvent.Step)
+                return FailSound(scenario, "a walking stride did not select Step.");
 
             return true;
         }

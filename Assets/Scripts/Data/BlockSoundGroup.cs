@@ -32,6 +32,13 @@ namespace Data
         [Tooltip("Played when the listener lands on this material. Empty falls back to the step clips.")]
         public AudioClip[] jumpLandClips;
 
+        [Tooltip("Played as the listener swims through this material. Empty falls back to the step clips.")]
+        public AudioClip[] swimClips;
+
+        [Tooltip("Played when the listener drops into this material from the air. Empty falls back to the " +
+                 "jump-land clips, then the step clips.")]
+        public AudioClip[] splashClips;
+
         [Tooltip("Volume multiplier applied to every clip in this group, on top of the category mixer volume.")]
         [Range(0f, 1f)]
         public float volume = 1f;
@@ -45,8 +52,8 @@ namespace Data
         public float pitchMax = 1.1f;
 
         /// <summary>
-        /// Returns the clip array backing the given event, applying the place-to-break and
-        /// gait/jump-to-step fallbacks.
+        /// Returns the clip array backing the given event, applying the place-to-break, gait/jump-to-step
+        /// and splash-to-jump-land fallbacks.
         /// </summary>
         /// <param name="evt">The one-shot being requested.</param>
         /// <returns>The clip array to pick from; empty or null when this group has no clips for the event.</returns>
@@ -67,6 +74,13 @@ namespace Data
                 case BlockSoundEvent.JumpStart:
                     return jumpStartClips is { Length: > 0 } ? jumpStartClips : stepClips;
                 case BlockSoundEvent.JumpLand:
+                    return jumpLandClips is { Length: > 0 } ? jumpLandClips : stepClips;
+                case BlockSoundEvent.Swim:
+                    return swimClips is { Length: > 0 } ? swimClips : stepClips;
+
+                // Two links: a landing is the closer match for hitting water, a footstep only the last resort.
+                case BlockSoundEvent.Splash:
+                    if (splashClips is { Length: > 0 }) return splashClips;
                     return jumpLandClips is { Length: > 0 } ? jumpLandClips : stepClips;
                 default: return breakClips;
             }

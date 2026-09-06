@@ -54,6 +54,8 @@ namespace Editor.SoundEditor
             BlockSoundEvent.Sprint,
             BlockSoundEvent.JumpStart,
             BlockSoundEvent.JumpLand,
+            BlockSoundEvent.Swim,
+            BlockSoundEvent.Splash,
             BlockSoundEvent.Hit,
         };
 
@@ -315,7 +317,9 @@ namespace Editor.SoundEditor
             return evt switch
             {
                 BlockSoundEvent.Place => "Break",
-                BlockSoundEvent.Sprint or BlockSoundEvent.JumpStart or BlockSoundEvent.JumpLand => "Step",
+                BlockSoundEvent.Sprint or BlockSoundEvent.JumpStart or BlockSoundEvent.JumpLand
+                    or BlockSoundEvent.Swim => "Step",
+                BlockSoundEvent.Splash => "Jump Land",
                 _ => null,
             };
         }
@@ -330,6 +334,8 @@ namespace Editor.SoundEditor
                 BlockSoundEvent.Sprint => "Played as the player runs on this material. Leave empty to reuse the Step clips.",
                 BlockSoundEvent.JumpStart => "Played when the player jumps off this material. Leave empty to reuse the Step clips.",
                 BlockSoundEvent.JumpLand => "Played when the player lands on this material. Leave empty to reuse the Step clips.",
+                BlockSoundEvent.Swim => "Played as the player swims through this material. Leave empty to reuse the Step clips.",
+                BlockSoundEvent.Splash => "Played when the player drops into this material from the air. Leave empty to reuse the Jump Land clips.",
                 _ => "Played while mining. Unused by the current engine.",
             };
         }
@@ -359,6 +365,8 @@ namespace Editor.SoundEditor
                 BlockSoundEvent.Sprint => group.sprintClips,
                 BlockSoundEvent.JumpStart => group.jumpStartClips,
                 BlockSoundEvent.JumpLand => group.jumpLandClips,
+                BlockSoundEvent.Swim => group.swimClips,
+                BlockSoundEvent.Splash => group.splashClips,
                 _ => group.hitClips,
             };
         }
@@ -373,6 +381,8 @@ namespace Editor.SoundEditor
                 case BlockSoundEvent.Sprint: group.sprintClips = clips; break;
                 case BlockSoundEvent.JumpStart: group.jumpStartClips = clips; break;
                 case BlockSoundEvent.JumpLand: group.jumpLandClips = clips; break;
+                case BlockSoundEvent.Swim: group.swimClips = clips; break;
+                case BlockSoundEvent.Splash: group.splashClips = clips; break;
                 default: group.hitClips = clips; break;
             }
         }

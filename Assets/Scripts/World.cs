@@ -5096,7 +5096,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         // target instead, on the axis a swimmer can fight.
         if (isFalling)
         {
-            contact = BuildContact(fluid, Vector3.zero, bestSurfaceY, bodyAABB, isFalling: true);
+            contact = BuildContact(fluid, bestVoxel.ID, Vector3.zero, bestSurfaceY, bodyAABB, isFalling: true);
             return;
         }
 
@@ -5112,7 +5112,8 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
             FluidNeighbor(bestCell, -1, -1, originX, originZ),
             fluid.fluidType, in fluidTemplates, in blockTypes);
 
-        contact = BuildContact(fluid, new Vector3(flow.x, 0f, flow.y), bestSurfaceY, bodyAABB, isFalling: false);
+        contact = BuildContact(fluid, bestVoxel.ID, new Vector3(flow.x, 0f, flow.y), bestSurfaceY, bodyAABB,
+            isFalling: false);
     }
 
     /// <summary>
@@ -5359,17 +5360,19 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
 
     /// <summary>Assembles a contact from a resolved current and the fluid's authored coefficients.</summary>
     /// <param name="fluid">The block at the waterline.</param>
+    /// <param name="fluidBlockId">That block's ID.</param>
     /// <param name="flowDirection">The resolved current, in Unity space.</param>
     /// <param name="surfaceY">Unity-space Y of the fluid surface.</param>
     /// <param name="bodyAABB">The body's Unity-space AABB.</param>
     /// <param name="isFalling">Whether the waterline fluid is a falling column.</param>
     /// <returns>The assembled contact.</returns>
-    private static FluidContact BuildContact(BlockType fluid, Vector3 flowDirection, float surfaceY,
-        Bounds bodyAABB, bool isFalling)
+    private static FluidContact BuildContact(BlockType fluid, ushort fluidBlockId, Vector3 flowDirection,
+        float surfaceY, Bounds bodyAABB, bool isFalling)
     {
         return new FluidContact
         {
             Type = fluid.fluidType,
+            BlockId = fluidBlockId,
             SubmergedFraction = FluidContactResolver.SubmergedFraction(surfaceY, bodyAABB.min.y,
                 bodyAABB.max.y - bodyAABB.min.y),
             FlowDirection = flowDirection,

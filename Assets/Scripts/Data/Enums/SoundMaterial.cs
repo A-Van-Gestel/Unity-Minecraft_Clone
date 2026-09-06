@@ -48,10 +48,13 @@ namespace Data.Enums
         /// <summary>Metal.</summary>
         Metal = 11,
 
-        /// <summary>Bucket-style place/remove for fluids. NOT the flow loops (SOUND_ENGINE_DESIGN.md §5.2).</summary>
+        /// <summary>Water: bucket-style place/remove. NOT the flow loops (SOUND_ENGINE_DESIGN.md §5.2).</summary>
         Liquid = 12,
 
         /// <summary>Snow.</summary>
         Snow = 13,
+
+        /// <summary>Lava. Split from <see cref="Liquid"/> so molten fluid can carry its own clips.</summary>
+        Lava = 14,
     }
 }

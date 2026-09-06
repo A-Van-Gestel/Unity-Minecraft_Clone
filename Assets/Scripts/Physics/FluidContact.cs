@@ -50,6 +50,15 @@ namespace Physics
         /// </remarks>
         public bool IsFalling;
 
+        /// <summary>
+        /// Block ID of the fluid at the waterline, or <see cref="BlockIDs.Air"/> when the body is in none.
+        /// </summary>
+        /// <remarks>
+        /// Identity, not a resolved property: anything needing a fluid attribute this struct does not carry
+        /// looks it up from the palette rather than growing a field here.
+        /// </remarks>
+        public ushort BlockId;
+
         /// <summary>Authored <see cref="BlockType.buoyancy"/> of the fluid at the waterline.</summary>
         public float Buoyancy;
 
