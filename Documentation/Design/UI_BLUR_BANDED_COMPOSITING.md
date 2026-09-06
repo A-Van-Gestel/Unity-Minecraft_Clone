@@ -1,6 +1,6 @@
 # UI Blur Banded Compositing Design
 
-**Version:** 1.2  
+**Version:** 1.3  
 **Date:** 2026-09-06  
 **Status:** Proposed design — not implemented.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
@@ -417,7 +417,7 @@ misconfiguration ships.
 |------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|--------------|--------|
 | **UB-0 — Feasibility spike**       | Throwaway branch. One canvas → Screen Space - Camera, one band pass at `AfterRendering`, all three layer masks cleared. Measured against `main`; results in §8. Gated on row 1. Shipped nothing. | 🟡     | —            | ✅ 2026-09-06 (GO) |
 | **UB-1 — Layer discipline**        | The foundation §2 says does not exist: `UIBandId`/`UIBandLayers`, the four band layers in the Tag Manager, layer assignment **at creation** via `RuntimeUIFactory.Attach` (15 call sites), `UIBlurBand`'s enable-time repair pass, and the no-foreign-layer baselines. | 🟡     | UB-0         | ✅ 2026-09-06 |
-| **UB-2 — Band infrastructure**     | `UIBlurChain` lifted out of `UIBlurRendererFeature`, which is then **absorbed** (§5); `UIBandRegistry`; `UIBandCompositeRendererFeature` at `AfterRendering`, Game camera only; all three renderer-asset masks; **rewrite Underwater B17**, which breaks by construction. | 🔴     | UB-1         | —      |
+| **UB-2 — Band infrastructure**     | `UIBlurChain` lifted out of `UIBlurRendererFeature`, which is then **absorbed**; `UIBandRegistry`; `UIBandCompositeRendererFeature` at `AfterRenderingPostProcessing`, Game camera only; all three renderer-asset masks; **Underwater B17 rewritten** to compare pass events. | 🔴     | UB-1         | ✅ 2026-09-06 |
 | **UB-3 — Canvas conversion**       | Render mode at `RuntimeUIFactory.cs:54`; `UIBlurBand` on the four band roots in `World.unity` + the four code-built canvases; **`TooltipManager` repositioning rewrite** (§5) and its new band-3 root.                                     | 🔴     | UB-2         | —      |
 | **UB-4 — Look reconciliation**     | Re-tune the six authored tints against the new post-processed capture — all eight blurred surfaces now show bloom (§5). In-game A/B against pre-UB-3 captures; closes the lighting report's accepted limitation 2. | 🟡     | UB-3         | —      |
 | **UB-5 — Workaround removal**      | Delete `ToastManager._wasBlurSuppressed`/`Update`/`IsBlurSuppressed`/`ApplyBackdropForUIState` and the suppression branch in `BackdropMaterialFor`; correct the now-false XML remarks in `RuntimeUIFactory`, `ToastManager`, `ToastCard`.  | 🟢     | UB-4         | —      |
@@ -495,6 +495,25 @@ Two further results worth keeping:
 Both §4.4 corrections came out of this run: the sort criteria, and the global-state permission.
 Neither was visible from static reading, which is what the spike existed to catch.
 
+### UB-2 findings
+
+Two more constraints only a running frame exposed, both now encoded in the feature:
+
+- **The composite records at `AfterRenderingPostProcessing`, not `AfterRendering`.** By
+  `AfterRendering` URP has switched the active target to the backbuffer, which has no sampleable
+  texture, so the blur's blit source resolves to null. The trap is that
+  `activeColorTexture.IsValid()` still returns **true** — only `isActiveTargetBackBuffer` reveals it,
+  measured at record time (`AfterRendering` → `True`; `AfterRenderingPostProcessing` → `False`).
+  This is load-bearing for the mechanism rather than merely a crash fix: a band drawn into the
+  backbuffer cannot be captured by the next band's blur, so the interleaving would be impossible
+  there regardless. `requiresIntermediateTexture` is still set — the pass does sample the active
+  color — but it does not address the switch and was not the fix.
+- **The base band always walks.** `_UIBlurTexture` publishes every frame whatever the registry
+  reports, and occupancy can only *add* bands. Edit-mode registration does not survive domain
+  reloads, so gating the blur on occupancy silently costs every panel its blur in the editor while
+  looking correct in play mode.
+
+
 ---
 
 ## 9. Rejected alternatives
@@ -512,6 +531,9 @@ Neither was visible from static reading, which is what the spike existed to catc
 
 ## Document History
 
+* **v1.3** - UB-2 shipped and confirmed in game: the composite records at
+  `AfterRenderingPostProcessing` (the backbuffer switch makes `AfterRendering` unusable), the base
+  band always walks, `UIBlurRendererFeature` is absorbed, and Underwater B17 compares pass events.
 * **v1.2** - UB-1 shipped and was confirmed in game: band layers declared, layer assignment moved to
   creation across 15 sites, `UI Band Layers` suite registered (aggregate 29 -> 30 suites).
 * **v1.1** - UB-0 ran and returned GO: §8 replaced with its measured results, §4.4 corrected on the
