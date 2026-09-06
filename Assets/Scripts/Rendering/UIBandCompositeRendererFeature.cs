@@ -182,8 +182,15 @@ namespace Rendering
                 DrawingSettings drawingSettings = RenderingUtils.CreateDrawingSettings(
                     s_shaderTags, renderingData, cameraData, lightData, SortingCriteria.CommonTransparent);
 
+                // Two filters, two questions: the GameObject layer says "this is UI", the sorting layer
+                // range says "this is that band". Banding on the sorting layer is what lets a band root
+                // route a whole subtree without touching any object in it.
+                short sortingValue = (short)UIBandLayers.SortingValueOf(band);
                 FilteringSettings filteringSettings =
-                    new FilteringSettings(RenderQueueRange.transparent, UIBandLayers.MaskOf(band));
+                    new FilteringSettings(RenderQueueRange.transparent, UIBandLayers.UILayerMask)
+                    {
+                        sortingLayerRange = new SortingLayerRange(sortingValue, sortingValue),
+                    };
 
                 passData.RendererList = renderGraph.CreateRendererList(
                     new RendererListParams(renderingData.cullResults, drawingSettings, filteringSettings));

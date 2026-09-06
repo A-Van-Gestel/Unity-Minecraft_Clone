@@ -1,6 +1,6 @@
 # UI Blur Banded Compositing Design
 
-**Version:** 1.3  
+**Version:** 1.4  
 **Date:** 2026-09-06  
 **Status:** Proposed design — not implemented.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
@@ -25,6 +25,12 @@ material references were read out of the serialized scenes, not assumed.
 **Amended:** 2026-09-06 — UB-0 ran and returned **GO**. §8 now carries its measured results, and §4.4
 gains two corrections the spike forced: the sort criteria and the global-state permission. The spike
 itself is preserved on branch `spike/ub0-inpipeline-ui` at commit `e369f061`; it ships nothing.
+
+**Amended:** 2026-09-06 — band identity moved from a **GameObject layer to a sorting layer** during
+UB-3, after a prefab audit of `World.unity` refuted the premise §9 rejected it on. §4.2, §4.3, §4.4,
+§6 and §9 are rewritten to match; the `UI` GameObject layer survives for a narrower job. §4.1 and
+§4.3 also pick up the `AfterRenderingPostProcessing` event that UB-2 settled but left stated only
+in §8.
 
 **Relationship to other documents:**
 
@@ -95,7 +101,7 @@ itself is preserved on branch `spike/ub0-inpipeline-ui` at commit `e369f061`; it
 | Canvas gamma flag           | `m_VertexColorAlwaysGammaSpace` is **0 in `World.unity:4637` but 1 in `MainMenu.unity:3258`** — the two scenes already disagree about how UI vertex colours are treated. Pre-existing and unrelated to this design, but it lands directly in UB-6's path. Both carry `m_AdditionalShaderChannelsFlag: 25` (Tangent + Normal + TexCoord1). |
 | Canvas draw path            | URP's `DrawObjectsPass` includes `SortingCriteria.CanvasOrder` in its sort flags (`DrawObjectsPass.cs:205`), and URP's runtime contains **no** special-casing for `ScreenSpaceCamera` canvases — so such canvases already render through the standard cull-results → `DrawRenderers` path this design filters. |
 | Tooltip positioning         | `TooltipManager` assigns screen-pixel coordinates straight into a world-space transform — `_tooltipRect.position = finalPos` at `:244`, `:282`, `:316`, with the comment *"Setting position directly works perfectly for Overlay canvases"* at `:243`. That identity holds **only** for Overlay canvases. Tooltips are also instantiated into `_parentCanvas` (`:108`), which in `World.unity` is the single scene canvas. |
-| Layer / sorting budget      | `TagManager.asset`: layer 5 is `UI`; layers 3 and 7–31 are free. **Only one sorting layer (`Default`) exists**, so bands must key on GameObject layer, not `SortingLayer`.        |
+| Layer / sorting budget      | `TagManager.asset`: layer 5 is `UI`; layers 3 and 7–31 are free. **Only one sorting layer (`Default`) existed**, from which this audit concluded bands must key on GameObject layer. UB-3's prefab audit refuted that conclusion — see §4.2 and §9. |
 | Layer discipline            | **None existed before UB-1.** A repo-wide grep for `.layer =` / `SetLayerRecursively` returns *zero* hits, so every runtime-built UI object (`RuntimeUIFactory.cs:38,165,190,220,244,312`, `ToastCard.cs:102,171,196,216`, `ToastManager.cs:327`, `TooltipManager.cs:108`) lands on layer 0 `Default` — **the same layer as world geometry**. Only the 27 scene-authored objects in `World.unity` are on layer 5. Layer-based band filtering therefore has no foundation to build on; UB-1 has to create one. |
 | Camera setup                | One camera per scene, `m_CullingMask: 4294967295` in both — UI is already in `cullResults`, so no culling-mask change is needed.                                                  |
 | Renderer feature order      | `VoxelEngine-URP-Renderer.asset`: Underwater overlay, then UI blur, then cloud prepass. Underwater-before-blur is a load-bearing invariant, asserted by Underwater **B17**.       |
@@ -186,13 +192,14 @@ flat color automatically.
 
 ### 4.1 The band loop
 
-A band is an ordered group of UI *subtrees* drawn together, identified by a GameObject layer (§4.2
+A band is an ordered group of UI *subtrees* drawn together, identified by a sorting layer (§4.2
 explains why a subtree and not a canvas). One feature owns the whole walk — **including band 0's
-capture** — at `RenderPassEvent.AfterRendering`, so every band samples a screen that has been through
-the post stack (§5). The pass walks bands in ascending order, re-blurring between them:
+capture** — at `RenderPassEvent.AfterRenderingPostProcessing`, so every band samples a screen that
+has been through the post stack while the active target is still sampleable (§8). The pass walks
+bands in ascending order, re-blurring between them:
 
 ```
-RenderPassEvent.AfterRendering
+RenderPassEvent.AfterRenderingPostProcessing
 │
 ├─ blur(cameraColor) ──▶ _UIBlurTexture        the post-processed world — bloom included
 ├─ draw band 0                                 HUD · toolbar · creative inventory
@@ -222,12 +229,28 @@ renderer, so a subtree of a canvas can be its own band without splitting the can
 Bands replace `sortingOrder` as the cross-band ordering authority; the mapping preserves today's
 observed paint order rather than redesigning it:
 
-| Band | Layer      | Occupants                                                      | Declared on                              | Today's order |
-|:----:|------------|-------------------------------------------------------------------|------------------------------------------|---------------|
-| 0    | `UIBand0`  | Benchmark HUD, `Toolbar`, `CreativeInventory`                     | HUD canvas root; the two scene subtrees  | −10, 0        |
-| 1    | `UIBand1`  | `PauseMenu`, `SettingsMenu`, `HelpMenu`                           | `PauseMenuContainer`                     | 0             |
-| 2    | `UIBand2`  | `ConsoleUI` panel, benchmark results overlay                      | their canvas roots                       | 100, 200      |
-| 3    | `UIBand3`  | Toast cards, tooltips                                             | toast canvas root; a new tooltip root    | 250           |
+| Band | Sorting layer           | Occupants                                     | Declared on                              | Today's order |
+|:----:|-------------------------|-----------------------------------------------|------------------------------------------|---------------|
+| 0    | `Default`               | Benchmark HUD, `Toolbar`, `CreativeInventory` | HUD canvas root; the two scene subtrees  | −10, 0        |
+| 1    | `UIBandMenus`           | `PauseMenu`, `SettingsMenu`, `HelpMenu`       | `PauseMenuContainer`                     | 0             |
+| 2    | `UIBandModals`          | `ConsoleUI` panel, benchmark results overlay  | their canvas roots                       | 100, 200      |
+| 3    | `UIBandNotifications`   | Toast cards, tooltips                         | toast canvas root; a new tooltip root    | 250           |
+
+Band identity is carried by the **sorting layer** on one `Canvas` per band root, not by a GameObject
+layer per object. The GameObject layer keeps a separate, single job: `UI` marks a renderer as UI at
+all, which is what the renderer's own draw masks exclude (§4.5). One layer covers every band.
+
+The split is what makes declaring a band free. A nested `Canvas` with `overrideSorting` routes its
+whole subtree in one component, so a band declaration writes **no property on any child** and
+therefore no prefab overrides — decisive here, because `World.unity`'s UI is 61 prefab instances out
+of 91 canvas objects, and `PauseMenuContainer` alone is 29 (§9).
+
+Two API constraints govern the routing, both pinned by the `L7` baseline:
+
+- `overrideSorting` applies only to a **nested** canvas; Unity forces it back off on a root canvas,
+  which already owns its sorting natively.
+- It must be set **before** `sortingLayerID` — a canvas still inheriting its parent's sorting ignores
+  the assignment, leaving the id at 0 with no error.
 
 Two consequences the per-canvas reading hid:
 
@@ -247,14 +270,14 @@ but the order is preserved anyway — this design does not relitigate it.
 ```
 ┌──────────────────────────┐    declares band      ┌────────────────────────┐
 │ UIBlurBand (per subtree) │ ────────────────────▶ │ UIBandRegistry         │
-│ · owns its band's layer  │                       │ · occupied-band bitmask│
+│ · sets canvas sort layer │                       │ · occupied-band bitmask│
 │ · registers on enable    │                       │ · static, domain-reset │
 └──────────────────────────┘                       └───────────┬────────────┘
                                                                │ reads
                                                    ┌───────────▼────────────────────┐
                                                    │ UIBandCompositeRendererFeature │
                                                    │ · per band: blur, then draw    │
-                                                   │ · AfterRendering               │
+                                                   │ · AfterRenderingPostProcessing │
                                                    └───────────┬────────────────────┘
                                                                │ uses
                                                    ┌───────────▼────────────┐
@@ -265,25 +288,28 @@ but the order is preserved anyway — this design does not relitigate it.
                                                    └────────────────────────┘
 ```
 
-`UIBlurBand` is the explicit registration point: a subtree declares its band, and the component owns
-that band's layer so nothing depends on hand-authored layer assignment surviving a prefab edit.
-`UIBandRegistry` holds one mutable static (the occupied-band mask) and therefore needs a
-`[RuntimeInitializeOnLoadMethod]` reset per `CLAUDE.md`'s domain-reload rule.
+`UIBlurBand` is the explicit registration point: a subtree declares its band, and the component sets
+its canvas's sorting layer so nothing depends on hand-authored sorting surviving a prefab edit. It
+carries `[RequireComponent(typeof(Canvas))]`, which makes a builder's component order load-bearing —
+see the `L8` note in §6. `UIBandRegistry` holds one mutable static (the occupied-band mask) and
+therefore needs a `[RuntimeInitializeOnLoadMethod]` reset per `CLAUDE.md`'s domain-reload rule.
 
-**A one-shot recursive layer set on enable is not sufficient**, and this is the sharpest edge in the
-design. Every occupant of bands 2 and 3 is created *after* its band root enables — `ToastCard.cs:102`,
-`:171`, `:196`, `:216`, `ToastManager.cs:327`, `TooltipManager.cs:108` — and Unity's `new GameObject`
-defaults to layer 0 with no inheritance on reparent. A late child would therefore be filtered out of
-every band draw *and* fall back inside URP's own transparent mask, drawing at the wrong time. The
-exact scenario this design exists for — a toast over the console — is the one such a contract would
-miss. The layer must therefore be applied **at creation**, which the project has nowhere to do it
+**A one-shot recursive layer set on enable is not sufficient** for the `UI` GameObject layer, and
+this is the sharpest edge in the design. Every occupant of bands 2 and 3 is created *after* its band
+root enables — `ToastCard.cs:102`, `:171`, `:196`, `:216`, `ToastManager.cs:327`,
+`TooltipManager.cs:108` — and Unity's `new GameObject` defaults to layer 0 with no inheritance on
+reparent. A late child would therefore fall back inside URP's own transparent mask and draw at the
+wrong time. The layer must therefore be applied **at creation**, which the project had nowhere to do
 today (§2, "Layer discipline": zero `.layer =` assignments repo-wide). UB-1 owns building that:
 
-- `RuntimeUIFactory`'s creation helpers take the layer from the nearest `UIBlurBand` ancestor.
-- `UIBlurBand` re-applies its layer to its subtree on enable, as a repair pass rather than the
+- `RuntimeUIFactory`'s creation helpers take the layer from the parent they attach under.
+- `UIBlurBand` re-applies the UI layer to its subtree on enable, as a repair pass rather than the
   primary mechanism.
 - A UB-1 baseline asserts **no `Graphic` under a band root sits on a foreign layer**, which is the
   assertion that turns this from a convention into a contract.
+
+Band identity itself is exempt from all of this: it lives on the band root's canvas, so a late child
+inherits it by being in the subtree, with nothing to assign and nothing to repair.
 
 `UIBlurChain` is a pure extraction of the existing Kawase ping-pong so the producer and the band
 pass cannot drift apart; the extraction must not change the kernel, the offset progression, or the
@@ -293,7 +319,9 @@ pass cannot drift apart; the extraction must not change the kernel, the offset p
 
 Modeled directly on `CloudPrepassRendererFeature.CloudPrepass`:
 
-- `FilteringSettings` — `RenderQueueRange.transparent`, `layerMask` = the band's layer.
+- `FilteringSettings` — `RenderQueueRange.transparent`, plus **two filters answering two questions**:
+  `layerMask` = the single `UI` GameObject layer ("this is UI"), and `sortingLayerRange` collapsed to
+  the band's own sorting value ("this is that band").
 - `DrawingSettings` — shader tags `SRPDefaultUnlit` and `UniversalForward` (UGUI, TMP and
   `MaskedUIBlur` all declare passes with no `LightMode`, so they resolve under `SRPDefaultUnlit`),
   and **`SortingCriteria.CommonTransparent`**, which is also what `CloudPrepass` uses.
@@ -404,10 +432,11 @@ misconfiguration ships.
 | BlockIDs constants, no raw IDs                  | Not applicable — no block references.                                                                                                                                 |
 | Mutable statics reset on play-mode entry        | `UIBandRegistry`'s occupied-band mask is the one mutable static; it gets its own `[RuntimeInitializeOnLoadMethod]` (the class has none today, so no UDR0005 conflict). |
 | Shader `#pragma target 4.5` floor               | No shader is modified. `UIBlurBlit` and `MaskedUIBlur` keep their existing pragmas and interpolator counts.                                                            |
-| No magic numbers                                | Band count, band layer names and the band-to-layer mapping are named constants on `UIBandRegistry`; `private const` in `SCREAMING_CASE`, `public const` in `PascalCase`. |
+| No magic numbers                                | Band count, sorting layer names and the band-to-layer mapping are named constants on `UIBandLayers`; `private const` in `SCREAMING_CASE`, `public const` in `PascalCase`. |
 | Coordinate spaces named for their space         | The only space crossing left in the shader is screen UV, unchanged. `TooltipManager`'s screen-pixels-into-world-position assignment is a real space violation that Overlay canvases happened to make harmless; UB-3 converts it to `ScreenPointToLocalPointInRectangle` + `anchoredPosition`, which names both spaces correctly. |
 | Mutable statics reset on play-mode entry        | Covered above; `UIBlurBand` itself holds no statics, so no UDR0005 conflict is introduced by the per-subtree component.                                              |
-| Layers are assigned, not assumed                | New discipline this design creates (§2 shows none exists): band layers are applied at GameObject creation and asserted by a UB-1 baseline, rather than relying on scene authoring or reparent inheritance, which Unity does not provide. |
+| Layers are assigned, not assumed                | New discipline this design creates (§2 shows none exists): the `UI` layer is applied at GameObject creation and asserted by a UB-1 baseline, rather than relying on scene authoring or reparent inheritance, which Unity does not provide. Band identity needs no such discipline — it is inherited from the band root's canvas. |
+| A factory's construction order is itself tested | `UIBlurBand`'s `[RequireComponent(typeof(Canvas))]` makes Unity add the canvas first, so a builder that adds the band before its own `AddComponent<Canvas>()` gets `null` back from that call — a silent contract, not a compile error. Baselines that exercise the component directly cannot see it (all seven did pass with the fault present), so `L8` goes **through `RuntimeUIFactory`** and asserts exactly one, fully configured canvas. |
 
 ---
 
@@ -418,7 +447,7 @@ misconfiguration ships.
 | **UB-0 — Feasibility spike**       | Throwaway branch. One canvas → Screen Space - Camera, one band pass at `AfterRendering`, all three layer masks cleared. Measured against `main`; results in §8. Gated on row 1. Shipped nothing. | 🟡     | —            | ✅ 2026-09-06 (GO) |
 | **UB-1 — Layer discipline**        | The foundation §2 says does not exist: `UIBandId`/`UIBandLayers`, the four band layers in the Tag Manager, layer assignment **at creation** via `RuntimeUIFactory.Attach` (15 call sites), `UIBlurBand`'s enable-time repair pass, and the no-foreign-layer baselines. | 🟡     | UB-0         | ✅ 2026-09-06 |
 | **UB-2 — Band infrastructure**     | `UIBlurChain` lifted out of `UIBlurRendererFeature`, which is then **absorbed**; `UIBandRegistry`; `UIBandCompositeRendererFeature` at `AfterRenderingPostProcessing`, Game camera only; all three renderer-asset masks; **Underwater B17 rewritten** to compare pass events. | 🔴     | UB-1         | ✅ 2026-09-06 |
-| **UB-3 — Canvas conversion**       | Render mode at `RuntimeUIFactory.cs:54`; `UIBlurBand` on the four band roots in `World.unity` + the four code-built canvases; **`TooltipManager` repositioning rewrite** (§5) and its new band-3 root.                                     | 🔴     | UB-2         | —      |
+| **UB-3 — Canvas conversion**       | Render mode at `RuntimeUIFactory.cs:54`; `UIBlurBand` on the four band roots in `World.unity` + the four code-built canvases; **`TooltipManager` repositioning rewrite** (§5) and its new band-3 root. Mechanism reworked mid-phase from GameObject-layer to **sorting-layer** banding (§4.2, §9). | 🔴     | UB-2         | In progress |
 | **UB-4 — Look reconciliation**     | Re-tune the six authored tints against the new post-processed capture — all eight blurred surfaces now show bloom (§5). In-game A/B against pre-UB-3 captures; closes the lighting report's accepted limitation 2. | 🟡     | UB-3         | —      |
 | **UB-5 — Workaround removal**      | Delete `ToastManager._wasBlurSuppressed`/`Update`/`IsBlurSuppressed`/`ApplyBackdropForUIState` and the suppression branch in `BackdropMaterialFor`; correct the now-false XML remarks in `RuntimeUIFactory`, `ToastManager`, `ToastCard`.  | 🟢     | UB-4         | —      |
 | **UB-6 — MainMenu adoption**       | Convert `MainMenu.unity`'s canvas, declare its bands, and add the frosted panels it does not have today.                                                                                                                                   | 🟢     | UB-4         | —      |
@@ -523,7 +552,8 @@ Two more constraints only a running frame exposed, both now encoded in the featu
 | Analytic affine chain of panel rects (Option A) | Reproduces a lower panel's flat tint but never its content — the console's text stays invisible through a toast above it, which is the case that makes the artifact obvious. Also needs per-panel data on shared materials. | 2026-09-06 |
 | Overlay camera stack, one camera per band (Option C) | Pays a full URP camera loop per band, inverting the cost model this design depends on, and needs per-camera suppression of the underwater and cloud features that Option B gets for free.                             | 2026-09-06 |
 | Generalized flat-fallback overlap policy (Option D) | Removes frost instead of stacking it. Already named as the wrong fix in `UI_BLUR_BACKDROP_SYSTEM.md` §8.                                                                                                               | 2026-09-06 |
-| Banding by `SortingLayer` rather than GameObject layer | The project defines exactly one sorting layer (`Default`), so this needs a `ProjectSettings` change to buy what a free GameObject layer gives directly, and `FilteringSettings.layerMask` is the better-trodden filter. | 2026-09-06 |
+| ~~Banding by `SortingLayer` rather than GameObject layer~~ — **REVERSED 2026-09-06, now the shipping mechanism (§4.2)** | Originally rejected because the project defined one sorting layer and a GameObject layer was "free". **A prefab audit of `World.unity` refuted the premise:** 61 of 91 canvas objects are prefab instances, and banding `PauseMenuContainer` by GameObject layer would have written ~29 prefab overrides — a per-object write on authored content, not a free one. A sorting layer routes the same subtree from one nested canvas with zero overrides. The three `ProjectSettings` entries are the cheaper half of that trade. | 2026-09-06 |
+| Banding by GameObject layer (the original mechanism) | Costs a per-object `m_Layer` write on every band member, which on prefab instances becomes a prefab override per object, and needs a repair pass on every enable to survive late-created children. Superseded by the row above; the `UI` layer survives for a different job (marking UI for the renderer's own masks). | 2026-09-06 |
 | Re-blurring the previous frame's composited back buffer | Self-referential: a panel's backdrop would contain the panel itself from the previous frame, producing a recursive smear. No latency budget makes this correct.                                                       | 2026-09-06 |
 | Adopting UI Toolkit's native backdrop-filter for blurred surfaces | URP 17.6 already ships the mechanism (§3), but it is gated on `AnyOverlayPanelHasBackdropFilter()` and only UIElements can sample the composite buffer — uGUI has no backdrop-filter API (zero hits across `com.unity.ugui@2.6.0`). Using it means porting the blurred surfaces to UIElements beside a mature uGUI stack, with only coarse ordering between a UIToolkit panel and the uGUI canvases. Worth revisiting if uGUI ever gains the API. | 2026-09-06 |
 
@@ -531,6 +561,10 @@ Two more constraints only a running frame exposed, both now encoded in the featu
 
 ## Document History
 
+* **v1.4** - Band identity moved from GameObject layer to **sorting layer** mid-UB-3 (§4.2, §9's
+  rejection reversed by a prefab audit); `UIBlurBand` routes through a nested canvas with
+  `overrideSorting`; §4.4 filters on both layer and sorting range; §6 gains the factory
+  construction-order constraint; §4.1/§4.3 corrected to `AfterRenderingPostProcessing`.
 * **v1.3** - UB-2 shipped and confirmed in game: the composite records at
   `AfterRenderingPostProcessing` (the backbuffer switch makes `AfterRendering` unusable), the base
   band always walks, `UIBlurRendererFeature` is absorbed, and Underwater B17 compares pass events.
@@ -544,4 +578,4 @@ Two more constraints only a running frame exposed, both now encoded in the featu
 ---
 
 **Last Updated:** 2026-09-06  
-**Next Review:** when UB-1 (layer discipline) starts
+**Next Review:** when UB-3 (canvas conversion) closes

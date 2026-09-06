@@ -3,31 +3,33 @@ using UnityEngine;
 namespace UI.Blur
 {
     /// <summary>
-    /// Declares the subtree below it as one UI compositing band, and keeps that subtree on the band's
-    /// layer. Sits on a canvas root, or on any subtree that must composite separately from its siblings.
+    /// Declares the subtree below it as one UI compositing band. Sits on a canvas root, or on any
+    /// subtree that must composite separately from its siblings.
     /// </summary>
     /// <remarks>
-    /// The enable-time sweep is a repair pass, not the mechanism: objects created later take the band
-    /// layer at creation instead, since Unity does not inherit a layer on reparent and a one-shot sweep
-    /// cannot see what does not exist yet. If the sweep is ever what makes a band correct, a creation
-    /// site is missing its assignment.
+    /// The band is carried by a nested <see cref="Canvas"/> with <c>overrideSorting</c>, so one component
+    /// routes a whole subtree and no per-object data is written. The subtree is also kept on the UI
+    /// GameObject layer, which is what excludes it from the renderer's own draw passes.
     /// </remarks>
     [DisallowMultipleComponent]
+    [RequireComponent(typeof(Canvas))]
     public sealed class UIBlurBand : MonoBehaviour
     {
         [Tooltip("Which compositing band this subtree draws in. Higher bands draw over, and can frost, lower ones.")]
         [SerializeField]
         private UIBandId _band = UIBandId.Hud;
 
+        private Canvas _canvas;
+
         /// <summary>The band this subtree draws in.</summary>
         public UIBandId Band => _band;
 
-        /// <summary>The layer this subtree's objects carry, or -1 when that layer is undeclared.</summary>
-        public int Layer => UIBandLayers.LayerOf(_band);
+        /// <summary>The sorting layer id this subtree's canvas carries.</summary>
+        public int SortingLayerId => UIBandLayers.SortingLayerIdOf(_band);
 
         private void OnEnable()
         {
-            ApplyLayer();
+            Apply();
             UIBandRegistry.Register(this);
         }
 
@@ -35,11 +37,11 @@ namespace UI.Blur
         {
             UIBandRegistry.Unregister(this);
 #if UNITY_EDITOR
-            UnityEditor.EditorApplication.delayCall -= ApplyLayerDeferred;
+            UnityEditor.EditorApplication.delayCall -= ApplyDeferred;
 #endif
         }
 
-        /// <summary>Assigns this subtree's band and applies its layer.</summary>
+        /// <summary>Assigns this subtree's band and routes it.</summary>
         /// <param name="band">The band this subtree draws in.</param>
         public void SetBand(UIBandId band)
         {
@@ -48,24 +50,41 @@ namespace UI.Blur
             // Re-registering is idempotent, and the registry reads the band off the component, so this
             // only has to keep an enabled component present.
             if (isActiveAndEnabled) UIBandRegistry.Register(this);
-            ApplyLayer();
+            Apply();
         }
 
-        /// <summary>Puts this GameObject and every current descendant on this band's layer.</summary>
-        /// <remarks>Safe to call repeatedly; does nothing while the band's layer is undeclared.</remarks>
-        public void ApplyLayer() => UIBandLayers.SetBandRecursively(gameObject, _band);
+        /// <summary>
+        /// Routes this subtree into its band: the canvas takes the band's sorting layer, and the subtree
+        /// is put on the UI layer so the renderer's own passes skip it.
+        /// </summary>
+        /// <remarks>Safe to call repeatedly; does nothing while the band's sorting layer is undeclared.</remarks>
+        public void Apply()
+        {
+            if (_canvas == null) _canvas = GetComponent<Canvas>();
+
+            UIBandLayers.SetUILayerRecursively(gameObject);
+
+            int sortingLayerId = SortingLayerId;
+            if (UIBandLayers.SortingValueOf(_band) < 0) return;
+
+            // Order matters: a nested canvas ignores sortingLayerID while it is still inheriting, so the
+            // opt-out has to come first. A root canvas already owns its sorting and forces the flag off.
+            if (!_canvas.isRootCanvas) _canvas.overrideSorting = true;
+
+            _canvas.sortingLayerID = sortingLayerId;
+        }
 
 #if UNITY_EDITOR
-        private void OnValidate() => UnityEditor.EditorApplication.delayCall += ApplyLayerDeferred;
+        private void OnValidate() => UnityEditor.EditorApplication.delayCall += ApplyDeferred;
 
         /// <summary>
-        /// Re-applies the layer a tick after an inspector edit. Assigning a layer during
-        /// <c>OnValidate</c> raises Unity's <c>OnLayersChanged</c> SendMessage, which the engine forbids.
+        /// Re-routes a tick after an inspector edit. Assigning a layer during <c>OnValidate</c> raises
+        /// Unity's <c>OnLayersChanged</c> SendMessage, which the engine forbids.
         /// </summary>
-        private void ApplyLayerDeferred()
+        private void ApplyDeferred()
         {
-            UnityEditor.EditorApplication.delayCall -= ApplyLayerDeferred;
-            if (this != null && isActiveAndEnabled) ApplyLayer();
+            UnityEditor.EditorApplication.delayCall -= ApplyDeferred;
+            if (this != null && isActiveAndEnabled) Apply();
         }
 #endif
     }

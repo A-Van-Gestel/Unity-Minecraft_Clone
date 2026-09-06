@@ -3,60 +3,97 @@ using UnityEngine;
 namespace UI.Blur
 {
     /// <summary>
-    /// Maps a <see cref="UIBandId"/> to the Unity layer its renderers live on, and applies that layer to
-    /// a subtree. Band membership is keyed on the layer because that is what a render-graph draw filters
-    /// by.
+    /// Resolves the two pieces of routing a UI band needs: the sorting layer that identifies the band,
+    /// and the single GameObject layer that marks a renderer as UI.
     /// </summary>
     /// <remarks>
-    /// Nothing is cached: <see cref="LayerMask.NameToLayer"/> is a cheap lookup and these calls happen
-    /// when UI is built, never per frame, which keeps this class free of mutable statics.
+    /// The split is deliberate. Band identity lives on the <b>sorting layer</b>, which a nested canvas
+    /// sets for a whole subtree at once, so declaring a band touches one component instead of every
+    /// object and writes no prefab overrides. The <b>GameObject layer</b> answers a different question,
+    /// "is this UI at all", and is what the renderer's own draw masks exclude; one layer covers every
+    /// band.
+    /// <para>
+    /// Nothing is cached: these are cheap lookups made when UI is built, never per frame, which keeps
+    /// this class free of mutable statics.
+    /// </para>
     /// </remarks>
     public static class UIBandLayers
     {
         /// <summary>Number of bands, and the length of the band walk.</summary>
         public const int BandCount = 4;
 
-        /// <summary>Layer for <see cref="UIBandId.Hud"/>.</summary>
-        public const string HudLayerName = "UI";
+        /// <summary>GameObject layer every UI renderer sits on, whatever its band.</summary>
+        public const string UILayerName = "UI";
 
-        /// <summary>Layer for <see cref="UIBandId.Menus"/>.</summary>
-        public const string MenusLayerName = "UIMenus";
+        /// <summary>Sorting layer for <see cref="UIBandId.Hud"/>, which keeps the project default.</summary>
+        public const string HudSortingLayerName = "Default";
 
-        /// <summary>Layer for <see cref="UIBandId.Modals"/>.</summary>
-        public const string ModalsLayerName = "UIModals";
+        /// <summary>Sorting layer for <see cref="UIBandId.Menus"/>.</summary>
+        public const string MenusSortingLayerName = "UIBandMenus";
 
-        /// <summary>Layer for <see cref="UIBandId.Notifications"/>.</summary>
-        public const string NotificationsLayerName = "UINotifications";
+        /// <summary>Sorting layer for <see cref="UIBandId.Modals"/>.</summary>
+        public const string ModalsSortingLayerName = "UIBandModals";
 
-        /// <summary>Value <see cref="LayerMask.NameToLayer"/> returns for an undeclared layer.</summary>
+        /// <summary>Sorting layer for <see cref="UIBandId.Notifications"/>.</summary>
+        public const string NotificationsSortingLayerName = "UIBandNotifications";
+
+        /// <summary>Value the layer lookups return for a layer the project does not declare.</summary>
         private const int UNDEFINED_LAYER = -1;
 
-        /// <summary>The layer name a band's renderers carry.</summary>
-        /// <param name="band">The band to resolve.</param>
-        /// <returns>The layer name; an unrecognized band falls back to <see cref="HudLayerName"/>.</returns>
-        public static string NameOf(UIBandId band) => band switch
+        /// <summary>The GameObject layer index UI renderers sit on, or -1 when undeclared.</summary>
+        public static int UILayer => LayerMask.NameToLayer(UILayerName);
+
+        /// <summary>Mask selecting the UI GameObject layer, for draw masks and pass filters.</summary>
+        public static int UILayerMask
         {
-            UIBandId.Menus => MenusLayerName,
-            UIBandId.Modals => ModalsLayerName,
-            UIBandId.Notifications => NotificationsLayerName,
-            _ => HudLayerName,
+            get
+            {
+                int layer = UILayer;
+                return layer == UNDEFINED_LAYER ? 0 : 1 << layer;
+            }
+        }
+
+        /// <summary>The sorting layer name that identifies a band.</summary>
+        /// <param name="band">The band to resolve.</param>
+        /// <returns>The sorting layer name; an unrecognized band falls back to the Hud layer.</returns>
+        public static string SortingLayerNameOf(UIBandId band) => band switch
+        {
+            UIBandId.Menus => MenusSortingLayerName,
+            UIBandId.Modals => ModalsSortingLayerName,
+            UIBandId.Notifications => NotificationsSortingLayerName,
+            _ => HudSortingLayerName,
         };
 
-        /// <summary>The layer index a band's renderers carry.</summary>
+        /// <summary>The sorting layer id a band's canvas carries.</summary>
         /// <param name="band">The band to resolve.</param>
-        /// <returns>The layer index, or -1 when the layer is undeclared.</returns>
-        /// <remarks>-1 means "leave the layer alone"; assigning it would throw.</remarks>
-        public static int LayerOf(UIBandId band) => LayerMask.NameToLayer(NameOf(band));
+        /// <returns>The sorting layer id, or 0 when the layer is undeclared.</returns>
+        public static int SortingLayerIdOf(UIBandId band) =>
+            SortingLayer.NameToID(SortingLayerNameOf(band));
 
-        /// <summary>Whether every band resolves to a declared layer.</summary>
-        /// <param name="missing">The first band whose layer is undeclared, when this returns false.</param>
-        /// <returns>True when all <see cref="BandCount"/> layers exist.</returns>
-        public static bool AllLayersDeclared(out UIBandId missing)
+        /// <summary>
+        /// The band's position in the sorting layer order, which is what a draw filter compares against.
+        /// </summary>
+        /// <param name="band">The band to resolve.</param>
+        /// <returns>The sorting layer value, or -1 when the layer is undeclared.</returns>
+        public static int SortingValueOf(UIBandId band)
+        {
+            string name = SortingLayerNameOf(band);
+            foreach (SortingLayer layer in SortingLayer.layers)
+                if (layer.name == name)
+                    return layer.value;
+
+            return UNDEFINED_LAYER;
+        }
+
+        /// <summary>Whether every band resolves to its own declared sorting layer.</summary>
+        /// <param name="missing">The first band whose sorting layer is undeclared, when this returns false.</param>
+        /// <returns>True when all <see cref="BandCount"/> sorting layers exist.</returns>
+        public static bool AllSortingLayersDeclared(out UIBandId missing)
         {
             for (int i = 0; i < BandCount; i++)
             {
                 UIBandId band = (UIBandId)i;
-                if (LayerOf(band) != UNDEFINED_LAYER) continue;
+                if (SortingValueOf(band) != UNDEFINED_LAYER) continue;
 
                 missing = band;
                 return false;
@@ -64,24 +101,6 @@ namespace UI.Blur
 
             missing = UIBandId.Hud;
             return true;
-        }
-
-        /// <summary>A layer mask selecting only this band.</summary>
-        /// <param name="band">The band to build a mask for.</param>
-        /// <returns>The mask, or 0 when the band's layer is undeclared.</returns>
-        public static int MaskOf(UIBandId band)
-        {
-            int layer = LayerOf(band);
-            return layer == UNDEFINED_LAYER ? 0 : 1 << layer;
-        }
-
-        /// <summary>A layer mask selecting every band.</summary>
-        /// <returns>The combined mask of all declared band layers.</returns>
-        public static int AllBandsMask()
-        {
-            int mask = 0;
-            for (int i = 0; i < BandCount; i++) mask |= MaskOf((UIBandId)i);
-            return mask;
         }
 
         /// <summary>Puts a GameObject and every descendant on a layer.</summary>
@@ -97,10 +116,8 @@ namespace UI.Blur
             for (int i = 0; i < t.childCount; i++) SetLayerRecursively(t.GetChild(i).gameObject, layer);
         }
 
-        /// <summary>Puts a GameObject and every descendant on a band's layer, if that layer is declared.</summary>
+        /// <summary>Puts a GameObject and every descendant on the UI layer, if that layer is declared.</summary>
         /// <param name="root">Subtree root. Ignored when null.</param>
-        /// <param name="band">The band whose layer to apply.</param>
-        public static void SetBandRecursively(GameObject root, UIBandId band) =>
-            SetLayerRecursively(root, LayerOf(band));
+        public static void SetUILayerRecursively(GameObject root) => SetLayerRecursively(root, UILayer);
     }
 }

@@ -5,6 +5,7 @@ using UI.Blur;
 using UI.Builders;
 using UnityEditor;
 using UnityEngine.Rendering.Universal;
+using UnityEngine.UI;
 using UnityEngine;
 
 namespace Editor.Validation.UIBands
@@ -36,7 +37,8 @@ namespace Editor.Validation.UIBands
         {
             List<Scenario> scenarios = new List<Scenario>
             {
-                new Scenario("L1 Every band resolves to its own declared layer", RunL1LayersDeclared),
+                new Scenario("L1 Every band resolves to its own declared sorting layer, in band order",
+                    RunL1SortingLayersDeclared),
                 new Scenario("L2 A band layer is applied to the whole subtree, not just its root",
                     RunL2RecursiveApply),
                 new Scenario("L3 An object created after its band root enabled still lands on the band layer",
@@ -47,6 +49,10 @@ namespace Editor.Validation.UIBands
                     RunL5RendererMasksCleared),
                 new Scenario("L6 Band occupancy drives the walk order and the capture count",
                     RunL6WalkOrder),
+                new Scenario("L7 A band root routes its whole subtree through one nested canvas",
+                    RunL7BandRouting),
+                new Scenario("L8 The factory builds one fully configured, banded canvas",
+                    RunL8FactoryCanvas),
             };
 
             return ValidationSuiteRunner.Execute("UI Band Layers", scenarios, KnownBugChannel.Bug,
@@ -70,41 +76,45 @@ namespace Editor.Validation.UIBands
         private static GameObject Temp(string name) =>
             new GameObject(name) { hideFlags = HideFlags.HideAndDontSave };
 
-        /// <summary>L1 — every band names a declared layer, and no two bands share one.</summary>
+        /// <summary>L1 — every band names a declared sorting layer, distinct, and in band order.</summary>
         /// <remarks>
-        /// The distinct count is what makes this more than a null check: bands sharing a layer would
-        /// satisfy "all declared" while collapsing the band walk into one draw.
+        /// The order assertion is the one with teeth: sorting layer order is authored in project settings
+        /// and decides paint order, so a reordering there would silently invert which band frosts which
+        /// while every "declared" and "distinct" check still passed.
         /// </remarks>
         /// <returns>True when every assertion holds.</returns>
-        private static bool RunL1LayersDeclared()
+        private static bool RunL1SortingLayersDeclared()
         {
-            bool ok = Check("every band's layer is declared in the Tag Manager",
-                UIBandLayers.AllLayersDeclared(out UIBandId missing));
+            bool ok = Check("every band's sorting layer is declared",
+                UIBandLayers.AllSortingLayersDeclared(out UIBandId missing));
 
             if (!ok)
-                Debug.LogError($"  [FAIL] first undeclared band layer: {missing} " +
-                               $"(expected a layer named '{UIBandLayers.NameOf(missing)}')");
+                Debug.LogError($"  [FAIL] first undeclared band sorting layer: {missing} " +
+                               $"(expected one named '{UIBandLayers.SortingLayerNameOf(missing)}')");
 
             HashSet<int> distinct = new HashSet<int>();
+            int previousValue = int.MinValue;
+            bool ascending = true;
+
             for (int i = 0; i < UIBandLayers.BandCount; i++)
             {
                 UIBandId band = (UIBandId)i;
-                int layer = UIBandLayers.LayerOf(band);
-                distinct.Add(layer);
-                Debug.Log($"    {band} -> layer {layer} ('{UIBandLayers.NameOf(band)}')");
+                int value = UIBandLayers.SortingValueOf(band);
+                distinct.Add(value);
+                if (value <= previousValue) ascending = false;
+                previousValue = value;
+
+                Debug.Log($"    {band} -> sorting layer '{UIBandLayers.SortingLayerNameOf(band)}' value {value}");
             }
 
-            ok &= Check($"the {UIBandLayers.BandCount} bands occupy {UIBandLayers.BandCount} distinct layers " +
-                        $"(got {distinct.Count})", distinct.Count == UIBandLayers.BandCount);
+            ok &= Check($"the {UIBandLayers.BandCount} bands occupy {UIBandLayers.BandCount} distinct " +
+                        $"sorting layers (got {distinct.Count})", distinct.Count == UIBandLayers.BandCount);
 
-            int mask = UIBandLayers.AllBandsMask();
-            int maskBits = 0;
-            for (int i = 0; i < 32; i++)
-                if ((mask & (1 << i)) != 0)
-                    maskBits++;
+            ok &= Check("sorting layer order ascends with band order, so a higher band paints over a lower one",
+                ascending);
 
-            ok &= Check($"the all-bands mask selects {UIBandLayers.BandCount} layers (got {maskBits})",
-                maskBits == UIBandLayers.BandCount);
+            ok &= Check($"the UI GameObject layer is declared (got {UIBandLayers.UILayer})",
+                UIBandLayers.UILayer >= 0);
 
             return ok;
         }
@@ -121,8 +131,8 @@ namespace Editor.Validation.UIBands
                 child.transform.SetParent(root.transform, false);
                 grandchild.transform.SetParent(child.transform, false);
 
-                int expected = UIBandLayers.LayerOf(UIBandId.Modals);
-                UIBandLayers.SetBandRecursively(root, UIBandId.Modals);
+                int expected = UIBandLayers.UILayer;
+                UIBandLayers.SetUILayerRecursively(root);
 
                 bool ok = Check($"the root is on the band layer ({root.layer} == {expected})", root.layer == expected);
                 ok &= Check($"the child is on the band layer ({child.layer} == {expected})", child.layer == expected);
@@ -150,7 +160,7 @@ namespace Editor.Validation.UIBands
             {
                 UIBlurBand band = root.AddComponent<UIBlurBand>();
                 band.SetBand(UIBandId.Notifications);
-                int expected = UIBandLayers.LayerOf(UIBandId.Notifications);
+                int expected = UIBandLayers.UILayer;
 
                 bool ok = Check($"the band root took its layer ({root.layer} == {expected})", root.layer == expected);
 
@@ -197,8 +207,8 @@ namespace Editor.Validation.UIBands
 
             if (!Check($"the renderer asset loaded from {RENDERER_ASSET_PATH}", data != null)) return false;
 
-            int bandMask = UIBandLayers.AllBandsMask();
-            bool ok = Check($"the all-bands mask is non-empty (0x{(uint)bandMask:X})", bandMask != 0);
+            int bandMask = UIBandLayers.UILayerMask;
+            bool ok = Check($"the UI layer mask is non-empty (0x{(uint)bandMask:X})", bandMask != 0);
 
             SerializedObject so = new SerializedObject(data);
             string[] maskNames = { "m_PrepassLayerMask", "m_OpaqueLayerMask", "m_TransparentLayerMask" };
@@ -213,7 +223,7 @@ namespace Editor.Validation.UIBands
                 }
 
                 uint bits = (uint)prop.intValue;
-                ok &= Check($"{maskName} (0x{bits:X8}) excludes every band layer", (bits & (uint)bandMask) == 0);
+                ok &= Check($"{maskName} (0x{bits:X8}) excludes the UI layer", (bits & (uint)bandMask) == 0);
             }
 
             return ok;
@@ -253,6 +263,105 @@ namespace Editor.Validation.UIBands
             return ok;
         }
 
+        /// <summary>L7 — a band root routes its subtree through one nested canvas, touching nothing else.</summary>
+        /// <remarks>
+        /// The no-per-object-data half is the point: band identity lives on the canvas, so declaring a
+        /// band writes no property on any child and therefore no prefab overrides. The child assertion
+        /// below is what would fail if routing regressed to a per-object scheme.
+        /// </remarks>
+        /// <returns>True when every assertion holds.</returns>
+        private static bool RunL7BandRouting()
+        {
+            GameObject root = Temp("BandRoot");
+            try
+            {
+                // A parent canvas, so the band root is genuinely nested — overrideSorting is meaningless
+                // on a root canvas and Unity forces it back off there.
+                root.AddComponent<Canvas>();
+
+                GameObject bandRoot = Temp("BandRoot_Nested");
+                bandRoot.transform.SetParent(root.transform, false);
+
+                GameObject child = Temp("Child");
+                child.transform.SetParent(bandRoot.transform, false);
+
+                UIBlurBand band = bandRoot.AddComponent<UIBlurBand>();
+                band.SetBand(UIBandId.Menus);
+
+                Canvas canvas = bandRoot.GetComponent<Canvas>();
+                bool ok = Check("the band root carries a canvas to route through", canvas != null);
+                if (canvas == null) return false;
+
+                ok &= Check("the nested canvas overrides sorting, so it stops inheriting its parent's " +
+                            $"layer (isRootCanvas={canvas.isRootCanvas})", canvas.overrideSorting);
+
+                int expectedId = UIBandLayers.SortingLayerIdOf(UIBandId.Menus);
+                ok &= Check($"the canvas carries the band's sorting layer ({canvas.sortingLayerID} == {expectedId})",
+                    canvas.sortingLayerID == expectedId);
+
+                ok &= Check("the subtree is on the UI layer, so the renderer's own passes skip it " +
+                            $"({child.layer} == {UIBandLayers.UILayer})", child.layer == UIBandLayers.UILayer);
+
+                // Band identity must live on the canvas alone; a child carrying its own sorting data is
+                // the per-object scheme this design exists to avoid.
+                ok &= Check("the child got no canvas of its own", child.GetComponent<Canvas>() == null);
+
+                band.SetBand(UIBandId.Notifications);
+                ok &= Check("re-banding moves the canvas to the new sorting layer",
+                    canvas.sortingLayerID == UIBandLayers.SortingLayerIdOf(UIBandId.Notifications));
+
+                return ok;
+            }
+            finally
+            {
+                Object.DestroyImmediate(root);
+            }
+        }
+
+        /// <summary>L8 — every code-built canvas comes out of the factory whole and on its band.</summary>
+        /// <remarks>
+        /// L7 exercises the band component directly, which is the half that cannot see an ordering fault
+        /// inside the factory: because <see cref="UIBlurBand"/> requires a canvas, adding it before the
+        /// factory's own <c>AddComponent&lt;Canvas&gt;</c> makes Unity supply one first and the explicit
+        /// add return null. The single-canvas and configured-canvas assertions are what pin that order.
+        /// </remarks>
+        /// <returns>True when every assertion holds.</returns>
+        private static bool RunL8FactoryCanvas()
+        {
+            const int sortingOrder = 42;
+
+            GameObject root = null;
+            try
+            {
+                root = RuntimeUIFactory.CreateCanvas("L8_FactoryCanvas", sortingOrder,
+                    band: UIBandId.Modals);
+                root.hideFlags = HideFlags.HideAndDontSave;
+
+                Canvas[] canvases = root.GetComponents<Canvas>();
+                bool ok = Check($"the factory left exactly one canvas on the object ({canvases.Length} == 1)",
+                    canvases.Length == 1);
+                if (canvases.Length == 0) return false;
+
+                Canvas canvas = canvases[0];
+                ok &= Check("that canvas is configured, not a bare one added to satisfy a requirement " +
+                            $"(sortingOrder={canvas.sortingOrder}, renderMode={canvas.renderMode})",
+                    canvas.sortingOrder == sortingOrder && canvas.renderMode == RenderMode.ScreenSpaceOverlay);
+
+                ok &= Check("the canvas got its scaler", root.GetComponent<CanvasScaler>() != null);
+                ok &= Check("the canvas got its raycaster", root.GetComponent<GraphicRaycaster>() != null);
+
+                UIBlurBand band = root.GetComponent<UIBlurBand>();
+                ok &= Check("the factory declared the requested band",
+                    band != null && band.Band == UIBandId.Modals);
+
+                return ok;
+            }
+            finally
+            {
+                if (root != null) Object.DestroyImmediate(root);
+            }
+        }
+
         /// <summary>L4 — attaching an already-built hierarchy carries the layer to its children.</summary>
         /// <remarks>Covers helpers that return a whole tree, where a root-only assignment would leave
         /// the contents outside the band.</remarks>
@@ -262,8 +371,8 @@ namespace Editor.Validation.UIBands
             GameObject root = Temp("BandRoot");
             try
             {
-                UIBandLayers.SetBandRecursively(root, UIBandId.Menus);
-                int expected = UIBandLayers.LayerOf(UIBandId.Menus);
+                UIBandLayers.SetUILayerRecursively(root);
+                int expected = UIBandLayers.UILayer;
 
                 // Built entirely outside the band, then attached in one go.
                 GameObject prebuilt = Temp("PrebuiltRoot");

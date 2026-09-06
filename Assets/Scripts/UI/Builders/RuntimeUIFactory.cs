@@ -76,9 +76,6 @@ namespace UI.Builders
         public static Canvas ConfigureCanvas(GameObject target, int sortingOrder, float matchWidthOrHeight = 0.5f,
             UIBandId band = UIBandId.Hud)
         {
-            // Before the children are built, so everything Attach()ed under it inherits the band layer.
-            target.AddComponent<UIBlurBand>().SetBand(band);
-
             Canvas canvas = target.AddComponent<Canvas>();
             canvas.renderMode = RenderMode.ScreenSpaceOverlay;
             canvas.sortingOrder = sortingOrder;
@@ -89,6 +86,10 @@ namespace UI.Builders
             scaler.matchWidthOrHeight = matchWidthOrHeight;
 
             target.AddComponent<GraphicRaycaster>();
+
+            // After the canvas, never before: UIBlurBand requires one, so adding it first makes Unity
+            // supply it and the add above return null. Still ahead of the caller's children.
+            target.AddComponent<UIBlurBand>().SetBand(band);
             return canvas;
         }
 
