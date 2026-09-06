@@ -35,7 +35,7 @@ namespace Data
         [Tooltip("Played as the listener swims through this material. Empty falls back to the step clips.")]
         public AudioClip[] swimClips;
 
-        [Tooltip("Played when the listener drops into this material from the air. Empty falls back to the " +
+        [Tooltip("Played when the listener enters this material's fluid. Empty falls back to the " +
                  "jump-land clips, then the step clips.")]
         public AudioClip[] splashClips;
 

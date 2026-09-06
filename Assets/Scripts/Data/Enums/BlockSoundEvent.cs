@@ -31,7 +31,7 @@ namespace Data.Enums
         Swim = 7,
 
         /// <summary>
-        /// The listener dropped into the block's fluid from the air. Falls back to <see cref="JumpLand"/>,
+        /// The listener entered the block's fluid. Falls back to <see cref="JumpLand"/>,
         /// then <see cref="Step"/> clips, when unauthored.
         /// </summary>
         Splash = 8,

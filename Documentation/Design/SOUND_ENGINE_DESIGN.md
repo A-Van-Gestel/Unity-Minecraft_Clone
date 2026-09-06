@@ -1,6 +1,6 @@
 # Sound Engine Design
 
-**Version:** 1.21  
+**Version:** 1.22  
 **Date:** 2026-09-06  
 **Status:** **Partially implemented — S0–S3, S5–S8, S10 and S11 shipped; all confirmed in game except S8
 and S10, which are awaiting their listening pass.** The `SoundMaterial`
@@ -13,7 +13,7 @@ where a pack authors none (§5.1, §16). **Swimming is no longer silent** (2026-
 a body nothing is holding up strokes on its own cadence and splashes once on entering a fluid, both sounding
 the fluid alone rather than the seabed under it, and `Lava` has split off `Liquid` as its own material
 (§5.1). Lava is still seeded with water's clips, so authoring a molten set is the split's open item (§9). The
-`Validate Sound Engine` suite guards the resolution chain and the ambience decisions (82 baselines).
+`Validate Sound Engine` suite guards the resolution chain and the ambience decisions (87 baselines).
 **S2's runtime shipped on 2026-08-29** — `AudioContext`, the `AmbienceResolution` decision layer, the
 `AmbienceDirector` bed pair with its cave layer, the `MusicScheduler` and the underwater low-pass — on top of
 the §6.2 managed biome query, which shipped the same day and is guarded by its own `Validate Biome Selection`
@@ -347,8 +347,11 @@ footfall and resets the accumulator.
 > expired when fluid entity physics shipped: `VoxelRigidbody.FluidContact` now answers "is anything carrying
 > this body", so `SoundResolution.IsSwimming(grounded, flying, inFluid)` splits the two footfall worlds and
 > `SelectStrideEvent` routes a stride to `Swim` instead of `Step`/`Sprint`. Two new `BlockSoundEvent`s:
-> `Swim`, on its own 3D `_strokeLength` cadence, and `Splash`, fired once on the air→fluid edge — which was
-> the *other* silence, since a body that jumps into a lake never becomes grounded and so never lands.
+> `Swim`, on its own 3D `_strokeLength` cadence, and `Splash`, fired once on each entry into a fluid — which
+> was the *other* silence, since a body that jumps into a lake never becomes grounded and so never lands.
+> The trigger is deliberately *any* entry rather than only a drop from the air: wading in from a beach
+> should sound too. The cost is that the edge is `InFluid`, an analog signal with no hysteresis, so
+> repeatedly crossing a waterline sounds repeatedly — a known limit, pinned by its own baseline.
 > Sprinting is ignored while swimming (there is no run-on-water stroke) and flying is excluded outright: the
 > solver clears the contact for a noclipping body but **not** for a flown one.
 >
@@ -358,7 +361,10 @@ footfall and resets the accumulator.
 > read that could disagree with the waterline the solver is actually pushing the body with. `swimClips` and
 > `splashClips` fall back along *different* chains: a stroke is a stride, so `Swim → stepClips`; hitting
 > water is a landing, so `Splash → jumpLandClips → stepClips`. Two suite baselines pin the chains and the
-> mode selection; the `Update` wiring stays an in-game check, as the rest of this section does.
+> mode selection. The transition state — the distance accumulator and the ground / fluid / swim edges —
+> lives in the pure `Audio/FootfallTracker`, driven as frame sequences by five more baselines, so
+> `PlayerFootsteps` is reduced to sampling the body and playing what the tracker returns. Only that
+> sampling and playback stay an in-game check.
 >
 > `Lava` also split off `Liquid` here, seeded with water's clip arrays so it sounds exactly as it did
 > before — the split is an authoring seam, not a content change, and until lava clips exist a lava swimmer
@@ -1649,12 +1655,26 @@ deliberately.
 
 ## Document History
 
+* **v1.22** - Review hardening of the swim pass (2026-09-06, 82 → 87 baselines). A code review of v1.21
+  found three defects in the footfall edges and one in the editor. The transition state moved out of
+  `PlayerFootsteps` into the pure `Audio/FootfallTracker` (`FootfallSample` in, `FootfallOutcome` out),
+  which is what made the edges assertable at all — the previous pass pinned the deciders and left every
+  latch uncovered. Two fixes landed on top, each proved red first: the fluid latch stored the
+  *flight-gated* contact, so leaving flight underwater sounded an entry into water the body was already
+  in (and re-fired on every toggle); and losing footing did not re-base the stride accumulator, so a
+  wader stepping off a shelf stroked instantly on banked walking distance. The Sound editor also reported
+  Splash as borrowing Jump Land clips a group might not author — it now models both links, as its Block
+  editor twin already did. §5.1's "air→fluid edge" was corrected in four places: the trigger is any
+  entry into a fluid, deliberately, so wading in sounds too. `s_prefillCases` gained the `Lava` row the
+  v1.21 name split shipped without. **Confirmed in game the same day**, with no regressions to the
+  wading, landing or stroke behavior v1.21 established.
+
 * **v1.21** - S4's swim strokes and entry splash (2026-09-06). The deferral in §5.1 rested on there being no
   swimming mechanic; fluid entity physics removed that, so `BlockSoundEvent` gained `Swim` and `Splash` and
   `BlockSoundGroup` the two arrays behind them, falling back along different chains — a stroke to `Step`, a
   splash to `JumpLand` then `Step`. `SoundResolution.IsSwimming` and `SelectStrideEvent` moved the mode
   decision into the pure layer where the suite can pin it (80 → 82 baselines); `PlayerFootsteps` gained the
-  swim branch, a 3D `_strokeLength`, and `TryPlaySplash` on the air→fluid edge. A stroke deliberately skips
+  swim branch, a 3D `_strokeLength`, and a splash on each entry into a fluid. A stroke deliberately skips
   the two-cell footfall — a swimmer is touching no seabed — and names its fluid from a new
   `FluidContact.BlockId` rather than a second voxel read, which is the one field this added to the physics
   struct. `SoundMaterial.Lava` split off `Liquid`, seeded with water's clip arrays so the split changed no

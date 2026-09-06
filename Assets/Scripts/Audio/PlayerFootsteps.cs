@@ -38,43 +38,16 @@ namespace Audio
 
         private VoxelRigidbody _body;
         private World _world;
-        private Vector3 _lastStepPosition;
-        private bool _wasGrounded;
 
-        /// <summary>
-        /// Whether the body was touching a fluid last frame, so entering one can be heard exactly once.
-        /// </summary>
-        /// <remarks>
-        /// Seeded alongside <see cref="_wasGrounded"/> rather than in <c>Awake</c>: a player who spawns
-        /// already in water would otherwise splash for an entry that never happened.
-        /// </remarks>
-        private bool _wasInFluid;
-
-        /// <summary>
-        /// The <see cref="VoxelRigidbody.JumpCount"/> already sounded, so a jump is heard exactly once.
-        /// </summary>
-        /// <remarks>
-        /// The counter is what separates a jump from walking off a ledge: both leave the ground, and only
-        /// the solver knows which one happened.
-        /// </remarks>
-        private uint _lastJumpCount;
-
-        /// <summary>
-        /// Whether <see cref="_wasGrounded"/> has been seeded from a live physics state yet.
-        /// </summary>
-        /// <remarks>
-        /// Seeding in <c>Awake</c> is too early: <see cref="VoxelRigidbody.IsGrounded"/> is false before the
-        /// first solve, so a player already standing on the ground when the world finishes loading would take
-        /// the landing branch and thud once for a fall that never happened.
-        /// </remarks>
-        private bool _groundedSeeded;
+        /// <summary>The state machine deciding which one-shots each frame earns.</summary>
+        private readonly FootfallTracker _tracker = new FootfallTracker();
 
         private void Awake()
         {
             _body = GetComponent<VoxelRigidbody>();
-            _lastStepPosition = transform.position;
-            _lastJumpCount = _body.JumpCount;
         }
+
+        private void OnEnable() => _tracker.Reset();
 
         private void Update()
         {
@@ -83,89 +56,22 @@ namespace Audio
             _world ??= World.Instance;
             if (_world == null || SoundManager.Instance == null) return;
 
-            bool grounded = _body.IsGrounded;
-            bool flying = _body.isFlying;
-            bool inFluid = _body.FluidContact.InFluid;
-
-            if (!_groundedSeeded)
+            FootfallSample sample = new FootfallSample
             {
-                _groundedSeeded = true;
-                _wasGrounded = grounded;
-                _wasInFluid = inFluid;
-                _lastStepPosition = transform.position;
-                _lastJumpCount = _body.JumpCount;
-                return;
-            }
+                Position = transform.position,
+                Grounded = _body.IsGrounded,
+                Flying = _body.isFlying,
+                InFluid = _body.FluidContact.InFluid,
+                Sprinting = _body.isSprinting,
+                JumpCount = _body.JumpCount,
+            };
 
-            // Polled before the grounded branches: the take-off leaves the ground in the same fixed step,
-            // so the jump would otherwise be indistinguishable from stepping off a ledge.
-            TryPlayJumpStart();
+            FootfallOutcome outcome = _tracker.Advance(in sample, _strideLength, _strokeLength);
 
-            // A flown body is not entering anything, even though the solver still reports its contact.
-            TryPlaySplash(inFluid && !flying);
-
-            if (SoundResolution.IsSwimming(grounded, flying, inFluid))
-            {
-                // Cleared here too, so sinking onto the bottom still lands rather than resuming mid-stride.
-                _wasGrounded = false;
-
-                // 3D, unlike the walking stride: a swimmer climbing a water column covers no horizontal
-                // distance, and would stroke only once for the whole climb.
-                if ((transform.position - _lastStepPosition).sqrMagnitude < _strokeLength * _strokeLength)
-                    return;
-
-                _lastStepPosition = transform.position;
-                PlayStroke(SoundResolution.SelectStrideEvent(swimming: true, _body.isSprinting));
-                return;
-            }
-
-            if (!grounded)
-            {
-                // Airborne travel must not bank distance, or a long fall lands and immediately fires a
-                // second step from the accumulated horizontal drift.
-                _lastStepPosition = transform.position;
-                _wasGrounded = false;
-                return;
-            }
-
-            if (!_wasGrounded)
-            {
-                _wasGrounded = true;
-                _lastStepPosition = transform.position;
-                PlayFootfall(BlockSoundEvent.JumpLand);
-                return;
-            }
-
-            Vector3 delta = transform.position - _lastStepPosition;
-            delta.y = 0f;
-            if (delta.sqrMagnitude < _strideLength * _strideLength) return;
-
-            _lastStepPosition = transform.position;
-
-            // The stride is deliberately not shortened while sprinting: it is a distance, so a faster body
-            // already crosses it more often, which is what a running cadence is.
-            PlayFootfall(SoundResolution.SelectStrideEvent(swimming: false, _body.isSprinting));
-        }
-
-        /// <summary>
-        /// Sounds a splash on the frame the body first touches a fluid.
-        /// </summary>
-        /// <param name="inFluid">Whether the body counts as touching a fluid this frame.</param>
-        /// <remarks>
-        /// Entry only. Leaving a fluid is deliberately silent: a body climbing out is already sounding the
-        /// footfall of whatever it climbed onto, and a second one-shot over it reads as a double hit.
-        /// </remarks>
-        private void TryPlaySplash(bool inFluid)
-        {
-            if (inFluid == _wasInFluid) return;
-
-            _wasInFluid = inFluid;
-            if (!inFluid) return;
-
-            // Entry re-bases the stroke accumulator, so the splash is not chased by a stroke fired from
-            // distance banked on the way in.
-            _lastStepPosition = transform.position;
-            PlayStroke(BlockSoundEvent.Splash);
+            if (outcome.JumpStart) PlayFootfall(BlockSoundEvent.JumpStart);
+            if (outcome.Splash) PlayStroke(BlockSoundEvent.Splash);
+            if (outcome.HasFootfall) PlayFootfall(outcome.Footfall);
+            if (outcome.HasStroke) PlayStroke(outcome.Stroke);
         }
 
         /// <summary>
@@ -186,18 +92,6 @@ namespace Audio
             // at the feet reads as coming from below a listener whose ears are at eye height.
             Vector3 strokePos = transform.position + new Vector3(0f, _body.collisionHeight * 0.5f, 0f);
             SoundManager.Instance.PlayBlockSound(material, evt, strokePos);
-        }
-
-        /// <summary>
-        /// Sounds a take-off when the solver reports a jump this frame has not been played yet.
-        /// </summary>
-        private void TryPlayJumpStart()
-        {
-            uint jumps = _body.JumpCount;
-            if (jumps == _lastJumpCount) return;
-
-            _lastJumpCount = jumps;
-            PlayFootfall(BlockSoundEvent.JumpStart);
         }
 
         /// <summary>
