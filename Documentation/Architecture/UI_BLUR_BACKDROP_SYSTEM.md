@@ -32,6 +32,9 @@ reading the serialized scene and by rendered-pixel measurement through the valid
   blurred panels.
 - [`TOAST_NOTIFICATION_SYSTEM.md`](TOAST_NOTIFICATION_SYSTEM.md) — a consumer that works around §8's
   stacking limit by policy, dropping its cards to a flat backdrop while a full-screen panel is up.
+- [`../Design/UI_BLUR_BANDED_COMPOSITING.md`](../Design/UI_BLUR_BANDED_COMPOSITING.md) — the proposed
+  design that closes §8's stacking limit by moving UI into the render graph and re-capturing the
+  blur between UI bands. Not implemented.
 
 ---
 
@@ -224,7 +227,9 @@ Two properties of the harness are load-bearing:
   texels, so the blur radius as a fraction of the screen is inversely proportional to resolution. Open
   against the producer; its acceptance test needs a matched capture at two resolutions.
 - **Panels cannot blur each other.** Fixing this needs a second capture point after the overlay
-  canvases draw, which no design currently proposes.
+  canvases draw. [`../Design/UI_BLUR_BANDED_COMPOSITING.md`](../Design/UI_BLUR_BANDED_COMPOSITING.md)
+  proposes one — UI moves into the render graph and the blur is re-captured between UI bands — and is
+  not implemented.
 
   Consumers work around it by *policy* rather than by compositing, and the workarounds are only as
   good as the overlap they anticipate. `ToastManager` drops its cards to a flat backdrop whenever a
