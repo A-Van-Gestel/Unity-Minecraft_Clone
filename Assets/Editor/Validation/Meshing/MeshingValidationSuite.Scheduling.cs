@@ -22,7 +22,7 @@ namespace Editor.Validation.Meshing
     /// <item><b>B25</b> — drain policy: the real <see cref="MeshDrainPolicy.Drain"/> loop (the exact one
     /// <c>World.Update</c> runs) replayed over a real <see cref="MeshBuildQueue"/> with a scripted
     /// <see cref="IMeshDrainHost"/> — pins the quota stop, the in-flight-cap re-check, the time-window
-    /// stop, the budgets-off leg, null/inactive purge, remove-on-schedule vs leave-on-decline, and
+    /// stop, the unbudgeted leg, null/inactive purge, remove-on-schedule vs leave-on-decline, and
     /// immediate-ahead-of-normal order. The budget <i>math</i> (<see cref="PipelinePassBudget"/>) is
     /// owned by the Pipeline Backpressure suite; this pins the loop that consumes it.</item>
     /// </list>
@@ -112,12 +112,13 @@ namespace Editor.Validation.Meshing
             ChunkCoord d = new ChunkCoord(3, 0);
             ChunkCoord e = new ChunkCoord(4, 0);
 
-            // Leg 1 — budgets-off (window = default, quota = raw cap): drains every ready chunk.
+            // Leg 1 — unbudgeted (window = default, as a ceiling configured to 0 ms produces): drains
+            // every ready chunk.
             {
                 MeshBuildQueue q = BuildQueue((a, true), (b, true), (c, true));
                 ScriptedDrainHost host = new ScriptedDrainHost(0, a, b, c);
                 int scheduled = MeshDrainPolicy.Drain(q, 10, default, 10, host).Scheduled;
-                ok &= MeshAssert.IsTrue("B25.1 budgets-off drains all ready chunks",
+                ok &= MeshAssert.IsTrue("B25.1 an unbudgeted window drains all ready chunks",
                     scheduled == 3 && q.Count == 0 && host.Scheduled.Count == 3,
                     $"scheduled {scheduled} (want 3), queue left {q.Count} (want 0)");
             }

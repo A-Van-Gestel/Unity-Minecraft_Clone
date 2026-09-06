@@ -86,12 +86,6 @@ namespace Data.WorldTypes
         [Tooltip("Block ID for the surface layer (e.g., Grass).")]
         public ushort surfaceBlockID;
 
-        [BlockID]
-        [Tooltip("Block ID for the sub-surface layers (e.g., Dirt).")]
-        [Obsolete("Replaced by terrainLayers")]
-        [HideInInspector]
-        public ushort subSurfaceBlockID;
-
         [Header("Terrain Layers")]
         [Tooltip("The blocks evaluated progressively downwards from the surface block (e.g. 3 blocks of Dirt).")]
         public StandardTerrainLayer[] terrainLayers;

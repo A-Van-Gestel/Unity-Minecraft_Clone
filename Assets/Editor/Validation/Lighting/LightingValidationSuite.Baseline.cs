@@ -128,10 +128,10 @@ namespace Editor.Validation.Lighting
             // self-registers here. ---
             AddBandDecisionBaselineScenarios(scenarios);
 
-            // --- P9-2 outcome-conditional edge-check cascade (B97-B99): the pure
-            // EdgeCheckCascadeDecision predicate (incl. its flag-off reduction to the legacy rule) and the
-            // ChunkData.ApplyJobLightMap change signal it consumes, across the uniform-sky compaction
-            // boundary. Lives in Baselines/LightingValidationSuite.Baseline.P92Cascade.cs. ---
+            // --- P9-2 outcome-conditional edge-check cascade (B98-B100, B119): the pure
+            // EdgeCheckCascadeDecision predicate, the ChunkData.ApplyJobLightMap change signal it consumes
+            // across the uniform-sky compaction boundary, and the outcome-to-effect mapping.
+            // Lives in Baselines/LightingValidationSuite.Baseline.P92Cascade.cs. ---
             AddP92CascadeBaselineScenarios(scenarios);
 
             // --- LI-2 band differential gate (B75-B78): identical world scripts run banded vs full

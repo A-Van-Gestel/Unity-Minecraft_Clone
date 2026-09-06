@@ -1048,9 +1048,9 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         int genKeyCount = _genScanKeys.Count;
 
         // Rotate the start slot only when a ceiling can actually break the pass (window.HasBudget) —
-        // the unbudgeted legs (rollback flag off, startup coroutine) keep legacy dictionary order
-        // byte-exact, including which job defers when the structure-mods budget exhausts. The cursor
-        // is reduced modulo the key count so the index sum below can never overflow int.
+        // the unbudgeted leg (the startup coroutine, which calls the pass without a window) keeps plain
+        // dictionary order, including which job defers when the structure-mods budget exhausts. The
+        // cursor is reduced modulo the key count so the index sum below can never overflow int.
         int genScanStart = 0;
         if (window.HasBudget && genKeyCount > 0)
             genScanStart = _genScanCursor = (_genScanCursor + 1) % genKeyCount;
@@ -1824,11 +1824,9 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
             // discrepancies after neighbors have run their own edge checks.
             // P9-2 (design §6, Option B1): the cascade propagates on EFFECT, not on stability — `IsStable`
             // only means no work is pending, which a pass that wrote nothing also satisfies. The rule lives
-            // in the shared decision so the validation suite exercises the exact production predicate;
-            // flag-off never yields SpendOnly and so reduces to the legacy form.
+            // in the shared decision so the validation suite exercises the exact production predicate.
             EdgeCheckCascadeDecision.CascadeOutcome cascade = chunkData != null
                 ? EdgeCheckCascadeDecision.Evaluate(
-                    _world.settings.enableConvergentEdgeCheckCascade,
                     chunkData.RemainingEdgeCheckRounds,
                     lightChanged,
                     chunkData.HasLightChangesToProcess)

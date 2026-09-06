@@ -69,7 +69,7 @@ namespace Helpers
         /// <param name="residentWidth">Resident load-square side in chunks (<c>2 × LoadDistance + 1</c>).</param>
         /// <param name="configuredClose">The persisted close threshold, stated at the reference width.</param>
         /// <param name="configuredReopen">The persisted reopen threshold, stated at the reference width.</param>
-        /// <param name="scaleWithResidency">Whether to scale with the resident square; false is the rollback leg.</param>
+        /// <param name="scaleWithResidency">Whether to scale with the resident square; false is the shipping path, which uses the configured thresholds verbatim.</param>
         /// <param name="closeAt">Backlog level at which an open gate closes.</param>
         /// <param name="reopenAt">Backlog level at or below which a closed gate reopens.</param>
         /// <remarks>

@@ -3208,7 +3208,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   _useClassicPattern: 0
-  _cloudPattern: {fileID: 2800000, guid: 97e640f4781f6834a931ea9191f853b5, type: 3}
+  _cloudPattern: {fileID: 0}
   _layers:
   - height: 100
     driftMultiplier: 1

@@ -557,28 +557,6 @@ public class Settings
     public int maxLightJobsPerFrame = 32;
 
     /// <summary>
-    /// P9-2 (Option B1): re-arm the post-generation edge-check cascade only when a lighting pass actually
-    /// changed light, instead of on every stable completion. **Default-ON since the 2026-08-02 GO** — the
-    /// capture cut lighting amplification 6.12 → 1.86 per delivered chunk at vd 32 and met the visibility
-    /// budget at every view distance. Retained as a rollback lever, and listed in
-    /// <see cref="OverlayBenchmarkSettingsFromDisk"/> so a cold-cache benchmark launch can still A/B it.
-    /// <para>
-    /// ⚠ <b>`World.prefab` carries a stale serialized `0` for this field and that is harmless</b> — it was
-    /// serialized while the default was still false. `World` overwrites its whole `settings` reference from
-    /// <see cref="LoadSettings"/> at startup, so the prefab value never reaches the pipeline. Do not "fix"
-    /// the prefab by hand (project rule: let the editor own .prefab serialization) and do not read it as
-    /// evidence that the feature is off.
-    /// </para>
-    /// </summary>
-    [SettingField(SettingsTab.Performance, Label = "Convergent Edge-Check Cascade", Order = 9)]
-    [Tooltip("Skips the post-generation edge-check round (and its neighbor triggers) when the lighting " +
-             "pass that would have armed it changed nothing.\n\n" +
-             TooltipTags.Performance + "Removes lighting work that recomputes an unchanged result — " +
-             "roughly 3x less lighting work per delivered chunk. Turn off only to diagnose a lighting " +
-             "convergence problem.")]
-    public bool enableConvergentEdgeCheckCascade = true;
-
-    /// <summary>
     /// The maximum number of structure-related VoxelMods that can be expanded in a single frame.
     /// Prevents lag spikes when generating massive structures.
     /// </summary>
@@ -613,7 +591,7 @@ public class Settings
     /// Maximum lighting jobs allowed in flight before the ready-set scan stops scheduling for the
     /// frame (memory bound — each job rents ~11 pooled full-volume buffers, so this ceiling keeps a
     /// hitch-scaled §3.4 quota from blowing past the pool retention into a Persistent alloc storm).
-    /// Inert under the legacy count cap; not device-calibrated (2× the desktop per-frame cap).
+    /// Always active; not device-calibrated (2× the desktop per-frame cap).
     /// </summary>
     public int maxInFlightLightingJobs = 64;
 
@@ -632,27 +610,11 @@ public class Settings
 
     // ── P-4 §3.4/§3.5 pipeline backpressure knobs ────────────────────────
     // The four ms ceilings are Performance-tab sliders (smoothness ↔ chunk-fill-speed trade is a
-    // player-facing preference); the rollback flags and panic thresholds stay OM-1-style non-UI
-    // fields (persisted + user-editable, but not everyday options). The ms ceilings are deliberately
+    // player-facing preference); the panic thresholds stay OM-1-style non-UI fields (persisted +
+    // user-editable, but not everyday options). The ms ceilings are deliberately
     // NOT device-calibrated — frame-time targets are device-independent, and device scaling already
     // flows in through the calibrated per-frame count caps that anchor each pass's rate quota
     // (see Helpers.PipelinePassBudget).
-
-    /// <summary>
-    /// Master switch for the §3.4 time-based pass budgets (rate quota + ms ceiling). Off restores the
-    /// exact legacy fixed per-frame count caps — kept as a rollback / A-B lever (TG-4 precedent).
-    /// </summary>
-    public bool enablePipelineTimeBudgets = true;
-
-    /// <summary>
-    /// When true, the four time ceilings scale with a voluntarily lowered FPS cap (a 30/15-FPS AFK /
-    /// battery / mobile frame is mostly idle sleep and can afford a bigger pipeline slice) — anchored at
-    /// 60 FPS, clamped ×8, keyed off the cap's intent and never measured frame time (see
-    /// <see cref="Helpers.PipelinePassBudget.ScaleCeilingMs"/>). Off restores the fixed absolute-ms
-    /// ceilings — kept as a rollback / A-B lever alongside <see cref="enablePipelineTimeBudgets"/>.
-    /// No effect when budgets are off or no FPS cap is active.
-    /// </summary>
-    public bool scaleBudgetCeilingsWithFpsCap = true;
 
     /// <summary>
     /// Time ceiling (ms) for processing completed generation jobs in one frame
@@ -713,12 +675,6 @@ public class Settings
     // NOTE: there is no draw budget. The old "Chunk Draw Budget (ms)" ceiling paced a queue whose only
     // job was triggering chunk load animations; MP-6 retired that stage and moved the trigger into the
     // mesh apply pass above, so the apply budget is now the whole mesh tail.
-
-    /// <summary>
-    /// Master switch for the §3.5 generation panic gate (pause admissions while the lighting backlog
-    /// is saturated). Kept as a rollback lever alongside <see cref="enablePipelineTimeBudgets"/>.
-    /// </summary>
-    public bool enableGenerationPanicGate = true;
 
     /// <summary>
     /// Scales the panic-gate thresholds with the resident load square (P-8). <b>Default-OFF</b> — the
@@ -1336,10 +1292,6 @@ public static class SettingsManager
             // here because the re-test it is retained for needs to switch legs without a rebuild — a
             // rebuilt leg would not be the same build, which is the whole point of running one.
             defaults.scalePanicGateThresholdsWithResidency = saved.scalePanicGateThresholdsWithResidency;
-
-            // P9-2's opt-in lever, default-OFF until its capture scores Q1/Q2. Listed for the same reason
-            // as P-8's: the A/B legs have to be the same build, so the flag must survive a cold cache.
-            defaults.enableConvergentEdgeCheckCascade = saved.enableConvergentEdgeCheckCascade;
         }
         catch (Exception)
         {

@@ -86,20 +86,16 @@ MonoBehaviour:
     maxInitialLoadRadius: 10
     maxMeshRebuildsPerFrame: 10
     maxLightJobsPerFrame: 32
-    enableConvergentEdgeCheckCascade: 0
     maxStructureModsPerFrame: 5000
     maxInFlightMeshJobs: 20
     maxInFlightGenerationJobs: 32
     maxInFlightLightingJobs: 64
     chunkJobArrayPoolRetention: 512
     calibrationVersion: 0
-    enablePipelineTimeBudgets: 1
-    scaleBudgetCeilingsWithFpsCap: 1
     genProcessBudgetMs: 6
     lightScheduleBudgetMs: 8
     meshScheduleBudgetMs: 6
     meshApplyBudgetMs: 4
-    enableGenerationPanicGate: 1
     scalePanicGateThresholdsWithResidency: 0
     panicGateCloseThreshold: 256
     panicGateReopenThreshold: 128

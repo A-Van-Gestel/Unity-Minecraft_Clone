@@ -281,8 +281,9 @@ edges.
    `residual_i(x,z) = clamp(pvSpline_i(pv_i(x,z)), -residualAmplitude, +residualAmplitude)`.
    Per-biome `baseTerrainHeight`, `continentalnessNoiseConfig`, `erosionNoiseConfig` and their
    splines are **removed** from `StandardBiomeAttributes` — deprecate first with `[Obsolete]` +
-   `[HideInInspector]` (the `subSurfaceBlockID` precedent, `StandardBiomeAttributes.cs:92-96`),
-   delete once the re-authoring pass completes.
+   `[HideInInspector]` (keeps the field serialized and off the inspector while authors migrate),
+   delete once the re-authoring pass completes. Deleting the field also drops its key from every
+   biome `.asset` on the next reserialize, so finish the re-authoring before removing it.
 3. **Blend only the residual**: `finalHeight = macroHeight + Σ w_i * residual_i` with the existing
    `GetCellularEdgeData` weights — `BiomeBlender` keeps its cell resolution and weighting code;
    only `EvaluateMultiNoiseHeight` changes. Because the blended quantity is now bounded (±12
@@ -654,8 +655,9 @@ changes the entire world's biome layout (a seed-breaking landmine disguised as a
 2. `Initialize()` reads the world-type field; delete the `biomes[0]` fallback path (keep the
    empty-list hardcoded default for editor/preview robustness).
 3. Deprecate `StandardBiomeAttributes.biomeWeightNoiseConfig` with `[Obsolete]` + `[HideInInspector]`
-   (exact precedent: `subSurfaceBlockID`, `StandardBiomeAttributes.cs:92-96`). Remove it entirely
-   once TF-3 replaces the selection model.
+   — the field stays serialized but leaves the inspector. Remove it entirely once TF-3 replaces the
+   selection model. (The project's previous worked example of this, `subSurfaceBlockID`, completed
+   its lifecycle and was deleted on 2026-09-06.)
 
 **Risks.** None beyond copy fidelity — add a one-shot editor assertion (or NS-suite check)
 comparing the new config against `biomes[0]`'s at first run. If the values are *changed* rather

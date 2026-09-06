@@ -215,15 +215,16 @@ After a chunk's initial lighting stabilizes, its border voxels may have incorrec
    it (edge checks are the only corrector for under-bright border light, §3.7). `ChunkData.ModifyVoxel`
    therefore tops `RemainingEdgeCheckRounds` back up to `BORDER_EDIT_EDGE_CHECK_ROUNDS` (= 1) on an
    opacity edit in a border column (local x/z in {0,15}), so this same stabilization machinery re-runs
-   the reconciling border check. Add-only and bounded by the counter, so it cannot livelock.
-   **Outcome-conditional re-arm (P9-2, August 2026 — behind `Settings.enableConvergentEdgeCheckCascade`,
-   default OFF):** `IsStable` means only that the job left no work pending, which is also true of a pass
-   that wrote *nothing* — so the re-arm above fires on converged chunks and recomputes an unchanged
-   result. With the flag on, the round is spent (and the neighbors triggered) only when the merge actually
+   the reconciling border check. Add-only and bounded by the counter, so it cannot livelock.  
+   **Outcome-conditional re-arm (P9-2, August 2026):** `IsStable` means only that the job left no work
+   pending, which is also true of a pass that wrote *nothing* — so a stability-only re-arm fires on
+   converged chunks and recomputes an unchanged result. Instead, the round is spent (and the neighbors
+   triggered) only when the merge actually
    changed light — `ChunkData.ApplyJobLightMap`'s return, or `HasLightChangesToProcess` for the post-merge
    writers (the deferred cross-chunk drain, the pull-back verification). The rule is the shared
-   `EdgeCheckCascadeDecision.Evaluate`, returning `None` / `SpendOnly` / `SpendAndRearm`; flag-off never
-   yields `SpendOnly` and so reduces to the budget-only test above. **A skipped re-arm still spends its
+   `EdgeCheckCascadeDecision.Evaluate`, returning `None` / `SpendOnly` / `SpendAndRearm`. It shipped
+   default-ON behind `Settings.enableConvergentEdgeCheckCascade`; that flag was **retired 2026-09-06** and
+   the effect condition is now unconditional. **A skipped re-arm still spends its
    round** — only the flags buy lighting schedules, so declining the round saves nothing, while a converged
    chunk that hoarded budget would break point 2's post-generation premise and arm cascades on ordinary
    edits this system never armed. Safety rests on

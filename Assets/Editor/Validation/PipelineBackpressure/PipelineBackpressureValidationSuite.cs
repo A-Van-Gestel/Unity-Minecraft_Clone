@@ -461,12 +461,12 @@ namespace Editor.Validation.PipelineBackpressure
         /// <summary>
         /// P-4 §3.4 ceiling scaling: a lowered FPS cap widens the ms ceiling proportionally (anchored
         /// at 60 FPS, clamped ×8, floored ×1), while a disabled ceiling and the no-cap case both pass
-        /// the input through untouched (the feature-off / uncapped byte-identity contract).
+        /// the input through untouched (the byte-identity contract).
         /// </summary>
         private static bool RunB7CeilingScaling()
         {
-            // No cap (interval <= 0): the ceiling is returned verbatim — this is the flag-off / uncapped
-            // path and MUST be byte-identical to the legacy fixed ceiling.
+            // No cap (interval <= 0): the ceiling is returned verbatim — an uncapped session MUST get the
+            // configured ceiling with no scaling applied.
             bool ok = Check("no cap (interval 0) returns the ceiling unchanged",
                 ExactValue.Equal(PipelinePassBudget.ScaleCeilingMs(6f, 0f), 6f));
             ok &= Check("negative interval returns the ceiling unchanged",

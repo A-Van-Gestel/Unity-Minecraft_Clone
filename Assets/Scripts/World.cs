@@ -2591,14 +2591,10 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         _playerLastChunkCoord = PlayerChunkCoord;
 
         // --- Process Job System ---
-        // P-4 §3.4 ceiling scaling: the ms ceilings below are widened in proportion to a voluntarily
-        // lowered FPS cap (an AFK/battery/mobile 30/15-cap frame is mostly idle sleep, so it can afford
-        // a bigger pipeline slice). Computed once per frame from the intended cap interval; 0 = no cap
-        // → ScaleCeilingMs returns each ceiling unchanged (byte-identical to the un-scaled feature-off
-        // path). Gated on both flags so flag-off is the exact recorded legacy config.
-        float ceilingScaleInterval = settings.enablePipelineTimeBudgets && settings.scaleBudgetCeilingsWithFpsCap
-            ? ComputeIntendedFrameIntervalSeconds()
-            : 0f;
+        // P-4 §3.4 ceiling scaling: the ms ceilings below widen in proportion to a voluntarily lowered
+        // FPS cap (an AFK/battery/mobile 30/15-cap frame is mostly idle sleep, so it can afford a bigger
+        // pipeline slice). 0 = no cap, for which ScaleCeilingMs returns each ceiling unchanged.
+        float ceilingScaleInterval = ComputeIntendedFrameIntervalSeconds();
 
         // 1. Process any jobs that have finished generating chunk data.
         //    This might add new chunks to the chunksToBuildMesh list.
@@ -2606,9 +2602,8 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         //    same retry contract as the pass's structure-mods budget). The startup coroutine calls the
         //    pass without a window and stays unbudgeted.
         long genProcessStart = WorldFrameProfiler.Begin();
-        JobManager.ProcessGenerationJobs(settings.enablePipelineTimeBudgets
-            ? PipelinePassBudget.StartWindow(PipelinePassBudget.ScaleCeilingMs(settings.genProcessBudgetMs, ceilingScaleInterval))
-            : default);
+        JobManager.ProcessGenerationJobs(
+            PipelinePassBudget.StartWindow(PipelinePassBudget.ScaleCeilingMs(settings.genProcessBudgetMs, ceilingScaleInterval)));
         WorldFrameProfiler.Add(WorldFrameProfiler.Phase.GenerationProcess, genProcessStart);
 
         // 1b. Admit queued generation requests under the in-flight cap (P-4 §3.1). Runs after the drain
@@ -2709,26 +2704,18 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
 
             // P-4 §3.4: the throttle is a rate quota (cap × frame duration × 60 — constant jobs/sec
             // instead of constant jobs/frame, so throughput no longer collapses with FPS) bounded by a
-            // Stopwatch ms ceiling (hitch guard). Flag off → quota == cap and the window never expires,
-            // which is exactly the legacy fixed count cap. The window starts HERE — after the ~1s
+            // Stopwatch ms ceiling (hitch guard). The window starts HERE — after the ~1s
             // fail-safe full scan above — so a scan frame's walk cost cannot eat the scheduling budget
             // (review finding: starting it earlier produced a recurring 1 Hz throughput dip).
-            int lightQuota = settings.enablePipelineTimeBudgets
-                ? PipelinePassBudget.ComputeQuota(settings.maxLightJobsPerFrame, Time.unscaledDeltaTime)
-                : settings.maxLightJobsPerFrame;
-            PipelinePassBudget.Window lightWindow = settings.enablePipelineTimeBudgets
-                ? PipelinePassBudget.StartWindow(PipelinePassBudget.ScaleCeilingMs(settings.lightScheduleBudgetMs, ceilingScaleInterval))
-                : default;
+            int lightQuota = PipelinePassBudget.ComputeQuota(settings.maxLightJobsPerFrame, Time.unscaledDeltaTime);
+            PipelinePassBudget.Window lightWindow =
+                PipelinePassBudget.StartWindow(PipelinePassBudget.ScaleCeilingMs(settings.lightScheduleBudgetMs, ceilingScaleInterval));
 
             // In-flight memory bound: a hitch-scaled quota may admit up to 8× the per-frame cap, and
             // each lighting job rents ~11 pooled full-volume buffers — without this ceiling one long
             // frame could blow past the pool retention into a Persistent alloc storm (the §1.1
-            // incident class). Budgets-on only: worker saturation can accumulate in-flight jobs past
-            // any fixed value even under the legacy count cap, so applying it unconditionally would
-            // make the flag-off rollback leg diverge from true legacy behavior.
-            int inFlightLightCap = settings.enablePipelineTimeBudgets
-                ? Mathf.Max(1, settings.maxInFlightLightingJobs)
-                : int.MaxValue;
+            // incident class).
+            int inFlightLightCap = Mathf.Max(1, settings.maxInFlightLightingJobs);
 
             // FP-2 stop-reason inputs, classified after the loop by the SAME pure helper the mesh drain
             // uses (PipelinePassBudget.ClassifyStop) so the two passes can never disagree on what a stop
@@ -2898,9 +2885,8 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         //    P-4 §3.4: time-budgeted — deferred completions stay enrolled (buffers held one more frame,
         //    bounded by the in-flight cap).
         long meshProcessStart = WorldFrameProfiler.Begin();
-        JobManager.ProcessMeshJobs(settings.enablePipelineTimeBudgets
-            ? PipelinePassBudget.StartWindow(PipelinePassBudget.ScaleCeilingMs(settings.meshApplyBudgetMs, ceilingScaleInterval))
-            : default);
+        JobManager.ProcessMeshJobs(
+            PipelinePassBudget.StartWindow(PipelinePassBudget.ScaleCeilingMs(settings.meshApplyBudgetMs, ceilingScaleInterval)));
         WorldFrameProfiler.Add(WorldFrameProfiler.Phase.MeshProcess, meshProcessStart);
 
         // 6. Schedule NEW mesh jobs for chunks that now need them.
@@ -2913,9 +2899,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         // the drain arm only because P9-0's utilization needs the granted quota on every frame that had work
         // — including the in-flight-cap arm, where work existed and none of it was served. Pure arithmetic
         // with no side effect (unlike StartWindow, which timestamps and therefore stays in the drain arm).
-        int meshQuota = settings.enablePipelineTimeBudgets
-            ? PipelinePassBudget.ComputeQuota(settings.maxMeshRebuildsPerFrame, Time.unscaledDeltaTime)
-            : settings.maxMeshRebuildsPerFrame;
+        int meshQuota = PipelinePassBudget.ComputeQuota(settings.maxMeshRebuildsPerFrame, Time.unscaledDeltaTime);
 
         if (_meshBuildQueue.Count == 0)
         {
@@ -2941,9 +2925,8 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
             // The RAM-scaled in-flight cap is untouched (OM-1 memory bound, not a throughput budget). The
             // drain loop itself lives in MeshDrainPolicy so the meshing suite can replay this exact
             // policy (MP-2); the budget math stays here and is derived per frame.
-            PipelinePassBudget.Window meshWindow = settings.enablePipelineTimeBudgets
-                ? PipelinePassBudget.StartWindow(PipelinePassBudget.ScaleCeilingMs(settings.meshScheduleBudgetMs, ceilingScaleInterval))
-                : default;
+            PipelinePassBudget.Window meshWindow =
+                PipelinePassBudget.StartWindow(PipelinePassBudget.ScaleCeilingMs(settings.meshScheduleBudgetMs, ceilingScaleInterval));
 
             DrainResult meshDrain = MeshDrainPolicy.Drain(
                 _meshBuildQueue, meshQuota, meshWindow, inFlightMeshCap, this);
@@ -3975,7 +3958,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         // Signal is the READY set only — parked frontier chunks (WaitingCount) sit indefinitely at the
         // load-square edge by design and would poison an absolute threshold. Gated on enableLighting:
         // without the lighting engine the signal never accumulates and the gate must stay open.
-        if (settings.enableGenerationPanicGate && settings.enableLighting)
+        if (settings.enableLighting)
         {
             int backlog = _readyCountAfterScan;
 
