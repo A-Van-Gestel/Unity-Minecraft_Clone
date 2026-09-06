@@ -25,13 +25,29 @@ namespace UI.Blur
         /// <summary>The layer this subtree's objects carry, or -1 when that layer is undeclared.</summary>
         public int Layer => UIBandLayers.LayerOf(_band);
 
-        private void OnEnable() => ApplyLayer();
+        private void OnEnable()
+        {
+            ApplyLayer();
+            UIBandRegistry.Register(this);
+        }
+
+        private void OnDisable()
+        {
+            UIBandRegistry.Unregister(this);
+#if UNITY_EDITOR
+            UnityEditor.EditorApplication.delayCall -= ApplyLayerDeferred;
+#endif
+        }
 
         /// <summary>Assigns this subtree's band and applies its layer.</summary>
         /// <param name="band">The band this subtree draws in.</param>
         public void SetBand(UIBandId band)
         {
             _band = band;
+
+            // Re-registering is idempotent, and the registry reads the band off the component, so this
+            // only has to keep an enabled component present.
+            if (isActiveAndEnabled) UIBandRegistry.Register(this);
             ApplyLayer();
         }
 
@@ -41,8 +57,6 @@ namespace UI.Blur
 
 #if UNITY_EDITOR
         private void OnValidate() => UnityEditor.EditorApplication.delayCall += ApplyLayerDeferred;
-
-        private void OnDisable() => UnityEditor.EditorApplication.delayCall -= ApplyLayerDeferred;
 
         /// <summary>
         /// Re-applies the layer a tick after an inspector edit. Assigning a layer during

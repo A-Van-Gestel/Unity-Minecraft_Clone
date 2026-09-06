@@ -1150,15 +1150,21 @@ namespace Editor.Validation.UnderwaterRender
         }
 
         /// <summary>
-        /// B17 — the overlay is wired into the renderer asset, shader assigned, ahead of the UI blur.
+        /// B17 — the overlay is wired into the renderer asset, shader assigned, and records before the UI
+        /// blur.
         /// </summary>
         /// <remarks>
         /// The render scenarios above all pass on the shader alone and cannot observe an unwired pipeline.
-        /// Three separate silent failures live here, and each needs its own assertion: the feature missing
-        /// entirely; the feature present but ordered <i>after</i> <c>UIBlurRendererFeature</c>, which leaves
-        /// every blurred HUD panel showing an untinted world; and the feature present with a null shader,
-        /// which makes <c>Create</c> log a warning and disable itself while this suite's own material — built
-        /// from <c>Shader.Find</c> — keeps passing. A membership-only check catches none of the last two.
+        /// Three silent failures live here, each needing its own assertion: the feature missing entirely;
+        /// the overlay recording <i>after</i> the UI blur, which leaves every blurred panel showing an
+        /// untinted world; and the feature present with a null shader, which makes <c>Create</c> log a
+        /// warning and disable itself while this suite's own material — built from <c>Shader.Find</c> —
+        /// keeps passing.
+        /// <para>
+        /// The ordering assertion compares the features' pass events, not their list indices, so it holds
+        /// for any list order — and it reads those events from the features rather than restating them,
+        /// which would compare two literals and never fail.
+        /// </para>
         /// </remarks>
         /// <returns>True when every assertion holds.</returns>
         private static bool RunB17RendererWiring()
@@ -1169,34 +1175,38 @@ namespace Editor.Validation.UnderwaterRender
             if (!Check($"the renderer asset loaded from {RENDERER_ASSET_PATH}", data != null)) return false;
 
             int overlayIndex = -1;
-            int blurIndex = -1;
+            int compositeIndex = -1;
             UnderwaterOverlayRendererFeature overlay = null;
+            UIBandCompositeRendererFeature composite = null;
 
             for (int i = 0; i < data.rendererFeatures.Count; i++)
             {
                 ScriptableRendererFeature feature = data.rendererFeatures[i];
 
-                if (feature is UnderwaterOverlayRendererFeature typed)
+                if (feature is UnderwaterOverlayRendererFeature typedOverlay)
                 {
                     overlayIndex = i;
-                    overlay = typed;
+                    overlay = typedOverlay;
                 }
-                else if (feature is UIBlurRendererFeature)
+                else if (feature is UIBandCompositeRendererFeature typedComposite)
                 {
-                    blurIndex = i;
+                    compositeIndex = i;
+                    composite = typedComposite;
                 }
             }
 
             bool ok = Check($"UnderwaterOverlayRendererFeature is listed (index {overlayIndex})",
                 overlayIndex >= 0);
 
-            ok &= Check($"UIBlurRendererFeature is listed (index {blurIndex})", blurIndex >= 0);
+            ok &= Check($"UIBandCompositeRendererFeature is listed (index {compositeIndex})",
+                compositeIndex >= 0);
 
-            if (overlayIndex < 0 || blurIndex < 0) return false;
+            if (overlay == null || composite == null) return false;
 
-            ok &= Check($"the overlay records before the UI blur ({overlayIndex} < {blurIndex}), so the " +
-                        "blur samples an already-tinted screen",
-                overlayIndex < blurIndex);
+            ok &= Check($"the UI blur composites at {UIBandCompositeRendererFeature.CompositeEvent}, " +
+                        $"after the overlay at {UnderwaterOverlayRendererFeature.OverlayEvent}, so it " +
+                        "samples an already-tinted screen whatever the feature list order",
+                UIBandCompositeRendererFeature.CompositeEvent > UnderwaterOverlayRendererFeature.OverlayEvent);
 
             SerializedObject featureObject = new SerializedObject(overlay);
             SerializedProperty shaderProperty = featureObject.FindProperty("_settings.overlayShader");
@@ -1206,6 +1216,15 @@ namespace Editor.Validation.UnderwaterRender
             if (shaderProperty != null)
                 ok &= Check($"the overlay shader is assigned ({shaderProperty.objectReferenceValue})",
                     shaderProperty.objectReferenceValue != null);
+
+            SerializedObject compositeObject = new SerializedObject(composite);
+            SerializedProperty blurShader = compositeObject.FindProperty("_settings.blurShader");
+
+            ok &= Check("the composite feature's blur shader field exists", blurShader != null);
+
+            if (blurShader != null)
+                ok &= Check($"the composite blur shader is assigned ({blurShader.objectReferenceValue})",
+                    blurShader.objectReferenceValue != null);
 
             return ok;
         }
