@@ -230,7 +230,6 @@ MonoBehaviour:
     domainWarpAmp: 25
     normalizeToZeroOne: 0
   surfaceBlockID: 1
-  subSurfaceBlockID: 1
   terrainLayers:
   - blockID: 10
     depth: 1
