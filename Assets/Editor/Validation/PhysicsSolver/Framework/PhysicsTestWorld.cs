@@ -1,10 +1,13 @@
 using System;
 using System.Reflection;
 using Data;
+using Data.JobData;
+using Data.NativeData;
 using Editor.Validation.Framework;
 using Helpers;
 using Jobs.BurstData;
 using Physics;
+using Unity.Collections;
 using UnityEngine;
 using Object = UnityEngine.Object;
 
@@ -70,6 +73,25 @@ namespace Editor.Validation.PhysicsSolver.Framework
 
         #endregion
 
+        #region Pinned fluid template shape
+
+        // Pinned for the same reason the entity dimensions are: the fluid scenarios compute exact expected
+        // waterlines from these, so a retune of the shipping FluidData assets must not silently move them.
+
+        /// <summary>Horizontal flow levels of the fixture's water-like fluid (levels 0-7).</summary>
+        public const int WaterFlowLevels = 8;
+
+        /// <summary>Height lost per horizontal flow level for the fixture's water-like fluid.</summary>
+        public const float WaterDecayStep = 1f / 8f;
+
+        /// <summary>Horizontal flow levels of the fixture's lava-like fluid.</summary>
+        public const int LavaFlowLevels = 4;
+
+        /// <summary>Height lost per horizontal flow level for the fixture's lava-like fluid.</summary>
+        public const float LavaDecayStep = 1f / 4f;
+
+        #endregion
+
         private readonly BlockType[] _palette;
         private readonly GameObject _worldGo;
         private readonly GameObject _entityGo;
@@ -80,6 +102,11 @@ namespace Editor.Validation.PhysicsSolver.Framework
         private readonly VoxelRigidbody _body;
         private readonly MethodInfo _resolveMovement;
         private readonly MethodInfo _calculateVelocity;
+        private readonly MethodInfo _resolveFluidContact;
+        private readonly MethodInfo _collectStepSmoothing;
+        private readonly MethodInfo _applyPendingJump;
+        private readonly JobDataManager _jobDataManager;
+        private readonly FluidVertexTemplatesNativeData _fluidTemplates;
         private bool _disposed;
 
         /// <summary>The palette backing <c>World.Instance.BlockTypes</c> — exposed so scenarios can read block data by id.</summary>
@@ -105,9 +132,11 @@ namespace Editor.Validation.PhysicsSolver.Framework
         public float VerticalMomentum => (float)ValidationReflection.GetInstanceField(_body, "_verticalMomentum");
 
         /// <summary>
-        /// Whether the solver latched the last <c>VoxelRigidbody.RequestJump</c> call. That method is a pure gate on
-        /// <see cref="IsGrounded"/>, so this is how a scenario observes a jump being <i>refused</i> rather than merely
-        /// being ineffective — the distinction <c>PLAYER_BUGS</c> §04 turns on.
+        /// Whether the solver latched the last <c>VoxelRigidbody.RequestJump</c> call. That method latches only
+        /// when the body is grounded and is not still holding the button that carried it out of a fluid
+        /// (<see cref="VoxelRigidbody.requireJumpReleaseAfterFluid"/>), so this is how a scenario observes a jump
+        /// being <i>refused</i> rather than merely being ineffective — the distinction <c>PLAYER_BUGS</c> §04
+        /// turns on.
         /// </summary>
         public bool JumpRequested => (bool)ValidationReflection.GetInstanceField(_body, "_jumpRequest");
 
@@ -155,6 +184,14 @@ namespace Editor.Validation.PhysicsSolver.Framework
                 ChunkData.IsPopulated = true;
                 _world.worldData.SetChunk(chunkVoxelPos, ChunkData);
 
+                // The fluid query needs the job-side palette and height templates, not just the managed
+                // palette. Without them it returns "no fluid" for every body rather than failing, so every
+                // fluid scenario would pass vacuously.
+                _jobDataManager = BuildJobDataManager(_palette);
+                _fluidTemplates = BuildFluidTemplates();
+                _world.JobDataManager = _jobDataManager;
+                _world.FluidVertexTemplates = _fluidTemplates;
+
                 _entityGo = new GameObject("PhysicsSolver_Entity");
                 _body = _entityGo.AddComponent<VoxelRigidbody>();
                 PinEntityDimensions(_body);
@@ -163,6 +200,9 @@ namespace Editor.Validation.PhysicsSolver.Framework
 
                 _resolveMovement = ResolveSolverMethod("ResolveMovement");
                 _calculateVelocity = ResolveSolverMethod("CalculateVelocity");
+                _resolveFluidContact = ResolveSolverMethod("ResolveFluidContact");
+                _collectStepSmoothing = ResolveSolverMethod("CollectStepSmoothing");
+                _applyPendingJump = ResolveSolverMethod("ApplyPendingJump");
             }
             catch
             {
@@ -197,6 +237,53 @@ namespace Editor.Validation.PhysicsSolver.Framework
             body.isNoclipping = false;
             body.isSprinting = false;
             body.showBoundingBox = false;
+        }
+
+        /// <summary>
+        /// Builds the job-side palette the fluid contact query reads, mirroring the managed one.
+        /// </summary>
+        /// <param name="palette">The managed palette this fixture is built on.</param>
+        /// <returns>A manager owning the native palette; disposed with the fixture.</returns>
+        private static JobDataManager BuildJobDataManager(BlockType[] palette)
+        {
+            NativeArray<BlockTypeJobData> blockTypes =
+                new NativeArray<BlockTypeJobData>(palette.Length, Allocator.Persistent);
+            for (int id = 0; id < palette.Length; id++)
+                blockTypes[id] = new BlockTypeJobData(palette[id]);
+
+            // The solver's fluid path reads only the block palette; the custom-mesh arrays exist to satisfy
+            // the manager's contract and are deliberately empty.
+            return new JobDataManager(
+                blockTypes,
+                new NativeArray<CustomMeshData>(0, Allocator.Persistent),
+                new NativeArray<CustomFaceData>(0, Allocator.Persistent),
+                new NativeArray<CustomVertData>(0, Allocator.Persistent),
+                new NativeArray<int>(0, Allocator.Persistent));
+        }
+
+        /// <summary>
+        /// Builds the fluid vertex-height templates from <see cref="FluidMeshData.BuildVertexHeightTemplate"/>.
+        /// </summary>
+        /// <returns>Native templates owned by this fixture.</returns>
+        /// <remarks>
+        /// Generated from the shared curve builder rather than loaded from the shipping
+        /// <c>FluidData_*.asset</c>, for the same reason the block palette is synthetic: a scenario's expected
+        /// waterline should follow the engine's height <i>rule</i>, not whatever the shipping assets were last
+        /// baked to. It is also the single source of truth the <c>FluidDataGenerator</c> bakes those assets
+        /// from, so the fixture cannot drift from production while agreeing with itself.
+        /// </remarks>
+        private static FluidVertexTemplatesNativeData BuildFluidTemplates()
+        {
+            float[] water = new float[16];
+            float[] lava = new float[16];
+            FluidMeshData.BuildVertexHeightTemplate(water, WaterFlowLevels, WaterDecayStep);
+            FluidMeshData.BuildVertexHeightTemplate(lava, LavaFlowLevels, LavaDecayStep);
+
+            return new FluidVertexTemplatesNativeData(new FluidTemplates
+            {
+                WaterVertexTemplates = water,
+                LavaVertexTemplates = lava,
+            });
         }
 
         /// <summary>Locates a private solver method, failing loudly if it was renamed.</summary>
@@ -304,9 +391,18 @@ namespace Editor.Validation.PhysicsSolver.Framework
         public Vector3 Tick()
         {
             Vector3 velocity = CalculateVelocityOnly();
+            _applyPendingJump.Invoke(_body, null);
             _entityGo.transform.Translate(velocity, Space.World);
+            CollectStepSmoothing();
             return velocity;
         }
+
+        /// <summary>
+        /// Runs the solver's post-move step-smoothing handoff, which <c>FixedUpdate</c> performs after its
+        /// translate. <see cref="Tick"/> already calls it; scenarios driving <see cref="Step"/> or
+        /// <see cref="Resolve"/> directly must call it themselves, since those bypass the tick.
+        /// </summary>
+        public void CollectStepSmoothing() => _collectStepSmoothing.Invoke(_body, null);
 
         /// <summary>
         /// Runs <c>CalculateVelocity</c> <b>without</b> the translate that follows it in <c>FixedUpdate</c> — so a
@@ -345,6 +441,58 @@ namespace Editor.Validation.PhysicsSolver.Framework
             _world.CheckPhysicsCollision(bounds, axis, directionSign, out contact);
 
         /// <summary>
+        /// The fluid contact the solver resolved on the most recent <see cref="Tick"/> /
+        /// <see cref="CalculateVelocityOnly"/>. Only those drive the resolve, so
+        /// <see cref="Resolve"/> and <see cref="Step"/> leave it stale.
+        /// </summary>
+        public FluidContact FluidContact => _body.FluidContact;
+
+        /// <summary>
+        /// Runs the solver's private fluid-contact resolve for the entity's current position, without
+        /// integrating a tick — so a scenario can assert what the query measured, separately from what the
+        /// forces then did with it.
+        /// </summary>
+        /// <returns>The resolved contact.</returns>
+        public FluidContact ResolveFluidContact()
+        {
+            _resolveFluidContact.Invoke(_body, null);
+            return _body.FluidContact;
+        }
+
+        /// <summary>
+        /// Disposes the fixture's job data and fluid templates early, reproducing the state a world leaves
+        /// behind when it is torn down while a body is still ticking.
+        /// </summary>
+        /// <remarks>
+        /// Both are idempotent, so the fixture's own <see cref="Dispose"/> still runs cleanly afterwards.
+        /// That was not true before <c>IsDisposed</c> existed: the second call threw.
+        /// </remarks>
+        public void DisposeJobDataEarly()
+        {
+            _fluidTemplates.Dispose();
+            _jobDataManager.Dispose();
+        }
+
+        /// <summary>Applies vertical swim intent, as the input layer does while jump or crouch is held.</summary>
+        /// <param name="verticalInput">-1 (swim down) to 1 (swim up).</param>
+        public void SetSwimVerticalIntent(float verticalInput) => _body.SetSwimVerticalIntent(verticalInput);
+
+        /// <summary>
+        /// The authored surface height of a fluid level, straight from the shared curve builder the fixture's
+        /// templates are generated with.
+        /// </summary>
+        /// <param name="fluidLevel">The raw 4-bit fluid level, falling flag included.</param>
+        /// <param name="flowLevels">Horizontal flow levels of the fluid (<see cref="WaterFlowLevels"/>).</param>
+        /// <param name="decayStep">Height lost per level (<see cref="WaterDecayStep"/>).</param>
+        /// <returns>The surface height in block-local units, 0-1.</returns>
+        public static float SurfaceHeightOf(byte fluidLevel, int flowLevels, float decayStep)
+        {
+            float[] template = new float[16];
+            FluidMeshData.BuildVertexHeightTemplate(template, flowLevels, decayStep);
+            return template[fluidLevel];
+        }
+
+        /// <summary>
         /// The entity AABB the solver would build for a feet-center position — so a scenario can express an
         /// expectation about the body's faces (min/max) rather than only about its position.
         /// </summary>
@@ -376,6 +524,8 @@ namespace Editor.Validation.PhysicsSolver.Framework
             WorldOrigin.SetOrigin(_previousOriginChunk);
 
             ChunkData?.Dispose();
+            _fluidTemplates?.Dispose();
+            _jobDataManager?.Dispose();
             if (_entityGo != null) Object.DestroyImmediate(_entityGo);
             if (_worldGo != null) Object.DestroyImmediate(_worldGo);
             if (_stubDatabase != null) Object.DestroyImmediate(_stubDatabase);

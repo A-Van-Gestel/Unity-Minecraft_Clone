@@ -1,7 +1,7 @@
 # Validation Suite Coverage Roadmap — Uncovered Systems, Ranked
 
-**Version:** 1.5  
-**Date:** 2026-07-02  
+**Version:** 1.6  
+**Date:** 2026-09-05  
 **Status:** **Living backlog.** `NS-4`, `NS-5`, `NS-7` and `NS-7b` are ✅ complete (NS-4 2026-08-03; NS-5 at the CP-2
 close-out; NS-7 and NS-7b both 2026-08-20 — the migration chain is now covered end to end, and NS-7b's first
 run found `SERIALIZATION_BUGS` §10, fixed 2026-08-21 and archived as `_FIXED_BUGS.md` Serialization 07, its `K10`
@@ -453,7 +453,7 @@ what this document ranks.
 
 ## Deliberate: not every menu-item suite belongs in `Validate All`
 
-`ValidationSuiteRegistry` carries **24** registered suites, pinned by `ExpectedSuiteCount` and guarded
+`ValidationSuiteRegistry` carries **29** registered suites, pinned by `ExpectedSuiteCount` and guarded
 by `ValidationFrameworkSelfTest.RegistryMeetsExpectedCount` (which reds if a suite is *dropped*) and by
 the aggregate runner's and `ValidationSuiteCI`'s count check. Some validation entry points intentionally
 sit **outside** that registry and therefore outside `Validate All` and CI:
@@ -508,6 +508,20 @@ infrastructure hygiene: do (1) and (2) with the next framework change, and treat
 project's Document History convention, so they record what the commits changed rather than
 contemporaneous notes.*
 
+* **v1.6** *(2026-09-05)* - **`Cloud Render` registered as the 29th suite** (`ExpectedSuiteCount` 28 → 29),
+  6 baselines, 9.7 ms. It is not a roadmap item — it arrived with `CL-9` in the cloud backlog, which made
+  clouds visible through a water surface by moving their draw to a URP pass at `AfterRenderingSkybox`,
+  ahead of the opaque-texture copy the liquid shader samples. The suite pins the four things that can
+  silently drift apart and each break the fix in a different way: the shader's `LightMode` tag versus the
+  tag the feature filters on, the feature's registration on the renderer asset, its pass event relative to
+  the copy, and the URP asset's opaque-texture toggle (whose absence makes the fix a silent no-op). All
+  six were confirmed **able to go red** by mutation, each reddening only its own baseline. What the suite
+  deliberately does not claim is that clouds actually reach the copy — that needs a live frame and was
+  confirmed in game. **Census re-verified against a full `Validate All`: 720 → 727 baselines / 28 → 29
+  suites, 0 failures, 0 isolation violations, 2 known-bug repros** (4 min 42.1 s); +6 is this suite and +1
+  is `Underwater Render`'s new `B25` (24 → 25), landed in the same pass from a code-review finding — every
+  other per-suite count is unchanged. Also corrected here: the "Deliberate" section's
+  present-tense claim that the registry carries **24** suites, stale since the count reached 28.
 * **v1.5** *(2026-08-21)* - **`NS-1` COMPLETE — parts 4–5 landed the same day**, into the same suite:
   `B9`–`B14` for the `RegionFile` sector allocator and `B15`–`B16` for the pending stores, plus the `K08`
   repro of `SERIALIZATION_BUGS` §08 (suite: 8 → **16 baselines + 2 repros**, 202 ms). This closes the
@@ -641,6 +655,6 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-08-22 (**`NS-5` coverage extension `G1`–`G4`** — a blind-spot audit of the already-complete NS-5 surface found four unpinned areas, all closed as `Chunk Math` partials (56 → 72 scenarios, no production change): the padded-volume index helpers and all three neighborhood gathers (`G1`, previously **zero** direct assertions), the flattened-index inverse pair (`G2`), the `r.{x}.{z}.bin` seam on negative region coords (`G3`), and the gated legacy V1 encoder (`G4`, its deliberate `Debug.LogError` captured and asserted rather than suppressed). Each prove-red verified by mutating the production code it guards. Census re-verified against a full `Validate All` at **561 baselines / 24 suites, 0 failures, 0 isolation violations, 2 known-bug repros** (3 min 19.6 s). **`NS-2` remains the top unbuilt item.** Previously: 2026-08-21 (**`NS-1` COMPLETE — all five parts** shipped as `Validate Serialization Round-Trip`: 16 baselines plus the `K04`/`K08` repros of `SERIALIZATION_BUGS` §04 and §08, registered as the 24th suite. Census re-verified against a full `Validate All` at **545 baselines / 24 suites, 0 failures, 2 known-bug repros** (204.5 s). **`NS-2` is now the top unbuilt item.** Previously: 2026-08-21 (`NS-1` parts 1–3, census verified at 537 / 24 / 1 over 188 s). Previously: 2026-08-21 (`SERIALIZATION_BUGS` §10 fixed — `RunAOTMigrationAsync`'s region-layout and per-chunk passes now run in sequence instead of exclusively; the bug is archived as `_FIXED_BUGS.md` Serialization 07 and its `K10` repro promoted to baseline `B25`, taking Migration Chain to **25 baselines, 0 repros** and the census to **529 baselines / 23 suites, all green, 0 repros** — re-verified the same day against a full `Validate All` (3 min 14 s). A new `SERIALIZATION_BUGS` §11 was filed for the pre-`needsLight` v1 chunk layout the fix does not cover. Previously: 2026-08-20 (NS-7 **and** NS-7b shipped: `Validate Migration Chain`, 24 baselines + the `K10` repro of `SERIALIZATION_BUGS` §10, census re-verified at **528 baselines / 23 suites, all green**. Previously: 2026-08-19 eighth-pass audit: `NS-7`…`NS-11` added, plus the deliberate-exclusion section for entry points kept out of `ValidationSuiteRegistry`; census re-verified against a `Validate All` run at **497 baselines / 22 suites, all green** — matching the 2026-08-17 release notes; superseded later the same day by the C14 mirrors B108–B114, taking Lighting 99 → 106 and the total to **504**)))  
+**Last Updated:** 2026-09-05 (**`Cloud Render` registered as the 29th suite** with `CL-9`; census re-verified at **727 baselines / 29 suites, 0 failures, 0 isolation violations, 2 known-bug repros** over 4 min 42.1 s; the stale "24 registered suites" claim corrected. Previously: 2026-08-22 (**`NS-5` coverage extension `G1`–`G4`** — a blind-spot audit of the already-complete NS-5 surface found four unpinned areas, all closed as `Chunk Math` partials (56 → 72 scenarios, no production change): the padded-volume index helpers and all three neighborhood gathers (`G1`, previously **zero** direct assertions), the flattened-index inverse pair (`G2`), the `r.{x}.{z}.bin` seam on negative region coords (`G3`), and the gated legacy V1 encoder (`G4`, its deliberate `Debug.LogError` captured and asserted rather than suppressed). Each prove-red verified by mutating the production code it guards. Census re-verified against a full `Validate All` at **561 baselines / 24 suites, 0 failures, 0 isolation violations, 2 known-bug repros** (3 min 19.6 s). **`NS-2` remains the top unbuilt item.** Previously: 2026-08-21 (**`NS-1` COMPLETE — all five parts** shipped as `Validate Serialization Round-Trip`: 16 baselines plus the `K04`/`K08` repros of `SERIALIZATION_BUGS` §04 and §08, registered as the 24th suite. Census re-verified against a full `Validate All` at **545 baselines / 24 suites, 0 failures, 2 known-bug repros** (204.5 s). **`NS-2` is now the top unbuilt item.** Previously: 2026-08-21 (`NS-1` parts 1–3, census verified at 537 / 24 / 1 over 188 s). Previously: 2026-08-21 (`SERIALIZATION_BUGS` §10 fixed — `RunAOTMigrationAsync`'s region-layout and per-chunk passes now run in sequence instead of exclusively; the bug is archived as `_FIXED_BUGS.md` Serialization 07 and its `K10` repro promoted to baseline `B25`, taking Migration Chain to **25 baselines, 0 repros** and the census to **529 baselines / 23 suites, all green, 0 repros** — re-verified the same day against a full `Validate All` (3 min 14 s). A new `SERIALIZATION_BUGS` §11 was filed for the pre-`needsLight` v1 chunk layout the fix does not cover. Previously: 2026-08-20 (NS-7 **and** NS-7b shipped: `Validate Migration Chain`, 24 baselines + the `K10` repro of `SERIALIZATION_BUGS` §10, census re-verified at **528 baselines / 23 suites, all green**. Previously: 2026-08-19 eighth-pass audit: `NS-7`…`NS-11` added, plus the deliberate-exclusion section for entry points kept out of `ValidationSuiteRegistry`; census re-verified against a `Validate All` run at **497 baselines / 22 suites, all green** — matching the 2026-08-17 release notes; superseded later the same day by the C14 mirrors B108–B114, taking Lighting 99 → 106 and the total to **504**))))  
 **Next Review:** whenever a suite is added or a `Validate All` count changes — the existing-coverage
 paragraph is the one part of this document that goes stale silently.

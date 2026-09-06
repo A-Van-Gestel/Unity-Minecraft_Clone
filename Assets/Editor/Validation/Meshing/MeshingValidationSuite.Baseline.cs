@@ -47,6 +47,9 @@ namespace Editor.Validation.Meshing
             // file (MeshingValidationSuite.CrossChunk.cs) and self-registers here. ---
             AddCrossChunkBaselineScenarios(scenarios);
 
+            // --- Fluid flow-vector baselines (B64–B65) live in MeshingValidationSuite.FluidFlow.cs. ---
+            AddFluidFlowBaselineScenarios(scenarios);
+
             // --- VO-5 fractional ambient occlusion (B41–B43) lives in MeshingValidationSuite.FractionalAO.cs. ---
             AddFractionalAoBaselineScenarios(scenarios);
 
@@ -142,6 +145,10 @@ namespace Editor.Validation.Meshing
         /// <summary>Hook for the cross-chunk border-culling baselines (implemented in MeshingValidationSuite.CrossChunk.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
         static partial void AddCrossChunkBaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the fluid flow-vector baselines (implemented in MeshingValidationSuite.FluidFlow.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddFluidFlowBaselineScenarios(List<Scenario> scenarios);
 
         /// <summary>Hook for the VO-5 fractional-AO baselines (implemented in MeshingValidationSuite.FractionalAO.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>

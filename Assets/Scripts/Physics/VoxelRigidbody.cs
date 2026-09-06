@@ -58,6 +58,27 @@ namespace Physics
         [Min(0f)]
         public float stepHeight = 0.5f;
 
+        [Tooltip("Step height while swimming, in meters — how big a ledge a body can haul itself onto out of " +
+                 "water.\nLarger than the walking step height on purpose: a floating body's feet sit most of a " +
+                 "block below the surface, so a bank it is looking straight at is still far out of stepping " +
+                 "range. Sized to clear a one-block bank and refuse a two-block wall.")]
+        [Min(0f)]
+        public float swimStepHeight = 1.45f;
+
+        [Tooltip("Require the jump button to be released before it can jump again, after climbing out of a " +
+                 "fluid.\nSwimming up is done by HOLDING jump, so without this the body jumps the moment it " +
+                 "lands on the bank and the climb reads as one big leap instead of a hop out of the water. " +
+                 "Turn off to let a held jump resume immediately on landing.")]
+        public bool requireJumpReleaseAfterFluid = true;
+
+        [Tooltip("How long a step-up's vertical snap takes to catch up visually, in seconds.\n" +
+                 "0 disables smoothing entirely — the view jumps the instant the collider does, which is how " +
+                 "step-ups behaved before this existed.\nHigher values ease the rise out over longer, which " +
+                 "reads as stepping up rather than teleporting. Per body, so a heavy entity can lag more than " +
+                 "the player.")]
+        [Range(0f, 0.5f)]
+        public float stepSmoothing = 0.12f;
+
         public float CollisionHalfWidthX => collisionWidthX * 0.5f;
         public float CollisionHalfDepthZ => collisionDepthZ * 0.5f;
 
@@ -110,11 +131,96 @@ namespace Physics
         /// </remarks>
         public uint JumpCount { get; private set; }
 
+        /// <summary>
+        /// The fluid this body is in as of the current tick, or <c>default</c> (<c>FluidType.None</c>) when it
+        /// is in air. Refreshed once per <c>FixedUpdate</c>, before any force reads it.
+        /// </summary>
+        /// <remarks>
+        /// Public because "is this body in water, and how deep" is asked outside the solver too — the same
+        /// reason <see cref="GroundProbeSkin"/> is. Readers get the solver's own answer instead of running a
+        /// second, differently-quantized probe of their own.
+        /// </remarks>
+        public FluidContact FluidContact { get; private set; }
+
+        /// <summary>
+        /// How far <b>below</b> its collider a step-up's view should still be drawn, in meters, decaying to
+        /// zero over <see cref="stepSmoothing"/>. Always 0 when smoothing is disabled.
+        /// </summary>
+        /// <remarks>
+        /// <b>Presentation only — nothing in the solve reads this.</b> The collider still snaps, because a
+        /// body that climbed gradually would spend those frames inside the geometry it is climbing. Only the
+        /// view lags: subtract this from the drawn position and it trails the step, then catches up.
+        /// </remarks>
+        public float StepSmoothingOffset { get; private set; }
+
+        /// <summary>
+        /// The step height in force right now — <see cref="swimStepHeight"/> while in fluid, otherwise
+        /// <see cref="stepHeight"/>.
+        /// </summary>
+        /// <remarks>
+        /// Only a <i>floating</i> body gets the swim allowance — one standing on the bottom of shallow water
+        /// is walking, and steps like a walker. The allowance is bigger because the float equilibrium parks
+        /// the feet most of a block under the surface, putting a one-block bank out of walking-step reach.
+        /// That gap is measured from the surface, so it does not grow with depth: one value clears a
+        /// one-block bank and still refuses a two-block wall.
+        /// </remarks>
+        public float EffectiveStepHeight => FluidContact.InFluid && !IsGrounded ? swimStepHeight : stepHeight;
+
         private float _verticalMomentum;
         private Vector3 _movementIntent;
         private float _verticalFlyingIntent;
         private bool _jumpRequest;
+        private float _swimVerticalIntent;
         private float _lastMoveSpeed;
+
+        /// <summary>Vertical distance the step-up pre-pass snapped this tick, awaiting the smoothing handoff.</summary>
+        private float _pendingStepRise;
+
+        /// <summary>Whether a jump is being refused until the button is released — see <see cref="requireJumpReleaseAfterFluid"/>.</summary>
+        private bool _jumpBlockedUntilRelease;
+
+        /// <summary>The jump button's current state, as last reported by the input layer.</summary>
+        private bool _jumpHeld;
+
+        /// <summary>Whether the body was in fluid on the previous tick, for edge detection on the exit.</summary>
+        private bool _wasInFluid;
+
+        /// <summary>
+        /// Below this the smoothing offset is snapped to zero rather than decayed further — an exponential
+        /// decay never actually reaches zero, and a permanently non-zero offset would keep the view a
+        /// fraction of a millimeter low forever.
+        /// </summary>
+        private const float STEP_SMOOTHING_EPSILON = 0.001f;
+
+        /// <summary>
+        /// How fast a swim stroke ramps toward its target speed, in m/s². High enough to feel responsive,
+        /// finite so the stroke reads as swimming rather than as a jump out of the water.
+        /// </summary>
+        private const float SWIM_ACCELERATION = 12f;
+
+        /// <summary>
+        /// How fast a falling column pulls a body toward its downward current speed, in m/s². Deliberately
+        /// below <see cref="SWIM_ACCELERATION"/>: the difference is the rate a swimmer climbs a waterfall.
+        /// </summary>
+        private const float FALL_CURRENT_ACCELERATION = 8f;
+
+        /// <summary>
+        /// The fraction of its still-water stroke speed a body is guaranteed to climb at while swimming up
+        /// through a falling column. Below 1 so a waterfall still visibly resists; above 0 so it can always
+        /// be escaped.
+        /// </summary>
+        private const float WATERFALL_CLIMB_FLOOR = 0.35f;
+
+        /// <summary>
+        /// Submersion at which a fluid's horizontal speed penalty reaches full strength.
+        /// </summary>
+        /// <remarks>
+        /// The penalty ramps to its authored value over this much of the body and then stays there, rather
+        /// than scaling linearly across the whole collider. Linear scaling meant a body floating at the
+        /// surface — where submersion is small by construction — kept nearly all of its walking speed and
+        /// slid across the top of the water. Knee-deep is where wading already costs most of your speed.
+        /// </remarks>
+        private const float FULL_HORIZONTAL_DRAG_SUBMERSION = 0.25f;
 
         /// <summary>
         /// PH-1: this body's gathered voxel neighborhood, refilled once per resolve and read by every sweep.
@@ -152,12 +258,56 @@ namespace Physics
         /// <summary>
         /// Indicates the entity wishes to jump this frame.
         /// </summary>
+        /// <remarks>
+        /// Gated on <see cref="IsGrounded"/>, and on not still holding the button that carried the body out
+        /// of a fluid — see <see cref="requireJumpReleaseAfterFluid"/>. A refused request is simply not
+        /// latched, so <c>PLAYER_BUGS</c> §04's distinction between "refused" and "ineffective" still reads
+        /// off the latch.
+        /// </remarks>
         public void RequestJump()
         {
+            if (_jumpBlockedUntilRelease) return;
+
             if (IsGrounded && !isFlying)
             {
                 _jumpRequest = true;
             }
+        }
+
+        /// <summary>
+        /// Reports the jump button's state for this frame. Releasing it clears a post-fluid jump block.
+        /// </summary>
+        /// <param name="held">Whether the jump button is currently down.</param>
+        /// <remarks>
+        /// Separate from <see cref="RequestJump"/> because the solver needs the <i>falling</i> edge, which a
+        /// request-only API never delivers: the input layer stops calling <c>RequestJump</c> when the button
+        /// comes up, which is indistinguishable from it simply not being a jump frame.
+        /// </remarks>
+        public void SetJumpHeld(bool held)
+        {
+            _jumpHeld = held;
+            if (!held) _jumpBlockedUntilRelease = false;
+        }
+
+        /// <summary>
+        /// Applies vertical swim intent for this tick — the in-fluid counterpart of
+        /// <see cref="SetVerticalFlyingIntent"/>, and of <see cref="RequestJump"/> for a body that is
+        /// swimming rather than standing.
+        /// </summary>
+        /// <param name="verticalInput">-1 (swim down) to 1 (swim up); 0 is no stroke.</param>
+        /// <remarks>
+        /// A second entry point rather than a relaxed gate inside <see cref="RequestJump"/>, which stays a
+        /// pure gate on <see cref="IsGrounded"/> — widening it would change what a refused jump means.
+        /// <para>
+        /// <b>Stored, not consumed</b>, like <see cref="_movementIntent"/>, and gated on being in fluid
+        /// where it is <i>used</i> rather than here. Clearing it per fixed step would drop strokes whenever
+        /// two steps fall between two renders, weakening swimming as the frame rate drops. A caller owes a
+        /// zero when it stops driving the body.
+        /// </para>
+        /// </remarks>
+        public void SetSwimVerticalIntent(float verticalInput)
+        {
+            _swimVerticalIntent = Mathf.Clamp(verticalInput, -1f, 1f);
         }
 
         /// <summary>
@@ -177,17 +327,67 @@ namespace Physics
 
             CalculateVelocity();
 
-            if (_jumpRequest && !isFlying)
-            {
-                _verticalMomentum = jumpForce;
-                IsGrounded = false;
-                _jumpRequest = false;
-                JumpCount++;
-            }
+            ApplyPendingJump();
 
             transform.Translate(Velocity, Space.World);
 
             ClampToWorldBorder();
+
+            CollectStepSmoothing();
+        }
+
+        /// <summary>
+        /// Converts a latched jump request into upward momentum, after this tick's velocity resolve — so the
+        /// impulse is carried by the next tick's movement.
+        /// </summary>
+        private void ApplyPendingJump()
+        {
+            if (!_jumpRequest || isFlying) return;
+
+            _verticalMomentum = jumpForce;
+            IsGrounded = false;
+            _jumpRequest = false;
+            JumpCount++;
+        }
+
+        /// <summary>
+        /// Folds this tick's step-up snap into <see cref="StepSmoothingOffset"/>, so the view has something
+        /// to catch up from. Clears the pending rise either way, so a body with smoothing switched off does
+        /// not accumulate one.
+        /// </summary>
+        private void CollectStepSmoothing()
+        {
+            if (stepSmoothing > 0f && _pendingStepRise > 0f)
+            {
+                // Capped at the step height: the pre-pass can only lift a body by that much in one go, and a
+                // larger reading means several substeps each stepped up — which is a legitimate climb the
+                // view should not lag a whole staircase behind.
+                StepSmoothingOffset = Mathf.Min(StepSmoothingOffset + _pendingStepRise,
+                    Mathf.Max(stepHeight, swimStepHeight));
+            }
+
+            _pendingStepRise = 0f;
+        }
+
+        /// <summary>
+        /// Eases <see cref="StepSmoothingOffset"/> back to zero on the render clock, so the smoothing runs at
+        /// display rate rather than in the 50 Hz physics steps it is hiding.
+        /// </summary>
+        private void Update()
+        {
+            if (StepSmoothingOffset <= 0f) return;
+
+            if (stepSmoothing <= 0f)
+            {
+                // Switched off mid-flight: drop the outstanding offset rather than freezing the view low.
+                StepSmoothingOffset = 0f;
+                return;
+            }
+
+            // Exponential ease-out, so stepSmoothing reads as a time constant and the catch-up decelerates
+            // into place instead of arriving at full speed and stopping dead.
+            StepSmoothingOffset *= Mathf.Exp(-Time.deltaTime / stepSmoothing);
+            if (StepSmoothingOffset < STEP_SMOOTHING_EPSILON) StepSmoothingOffset = 0f;
         }
 
         /// <summary>
@@ -230,6 +430,11 @@ namespace Physics
 
         private void CalculateVelocity()
         {
+            // Resolved once per tick, before anything reads it. Fluid forces integrate alongside gravity for
+            // the same reason gravity does: ResolveMovement runs once per SUBSTEP, so applying them there
+            // would scale every force by the substep count of whatever speed the body happens to be moving.
+            ResolveFluidContact();
+
             // VERTICAL VELOCITY & GRAVITY
             if (!isFlying)
             {
@@ -240,6 +445,8 @@ namespace Physics
                 // Affect vertical momentum with gravity.
                 if (_verticalMomentum > gravity)
                     _verticalMomentum += Time.fixedDeltaTime * gravity;
+
+                ApplyFluidVerticalForces();
             }
             else
             {
@@ -265,10 +472,24 @@ namespace Physics
             else
                 MoveSpeed = _lastMoveSpeed;
 
+            // Wading slows the body in proportion to submersion, so ankle-deep water barely bites.
+            // Must stay AFTER the _lastMoveSpeed write: that field carries the ground speed into the air,
+            // so scaling before it would let one waded step follow the body until it lands again.
+            if (FluidContact.InFluid && !isFlying)
+            {
+                float drag = Mathf.Clamp01(FluidContact.SubmergedFraction / FULL_HORIZONTAL_DRAG_SUBMERSION);
+                MoveSpeed *= Mathf.Lerp(1f, FluidContact.SubmergedSpeedMultiplier, drag);
+            }
+
             Velocity = _movementIntent * (Time.fixedDeltaTime * MoveSpeed);
 
             // Apply vertical momentum (falling / jumping)
             Velocity += Vector3.up * (_verticalMomentum * Time.fixedDeltaTime);
+
+            // The current carries the body regardless of its own input — a body standing still in a river
+            // still moves downstream.
+            if (FluidContact.InFluid && !isFlying)
+                Velocity += FluidContact.FlowDirection * (FluidContact.PushStrength * Time.fixedDeltaTime);
 
             // COLLISION (Sub-voxel AABB physics solver)
             if (!isNoclipping)
@@ -315,6 +536,92 @@ namespace Physics
                     ResolveMovement(ref tempVelocity, transform.position);
                     Velocity = tempVelocity;
                 }
+            }
+        }
+
+        /// <summary>
+        /// Refreshes <see cref="FluidContact"/> from the body's current AABB. Clears it while noclipping, so
+        /// a ghosting body is not shoved around by water it is deliberately passing through.
+        /// </summary>
+        private void ResolveFluidContact()
+        {
+            if (isNoclipping)
+            {
+                FluidContact = default;
+                return;
+            }
+
+            Vector3 pos = transform.position;
+            Bounds bodyAABB = new Bounds();
+            bodyAABB.SetMinMax(
+                new Vector3(pos.x - CollisionHalfWidthX, pos.y, pos.z - CollisionHalfDepthZ),
+                new Vector3(pos.x + CollisionHalfWidthX, pos.y + collisionHeight, pos.z + CollisionHalfDepthZ));
+
+            _world.GatherFluidContact(bodyAABB, out FluidContact contact);
+            FluidContact = contact;
+
+            // Climbing out IS holding jump, so without this the body jumps on the frame it lands and the
+            // climb and the jump fuse into one launch. Edge-triggered, so re-entering the water re-arms it.
+            if (_wasInFluid && !FluidContact.InFluid && requireJumpReleaseAfterFluid && _jumpHeld)
+                _jumpBlockedUntilRelease = true;
+
+            _wasInFluid = FluidContact.InFluid;
+        }
+
+        /// <summary>
+        /// Applies buoyancy, vertical drag and the swim stroke to <see cref="_verticalMomentum"/>, after
+        /// gravity has been integrated for this tick.
+        /// </summary>
+        /// <remarks>
+        /// Buoyancy cancels a <i>fraction of gravity</i> rather than adding an upward force, so an authored
+        /// 1 is exactly neutral at full submersion and no tuning produces runaway lift. Scaling it by
+        /// <see cref="FluidContact.SubmergedFraction"/> settles a body at the surface: the support falls
+        /// away as it rises.
+        /// <para>
+        /// Drag decays exponentially rather than subtracting linearly, so it cannot overshoot past zero and
+        /// reverse the body — which would read as a bounce at the surface.
+        /// </para>
+        /// </remarks>
+        private void ApplyFluidVerticalForces()
+        {
+            if (!FluidContact.InFluid) return;
+
+            float submersion = FluidContact.SubmergedFraction;
+
+            // Cancel the authored fraction of this tick's gravity pull.
+            _verticalMomentum -= Time.fixedDeltaTime * gravity * FluidContact.Buoyancy * submersion;
+
+            // Exponential decay toward zero; never overshoots however large the coefficient is authored.
+            float drag = FluidContact.VerticalDrag * submersion;
+            if (drag > 0f)
+                _verticalMomentum *= Mathf.Exp(-drag * Time.fixedDeltaTime);
+
+            // A falling column drags the body toward its current speed. A momentum target rather than
+            // displacement, so the stroke below acts on the same axis and can gain on it — the gap between
+            // the two accelerations is the rate a swimmer climbs a waterfall.
+            if (FluidContact.IsFalling)
+            {
+                _verticalMomentum = Mathf.MoveTowards(_verticalMomentum,
+                    -FluidContact.PushStrength * submersion, FALL_CURRENT_ACCELERATION * Time.fixedDeltaTime);
+            }
+
+            if (_swimVerticalIntent != 0f)
+            {
+                // Scaled by submersion so the stroke fades as the body rises, settling it at the waterline
+                // rather than carrying it clear of the pool.
+                float target = _swimVerticalIntent * FluidContact.SwimAscendSpeed * submersion;
+
+                // Accelerated toward rather than snapped to, so the stroke composes with the buoyancy and
+                // drag above. The authority is scaled by submersion too: a body mostly out of the water gets
+                // little purchase and sinks back, which is what holds the float line under the surface.
+                _verticalMomentum = Mathf.MoveTowards(_verticalMomentum, target,
+                    SWIM_ACCELERATION * submersion * Time.fixedDeltaTime);
+
+                // A waterfall slows a climb; it does not forbid one. A gameplay floor rather than physics —
+                // an honest force balance nets downward here, and a waterfall that cannot be climbed reads
+                // as a trap. Tuning-independent, so no authored value can close the exit.
+                if (FluidContact.IsFalling && _swimVerticalIntent > 0f)
+                    _verticalMomentum = Mathf.Max(_verticalMomentum, target * WATERFALL_CLIMB_FLOOR);
             }
         }
 
@@ -369,11 +676,16 @@ namespace Physics
 
             bool horizontalBlocked = zBlocked || xBlocked;
 
-            // If blocked and grounded, attempt step-up with ORIGINAL movement
-            if (horizontalBlocked && IsGrounded && !isFlying)
+            float step = EffectiveStepHeight;
+
+            // If blocked and supported, attempt step-up with ORIGINAL movement. Buoyancy counts as support,
+            // since a swimmer is never grounded. Climbing out also requires ASKING to rise — twice a walking
+            // step, so it is the player's call rather than a consequence of touching the bank.
+            bool climbingOutOfFluid = FluidContact.InFluid && _swimVerticalIntent > 0f;
+            if (horizontalBlocked && (IsGrounded || climbingOutOfFluid) && !isFlying)
             {
                 Bounds liftedAABB = horizontalFutureAABB;
-                liftedAABB.center += Vector3.up * stepHeight;
+                liftedAABB.center += Vector3.up * step;
 
                 bool clearsAtStep = true;
                 if (movement.x != 0f)
@@ -385,8 +697,8 @@ namespace Physics
                 {
                     // Sweep DOWNWARD to find highest support surface
                     Bounds sweepAABB = liftedAABB;
-                    sweepAABB.Expand(new Vector3(0, stepHeight, 0));
-                    sweepAABB.center -= new Vector3(0, stepHeight * 0.5f, 0);
+                    sweepAABB.Expand(new Vector3(0, step, 0));
+                    sweepAABB.center -= new Vector3(0, step * 0.5f, 0);
 
                     if (Probe(sweepAABB, axis: 1, -1, out var groundContact))
                     {
@@ -399,12 +711,26 @@ namespace Physics
                     else
                     {
                         // No support found, step onto air
-                        movement.y = stepHeight;
+                        movement.y = step;
                     }
 
                     // SUCCESS: horizontal velocity is preserved as-is (no correction applied).
                     horizontalBlocked = false;
                     horizontalFutureAABB.center += Vector3.up * movement.y;
+
+                    // Hand the snap to the smoothing offset. Accumulated rather than assigned because a
+                    // single tick can substep, and each substep may step up in turn — the view owes the
+                    // total, not the last leg.
+                    if (movement.y > 0f) _pendingStepRise += movement.y;
+
+                    // Armed here rather than on the fluid-exit edge, which is a tick too late by
+                    // construction: the step-up grounds the body within this tick, so the input layer can
+                    // latch a jump on the render frame before that edge is ever detected.
+                    if (climbingOutOfFluid && requireJumpReleaseAfterFluid && _jumpHeld)
+                    {
+                        _jumpBlockedUntilRelease = true;
+                        _jumpRequest = false;
+                    }
                 }
             }
 
@@ -515,7 +841,7 @@ namespace Physics
             // cannot rise further. The stand-offs are added because the solver parks bodies an epsilon off contact.
             envelope.SetMinMax(
                 new Vector3(envelope.min.x, envelope.min.y - GroundProbeSkin, envelope.min.z),
-                new Vector3(envelope.max.x, envelope.max.y + stepHeight + collisionPadding + COLLISION_EPSILON,
+                new Vector3(envelope.max.x, envelope.max.y + EffectiveStepHeight + collisionPadding + COLLISION_EPSILON,
                     envelope.max.z));
 
             _world.GatherPhysicsCells(envelope, _cellBuffer);

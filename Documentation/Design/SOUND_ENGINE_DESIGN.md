@@ -1,16 +1,19 @@
 # Sound Engine Design
 
-**Version:** 1.19  
-**Date:** 2026-09-02  
+**Version:** 1.22  
+**Date:** 2026-09-06  
 **Status:** **Partially implemented — S0–S3, S5–S8, S10 and S11 shipped; all confirmed in game except S8
 and S10, which are awaiting their listening pass.** The `SoundMaterial`
 channel, the shared `BlockSoundDatabase`, the BlockEditor dropdown and prefill, the volume settings, the
 pooled one-shot voices and the break / place / footstep triggers all exist; the `AudioMixer` is authored
-with its seven exposed volume parameters; two CC0 packs supply content, so all 13 sounding materials have
+with its seven exposed volume parameters; two CC0 packs supply content, so all 14 sounding materials have
 break and step clips. Footsteps sample two cells, so wading and cross-mesh flora sound, and carry a gait and
 jump dimension — sprinting, taking off and landing each have their own clips, falling back to the plain step
-where a pack authors none (§5.1, §16). The
-`Validate Sound Engine` suite guards the resolution chain and the ambience decisions (80 baselines).
+where a pack authors none (§5.1, §16). **Swimming is no longer silent** (2026-09-06, **confirmed in game**):
+a body nothing is holding up strokes on its own cadence and splashes once on entering a fluid, both sounding
+the fluid alone rather than the seabed under it, and `Lava` has split off `Liquid` as its own material
+(§5.1). Lava is still seeded with water's clips, so authoring a molten set is the split's open item (§9). The
+`Validate Sound Engine` suite guards the resolution chain and the ambience decisions (87 baselines).
 **S2's runtime shipped on 2026-08-29** — `AudioContext`, the `AmbienceResolution` decision layer, the
 `AmbienceDirector` bed pair with its cave layer, the `MusicScheduler` and the underwater low-pass — on top of
 the §6.2 managed biome query, which shipped the same day and is guarded by its own `Validate Biome Selection`
@@ -175,8 +178,9 @@ public enum SoundMaterial : byte
     Glass,      // glass, ice (split Ice out later if it needs distinct clips)
     Wool,
     Metal,
-    Liquid,     // bucket-style place/remove; NOT the flow loops (§5.2)
+    Liquid,     // water: bucket-style place/remove, wading, swimming; NOT the flow loops (§5.2)
     Snow,
+    Lava,       // split out of Liquid 2026-09-06; seeded with water's clips (§5.1)
 }
 ```
 
@@ -339,16 +343,48 @@ footfall and resets the accumulator.
 > Both halves live in the pure `SoundResolution` layer, which is why the suite can pin them (the two
 > `Step ...` baselines); the wiring in `PlayerFootsteps.PlayStep` stays an in-game check.
 >
-> **Still open:** `Update` returns early whenever `IsGrounded` is false, so swimming produces no footsteps.
-> Deliberately deferred rather than fixed here — there is no swimming *mechanic* to sound
-> ([`../Bugs/FLUID_BUGS.md`](../Bugs/FLUID_BUGS.md) §02 "No player effect": no buoyancy or swimming
-> simulation, fluids are merely non-solid), and strokes would want their own clips distinct from walking and
-> wading. `Assets/Scripts/Physics/` still computes **no** liquid contact state at all — but that turned out not to
+> **Superseded 2026-09-06 — swim strokes and the entry splash.** The prerequisite this paragraph recorded
+> expired when fluid entity physics shipped: `VoxelRigidbody.FluidContact` now answers "is anything carrying
+> this body", so `SoundResolution.IsSwimming(grounded, flying, inFluid)` splits the two footfall worlds and
+> `SelectStrideEvent` routes a stride to `Swim` instead of `Step`/`Sprint`. Two new `BlockSoundEvent`s:
+> `Swim`, on its own 3D `_strokeLength` cadence, and `Splash`, fired once on each entry into a fluid — which
+> was the *other* silence, since a body that jumps into a lake never becomes grounded and so never lands.
+> The trigger is deliberately *any* entry rather than only a drop from the air: wading in from a beach
+> should sound too. The cost is that the edge is `InFluid`, an analog signal with no hysteresis, so
+> repeatedly crossing a waterline sounds repeatedly — a known limit, pinned by its own baseline.
+> Sprinting is ignored while swimming (there is no run-on-water stroke) and flying is excluded outright: the
+> solver clears the contact for a noclipping body but **not** for a flown one.
+>
+> A stroke deliberately does **not** go through the two-cell resolution above. Swimming a block above a
+> seabed, the support cell is sand the body never touches, so a stroke sounds the fluid **alone** — and it
+> names it from `FluidContact.BlockId`, carried on the contact for this, rather than from a second voxel
+> read that could disagree with the waterline the solver is actually pushing the body with. `swimClips` and
+> `splashClips` fall back along *different* chains: a stroke is a stride, so `Swim → stepClips`; hitting
+> water is a landing, so `Splash → jumpLandClips → stepClips`. Two suite baselines pin the chains and the
+> mode selection. The transition state — the distance accumulator and the ground / fluid / swim edges —
+> lives in the pure `Audio/FootfallTracker`, driven as frame sequences by five more baselines, so
+> `PlayerFootsteps` is reduced to sampling the body and playing what the tracker returns. Only that
+> sampling and playback stay an in-game check.
+>
+> `Lava` also split off `Liquid` here, seeded with water's clip arrays so it sounds exactly as it did
+> before — the split is an authoring seam, not a content change, and until lava clips exist a lava swimmer
+> hears water. Water's strokes are authored: the run family already read as swimming, so it serves both
+> `sprintClips` and `swimClips` and no fallback is in play for `Liquid` or `Lava` (§9).
+>
+> *Historical, and the reason it was deferred:* `Update` used to return early whenever `IsGrounded` was false,
+> so swimming produced no footsteps at all. There was no swimming *mechanic* to sound
+> ([`../Bugs/_FIXED_BUGS.md`](../Bugs/_FIXED_BUGS.md) Fluid #21 "No player effect": no buoyancy or swimming
+> simulation, fluids are merely non-solid), and strokes wanted their own clips distinct from walking and
+> wading. `Assets/Scripts/Physics/` then computed **no** liquid contact state at all — but that turned out not to
 > block `AudioContext.Submerged` (§5.3): S2 reads the block filling the listener's head cell and asks whether its
 > `fluidType` is anything but `None`, the same read-only posture footsteps already take. The prerequisite this
-> section recorded was real for the *footstep* case and overstated for the submerged one. What the cell-level read
-> costs is precision at the surface: a fluid voxel is only partly filled, so a head just under the waterline reads
-> dry until it enters the cell below.
+> section recorded was real for the *footstep* case and overstated for the submerged one. The cell-level read cost
+> precision at the surface — a fluid voxel is only partly filled, so a head just under the waterline read dry until
+> it entered the cell below. **Superseded 2026-09-04 (`UW-3`):** the layer now reads
+> `World.GatherEyeSubmersion`, a sub-cell query against the fluid's *drawn* surface height, so the muffling engages
+> at the waterline and on the same boundary as the underwater visuals. It is still a pure read over the eye point —
+> not the solver's contact state — so this layer keeps its own 4 Hz cadence and takes on no physics timing. See
+> [`../Architecture/UNDERWATER_AND_SUBMERSION_RENDERING.md`](../Architecture/UNDERWATER_AND_SUBMERSION_RENDERING.md) §6.
 
 > **Gait and jump events** (`S11`, shipped and confirmed in game 2026-08-31, §16). A footfall is not always a walking step:
 > `Sprint`, `JumpStart` and `JumpLand` are separate `BlockSoundEvent`s resolving against their own clip
@@ -629,7 +665,8 @@ one is assigned and is applied per source when one is not, so the mixer asset ca
 without a code change. Sliders map linearly 0–1 → dB via the standard `20 * log10(x)` conversion with a
 floor at −80 dB.
 
-**Underwater ✅ shipped, but not as a snapshot.** `AudioContext.Submerged` drives an `AudioLowPassFilter`
+**Underwater ✅ shipped, but not as a snapshot.** `AudioContext.Submerged` — since `UW-3` the shared
+`World.GatherEyeSubmersion` answer rather than a per-cell `fluidType` test — drives an `AudioLowPassFilter`
 on each non-UI source — the one-shot voices, the ambience beds and the music source — swept between a dry and a
 wet cutoff over a short fade. A mixer snapshot was the original design and was **not** built: the mixer asset
 carries a single snapshot and no effects, authoring one needs editor API the §5.4 setup tool does not cover, and a
@@ -750,7 +787,7 @@ job and the managed query) and is seed-safe by construction.
 | **S7 — Per-track gain** ✅ | **Shipped 2026-08-30.** `AmbienceTrack.volume` plus per-clip trims for the database's own two beds, composed by `AmbienceResolution.BedSourceVolume`; the Loudness tab writes the Ambient role. Detail in §12. |   🟢   | S2 ✅; S6 ✅        |
 | **S8 — Music pools** ✅   | **Shipped 2026-08-30.** `MusicTrack` (clip + weight + volume) replacing both bare `AudioClip[]` pools, the `MusicResolution` layer (biome-share pool roll, then a weighted roulette, with a cross-pool repeat guard), a fourth import profile, `/music`, and the first music content (§9). Detail in §13. |   🟡   | S2 ✅; S7 ✅        |
 | **S10 — Music fades** ✅ | **Shipped 2026-08-31.** A single fade position on the music source driven by targets (opening fade-in, tail, stop, queued replacement), a decibel-linear `MusicResolution.GainFromFade` with an exact zero, `TailFadeTarget` and the short-clip `EffectiveFadeSeconds` clamp, a pending-track queue so an interruption fades across, and a listener fade before the world scene is torn down. Detail in §15. |   🟢   | S8 ✅              |
-| **S4 — Later**            | **Two-cell footstep sampling** ✅ (occupied cell + supporting cell, a non-solid occupant layered over the support — see the §5.1 note; shipped 2026-08-29). Still open: ungrounded/swimming steps (deferred — no swimming mechanic exists, `FLUID_BUGS.md` §02), v2 apply-site break/place hook (`VoxelModSource.Live` filter), hit/mining sounds, weather (RF-7), time-of-day (RF-1), `LEAVES` wind emitters.                                                                                                                                                                                                              |   —    | feature-gated     |
+| **S4 — Later**            | **Two-cell footstep sampling** ✅ (occupied cell + supporting cell, a non-solid occupant layered over the support — see the §5.1 note; shipped 2026-08-29). **Swim strokes and the entry splash** ✅ (shipped and confirmed in game 2026-09-06): `BlockSoundEvent.Swim` + `Splash`, `SoundResolution.IsSwimming`/`SelectStrideEvent`, `FluidContact.BlockId`, and `SoundMaterial.Lava` split off `Liquid` — see the §5.1 note. Still open: **lava clip content** (the `Lava` group is still water's clips, so lava sounds like water in every channel — §9), v2 apply-site break/place hook (`VoxelModSource.Live` filter), hit/mining sounds, weather (RF-7), time-of-day (RF-1), `LEAVES` wind emitters.                                                                                                                                                                                                              |   —    | feature-gated     |
 
 S0+S1 alone deliver the largest perceived-quality jump (block feedback + footsteps) and validate
 the whole data model; S2 and S3 are independent of each other and can land in either order.
@@ -872,6 +909,19 @@ material-agnostic `Footsteps_Jump_Start` / `Footsteps_Jump_Land` pair was **not*
 neutral thump under `Wool`'s Kenney-sourced walk set would mix two packs' character under one group volume,
 which the loudness tool then anchors on a median of both. One folder per pack under
 `Assets/Audio/Blocks/`. Recorded in `REFERENCES_AND_CREDITS.md` and `CreditsDatabase.asset`.
+
+**Swim content: the run family, doing double duty (2026-09-06).** No pack in the repo carries a dedicated
+stroke family, but the audition pass found one already in hand: NOX's five `Footsteps_Water_Run` clips read
+as swimming rather than as running, so they are assigned to **both** `sprintClips` and `swimClips` on
+`Liquid` and `Lava`. A clip claimed by two roles is a case the Loudness tab already handles (§14), and the
+overlap is deliberate — a sprinting wader and a swimmer sounding alike is what the source material actually
+is, not a gap left open. `Splash` needed nothing at all: it borrows `jumpLandClips`, which for `Liquid` is
+already the three `Footsteps_Water_Jump_Big` clips, the closest thing in the repo to a body hitting water.
+
+**Lava content is the open item.** The `Lava` group is still a **copy of `Liquid`'s arrays by reference** —
+the same clip GUIDs, no new files — so the split changed no sound and lava currently sounds like water in
+every channel, swimming included. Authoring a molten set is what makes the split mean anything; it is
+deliberately out of the 2026-09-06 scope and tracked on §8's S4 row.
 
 Candidate sources for further clip content. **License hygiene rule:** licensing on these sites is
 per-asset (or per-pack), *not* per-site — verify the license of every individual download, and
@@ -1605,6 +1655,39 @@ deliberately.
 
 ## Document History
 
+* **v1.22** - Review hardening of the swim pass (2026-09-06, 82 → 87 baselines). A code review of v1.21
+  found three defects in the footfall edges and one in the editor. The transition state moved out of
+  `PlayerFootsteps` into the pure `Audio/FootfallTracker` (`FootfallSample` in, `FootfallOutcome` out),
+  which is what made the edges assertable at all — the previous pass pinned the deciders and left every
+  latch uncovered. Two fixes landed on top, each proved red first: the fluid latch stored the
+  *flight-gated* contact, so leaving flight underwater sounded an entry into water the body was already
+  in (and re-fired on every toggle); and losing footing did not re-base the stride accumulator, so a
+  wader stepping off a shelf stroked instantly on banked walking distance. The Sound editor also reported
+  Splash as borrowing Jump Land clips a group might not author — it now models both links, as its Block
+  editor twin already did. §5.1's "air→fluid edge" was corrected in four places: the trigger is any
+  entry into a fluid, deliberately, so wading in sounds too. `s_prefillCases` gained the `Lava` row the
+  v1.21 name split shipped without. **Confirmed in game the same day**, with no regressions to the
+  wading, landing or stroke behavior v1.21 established.
+
+* **v1.21** - S4's swim strokes and entry splash (2026-09-06). The deferral in §5.1 rested on there being no
+  swimming mechanic; fluid entity physics removed that, so `BlockSoundEvent` gained `Swim` and `Splash` and
+  `BlockSoundGroup` the two arrays behind them, falling back along different chains — a stroke to `Step`, a
+  splash to `JumpLand` then `Step`. `SoundResolution.IsSwimming` and `SelectStrideEvent` moved the mode
+  decision into the pure layer where the suite can pin it (80 → 82 baselines); `PlayerFootsteps` gained the
+  swim branch, a 3D `_strokeLength`, and a splash on each entry into a fluid. A stroke deliberately skips
+  the two-cell footfall — a swimmer is touching no seabed — and names its fluid from a new
+  `FluidContact.BlockId` rather than a second voxel read, which is the one field this added to the physics
+  struct. `SoundMaterial.Lava` split off `Liquid`, seeded with water's clip arrays so the split changed no
+  sound; `SoundMaterialPrefill` now routes a LIQUID-tagged block by name. §3, §5.1, §8's S4 row and §9
+  updated. **Confirmed in game the same day** — swimming reads as natural and the surface splash fires on
+  the right boundary. The audition pass that followed found the stroke content already in the repo: NOX's
+  five `Footsteps_Water_Run` clips read as swimming, so they now serve `swimClips` as well as `sprintClips`
+  on `Liquid` and `Lava`, and no material falls back for a stroke. Lava clip content is the one item the
+  split left open.
+* **v1.20** - `UW-3`: the submersion test behind the low-pass filter is now the shared, sub-cell
+  `World.GatherEyeSubmersion` instead of a per-cell `fluidType` read, so audio and the underwater visuals
+  switch on one boundary. `AmbienceResolution.IsSubmerged` removed and its Sound Engine baseline rewritten
+  to pin the depth rule in both directions. §5.1's amendment and the §7 underwater note updated.
 * **v1.19** - Shared-gain extraction (2026-09-02). No behavioral change; three duplications collapsed.
   The mixer-group rule (`group == null ? GetLinear(category) : 1f`) existed in four copies across
   `SoundManager`, `AmbienceDirector`, `FluidEmitterDirector` and `MusicScheduler` and is now

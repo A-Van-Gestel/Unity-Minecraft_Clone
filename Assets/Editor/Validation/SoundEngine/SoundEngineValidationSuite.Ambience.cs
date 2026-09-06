@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using Audio;
 using Data;
 using Data.WorldTypes;
+using Helpers;
 using Jobs.Helpers;
 using Editor.Validation.Framework;
 using UnityEditor;
@@ -53,7 +54,7 @@ namespace Editor.Validation.SoundEngine
         {
             scenarios.Add(new Scenario("Cave Dwell Holds A Reading Before Committing It", RunCaveDwell));
             scenarios.Add(new Scenario("Underground Test Includes Its Threshold Level", RunUndergroundThreshold));
-            scenarios.Add(new Scenario("A Head In A Fluid Cell Reads As Submerged", RunSubmergedTest));
+            scenarios.Add(new Scenario("A Head Under The Drawn Surface Reads As Submerged", RunSubmergedTest));
             scenarios.Add(new Scenario("Ambience Falls Back When The Biome Authors No Bed", RunBedFallback));
             scenarios.Add(new Scenario("Complementary Bed Fades Hold Constant Power", RunBedGainCurve));
             scenarios.Add(new Scenario("Bed Fade Advances At The Authored Rate And Clamps", RunAdvanceFade));
@@ -232,29 +233,44 @@ namespace Editor.Validation.SoundEngine
         }
 
         /// <summary>
-        /// The submersion test, including the three ways it can be handed nothing: a null database, an ID
-        /// past its end, and a hole in the array.
+        /// The rule the ambience layer reads off the shared eye query (UW-3): submersion is decided by the
+        /// eye's depth under the <b>drawn</b> surface, not by which cell the head occupies.
         /// </summary>
+        /// <remarks>
+        /// Both directions of the sub-cell case are pinned, because the per-cell test this replaced got both
+        /// wrong: a head just under a partly-filled surface read dry, and a head in the upper part of a
+        /// half-filled cell read wet. Neither is expressible without a surface height.
+        /// </remarks>
         private static bool RunSubmergedTest()
         {
-            const string scenario = "A Head In A Fluid Cell Reads As Submerged";
+            const string scenario = "A Head Under The Drawn Surface Reads As Submerged";
 
-            BlockType[] blocks =
-            {
-                new BlockType { blockName = "Air", fluidType = FluidType.None },
-                new BlockType { blockName = "Water", fluidType = FluidType.WaterLike },
-                null,
-                new BlockType { blockName = "Stone", fluidType = FluidType.None },
-            };
+            EyeSubmersion underWater = new EyeSubmersion
+                { Type = FluidType.WaterLike, SurfaceY = 64.7f, EyeDepth = 0.3f };
+            if (!underWater.IsSubmerged)
+                return FailSound(scenario, "an eye below the surface did not read as submerged.");
 
-            if (!AmbienceResolution.IsSubmerged(blocks, 1)) return FailSound(scenario, "a water cell did not read as submerged.");
-            if (AmbienceResolution.IsSubmerged(blocks, 0)) return FailSound(scenario, "air read as submerged.");
-            if (AmbienceResolution.IsSubmerged(blocks, 3)) return FailSound(scenario, "stone read as submerged.");
-            if (!AmbienceResolution.IsSubmerged(new[] { new BlockType { fluidType = FluidType.LavaLike } }, 0))
-                return FailSound(scenario, "a lava cell did not read as submerged.");
-            if (AmbienceResolution.IsSubmerged(blocks, 2)) return FailSound(scenario, "a null block entry read as submerged.");
-            if (AmbienceResolution.IsSubmerged(blocks, 99)) return FailSound(scenario, "an out-of-range ID read as submerged.");
-            if (AmbienceResolution.IsSubmerged(null, 1)) return FailSound(scenario, "a null database read as submerged.");
+            // The case the per-cell test could not see: in a water cell, but above its partial surface.
+            EyeSubmersion inCellAboveSurface = new EyeSubmersion
+                { Type = FluidType.WaterLike, SurfaceY = 64.4f, EyeDepth = -0.4f };
+            if (inCellAboveSurface.IsSubmerged)
+                return FailSound(scenario, "an eye above a partly-filled surface read as submerged.");
+
+            EyeSubmersion atSurface = new EyeSubmersion
+                { Type = FluidType.WaterLike, SurfaceY = 64f, EyeDepth = 0f };
+            if (atSurface.IsSubmerged)
+                return FailSound(scenario, "an eye exactly at the surface read as submerged.");
+
+            EyeSubmersion underLava = new EyeSubmersion
+                { Type = FluidType.LavaLike, SurfaceY = 12f, EyeDepth = 1.5f };
+            if (!underLava.IsSubmerged) return FailSound(scenario, "an eye below lava did not read as submerged.");
+
+            // What the query returns over air, and over an unloaded or disposed world.
+            if (default(EyeSubmersion).IsSubmerged) return FailSound(scenario, "air read as submerged.");
+
+            // A depth without a fluid is the shape a half-populated struct would have; it must not read wet.
+            EyeSubmersion typelessDepth = new EyeSubmersion { Type = FluidType.None, EyeDepth = 2f };
+            if (typelessDepth.IsSubmerged) return FailSound(scenario, "a depth with no fluid read as submerged.");
 
             return true;
         }

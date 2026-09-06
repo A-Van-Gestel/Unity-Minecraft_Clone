@@ -29,6 +29,17 @@ namespace Editor.Validation.SoundEngine
             scenarios.Add(new Scenario("Block ID Resolves To Its Authored Sound Material", RunResolveMaterial));
             scenarios.Add(new Scenario("Unauthored Place Clips Fall Back To Break Clips", RunPlaceFallback));
             scenarios.Add(new Scenario("Unauthored Gait And Jump Clips Fall Back To Step Clips", RunGaitFallback));
+            scenarios.Add(new Scenario("Unauthored Swim Falls Back To Step And Splash To Jump Land",
+                RunSwimFallback));
+            scenarios.Add(new Scenario("Swimming Is Selected Only Off The Ground In A Fluid", RunSwimSelection));
+            scenarios.Add(new Scenario("Wading In And Out Splashes On Each Entry And Keeps Stepping",
+                RunTrackerWade));
+            scenarios.Add(new Scenario("A Fall Into Water Splashes Once Then Strokes On Distance",
+                RunTrackerFall));
+            scenarios.Add(new Scenario("Sinking Onto The Bottom Lands Instead Of Resuming Mid-Stride",
+                RunTrackerSink));
+            scenarios.Add(new Scenario("Leaving Flight Under Water Never Sounds An Entry", RunTrackerFlight));
+            scenarios.Add(new Scenario("Losing Footing Re-Bases The Stroke Cadence", RunTrackerLoseFooting));
             scenarios.Add(new Scenario("Clip Pick Is Deterministic And Always In Range", RunClipPick));
             scenarios.Add(new Scenario("Pitch Stays Inside The Group's Envelope", RunPitchEnvelope));
             scenarios.Add(new Scenario("Event Hash Separates Materials And Events", RunEventHash));
@@ -270,6 +281,287 @@ namespace Editor.Validation.SoundEngine
                 if (breakOnly.GetClips(evt) != null)
                     return FailSound(scenario, $"{evt} fell through an empty Step to the break clips; it must stay silent.");
             }
+
+            return true;
+        }
+
+        /// <summary>
+        /// The two in-fluid events borrow along different chains, and the difference is the point: a stroke
+        /// is a stride, so it borrows the step clips; hitting the water is a landing, so a splash borrows the
+        /// heavier jump-land clip first and only settles for a footstep when the group authors no landing.
+        /// </summary>
+        /// <remarks>
+        /// The last block is the load-bearing one. Splash reaching Step <i>through</i> an authored JumpLand
+        /// would put a footfall under a body dropping into a lake — audible, plausible, and wrong; and a
+        /// Splash that stopped at an empty JumpLand rather than continuing to Step would go silent for every
+        /// material that authors only walking clips.
+        /// </remarks>
+        private static bool RunSwimFallback()
+        {
+            const string scenario = "Unauthored Swim Falls Back To Step And Splash To Jump Land";
+
+            AudioClip[] steps = MakeClips(3);
+            AudioClip[] lands = MakeClips(2);
+            AudioClip[] own = MakeClips(4);
+
+            BlockSoundGroup stepOnly = new BlockSoundGroup { stepClips = steps };
+            if (!ReferenceEquals(stepOnly.GetClips(BlockSoundEvent.Swim), steps))
+                return FailSound(scenario, "an unauthored Swim did not fall back to the step clips.");
+
+            BlockSoundGroup emptySwim = new BlockSoundGroup { stepClips = steps, swimClips = Array.Empty<AudioClip>() };
+            if (!ReferenceEquals(emptySwim.GetClips(BlockSoundEvent.Swim), steps))
+                return FailSound(scenario, "an empty (not null) Swim array did not fall back.");
+
+            BlockSoundGroup authoredSwim = new BlockSoundGroup { stepClips = steps, swimClips = own };
+            if (!ReferenceEquals(authoredSwim.GetClips(BlockSoundEvent.Swim), own))
+                return FailSound(scenario, "an authored Swim array was overridden by the fallback.");
+
+            BlockSoundGroup authoredSplash = new BlockSoundGroup
+            {
+                stepClips = steps, jumpLandClips = lands, splashClips = own,
+            };
+            if (!ReferenceEquals(authoredSplash.GetClips(BlockSoundEvent.Splash), own))
+                return FailSound(scenario, "an authored Splash array was overridden by the fallback.");
+
+            BlockSoundGroup landing = new BlockSoundGroup { stepClips = steps, jumpLandClips = lands };
+            if (!ReferenceEquals(landing.GetClips(BlockSoundEvent.Splash), lands))
+                return FailSound(scenario, "Splash skipped an authored JumpLand and took the step clips.");
+
+            if (!ReferenceEquals(stepOnly.GetClips(BlockSoundEvent.Splash), steps))
+                return FailSound(scenario, "Splash stopped at an empty JumpLand instead of reaching Step.");
+
+            // Neither event may climb past Step into the break clips: a shattering block under a swimmer.
+            BlockSoundGroup breakOnly = new BlockSoundGroup { breakClips = MakeClips(2) };
+            if (breakOnly.GetClips(BlockSoundEvent.Swim) != null)
+                return FailSound(scenario, "Swim fell through an empty Step to the break clips.");
+            if (breakOnly.GetClips(BlockSoundEvent.Splash) != null)
+                return FailSound(scenario, "Splash fell through an empty Step to the break clips.");
+
+            return true;
+        }
+
+        /// <summary>
+        /// Which of the two footfall worlds a body is in. Wading and swimming differ by exactly one bit —
+        /// whether anything is holding the body up — and getting it wrong is inaudible in the direction that
+        /// matters: a wading player who resolved as swimming would lose the riverbed under their feet.
+        /// </summary>
+        /// <remarks>
+        /// The flying case is pinned because the solver does <i>not</i> clear the contact for a flown body
+        /// (only noclip does), so "in fluid and not grounded" is true for every flier crossing a lake. The
+        /// sprint case is pinned because the two conditions are checked in one expression: an ordering that
+        /// tested sprinting first would put run-on-water clips under a swimmer.
+        /// </remarks>
+        private static bool RunSwimSelection()
+        {
+            const string scenario = "Swimming Is Selected Only Off The Ground In A Fluid";
+
+            if (!SoundResolution.IsSwimming(grounded: false, flying: false, inFluid: true))
+                return FailSound(scenario, "a floating body in a fluid did not count as swimming.");
+            if (SoundResolution.IsSwimming(grounded: true, flying: false, inFluid: true))
+                return FailSound(scenario, "a body standing in shallow water counted as swimming, not wading.");
+            if (SoundResolution.IsSwimming(grounded: false, flying: false, inFluid: false))
+                return FailSound(scenario, "a body falling through air counted as swimming.");
+            if (SoundResolution.IsSwimming(grounded: false, flying: true, inFluid: true))
+                return FailSound(scenario, "a body flying through a fluid counted as swimming.");
+
+            if (SoundResolution.SelectStrideEvent(swimming: true, sprinting: false) != BlockSoundEvent.Swim)
+                return FailSound(scenario, "a swimming stride did not select Swim.");
+            if (SoundResolution.SelectStrideEvent(swimming: true, sprinting: true) != BlockSoundEvent.Swim)
+                return FailSound(scenario, "a sprinting swimmer selected Sprint instead of Swim.");
+            if (SoundResolution.SelectStrideEvent(swimming: false, sprinting: true) != BlockSoundEvent.Sprint)
+                return FailSound(scenario, "a sprinting stride on land did not select Sprint.");
+            if (SoundResolution.SelectStrideEvent(swimming: false, sprinting: false) != BlockSoundEvent.Step)
+                return FailSound(scenario, "a walking stride did not select Step.");
+
+            return true;
+        }
+
+        /// <summary>Stride length the tracker scenarios drive, matching the shipped serialized default.</summary>
+        private const float TRACKER_STRIDE = 1.5f;
+
+        /// <summary>Stroke length the tracker scenarios drive, matching the shipped serialized default.</summary>
+        private const float TRACKER_STROKE = 1.2f;
+
+        /// <summary>Advances a tracker one frame.</summary>
+        /// <param name="tracker">The tracker under test.</param>
+        /// <param name="position">The body's position this frame.</param>
+        /// <param name="grounded">Whether the solver reports the body standing on something.</param>
+        /// <param name="inFluid">Whether the solver reports fluid contact.</param>
+        /// <param name="flying">Whether the body is in flight mode.</param>
+        /// <param name="sprinting">Whether the body is sprinting.</param>
+        /// <param name="jumps">The solver's jump counter.</param>
+        /// <returns>The one-shots that frame earned.</returns>
+        private static FootfallOutcome Frame(FootfallTracker tracker, Vector3 position, bool grounded,
+            bool inFluid, bool flying = false, bool sprinting = false, uint jumps = 0)
+        {
+            FootfallSample sample = new FootfallSample
+            {
+                Position = position,
+                Grounded = grounded,
+                InFluid = inFluid,
+                Flying = flying,
+                Sprinting = sprinting,
+                JumpCount = jumps,
+            };
+
+            return tracker.Advance(in sample, TRACKER_STRIDE, TRACKER_STROKE);
+        }
+
+        /// <summary>Formats an outcome for a failure message.</summary>
+        /// <param name="outcome">The outcome to describe.</param>
+        /// <returns>A compact list of the flags that are set.</returns>
+        private static string Describe(FootfallOutcome outcome)
+        {
+            string footfall = outcome.HasFootfall ? outcome.Footfall.ToString() : "-";
+            string stroke = outcome.HasStroke ? outcome.Stroke.ToString() : "-";
+            return $"jumpStart={outcome.JumpStart} splash={outcome.Splash} footfall={footfall} stroke={stroke}";
+        }
+
+        /// <summary>
+        /// The wading path, unchanged by the tracker extraction: an entry splashes and re-bases the
+        /// accumulator, walking on still steps, and leaving is silent.
+        /// </summary>
+        /// <remarks>
+        /// The final re-entry pins a <b>deliberate</b> limitation rather than an accident. The entry edge is
+        /// <c>InFluid</c>, an analog signal with no hysteresis, so crossing a waterline repeatedly sounds
+        /// repeatedly. Adding a threshold is a behavior change and would land here as a baseline update.
+        /// </remarks>
+        private static bool RunTrackerWade()
+        {
+            const string scenario = "Wading In And Out Splashes On Each Entry And Keeps Stepping";
+
+            FootfallTracker tracker = new FootfallTracker();
+
+            FootfallOutcome seed = Frame(tracker, Vector3.zero, grounded: true, inFluid: false);
+            if (seed.Splash || seed.HasFootfall)
+                return FailSound(scenario, $"the seeding frame sounded something: {Describe(seed)}.");
+
+            FootfallOutcome entry = Frame(tracker, Vector3.zero, grounded: true, inFluid: true);
+            if (!entry.Splash) return FailSound(scenario, "walking into the water did not splash.");
+            if (entry.HasFootfall)
+                return FailSound(scenario, $"the entry frame also sounded a footfall: {Describe(entry)}.");
+
+            FootfallOutcome stride = Frame(tracker, new Vector3(2f, 0f, 0f), grounded: true, inFluid: true);
+            if (!stride.HasFootfall || stride.Footfall != BlockSoundEvent.Step)
+                return FailSound(scenario, $"wading a full stride did not step: {Describe(stride)}.");
+
+            FootfallOutcome exit = Frame(tracker, new Vector3(2f, 0f, 0f), grounded: true, inFluid: false);
+            if (exit.Splash) return FailSound(scenario, "leaving the water sounded a splash.");
+
+            FootfallOutcome reentry = Frame(tracker, new Vector3(2f, 0f, 0f), grounded: true, inFluid: true);
+            if (!reentry.Splash) return FailSound(scenario, "a second entry did not splash.");
+
+            return true;
+        }
+
+        /// <summary>
+        /// Dropping into water: the airborne frames bank no distance, the entry splashes once, and strokes
+        /// then follow the stroke length rather than the stride length.
+        /// </summary>
+        private static bool RunTrackerFall()
+        {
+            const string scenario = "A Fall Into Water Splashes Once Then Strokes On Distance";
+
+            FootfallTracker tracker = new FootfallTracker();
+            Frame(tracker, new Vector3(0f, 10f, 0f), grounded: false, inFluid: false);
+
+            FootfallOutcome falling = Frame(tracker, new Vector3(0f, 8f, 0f), grounded: false, inFluid: false);
+            if (falling.Splash || falling.HasFootfall || falling.HasStroke)
+                return FailSound(scenario, $"a falling frame in air sounded something: {Describe(falling)}.");
+
+            FootfallOutcome entry = Frame(tracker, new Vector3(0f, 6f, 0f), grounded: false, inFluid: true);
+            if (!entry.Splash) return FailSound(scenario, "hitting the water did not splash.");
+            if (entry.HasStroke)
+                return FailSound(scenario, "the entry frame stroked as well; the fall's distance was banked.");
+
+            FootfallOutcome shortMove = Frame(tracker, new Vector3(0f, 5.5f, 0f), grounded: false, inFluid: true);
+            if (shortMove.HasStroke)
+                return FailSound(scenario, "half a stroke length was enough to stroke.");
+
+            FootfallOutcome stroke = Frame(tracker, new Vector3(0f, 4.5f, 0f), grounded: false, inFluid: true);
+            if (!stroke.HasStroke || stroke.Stroke != BlockSoundEvent.Swim)
+                return FailSound(scenario, $"a full stroke length did not stroke: {Describe(stroke)}.");
+
+            return true;
+        }
+
+        /// <summary>
+        /// A swimmer settling onto the bottom lands. The swim branch has to clear the grounded latch, or the
+        /// body resumes walking mid-stride and the touchdown is silent.
+        /// </summary>
+        private static bool RunTrackerSink()
+        {
+            const string scenario = "Sinking Onto The Bottom Lands Instead Of Resuming Mid-Stride";
+
+            FootfallTracker tracker = new FootfallTracker();
+            Frame(tracker, new Vector3(0f, 5f, 0f), grounded: false, inFluid: true);
+            Frame(tracker, new Vector3(0f, 4f, 0f), grounded: false, inFluid: true);
+
+            FootfallOutcome touchdown = Frame(tracker, new Vector3(0f, 4f, 0f), grounded: true, inFluid: true);
+            if (!touchdown.HasFootfall || touchdown.Footfall != BlockSoundEvent.JumpLand)
+                return FailSound(scenario, $"touching the bottom did not land: {Describe(touchdown)}.");
+
+            return true;
+        }
+
+        /// <summary>
+        /// A body flown into water and then dropped out of flight is already in that water — it must not
+        /// sound an entry.
+        /// </summary>
+        /// <remarks>
+        /// The failure this pins is a latch storing the flight-gated contact rather than the raw one: the
+        /// flier reads as "not in fluid" the whole time it flies, so leaving flight underwater presents as a
+        /// fresh entry. It re-fires on every toggle, which is what makes it audible rather than academic.
+        /// </remarks>
+        private static bool RunTrackerFlight()
+        {
+            const string scenario = "Leaving Flight Under Water Never Sounds An Entry";
+
+            FootfallTracker tracker = new FootfallTracker();
+            Frame(tracker, new Vector3(0f, 5f, 0f), grounded: false, inFluid: false, flying: true);
+
+            FootfallOutcome flownIn = Frame(tracker, new Vector3(0f, 4f, 0f), grounded: false, inFluid: true,
+                flying: true);
+            if (flownIn.Splash) return FailSound(scenario, "flying into the water sounded an entry.");
+            if (flownIn.HasStroke) return FailSound(scenario, "a flier stroked.");
+
+            FootfallOutcome leftFlight = Frame(tracker, new Vector3(0f, 4f, 0f), grounded: false, inFluid: true);
+            if (leftFlight.Splash)
+                return FailSound(scenario, "leaving flight while submerged sounded an entry that never happened.");
+
+            FootfallOutcome backToFlight = Frame(tracker, new Vector3(0f, 4f, 0f), grounded: false,
+                inFluid: true, flying: true);
+            if (backToFlight.Splash) return FailSound(scenario, "re-entering flight underwater sounded an entry.");
+
+            return true;
+        }
+
+        /// <summary>
+        /// A wader stepping off a shelf starts its stroke cadence from where it lost footing, not from the
+        /// last footfall — otherwise banked walking distance fires a stroke on the very first swimming frame.
+        /// </summary>
+        /// <remarks>
+        /// The two lengths are what make this reachable: a stride is longer than a stroke, so any partial
+        /// stride already exceeds a full stroke the moment the body starts swimming.
+        /// </remarks>
+        private static bool RunTrackerLoseFooting()
+        {
+            const string scenario = "Losing Footing Re-Bases The Stroke Cadence";
+
+            FootfallTracker tracker = new FootfallTracker();
+            Frame(tracker, Vector3.zero, grounded: true, inFluid: true);
+
+            FootfallOutcome step = Frame(tracker, new Vector3(1.6f, 0f, 0f), grounded: true, inFluid: true);
+            if (!step.HasFootfall) return FailSound(scenario, "the wading stride did not step.");
+
+            // Short of a stride, but longer than a stroke — the distance the bug carried across the edge.
+            FootfallOutcome partial = Frame(tracker, new Vector3(2.9f, 0f, 0f), grounded: true, inFluid: true);
+            if (partial.HasFootfall) return FailSound(scenario, "a partial stride stepped.");
+
+            FootfallOutcome lostFooting = Frame(tracker, new Vector3(2.9f, 0f, 0f), grounded: false, inFluid: true);
+            if (lostFooting.HasStroke)
+                return FailSound(scenario,
+                    $"the first swimming frame stroked on banked walking distance: {Describe(lostFooting)}.");
 
             return true;
         }

@@ -41,6 +41,13 @@ MonoBehaviour:
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
     spreadChance: 1
+    buoyancy: 0.55
+    verticalDrag: 6
+    submergedSpeedMultiplier: 0.5
+    pushStrength: 1.4
+    swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 0
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -84,6 +91,13 @@ MonoBehaviour:
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
     spreadChance: 1
+    buoyancy: 0.55
+    verticalDrag: 6
+    submergedSpeedMultiplier: 0.5
+    pushStrength: 1.4
+    swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -127,6 +141,13 @@ MonoBehaviour:
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
     spreadChance: 1
+    buoyancy: 0.55
+    verticalDrag: 6
+    submergedSpeedMultiplier: 0.5
+    pushStrength: 1.4
+    swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -170,6 +191,13 @@ MonoBehaviour:
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
     spreadChance: 1
+    buoyancy: 0.55
+    verticalDrag: 6
+    submergedSpeedMultiplier: 0.5
+    pushStrength: 1.4
+    swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -213,6 +241,13 @@ MonoBehaviour:
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
     spreadChance: 1
+    buoyancy: 0.55
+    verticalDrag: 6
+    submergedSpeedMultiplier: 0.5
+    pushStrength: 1.4
+    swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -256,6 +291,13 @@ MonoBehaviour:
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
     spreadChance: 1
+    buoyancy: 0.55
+    verticalDrag: 6
+    submergedSpeedMultiplier: 0.5
+    pushStrength: 1.4
+    swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -299,6 +341,13 @@ MonoBehaviour:
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
     spreadChance: 1
+    buoyancy: 0.55
+    verticalDrag: 6
+    submergedSpeedMultiplier: 0.5
+    pushStrength: 1.4
+    swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -342,6 +391,13 @@ MonoBehaviour:
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
     spreadChance: 1
+    buoyancy: 0.55
+    verticalDrag: 6
+    submergedSpeedMultiplier: 0.5
+    pushStrength: 1.4
+    swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -385,6 +441,13 @@ MonoBehaviour:
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
     spreadChance: 1
+    buoyancy: 0.55
+    verticalDrag: 6
+    submergedSpeedMultiplier: 0.5
+    pushStrength: 1.4
+    swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -428,6 +491,13 @@ MonoBehaviour:
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
     spreadChance: 1
+    buoyancy: 0.55
+    verticalDrag: 6
+    submergedSpeedMultiplier: 0.5
+    pushStrength: 1.4
+    swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -471,6 +541,13 @@ MonoBehaviour:
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
     spreadChance: 1
+    buoyancy: 0.55
+    verticalDrag: 6
+    submergedSpeedMultiplier: 0.5
+    pushStrength: 1.4
+    swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -514,6 +591,13 @@ MonoBehaviour:
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
     spreadChance: 1
+    buoyancy: 0.55
+    verticalDrag: 6
+    submergedSpeedMultiplier: 0.5
+    pushStrength: 1.4
+    swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -557,6 +641,13 @@ MonoBehaviour:
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
     spreadChance: 1
+    buoyancy: 0.55
+    verticalDrag: 6
+    submergedSpeedMultiplier: 0.5
+    pushStrength: 1.4
+    swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -600,6 +691,13 @@ MonoBehaviour:
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
     spreadChance: 1
+    buoyancy: 0.55
+    verticalDrag: 6
+    submergedSpeedMultiplier: 0.5
+    pushStrength: 1.4
+    swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 0
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -643,6 +741,13 @@ MonoBehaviour:
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
     spreadChance: 1
+    buoyancy: 0.55
+    verticalDrag: 6
+    submergedSpeedMultiplier: 0.5
+    pushStrength: 1.4
+    swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -686,6 +791,13 @@ MonoBehaviour:
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
     spreadChance: 1
+    buoyancy: 0.55
+    verticalDrag: 6
+    submergedSpeedMultiplier: 0.5
+    pushStrength: 1.4
+    swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 5
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -729,6 +841,13 @@ MonoBehaviour:
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
     spreadChance: 1
+    buoyancy: 0.55
+    verticalDrag: 6
+    submergedSpeedMultiplier: 0.5
+    pushStrength: 1.4
+    swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -772,6 +891,13 @@ MonoBehaviour:
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
     spreadChance: 1
+    buoyancy: 0.55
+    verticalDrag: 6
+    submergedSpeedMultiplier: 0.5
+    pushStrength: 1.4
+    swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -815,6 +941,13 @@ MonoBehaviour:
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
     spreadChance: 1
+    buoyancy: 0.55
+    verticalDrag: 6
+    submergedSpeedMultiplier: 0.5
+    pushStrength: 1.4
+    swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -858,6 +991,13 @@ MonoBehaviour:
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 1
     spreadChance: 1
+    buoyancy: 0.55
+    verticalDrag: 6
+    submergedSpeedMultiplier: 0.5
+    pushStrength: 1.4
+    swimAscendSpeed: 0.9
+    submersionColor: {r: 0.31332, g: 0.527146, b: 0.735358, a: 1}
+    submersionDensity: 0.05
     opacity: 2
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -901,6 +1041,13 @@ MonoBehaviour:
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
     spreadChance: 0.25
+    buoyancy: 0.7
+    verticalDrag: 10
+    submergedSpeedMultiplier: 0.3
+    pushStrength: 0.7
+    swimAscendSpeed: 0.5
+    submersionColor: {r: 0.85, g: 0.3, b: 0.05, a: 1}
+    submersionDensity: 1.5
     opacity: 7
     lightEmission: 15
     lightEmissionColor: {r: 1, g: 0.73333335, b: 0.26666668, a: 1}
@@ -908,7 +1055,7 @@ MonoBehaviour:
     tags: 2
     worldGenCanReplaceTags: 8258
     placementCanReplaceTags: 8194
-    soundMaterial: 12
+    soundMaterial: 14
     isActive: 1
     metadataSchema: 0
     placementMetadataMode: 0
@@ -944,6 +1091,13 @@ MonoBehaviour:
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
     spreadChance: 1
+    buoyancy: 0.55
+    verticalDrag: 6
+    submergedSpeedMultiplier: 0.5
+    pushStrength: 1.4
+    swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -987,6 +1141,13 @@ MonoBehaviour:
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
     spreadChance: 1
+    buoyancy: 0.55
+    verticalDrag: 6
+    submergedSpeedMultiplier: 0.5
+    pushStrength: 1.4
+    swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 0
     lightEmission: 0
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -1030,6 +1191,13 @@ MonoBehaviour:
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
     spreadChance: 1
+    buoyancy: 0.55
+    verticalDrag: 6
+    submergedSpeedMultiplier: 0.5
+    pushStrength: 1.4
+    swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 1
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -1073,6 +1241,13 @@ MonoBehaviour:
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
     spreadChance: 1
+    buoyancy: 0.55
+    verticalDrag: 6
+    submergedSpeedMultiplier: 0.5
+    pushStrength: 1.4
+    swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 2
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -1116,6 +1291,13 @@ MonoBehaviour:
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
     spreadChance: 1
+    buoyancy: 0.55
+    verticalDrag: 6
+    submergedSpeedMultiplier: 0.5
+    pushStrength: 1.4
+    swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 3
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -1159,6 +1341,13 @@ MonoBehaviour:
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
     spreadChance: 1
+    buoyancy: 0.55
+    verticalDrag: 6
+    submergedSpeedMultiplier: 0.5
+    pushStrength: 1.4
+    swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 4
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -1202,6 +1391,13 @@ MonoBehaviour:
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
     spreadChance: 1
+    buoyancy: 0.55
+    verticalDrag: 6
+    submergedSpeedMultiplier: 0.5
+    pushStrength: 1.4
+    swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 5
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -1245,6 +1441,13 @@ MonoBehaviour:
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
     spreadChance: 1
+    buoyancy: 0.55
+    verticalDrag: 6
+    submergedSpeedMultiplier: 0.5
+    pushStrength: 1.4
+    swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 6
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -1288,6 +1491,13 @@ MonoBehaviour:
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
     spreadChance: 1
+    buoyancy: 0.55
+    verticalDrag: 6
+    submergedSpeedMultiplier: 0.5
+    pushStrength: 1.4
+    swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 7
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -1331,6 +1541,13 @@ MonoBehaviour:
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
     spreadChance: 1
+    buoyancy: 0.55
+    verticalDrag: 6
+    submergedSpeedMultiplier: 0.5
+    pushStrength: 1.4
+    swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 8
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -1374,6 +1591,13 @@ MonoBehaviour:
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
     spreadChance: 1
+    buoyancy: 0.55
+    verticalDrag: 6
+    submergedSpeedMultiplier: 0.5
+    pushStrength: 1.4
+    swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 9
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -1417,6 +1641,13 @@ MonoBehaviour:
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
     spreadChance: 1
+    buoyancy: 0.55
+    verticalDrag: 6
+    submergedSpeedMultiplier: 0.5
+    pushStrength: 1.4
+    swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 10
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -1460,6 +1691,13 @@ MonoBehaviour:
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
     spreadChance: 1
+    buoyancy: 0.55
+    verticalDrag: 6
+    submergedSpeedMultiplier: 0.5
+    pushStrength: 1.4
+    swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 11
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}
@@ -1503,6 +1741,13 @@ MonoBehaviour:
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
     spreadChance: 1
+    buoyancy: 0.55
+    verticalDrag: 6
+    submergedSpeedMultiplier: 0.5
+    pushStrength: 1.4
+    swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 12
     lightEmissionColor: {r: 0, g: 1, b: 0, a: 1}
@@ -1546,6 +1791,13 @@ MonoBehaviour:
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
     spreadChance: 1
+    buoyancy: 0.55
+    verticalDrag: 6
+    submergedSpeedMultiplier: 0.5
+    pushStrength: 1.4
+    swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 13
     lightEmissionColor: {r: 0, g: 0, b: 1, a: 1}
@@ -1589,6 +1841,13 @@ MonoBehaviour:
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
     spreadChance: 1
+    buoyancy: 0.55
+    verticalDrag: 6
+    submergedSpeedMultiplier: 0.5
+    pushStrength: 1.4
+    swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 14
     lightEmissionColor: {r: 1, g: 0, b: 0, a: 1}
@@ -1632,6 +1891,13 @@ MonoBehaviour:
     waterfallsMaxSpread: 1
     infiniteSourceRegeneration: 0
     spreadChance: 1
+    buoyancy: 0.55
+    verticalDrag: 6
+    submergedSpeedMultiplier: 0.5
+    pushStrength: 1.4
+    swimAscendSpeed: 0.9
+    submersionColor: {r: 0.11, g: 0.3, b: 0.42, a: 1}
+    submersionDensity: 0.14
     opacity: 15
     lightEmission: 15
     lightEmissionColor: {r: 1, g: 1, b: 1, a: 1}

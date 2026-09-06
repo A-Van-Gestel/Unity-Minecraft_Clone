@@ -54,6 +54,7 @@ Documentation/
 | Save format / on-disk schema changes                                                                                                      | `Architecture/AOT_WORLD_MIGRATION_SYSTEM.md` (+ `serialization-migration` skill)                                          |
 | Sub-voxel collision, collision bounds                                                                                                     | `Architecture/SUB_VOXEL_COLLISION_SYSTEM.md`                                                                              |
 | Fluid rendering, shoreline blending                                                                                                       | `Architecture/FLUID_SHORELINE_RENDERING.md`                                                                               |
+| Submersion overlay, the shared eye query, `FluidSurfaceResolver`, `UnderwaterOverlayRendererFeature`                                      | `Architecture/UNDERWATER_AND_SUBMERSION_RENDERING.md`                                                                     |
 | Profiler markers, performance instrumentation                                                                                             | `Architecture/PERFORMANCE_PROFILER_OVERHAUL.md` + `Performance/`                                                          |
 | Reflection-based settings menu, `SettingsUIGenerator`, `SettingFieldAttribute`, `Settings`/`DevSettings` fields                           | `Architecture/DATA_DRIVEN_SETTINGS_UI.md`                                                                                 |
 | Burst jobs, Burst-compatibility patterns                                                                                                  | `Guides/BURST_COMPILER_GUIDE.md`                                                                                          |
@@ -114,7 +115,9 @@ the other:
 
 - **`Design/` is a record of intent over time.** Phases stay, and each carries its own dated
   status (`create-design-doc` owns the format). A reader is expected to read a completed phase as
-  history and use its date to judge how far it has drifted.
+  history and use its date to judge how far it has drifted. **A design that completes a promotion
+  leaves the folder entirely — it is deleted**, because everything load-bearing is by then merged
+  into the Architecture doc and git retains the rest (`DG-*`; protocol Step 4).
 - **`Architecture/` is a description of the codebase right now.** No phase structure, no "we
   then changed it to" — overlapping or stacked phases are merged into single logical sections
   describing current behavior only.
@@ -156,12 +159,22 @@ The three rules that decide whether the result can be trusted:
   place.
 - **Carry the IDs across.** The promoted doc keeps an ID index table (`create-design-doc` Step 4)
   so `RF-3`-style references in commit messages and code comments still resolve after the phase
-  sections they named are gone.
+  sections they named are gone. **That table is also the promotion's proof-of-work:** an
+  Architecture doc without one has not superseded anything, whatever IDs it cites.
+- **Then delete the Design doc** (Step 4), once its open items have rows in the open-work index and
+  the link sweep is clean. ⚠️ **Only a doc that actually went through this protocol.** Most closed
+  arcs in this repo never did — they were finished by shipping the work and updating whatever
+  Architecture docs it touched, which leaves those docs deferring detail *back* to the design. Those
+  are **closed, retained**: they stay in `Design/` with a status line saying the Architecture tree
+  cites rather than supersedes them. `Documentation/Design/DOC_LIFECYCLE_AND_OPEN_WORK_INDEX.md`
+  §2.1 holds the current tiering.
 
 ### Step 3 — Verify cross-references
 
-Two checks. The first runs **every time** this skill runs; the second only when a doc's path or
-name changed.
+Three checks, in the order they appear below: **(1)** the checker sweep, which runs **every time**
+this skill runs; **(2)** the inbound-reference sweep, only when a doc's path or name changed; and
+**(3)** the closure sweep, only when an item, phase or arc **closed**. All four scripts belong to
+check (1) — run the set, not a subset.
 
 **Always — `@Documentation/` reference integrity.** This repo wires several dozen
 `@Documentation/...` references from `CLAUDE.md`, `AGENTS.md`, and `.agents/skills/` into the doc
@@ -169,8 +182,14 @@ tree, and a broken one silently degrades agent context — nothing errors. It is
 do it regardless of what you changed:
 
 ```bash
-python Tools/Python/check_doc_refs.py
+python Tools/Python/check_doc_refs.py      # @-prefixed doc references
+python Tools/Python/check_doc_links.py     # relative markdown links between docs
+python Tools/Python/check_doc_status.py    # OPEN_WORK_INDEX vs each doc's own **Status:**
 ```
+
+`check_doc_links.py` is the one that matters on a move, rename or deletion: `check_doc_refs.py`
+reads only the `@`-prefixed form, so a doc whose inbound links are ordinary markdown can be deleted
+with both the reference checker and the line-break checker fully green.
 
 It prints the number of references it found and lists any that do not resolve, exiting non-zero
 on failure. **A "0 unresolved" result only means something if the found-count is plausible** — a
@@ -194,7 +213,7 @@ Sweep on the **bare filename**, because references come in two shapes and a link
 one:
 
 ```bash
-grep -rn "OldDocName.md" CLAUDE.md AGENTS.md Documentation/ .agents/
+grep -rn "OldDocName.md" CLAUDE.md AGENTS.md Documentation/ .agents/ Assets/
 ```
 
 - **`@Documentation/...` references and markdown links** are relative, so they break on a *move*
@@ -204,6 +223,29 @@ grep -rn "OldDocName.md" CLAUDE.md AGENTS.md Documentation/ .agents/
 
 Fix every hit in the same commit as the rename. Broken `@`-refs silently degrade agent context
 windows.
+
+**On closing an item, phase or arc — sweep the docs that cite it (`DG-5`).** This is the check with
+no tool behind it, and it exists because the other kind of drift has no trigger at all: `docs-sync`
+fires on a **code change** or a **promotion**, and neither happens when a document goes stale
+because *another document's* state moved. Two ways that bites, both observed on 2026-09-05:
+
+- **A prerequisite completed.** `STEAM_AUDIO_INTEGRATION.md` said the sound engine "has not
+  started" long after `S0`–`S3` shipped, and its `**Next Review:**` trigger — *"only when S0–S3
+  have shipped"* — had fired silently. **Not automatable**: 38 docs carry that field and only 6
+  cite a resolvable ID, so a resolver would miss ~84 % while looking authoritative.
+- **An index went stale.** `OPEN_WORK_INDEX.md` still listed an arc as open hours after it closed.
+  *This half is automated* — `check_doc_status.py` above catches it.
+
+So when you mark something complete, before you commit:
+
+```bash
+grep -rn "<THE-ID>" Documentation/ | grep -v "<the doc that owns it>"
+```
+
+Read the `**Status:**` and `**Next Review:**` of every doc that comes back. A doc naming your item
+as a prerequisite, or whose review trigger your closure just fired, is now stale — fix it in the
+same commit or report it explicitly. Checking costs one grep; the failure mode is silent and was
+found by accident twice.
 
 ### Step 4 — Commit alongside the code change
 
@@ -243,7 +285,7 @@ whole-file doc rewrite.
 - **Do not mass-rewrite.** Apply targeted diffs. Preserve existing tone, headings, ASCII diagrams, and `#region`-style structure. Never delete a section just because a *different* section is now wrong.
 - **Never restate a claim about code you did not read this session.** A targeted edit must not regenerate prose about behavior you did not verify — that silently launders an unverified claim into an authoritative doc. If a neighbouring claim looks wrong but you cannot confirm it, report it (see Output shape); do not fix it and do not delete it.
 - **Do not restamp a date header for a targeted edit.** Many Architecture and Design docs carry a `Last Updated:` / `Date:` / `Analysis Date:` line, which means *the whole doc was verified at that date*. Restamping after a one-line fix makes the rest of the doc look fresher than it is — only move the stamp when you actually re-verified the whole doc.
-- **Do not edit `Documentation/Bugs/` or `Documentation/Archived/` from this skill** — those are handled by `archive-fixed-bug` and the `voxel-debugging` workflow respectively. The one exception is a **Design → Architecture promotion**, which archives superseded phase detail (see `references/promotion-protocol.md` Step 4).
+- **Do not edit `Documentation/Bugs/` or `Documentation/Archived/` from this skill** — those are handled by `archive-fixed-bug` and the `voxel-debugging` workflow respectively. Two narrow exceptions, both belonging to a **Design → Architecture promotion** (see `references/promotion-protocol.md` Step 4): archiving superseded phase detail, and **repointing a `Documentation/Bugs/` link at the Architecture doc when the design it names is deleted** — repoint only, never edit a bug entry's content.
 - **Do not patch a completed phase to track code drift.** The freeze rule (Step 2b) allows only corrections that were already wrong at completion time. Drift belongs to the Architecture doc, not to a historical phase.
 - **Do not promote by paraphrasing the Design doc.** A promotion's claims come from current code, verified per claim; the design's own prose is the least trustworthy input in the room.
 - **Do not duplicate content.** If the same fact lives in `CLAUDE.md` and an Architecture doc, link from `CLAUDE.md` to the doc — do not copy the doc's body into `CLAUDE.md`.

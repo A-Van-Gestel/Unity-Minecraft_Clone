@@ -1,16 +1,17 @@
 # Cloud Rendering Improvements Report
 
-**Version:** 1.8  
-**Date:** 2026-07-20  
+**Version:** 1.9  
+**Date:** 2026-09-05  
 **Status:** Open backlog. Items are removed (archived) when implemented and verified.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > The backlog for making the **cloud layer feel alive** — slow shape evolution, a volumetric
 > quality tier, cloud shadows, and an infinite non-repeating pattern. Ranked internally
 > (§Recommended order); deliberately **not** folded into the combined TF/RF roadmap — clouds are
-> a self-contained cosmetic system. Shipped and archived so far (all 2026-07-19): **CL-1 wind
+> a self-contained cosmetic system. Shipped and archived so far — 2026-07-19: **CL-1 wind
 > drift + CL-2 shading/tint/fade** (v1.1), **CL-3-A procedural seeded pattern** (v1.3), and
-> **CL-6 second parallax layer** (v1.4); every remaining item builds on that substrate.
+> **CL-6 second parallax layer** (v1.4); 2026-09-05: **CL-9 clouds visible through water** (v1.9).
+> Every remaining item builds on that substrate.
 
 **Audited:** 2026-07-19, at commit `c7eabd6` (branch `feat/world-scaling`).
 Findings are from a full read of `Assets/Scripts/Clouds.cs` (same-session rework, so current by
@@ -68,6 +69,7 @@ CL-1/CL-2 drift + shader work (`d52b089`, `12e6cf6`, both in-game verified 2026-
 | Motion        | **Wind drift (was CL-1):** cloud-space tiles on a drift-carrying root — per-frame cost is one root transform move; re-key sweep only on cloud-tile crossing; accumulator wraps at the pattern period; wind vector **owned by `World` since FL-1** (`World.WindBlocksPerSecond`, default `(−0.6, 0)`, shared with foliage sway; `Clouds.LayerWind` reads it), RF-7 drives the value later |
 | Lighting/time | **Face shading + tint + edge fade (was CL-2, absorbs RF-2 §5):** top 1.0 / bottom 0.7 / X 0.9 / Z 0.8 on Fancy, flat on Fast; hue follows `SkylightColor`, brightness follows the shared `VoxelLightToShadow` curve at `skyLuminance = 1`, **normalized to noon** (noon look = authored `_Color` exactly; night matches terrain's relative darkening)                                    |
 | Update driver | Per-frame `Clouds.Update` drift tick (root move only, allocation-free); the re-key sweep runs on cloud-tile crossing and from `CheckViewDistance` / `Reanchor()` / `OnSettingsChanged` → `Reinitialize()` (drift survives reinit)                                                                                                                                                        |
+| Compositing   | **Pre-transparent cloud pass (was CL-9, 2026-09-05):** `Rendering.CloudPrepassRendererFeature` draws `CloudShader` at `RenderPassEvent.AfterRenderingSkybox` — after the skybox and opaque terrain, before `m_CopyColorPass` — so clouds land in `_CameraOpaqueTexture` and `UberLiquidShader`'s `SampleSceneColor` can see them through a water surface. The pass is selected by a custom `LightMode` (`VoxelCloud`), which is what keeps URP's own transparent draw off it; queue and blend state are unchanged. Pinned by the **Cloud Render** validation suite (6 baselines) |
 | Layers        | **Per-layer config array (was CL-6):** `CloudLayerConfig[]` on the `Clouds` component — height, drift multiplier + veer, opacity, style clamp (`min(setting, maxStyle)`), noise knobs, seed salt; per-layer runtime state (drift root, material instance, pattern, pools). Defaults: main 100 + upper 170 (×1.5 drift veered 15°, 60% opacity, always `Fast`, 2× blobs @ 0.12 coverage)  |
 
 ---
@@ -241,6 +243,37 @@ too); pairs naturally with CL-5 where the slab shader gives the effect for free 
 
 ## Document History
 
+* **v1.9** - **CL-9 FILED & SHIPPED in the same pass** (2026-09-05, confirmed in game): clouds are
+  visible through a water surface. It arrives as a new ID because it had never actually been filed here — `FLUID_BUGS` #02 and
+  the underwater design doc both said the work was "owned by the `CL-*` cloud backlog", and this report
+  had no row for it. Cause: `UberLiquidShader` composites against `_CameraOpaqueTexture`, URP fills that
+  copy after the skybox but before transparents, and `CloudShader` was `Queue="Transparent"` — so the
+  sky was in the copy and the clouds never were. Fix: a custom `LightMode` (`VoxelCloud`) takes the cloud
+  pass out of URP's own draw lists, and `CloudPrepassRendererFeature` redraws it at
+  `RenderPassEvent.AfterRenderingSkybox`, which URP records immediately before `m_CopyColorPass`. Queue,
+  blend and the `ZWrite On` overlap strategy are untouched, and the pass sorts `CommonTransparent` so the
+  per-face shading that strategy buys is unchanged. **The consequence accepted rather than fixed, and now
+  observed rather than predicted:** clouds no longer blend with transparents *behind* them — their
+  `ZWrite` now Z-fails a farther transparent instead of being blended over by it. Confirmed in the same
+  in-game pass that confirmed the fix: **a fluid surface viewed from above the cloud layer is invisible
+  through the cloud**, because the water fragment fails the depth test and what remains is the cloud over
+  the opaque seabed. Every fix shape shares this: a second color copy after the clouds must pull them out
+  of the transparent queue just the same and pays an extra full-screen copy for it, and only moving the
+  **liquid** to a post-transparent pass avoids it, at the price of reordering water against the other
+  transparents and disturbing the UW-4 depth-copy ordering that is confirmed in game. Also accepted:
+  clouds seen through water are half-resolution, because the opaque copy is `_2xBilinear` — already true
+  of the terrain seen through water. Glass and leaves through water are **unchanged and still missing**;
+  they need the same treatment each. New **Cloud Render** validation suite (6 baselines, registry
+  `ExpectedSuiteCount` 28 → 29; census re-verified against a full `Validate All` at **726 baselines /
+  29 suites, 0 failures, 0 isolation violations, 2 known-bug repros**, 4 min 40.7 s — the +6 is entirely
+  this suite) pins the four halves that can drift apart — the shader tag, the
+  registration, the pass event, and the URP asset's opaque copy. All six were confirmed **able to go red**
+  by mutation (tag desynced, tag set to URP's own `UniversalForward`, queue moved to `Geometry`, feature
+  deactivated, opaque texture off, feature map corrupted, pass event moved to
+  `BeforeRenderingTransparents` via a real recompile), each reddening only its own baseline. What the
+  suite deliberately does **not** claim is that clouds actually reach the copy — that needs a live frame
+  and is confirmed in game.
+
 * **v1.6** - Wind ownership updated for shipped FL-1 (2026-07-19): `_windBlocksPerSecond` moved
   from `Clouds` to `World.WindBlocksPerSecond` (shared with foliage sway; `Clouds.LayerWind`
   reads it; RF-7 drives the World value later). Motion baseline row + FL relationship updated.
@@ -292,5 +325,5 @@ too); pairs naturally with CL-5 where the slab shader gives the effect for free 
 
 ---
 
-**Last Updated:** 2026-08-15 (`GS-4` cross-refs de-staled; 2026-07-20: VX-* cross-links)  
+**Last Updated:** 2026-09-05 (`CL-9` filed and shipped; 2026-08-15: `GS-4` cross-refs de-staled)  
 **Next Review:** when CL-4 or CL-7 starts (re-verify `Clouds.cs`/`CloudPatternJob.cs`/`CloudShader.shader` against the v1.4 baseline) or on the next RF-7 design pass (wind/weather seam)

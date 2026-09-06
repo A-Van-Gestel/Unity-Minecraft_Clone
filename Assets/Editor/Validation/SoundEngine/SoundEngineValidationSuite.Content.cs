@@ -70,6 +70,7 @@ namespace Editor.Validation.SoundEngine
             ("Sand", BlockTags.SOLID | BlockTags.SOIL | BlockTags.GRAVITY_AFFECTED, SoundMaterial.Sand),
             ("Gravel", BlockTags.SOLID | BlockTags.SOIL | BlockTags.GRAVITY_AFFECTED, SoundMaterial.Gravel),
             ("Water", BlockTags.LIQUID, SoundMaterial.Liquid),
+            ("Lava", BlockTags.LIQUID, SoundMaterial.Lava),
             ("Glass", BlockTags.SOLID | BlockTags.MAN_MADE, SoundMaterial.Glass),
             ("Debug Lamp 01", BlockTags.DEBUG, SoundMaterial.Stone),
         };

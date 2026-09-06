@@ -1,6 +1,7 @@
 # Lighting Validation Harness — Fidelity Boundary & Known Gaps
 
-**Status:** Living document  
+**Status:** Living document — **open coverage gaps remain outstanding** (the `OPEN` rows in §3's
+gap table, `B5` among them), so this doc owns work as well as describing the harness.  
 **Created:** 2026-06-13  
 **Scope:** `Assets/Editor/Validation/Lighting/` — the `LightingValidationSuite` + `LightingTestWorld` + `LightingFrameSimulator` harness.
 

@@ -7,8 +7,9 @@ namespace Audio
 {
     /// <summary>
     /// The pure half of world ambience: every decision the beds, the cave layer and the music scheduler make
-    /// before a source is touched — dwell filtering, bed and pool selection, crossfade gains, the submerged
-    /// test and the low-pass sweep (SOUND_ENGINE_DESIGN.md §5.3).
+    /// before a source is touched — dwell filtering, bed and pool selection, crossfade gains and the
+    /// low-pass sweep (SOUND_ENGINE_DESIGN.md §5.3). The submersion test itself is the shared eye query's,
+    /// so the muffling and the screen tint engage on one boundary.
     /// </summary>
     /// <remarks>
     /// Free of scene state for the same reason <see cref="SoundResolution"/> is: these are the choices that
@@ -69,26 +70,6 @@ namespace Audio
         /// a marginal reading from flapping.
         /// </remarks>
         public static bool IsUnderground(byte skylightAtHead, byte maxSkylight) => skylightAtHead <= maxSkylight;
-
-        /// <summary>
-        /// True when the block filling the listener's head cell is a fluid.
-        /// </summary>
-        /// <param name="blockTypes">The block database array, indexed by block ID.</param>
-        /// <param name="headBlockId">The block in the cell the listener's head occupies.</param>
-        /// <returns>True when that block is a fluid of any type.</returns>
-        /// <remarks>
-        /// Read from the voxel rather than from a contact state: <c>Assets/Scripts/Physics/</c> computes no
-        /// liquid contact of any kind, and inventing one for a 4 Hz query would put an audio feature inside
-        /// the solver's hot path. The consequence is that submersion is decided per cell, so a head just
-        /// under a partly-filled surface reads dry until it enters the cell below.
-        /// </remarks>
-        public static bool IsSubmerged(BlockType[] blockTypes, ushort headBlockId)
-        {
-            if (blockTypes == null || headBlockId >= blockTypes.Length) return false;
-
-            BlockType block = blockTypes[headBlockId];
-            return block != null && block.fluidType != FluidType.None;
-        }
 
         /// <summary>
         /// Picks which of a biome's ambience tracks should sound at the listener's altitude.

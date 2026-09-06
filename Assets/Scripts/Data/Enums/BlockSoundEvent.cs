@@ -26,5 +26,14 @@ namespace Data.Enums
 
         /// <summary>The listener landed on the block. Falls back to <see cref="Step"/> clips when unauthored.</summary>
         JumpLand = 6,
+
+        /// <summary>The listener swam through the block. Falls back to <see cref="Step"/> clips when unauthored.</summary>
+        Swim = 7,
+
+        /// <summary>
+        /// The listener entered the block's fluid. Falls back to <see cref="JumpLand"/>,
+        /// then <see cref="Step"/> clips, when unauthored.
+        /// </summary>
+        Splash = 8,
     }
 }

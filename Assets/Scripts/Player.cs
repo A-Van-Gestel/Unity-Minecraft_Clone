@@ -14,6 +14,13 @@ public class Player : MonoBehaviour
     internal PlayerInteraction PlayerInteraction;
     public VoxelRigidbody VoxelRigidbody { get; private set; }
     private Transform _playerCamera;
+
+    /// <summary>
+    /// The camera's authored local height, captured once so step smoothing has a rest position to return
+    /// to. Read from the prefab rather than assumed, so moving the eye line does not fight the smoothing.
+    /// </summary>
+    private float _cameraRestLocalY;
+
     private World _world;
     private InputManager _input;
     private TerrainGenDebugOverlay _terrainDebugOverlay;
@@ -62,6 +69,7 @@ public class Player : MonoBehaviour
         PlayerInteraction = GetComponent<PlayerInteraction>();
         VoxelRigidbody = GetComponent<VoxelRigidbody>();
         _playerCamera = Camera.main?.transform;
+        if (_playerCamera != null) _cameraRestLocalY = _playerCamera.localPosition.y;
         _world = World.Instance;
         _input = InputManager.Instance;
 
@@ -72,6 +80,12 @@ public class Player : MonoBehaviour
             Vector3 playerBodyLocalPosition = playerBody.localPosition;
             playerBodyLocalPosition = new Vector3(playerBodyLocalPosition.x, VoxelRigidbody.collisionHeight / 2f, playerBodyLocalPosition.z);
             playerBody.localPosition = playerBodyLocalPosition;
+
+            // Hidden from its owner's own camera: the box casts no shadows, so in first person it can only
+            // occlude the view it belongs to — and step smoothing can drop the camera far enough to see it
+            // from outside. Kept in the scene as a scene-view reference for the collider dimensions.
+            foreach (Renderer bodyRenderer in playerBody.GetComponentsInChildren<Renderer>(true))
+                bodyRenderer.enabled = false;
         }
 
         if (WorldLaunchState.CurrentMode == RuntimeMode.Benchmark)
@@ -94,6 +108,7 @@ public class Player : MonoBehaviour
         {
             // The active automated controller (BenchmarkController / FluidStressController) drives movement.
             VoxelRigidbody.SetMovementIntent(Vector3.zero);
+            VoxelRigidbody.SetSwimVerticalIntent(0f);
         }
         else if (!World.InUI)
         {
@@ -116,8 +131,12 @@ public class Player : MonoBehaviour
         }
         else
         {
+            // A standing swim intent would otherwise keep stroking while a menu is open.
             VoxelRigidbody.SetMovementIntent(Vector3.zero);
+            VoxelRigidbody.SetSwimVerticalIntent(0f);
         }
+
+        ApplyStepSmoothing();
 
         // TODO: Merge with lookingDirection from debug script.
         Vector3 xzDirection = transform.forward;
@@ -130,6 +149,25 @@ public class Player : MonoBehaviour
             orientation = 1; // Player is facing south.
         else
             orientation = 4; // Player is facing west.
+    }
+
+    /// <summary>
+    /// Trails the camera behind a step-up's instant vertical snap and lets it catch up, turning the jump
+    /// into a rise. Runs every frame, including while a menu is open, so an offset outstanding when the UI
+    /// opened still resolves instead of parking the view low.
+    /// </summary>
+    /// <remarks>
+    /// Applied to the camera rather than to the body: the collider must snap, or it would spend the climb
+    /// inside the block it is climbing. Only the view lags. Unconditional assignment rather than
+    /// "assign when non-zero", so the rest height is restored on the frame the offset reaches zero.
+    /// </remarks>
+    private void ApplyStepSmoothing()
+    {
+        if (_playerCamera == null) return;
+
+        Vector3 local = _playerCamera.localPosition;
+        local.y = _cameraRestLocalY - VoxelRigidbody.StepSmoothingOffset;
+        _playerCamera.localPosition = local;
     }
 
     private void EnsureTerrainDebugOverlay()
@@ -197,6 +235,11 @@ public class Player : MonoBehaviour
 
         if (!IsFlying)
         {
+            // Both unconditional: the solver stores these and re-reads them every fixed step, so a frame
+            // that skips one leaves the previous frame's value standing.
+            VoxelRigidbody.SetJumpHeld(_input.JumpHeld);
+            VoxelRigidbody.SetSwimVerticalIntent(_input.JumpValue - _input.CrouchValue);
+
             if (IsGrounded && _input.JumpHeld)
                 VoxelRigidbody.RequestJump();
         }

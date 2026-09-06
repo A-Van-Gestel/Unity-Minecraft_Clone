@@ -1,6 +1,11 @@
 # Fluid Shoreline Rendering
 
-This document describes the algorithm and techniques used to render the foam shoreline effect where fluid surfaces meet solid walls. The system spans the C# mesher (`VoxelMeshHelper.cs`) and the HLSL shader (`UberLiquidShader.shader`).
+This document describes the algorithm and techniques used to render the foam shoreline effect where fluid surfaces meet solid walls. The system spans the C# mesher (`VoxelMeshHelper.cs`) and the shared HLSL liquid core (`Includes/LiquidCore.hlsl`), which both `UberLiquidShader.shader` and the editor preview shader include.
+
+**Relationship to other documents:**
+
+- [`UNDERWATER_AND_SUBMERSION_RENDERING.md`](UNDERWATER_AND_SUBMERSION_RENDERING.md) — how the same liquid shader is seen from *inside* a fluid body, plus the screen-space submersion overlay. It changes this shader's `Cull` state (`UW-1`) and nothing about the vertex-channel contract below.
+- [`../Design/ANIMATED_LIQUID_SURFACE.md`](../Design/ANIMATED_LIQUID_SURFACE.md) — `UW-5`, paused. Its §4.2 finds that this document's vertex-channel contract has no room left for a surface-distance channel.
 
 ---
 
@@ -50,16 +55,23 @@ These are encoded into separate vertex channels and combined per-pixel in the fr
 
 ## Channel Layout (Top Face)
 
-| Channel   | Data                          | Scope               | GPU Interpolation           |
-|-----------|-------------------------------|---------------------|-----------------------------|
-| `color.r` | Liquid type (0=lava, 1=water) | Per-vertex          | Interpolated                |
-| `color.g` | Packed 8-bit wall mask        | Per-quad (constant) | No (all vertices identical) |
-| `color.b` | Shadow multiplier             | Per-vertex          | Interpolated                |
-| `color.a` | Light level                   | Per-vertex          | Interpolated                |
-| `uv.xy`   | Local flow vector             | Per-vertex          | Interpolated                |
-| `uv.zw`   | Shore push direction          | Per-vertex          | Interpolated                |
+| Channel                   | Data                                                      | Scope               | GPU Interpolation               |
+|---------------------------|-----------------------------------------------------------|---------------------|---------------------------------|
+| `color.r`                 | Liquid type — raw `FluidShaderID` (0 = water, 1 = lava)   | Per-vertex          | Interpolated                    |
+| `color.g`                 | Packed 8-bit wall mask                                    | Per-quad (constant) | No — declared `nointerpolation` |
+| `color.b`                 | Shadow multiplier                                         | Per-vertex          | Interpolated                    |
+| `color.a`                 | Emissive strength (RF-3) — 0 for water, non-zero for lava | Per-vertex          | Interpolated                    |
+| `uv.xy`                   | Local flow vector                                         | Per-vertex          | Interpolated                    |
+| `uv.zw`                   | Shore push direction                                      | Per-vertex          | Interpolated                    |
+| `lightData` (`TEXCOORD1`) | Sky light + block light RGB                               | Per-vertex          | Interpolated                    |
 
 Side and bottom faces set `color.g = 0.0` (no shore effect).
+
+> **Light does not ride in `color.a`.** MR-2 moved lighting to its own `TEXCOORD1` stream
+> (`lightData`, UNorm8×4 = sky, block R, block G, block B), which freed the alpha channel for RF-3
+> to stamp emission into — see `MeshGenerationJob.StampEmissiveStrength`, which overwrites the
+> `0` the `VoxelMeshHelper` writers seed. Both changes are shader-visible, so a reader working from
+> the pre-MR-2 layout will look for light in the wrong channel.
 
 ---
 
@@ -206,7 +218,8 @@ list above as the specification of what was useful.
 | File                                        | Responsibility                                                           |
 |---------------------------------------------|--------------------------------------------------------------------------|
 | `Assets/Scripts/Helpers/VoxelMeshHelper.cs` | `GenerateFluidMeshData` — wall mask encoding, push direction computation |
-| `Assets/Shaders/UberLiquidShader.shader`    | `GetShoreData` — per-pixel wall distance, gradient, and push             |
+| `Assets/Scripts/Jobs/BurstData/BurstFluidFlowUtility.cs` | `CalculateSymmetricCornerFlow` + its wall/fluid neighbor tests — the corner flow derivative, shared with `Physics.FluidContactResolver` |
+| `Assets/Shaders/Includes/LiquidCore.hlsl`   | `GetShoreData` — per-pixel wall distance, gradient, and push. Shared by the game shader and the editor preview shader; `UberLiquidShader.shader` itself only includes it |
 
 ---
 

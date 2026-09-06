@@ -54,6 +54,8 @@ namespace Editor.SoundEditor
             BlockSoundEvent.Sprint,
             BlockSoundEvent.JumpStart,
             BlockSoundEvent.JumpLand,
+            BlockSoundEvent.Swim,
+            BlockSoundEvent.Splash,
             BlockSoundEvent.Hit,
         };
 
@@ -272,7 +274,7 @@ namespace Editor.SoundEditor
 
             if (current == null || current.Length == 0)
             {
-                string fallback = FallbackNameFor(evt);
+                string fallback = FallbackNameFor(group, evt);
                 if (fallback != null)
                     EditorGUILayout.LabelField(" ", $"↳ falls back to the {fallback} clips", EditorStyles.miniLabel);
             }
@@ -307,15 +309,20 @@ namespace Editor.SoundEditor
         #region Helpers
 
         /// <summary>Names the event an unauthored one borrows its clips from, or null when it stays silent.</summary>
+        /// <param name="group">The group whose row is being drawn; a multi-link chain depends on it.</param>
         /// <param name="evt">The event whose row is empty.</param>
         /// <returns>The fallback event's display name, or null when the event has no fallback.</returns>
         /// <remarks>Mirrors <see cref="BlockSoundGroup.GetClips"/> — the row must report what the game does.</remarks>
-        private static string FallbackNameFor(BlockSoundEvent evt)
+        private static string FallbackNameFor(BlockSoundGroup group, BlockSoundEvent evt)
         {
             return evt switch
             {
                 BlockSoundEvent.Place => "Break",
-                BlockSoundEvent.Sprint or BlockSoundEvent.JumpStart or BlockSoundEvent.JumpLand => "Step",
+                BlockSoundEvent.Sprint or BlockSoundEvent.JumpStart or BlockSoundEvent.JumpLand
+                    or BlockSoundEvent.Swim => "Step",
+
+                // Two links, so the answer depends on what this group authors.
+                BlockSoundEvent.Splash => group.jumpLandClips is { Length: > 0 } ? "Jump Land" : "Step",
                 _ => null,
             };
         }
@@ -330,6 +337,8 @@ namespace Editor.SoundEditor
                 BlockSoundEvent.Sprint => "Played as the player runs on this material. Leave empty to reuse the Step clips.",
                 BlockSoundEvent.JumpStart => "Played when the player jumps off this material. Leave empty to reuse the Step clips.",
                 BlockSoundEvent.JumpLand => "Played when the player lands on this material. Leave empty to reuse the Step clips.",
+                BlockSoundEvent.Swim => "Played as the player swims through this material. Leave empty to reuse the Step clips.",
+                BlockSoundEvent.Splash => "Played when the player enters this material's fluid. Leave empty to reuse the Jump Land clips.",
                 _ => "Played while mining. Unused by the current engine.",
             };
         }
@@ -359,6 +368,8 @@ namespace Editor.SoundEditor
                 BlockSoundEvent.Sprint => group.sprintClips,
                 BlockSoundEvent.JumpStart => group.jumpStartClips,
                 BlockSoundEvent.JumpLand => group.jumpLandClips,
+                BlockSoundEvent.Swim => group.swimClips,
+                BlockSoundEvent.Splash => group.splashClips,
                 _ => group.hitClips,
             };
         }
@@ -373,6 +384,8 @@ namespace Editor.SoundEditor
                 case BlockSoundEvent.Sprint: group.sprintClips = clips; break;
                 case BlockSoundEvent.JumpStart: group.jumpStartClips = clips; break;
                 case BlockSoundEvent.JumpLand: group.jumpLandClips = clips; break;
+                case BlockSoundEvent.Swim: group.swimClips = clips; break;
+                case BlockSoundEvent.Splash: group.splashClips = clips; break;
                 default: group.hitClips = clips; break;
             }
         }

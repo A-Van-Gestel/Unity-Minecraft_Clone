@@ -140,6 +140,34 @@ namespace Audio
         }
 
         /// <summary>
+        /// Whether a body counts as <i>swimming</i> — carried by a fluid rather than by the ground.
+        /// </summary>
+        /// <remarks>
+        /// Flying is excluded explicitly, not implied: the solver clears the contact for a noclipping body
+        /// but not for a flown one, so a flier crossing a lake is otherwise in fluid and not grounded.
+        /// </remarks>
+        /// <param name="grounded">Whether the solver reports the body standing on something.</param>
+        /// <param name="flying">Whether the body is in flight mode.</param>
+        /// <param name="inFluid">Whether the solver reports any fluid contact — <see cref="FluidContact.InFluid"/>.</param>
+        /// <returns>True when the body should sound swim strokes instead of footfalls.</returns>
+        public static bool IsSwimming(bool grounded, bool flying, bool inFluid)
+        {
+            return inFluid && !grounded && !flying;
+        }
+
+        /// <summary>
+        /// Picks which one-shot a distance-triggered stride sounds.
+        /// </summary>
+        /// <param name="swimming">Whether the body is swimming — see <see cref="IsSwimming"/>.</param>
+        /// <param name="sprinting">Whether the body is sprinting. Ignored while swimming.</param>
+        /// <returns>The event whose clips this stride should play.</returns>
+        public static BlockSoundEvent SelectStrideEvent(bool swimming, bool sprinting)
+        {
+            if (swimming) return BlockSoundEvent.Swim;
+            return sprinting ? BlockSoundEvent.Sprint : BlockSoundEvent.Step;
+        }
+
+        /// <summary>
         /// Picks which clip of a group plays for one event.
         /// </summary>
         /// <param name="clipCount">How many clips the event's array holds.</param>
