@@ -5,12 +5,6 @@ public class ChunkLoadAnimation : MonoBehaviour
     private const float SPEED = 3f;
     private Vector3 _targetPos;
 
-    /// Random delay for each chunk before playing animation.
-    private bool _useRandomDelay = false;
-
-    private float _waitTimer;
-    private float _timer;
-
     /// <summary>
     /// Temporarily disables the animation component and snaps the chunk's active position to an underground offset.
     /// Used by the pool to prevent a 1-frame visual flash before the animation officially starts.
@@ -38,28 +32,16 @@ public class ChunkLoadAnimation : MonoBehaviour
     }
 
     /// <summary>
-    /// Resets the internal timer and enables the component, triggering the chunk to rise smoothly
-    /// from its underground offset towards its final resting position.
+    /// Enables the component, triggering the chunk to rise smoothly from its underground offset
+    /// towards its final resting position.
     /// </summary>
     public void StartAnimation()
     {
-        _timer = 0f;
-
-        if (_useRandomDelay)
-            _waitTimer = Random.Range(0f, 3f);
-
         enabled = true;
     }
 
     private void Update()
     {
-        // Random delay for each chunk before playing animation.
-        if (_useRandomDelay && _timer < _waitTimer)
-        {
-            _timer += Time.deltaTime;
-            return;
-        }
-
         transform.position = Vector3.Lerp(transform.position, _targetPos, Time.deltaTime * SPEED);
         if (_targetPos.y - transform.position.y < 0.05f)
         {
