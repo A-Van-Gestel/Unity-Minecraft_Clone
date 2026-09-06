@@ -26,6 +26,10 @@ namespace UI.Tooltip
         [SerializeField]
         private Canvas _parentCanvas;
 
+        /// <summary>Scratch buffers for corner conversion, so positioning allocates nothing per frame.</summary>
+        private readonly Vector3[] _worldCorners = new Vector3[4];
+        private readonly Vector2[] _screenCorners = new Vector2[4];
+
         [Tooltip("The tooltip UI prefab.")]
         [SerializeField]
         private GameObject _tooltipPrefab;
@@ -201,6 +205,39 @@ namespace UI.Tooltip
             _activeTriggerRect = null;
         }
 
+        /// <summary>Camera the canvas renders through, or null while it is an overlay canvas.</summary>
+        private Camera UIEventCamera =>
+            _parentCanvas.renderMode == RenderMode.ScreenSpaceOverlay ? null : _parentCanvas.worldCamera;
+
+        /// <summary>Reads a rect's corners in screen pixels, whichever render mode the canvas uses.</summary>
+        /// <param name="rect">The rect to measure.</param>
+        /// <returns>The four corners in screen space, in <see cref="RectTransform.GetWorldCorners"/> order.</returns>
+        private Vector2[] GetScreenCorners(RectTransform rect)
+        {
+            rect.GetWorldCorners(_worldCorners);
+            Camera cam = UIEventCamera;
+
+            for (int i = 0; i < 4; i++)
+                _screenCorners[i] = RectTransformUtility.WorldToScreenPoint(cam, _worldCorners[i]);
+
+            return _screenCorners;
+        }
+
+        /// <summary>Places the tooltip's pivot at a point given in screen pixels.</summary>
+        /// <param name="screenPos">Where the pivot should land, in screen pixels.</param>
+        /// <remarks>
+        /// The conversion is the whole point: a screen point only equals a world position on an overlay
+        /// canvas, so it is mapped through the canvas rect instead of assigned directly.
+        /// </remarks>
+        private void PlaceAtScreenPoint(Vector2 screenPos)
+        {
+            RectTransform canvasRect = (RectTransform)_parentCanvas.transform;
+
+            if (RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                    canvasRect, screenPos, UIEventCamera, out Vector2 localPos))
+                _tooltipRect.position = canvasRect.TransformPoint(localPos);
+        }
+
         private void UpdateFollowMousePosition()
         {
             if (_tooltipRect == null || _parentCanvas == null) return;
@@ -244,8 +281,7 @@ namespace UI.Tooltip
             // Hard clamp Y to screen bounds (Pivot is Top-Left, so Y is the top edge)
             finalPos.y = Mathf.Clamp(finalPos.y, tooltipHeight, Screen.height);
 
-            // Setting position directly works perfectly for Overlay canvases
-            _tooltipRect.position = finalPos;
+            PlaceAtScreenPoint(finalPos);
         }
 
         /// <summary>
@@ -261,9 +297,8 @@ namespace UI.Tooltip
             float tooltipWidth = _tooltipRect.rect.width * scaleFactor;
             float tooltipHeight = _tooltipRect.rect.height * scaleFactor;
 
-            // Get the trigger's screen-space corners (bottom-left, top-left, top-right, bottom-right)
-            Vector3[] triggerCorners = new Vector3[4];
-            _activeTriggerRect.GetWorldCorners(triggerCorners);
+            // Corners in screen pixels (bottom-left, top-left, top-right, bottom-right)
+            Vector2[] triggerCorners = GetScreenCorners(_activeTriggerRect);
 
             float triggerRight = triggerCorners[2].x;
             float triggerLeft = triggerCorners[0].x;
@@ -283,7 +318,7 @@ namespace UI.Tooltip
             finalPos.x = Mathf.Clamp(finalPos.x, 0f, Screen.width - tooltipWidth);
             finalPos.y = Mathf.Clamp(finalPos.y, tooltipHeight, Screen.height);
 
-            _tooltipRect.position = finalPos;
+            PlaceAtScreenPoint(finalPos);
         }
 
         /// <summary>
@@ -297,9 +332,8 @@ namespace UI.Tooltip
             float tooltipWidth = _tooltipRect.rect.width * scaleFactor;
             float tooltipHeight = _tooltipRect.rect.height * scaleFactor;
 
-            // Get the trigger's screen-space corners
-            Vector3[] triggerCorners = new Vector3[4];
-            _activeTriggerRect.GetWorldCorners(triggerCorners);
+            // Corners in screen pixels
+            Vector2[] triggerCorners = GetScreenCorners(_activeTriggerRect);
 
             float triggerTop = triggerCorners[1].y;
             float triggerCenterX = (triggerCorners[0].x + triggerCorners[2].x) / 2f;
@@ -317,7 +351,7 @@ namespace UI.Tooltip
             finalPos.x = Mathf.Clamp(finalPos.x, 0f, Screen.width - tooltipWidth);
             finalPos.y = Mathf.Clamp(finalPos.y, tooltipHeight, Screen.height);
 
-            _tooltipRect.position = finalPos;
+            PlaceAtScreenPoint(finalPos);
         }
     }
 }
