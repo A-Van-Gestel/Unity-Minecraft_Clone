@@ -4,6 +4,7 @@ using Editor.Validation.Framework;
 using UI.Blur;
 using UI.Builders;
 using UnityEditor;
+using UnityEngine.Rendering.Universal;
 using UnityEngine;
 
 namespace Editor.Validation.UIBands
@@ -42,6 +43,10 @@ namespace Editor.Validation.UIBands
                     RunL3LateChildAdoptsBand),
                 new Scenario("L4 Attaching a pre-built hierarchy carries the layer to its children",
                     RunL4PrebuiltSubtree),
+                new Scenario("L5 The renderer excludes every band layer from all three of its own masks",
+                    RunL5RendererMasksCleared),
+                new Scenario("L6 Band occupancy drives the walk order and the capture count",
+                    RunL6WalkOrder),
             };
 
             return ValidationSuiteRunner.Execute("UI Band Layers", scenarios, KnownBugChannel.Bug,
@@ -173,6 +178,79 @@ namespace Editor.Validation.UIBands
             {
                 Object.DestroyImmediate(root);
             }
+        }
+
+        /// <summary>Renderer asset whose layer masks decide whether URP draws the bands itself.</summary>
+        private const string RENDERER_ASSET_PATH = "Assets/settings/Rendering/VoxelEngine-URP-Renderer.asset";
+
+        /// <summary>L5 — every band layer is cleared from the renderer's own draw masks.</summary>
+        /// <remarks>
+        /// The prepass mask is the one that is easy to leave set and expensive to get wrong: UI in the
+        /// depth prepass writes depth on the camera plane, corrupting every consumer that reads camera
+        /// depth. An assertion covering only opaque and transparent passes while that ships.
+        /// </remarks>
+        /// <returns>True when every assertion holds.</returns>
+        private static bool RunL5RendererMasksCleared()
+        {
+            UniversalRendererData data =
+                AssetDatabase.LoadAssetAtPath<UniversalRendererData>(RENDERER_ASSET_PATH);
+
+            if (!Check($"the renderer asset loaded from {RENDERER_ASSET_PATH}", data != null)) return false;
+
+            int bandMask = UIBandLayers.AllBandsMask();
+            bool ok = Check($"the all-bands mask is non-empty (0x{(uint)bandMask:X})", bandMask != 0);
+
+            SerializedObject so = new SerializedObject(data);
+            string[] maskNames = { "m_PrepassLayerMask", "m_OpaqueLayerMask", "m_TransparentLayerMask" };
+
+            foreach (string maskName in maskNames)
+            {
+                SerializedProperty prop = so.FindProperty(maskName);
+                if (!Check($"{maskName} exists on the renderer", prop != null))
+                {
+                    ok = false;
+                    continue;
+                }
+
+                uint bits = (uint)prop.intValue;
+                ok &= Check($"{maskName} (0x{bits:X8}) excludes every band layer", (bits & (uint)bandMask) == 0);
+            }
+
+            return ok;
+        }
+
+        /// <summary>L6 — occupancy decides which bands the walk visits, in order, and how many blurs run.</summary>
+        /// <remarks>
+        /// Asserts the count as well as the order: a band silently dropping out of the walk keeps the
+        /// remaining order correct and would otherwise pass.
+        /// </remarks>
+        /// <returns>True when every assertion holds.</returns>
+        private static bool RunL6WalkOrder()
+        {
+            UIBandId[] buffer = new UIBandId[UIBandLayers.BandCount];
+
+            bool ok = Check("an empty occupancy walks no bands and records no blur",
+                UIBandRegistry.GetWalkOrder(0, buffer) == 0 && UIBandRegistry.CaptureCountFor(0) == 0);
+
+            const int hudOnly = 1 << (int)UIBandId.Hud;
+            ok &= Check("one occupied band costs one capture, today's cost",
+                UIBandRegistry.CaptureCountFor(hudOnly) == 1);
+
+            // Deliberately non-contiguous: the walk must skip the vacant band, not stop at it.
+            const int sparse = (1 << (int)UIBandId.Hud) | (1 << (int)UIBandId.Notifications);
+            int written = UIBandRegistry.GetWalkOrder(sparse, buffer);
+
+            ok &= Check($"a sparse occupancy walks both occupied bands (got {written})", written == 2);
+            ok &= Check($"the walk is in ascending paint order (got {buffer[0]}, {buffer[1]})",
+                written == 2 && buffer[0] == UIBandId.Hud && buffer[1] == UIBandId.Notifications);
+            ok &= Check($"the capture count matches the walk length (got {UIBandRegistry.CaptureCountFor(sparse)})",
+                UIBandRegistry.CaptureCountFor(sparse) == written);
+
+            const int all = (1 << UIBandLayers.BandCount) - 1;
+            ok &= Check($"a fully occupied stack costs {UIBandLayers.BandCount} captures",
+                UIBandRegistry.CaptureCountFor(all) == UIBandLayers.BandCount);
+
+            return ok;
         }
 
         /// <summary>L4 — attaching an already-built hierarchy carries the layer to its children.</summary>
