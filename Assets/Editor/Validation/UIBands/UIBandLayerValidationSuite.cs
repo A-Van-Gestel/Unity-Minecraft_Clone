@@ -66,6 +66,8 @@ namespace Editor.Validation.UIBands
                     RunL13DropdownPrefabCarriesFixer),
                 new Scenario("L14 UI sitting off the canvas plane is detected",
                     RunL14DepthOffsetDetection),
+                new Scenario("L15 A nested dropdown instance inherits the band sorting fixer",
+                    RunL15NestedDropdownInheritsFixer),
             };
 
             return ValidationSuiteRunner.Execute("UI Band Layers", scenarios, KnownBugChannel.Bug,
@@ -671,6 +673,40 @@ namespace Editor.Validation.UIBands
             {
                 Object.DestroyImmediate(root);
             }
+        }
+
+        /// <summary>
+        /// L15 — a dropdown nested inside another prefab inherits the fixer from its source prefab.
+        /// </summary>
+        /// <remarks>
+        /// `L13` pins the source prefab; this pins the property that makes one edit cover every user of
+        /// it. A nested instance stores only its own modifications, so a component added to the source
+        /// reaches it by inheritance and appears nowhere in the nesting prefab's own file — which means
+        /// reading the file cannot tell you whether the fixer is there, and only loading it can.
+        /// <para>
+        /// The dropdown count is asserted, not just the per-dropdown condition: a scan that resolves no
+        /// dropdowns satisfies "every dropdown carries it" vacuously, which is exactly how this baseline
+        /// would go green after someone replaces the control.
+        /// </para>
+        /// </remarks>
+        /// <returns>True when every assertion holds.</returns>
+        private static bool RunL15NestedDropdownInheritsFixer()
+        {
+            const string prefabPath = "Assets/Prefabs/UI/Components/InputField - Dropdown.prefab";
+
+            GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
+            if (!Check($"the nesting prefab loaded from {prefabPath}", prefab != null)) return false;
+
+            TMP_Dropdown[] dropdowns = prefab.GetComponentsInChildren<TMP_Dropdown>(true);
+
+            bool ok = Check($"it hosts at least one nested TMP_Dropdown (found {dropdowns.Length})",
+                dropdowns.Length > 0);
+
+            foreach (TMP_Dropdown dropdown in dropdowns)
+                ok &= Check($"nested dropdown '{dropdown.name}' carries UIBandDropdownSorting",
+                    dropdown.GetComponent<UIBandDropdownSorting>() != null);
+
+            return ok;
         }
     }
 }
