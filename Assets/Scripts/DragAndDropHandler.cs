@@ -28,6 +28,9 @@ public class DragAndDropHandler : MonoBehaviour
     private ItemSlot _cursorItemSlot;
     private UIItemSlot _lastClickedSlot;
 
+    private Canvas _cursorCanvas;
+    private RectTransform _cursorRect;
+
     private World _world;
     private InputManager _input;
 
@@ -65,10 +68,35 @@ public class DragAndDropHandler : MonoBehaviour
 
         _cursorItemSlot = new ItemSlot(_cursorSlot);
 
+        _cursorRect = (RectTransform)_cursorSlot.transform;
+        Canvas canvas = _cursorSlot.GetComponentInParent<Canvas>();
+        _cursorCanvas = canvas != null ? canvas.rootCanvas : null;
+
         // The cursor slot follows the pointer; its graphics must never block
         // raycasts or it would swallow every click meant for the slot below it.
         foreach (Graphic graphic in _cursorSlot.GetComponentsInChildren<Graphic>(true))
             graphic.raycastTarget = false;
+    }
+
+    /// <summary>Camera the cursor slot's canvas renders through, or null while it is an overlay canvas.</summary>
+    private Camera UIEventCamera =>
+        _cursorCanvas.renderMode == RenderMode.ScreenSpaceOverlay ? null : _cursorCanvas.worldCamera;
+
+    /// <summary>Places the cursor slot's pivot at a point given in screen pixels.</summary>
+    /// <param name="screenPos">Where the pivot should land, in screen pixels.</param>
+    /// <remarks>
+    /// The conversion is the whole point: a screen point only equals a world position on an overlay
+    /// canvas, so it is mapped through the canvas rect instead of assigned directly.
+    /// </remarks>
+    private void PlaceCursorAtScreenPoint(Vector2 screenPos)
+    {
+        if (_cursorCanvas == null || _cursorRect == null) return;
+
+        RectTransform canvasRect = (RectTransform)_cursorCanvas.transform;
+
+        if (RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                canvasRect, screenPos, UIEventCamera, out Vector2 localPos))
+            _cursorRect.position = canvasRect.TransformPoint(localPos);
     }
 
     private void Update()
@@ -94,7 +122,7 @@ public class DragAndDropHandler : MonoBehaviour
             return;
         }
 
-        _cursorSlot.transform.position = _input.MousePosition;
+        PlaceCursorAtScreenPoint(_input.MousePosition);
 
         // Mobile long-press fires while the finger is still down, so it must be
         // polled here rather than waiting for the pointer-up event.
