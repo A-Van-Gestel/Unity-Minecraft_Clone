@@ -561,7 +561,7 @@ misconfiguration ships.
 | **UB-4 — Look reconciliation**     | Re-tune the six authored tints against the new post-processed capture. **Not needed:** the profile's only post effect is Bloom at `intensity 0.25` / `threshold 1.1`, so sub-white pixels contribute nothing and the tints still read correctly in game (both scenes, 2026-09-07). The phase's one real deliverable — closing the lighting report's accepted limitation 2 — was done separately. | 🟡     | UB-3         | ⏸️ 2026-09-07 |
 | **UB-5 — Workaround removal**      | Deleted `ToastManager._wasBlurSuppressed`/`Update`/`IsBlurSuppressed`/`ApplyBackdropForUIState` and the suppression branch in `BackdropMaterialFor`; `ToastCard.Variant` went with them. Corrected the now-false remarks in `RuntimeUIFactory`, `ToastManager`, `ToastCard`, and — found by phrase sweep, not by the identifier list above — `BenchmarkUIBuilder`, `WorldUIManager` and `UIBlurRenderValidationSuite`. Synced `TOAST_NOTIFICATION_SYSTEM.md` and `RUNTIME_UI_FACTORY.md`. | 🟢     | UB-3         | ✅ 2026-09-07 |
 | **UB-6 — MainMenu adoption**       | Canvas to Screen Space - Camera; bands on the root, the three submenus and a new `TooltipRoot`; `CreditsMenuController.cs:69` given the canvas camera; 13 stray local-Z values zeroed (6 in scene, 7 in prefab assets); frosted backdrops on all three submenus — on the bounded content boxes, not the full-screen containers (§5) — plus the three WorldSelect modals on the `Modals` band. The two full-screen backdrops use a second material, `UIBlurClear.mat`, which blurs without darkening (§5). Two scroll viewports converted from stencil `Mask` to `RectMask2D`, without which the world list does not clip at all (§4.4). Baseline `L15`. **MainMenu's screens are mutually exclusive**, so banding here buys frost-over-`Background`, not panel-over-panel (§5). | 🟢     | UB-3         | ✅ 2026-09-07 |
-| **UB-7 — Validation & promotion**  | Play-mode capture harness + the baseline that actually pins the fix; `docs-sync` promotion of this doc into `UI_BLUR_BACKDROP_SYSTEM.md`.                                                                                                  | 🟡     | UB-5, UB-6   | —      |
+| **UB-7 — Validation & promotion**  | **Split.** The design's defining assertion — a toast over the open console showing the console's *text* blurred in its backdrop — is **confirmed in game (2026-09-07)**, so the arc's claim is discharged. Automating it needs a play-mode scenario host the framework does not have: filed as `NS-12` in `VALIDATION_SUITE_COVERAGE_ROADMAP.md`. The `docs-sync` promotion into `UI_BLUR_BACKDROP_SYSTEM.md` is **handed off to a clean session** per the promotion protocol's multi-phase rule. | 🟡     | UB-5, UB-6   | In progress |
 
 UB-0 through UB-5 is the minimal set that delivers standalone value: it closes §8's limitation for
 the `World` scene and removes the policy debt. UB-6 is additive adoption; UB-7 is what makes the
@@ -603,6 +603,10 @@ own baselines:
 - **UB-7** — the play-mode capture baseline that actually pins the fix: a toast raised over the open
   console must show the console's **text** blurred in its backdrop. That single assertion is the
   design's reason for existing, and no offscreen harness can make it.
+  <br>**Outcome: confirmed in game 2026-09-07, not automated.** The assertion holds; the regression
+  guard is what is missing. `Scenario` is a synchronous `Func<bool>` and no suite enters play mode, so
+  the harness is `NS-12` in
+  [`VALIDATION_SUITE_COVERAGE_ROADMAP.md`](VALIDATION_SUITE_COVERAGE_ROADMAP.md), not a UB phase.
 
 ### Extension roadmap (post-UB-7, in intended order)
 

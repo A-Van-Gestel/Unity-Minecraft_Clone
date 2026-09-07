@@ -450,9 +450,19 @@ what this document ranks.
 
 ---
 
+## NS-12. Play-mode capture harness — the framework cannot host an in-game assertion — **Priority 4**
+
+- **The situation:** every suite runs in **edit mode** and asserts against synthetic fixtures. `Scenario` carries a `Func<bool>` (`Assets/Editor/Validation/Framework/Scenario.cs`), which is synchronous, and entering play mode is not — so a scenario that needs a running game cannot be expressed at all. Confirmed 2026-09-07: no file under `Assets/Editor/` enters play mode except a sound-editor window, and all three pixel-readback helpers (`UIBlurQuadRenderer`, `LiquidFaceRenderer`, `OverlayFragmentRenderer`) render offscreen in edit mode.
+- **Why it surfaced:** the `UB-*` banded-compositing arc's defining assertion — a toast raised over the open console shows the console's **text** blurred in its backdrop — is only observable in a running game. It was discharged by in-game confirmation (2026-09-07) rather than by a baseline, so **nothing pins it against regression**. Every UB-3 defect was of the same shape: invisible to a suite, found by playing.
+- **Scope sketch:** (1) an async/coroutine scenario host in the framework, so a suite can await play-mode entry and exit without the aggregate runner losing its verdict accounting; (2) world load from `WorldLaunchState` + `LoadScene`; (3) a capture-and-compare helper over the Game camera; (4) the toast-over-console baseline as the first consumer.
+- **Do not fold this into a UI suite.** (1) touches `ValidationSuiteRunner`, which all 30 suites depend on — it wants its own plan and its own prove-red that a play-mode scenario can actually fail.
+- **Effort:** 🔴 — framework work, not a suite.
+
+---
+
 ## Deliberate: not every menu-item suite belongs in `Validate All`
 
-`ValidationSuiteRegistry` carries **29** registered suites, pinned by `ExpectedSuiteCount` and guarded
+`ValidationSuiteRegistry` carries **30** registered suites, pinned by `ExpectedSuiteCount` and guarded
 by `ValidationFrameworkSelfTest.RegistryMeetsExpectedCount` (which reds if a suite is *dropped*) and by
 the aggregate runner's and `ValidationSuiteCI`'s count check. Some validation entry points intentionally
 sit **outside** that registry and therefore outside `Validate All` and CI:
