@@ -78,7 +78,7 @@ would put the same item on the map twice and mis-sort the doc.
 | **Chunk pipeline performance** | [`CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md`](CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md) | §-numbered | §1.1 and the §3 backpressure family shipped; **§2 and §4 remain open** |
 | **Visibility culling** | [`VISIBILITY_CULLING_ARCHITECTURE.md`](VISIBILITY_CULLING_ARCHITECTURE.md) | Phases 0–3 | Phases 0 and 0.5 complete; **the culler itself (Phases 1–3) is unbuilt** |
 | **Voxel occlusion / AO** | [`VOXEL_OCCLUSION_REFACTOR.md`](VOXEL_OCCLUSION_REFACTOR.md) | `VO-` | `VO-0`…`VO-6`, `VO-8`, `VO-9a`, `VO-9b` done; **`VO-9` not started**, premise revised |
-| **UI blur banded compositing** | [`UI_BLUR_BANDED_COMPOSITING.md`](UI_BLUR_BANDED_COMPOSITING.md) | `UB-` | `UB-0`…`UB-3` shipped, `UB-4` ⏸️ (no tint retune due), `UB-5` shipped; **`UB-6` (MainMenu adoption) and `UB-7` (play-mode baseline + promotion) remain** |
+| **UI blur banded compositing** | [`UI_BLUR_BANDED_COMPOSITING.md`](UI_BLUR_BANDED_COMPOSITING.md) | `UB-` | `UB-0`…`UB-3` shipped, `UB-4` ⏸️ (no tint retune due), `UB-5` and `UB-6` shipped; **`UB-7` (play-mode baseline + promotion) remains** |
 | **Contact shadows** | [`SILHOUETTE_CONTACT_SHADOWS.md`](SILHOUETTE_CONTACT_SHADOWS.md) | `SS-` | `SS-0`…`SS-3a` shipped (`SS-3` default-OFF by owner decision); **`SS-4` not started** |
 | **Sound engine** | [`SOUND_ENGINE_DESIGN.md`](SOUND_ENGINE_DESIGN.md) | `S`-numbered | `S0`–`S3`, `S5`–`S8`, `S10`, `S11` shipped; `S8` and `S10` await their listening pass |
 | **Spatial audio (far horizon)** | [`STEAM_AUDIO_INTEGRATION.md`](STEAM_AUDIO_INTEGRATION.md) | — | Draft, unscheduled; SDK specifics need re-verification before any work starts |

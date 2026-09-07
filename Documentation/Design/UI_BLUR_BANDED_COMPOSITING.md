@@ -1,8 +1,8 @@
 # UI Blur Banded Compositing Design
 
-**Version:** 1.11  
+**Version:** 1.12  
 **Date:** 2026-09-06  
-**Status:** Partially implemented — UB-0…UB-5 shipped and confirmed in game (UB-4 ⏸️); UB-6 and UB-7 remain.  
+**Status:** Partially implemented — UB-0…UB-6 shipped and confirmed in game (UB-4 ⏸️); UB-7 remains.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > Moves every UI canvas out of Screen Space - Overlay and into the URP render graph, so the UI blur
@@ -83,8 +83,10 @@ layers the sorting-layer rework made redundant, and the renderer masks restored 
   not a wall. A per-panel capture is a **v2 extension**, see §7's roadmap.
 - **Fixing UI_BUGS #05.** The resolution-dependent kernel is orthogonal and stays open. This design
   makes it *more* visible by running the kernel more often, which is noted in §5, not fixed here.
-- **Blurred graphics under a stencil `Mask`.** Still unexercised in the project (`RectMask2D` is
-  used, `Mask` is not); the shader declares the state and nothing tests it, exactly as today.
+- ~~**Blurred graphics under a stencil `Mask`.** Still unexercised in the project (`RectMask2D` is
+  used, `Mask` is not).~~ **WRONG, corrected 2026-09-07 by UB-6.** A stencil `Mask` is used in six
+  places, and it does not merely go untested under banding — **it cannot work there at all** (§4.4).
+  Converting the affected viewports to `RectMask2D` is the fix, not a shader change.
 - **World-space / diegetic UI.** Out of scope permanently — this design is about screen-space bands.
 
 ---
@@ -249,7 +251,7 @@ whole subtree in one component, so a band declaration writes **no property on an
 therefore no prefab overrides — decisive here, because `World.unity`'s UI is 61 prefab instances out
 of 91 canvas objects, and `PauseMenuContainer` alone is 29 (§9).
 
-Three API constraints govern the routing, each found by it breaking something:
+Four API constraints govern the routing, each found by it breaking something:
 
 - `overrideSorting` applies only to a **nested** canvas; Unity forces it back off on a root canvas,
   which already owns its sorting natively. (`L7`, `L9`)
@@ -261,6 +263,14 @@ Three API constraints govern the routing, each found by it breaking something:
   draws, which is exactly what makes the loss of input silent: `PauseMenuContainer` rendered and
   frosted correctly with all ten of its buttons dead. `UIBlurBand` now warns in-editor when a nested
   band root holds a `Selectable` and carries no raycaster. (`L11`)
+- **A band root that starts inactive never gets `overrideSorting`.** An inactive nested canvas
+  reports `isRootCanvas == true`, so `Apply` takes the root-canvas branch and skips the opt-out,
+  leaving `sortingLayerID` set on a canvas that is still inheriting. `UIBlurBand` carries no
+  `[ExecuteAlways]`, so nothing re-runs in the editor either, and the scene is saved wrong. UB-3
+  never met this because `PauseMenuContainer` is always active; every one of `MainMenu`'s band roots
+  is inactive at rest. Authoring fix: activate the object, call `Apply`, restore its state — the flag
+  survives deactivation. At runtime `OnEnable` gets it right on its own, so the defect is confined
+  to what the scene file records.
 
 A band root that holds no interactive content should *not* get a raycaster — `TooltipRoot` has none
 deliberately, so tooltips cannot intercept clicks meant for the UI beneath them.
@@ -372,6 +382,13 @@ Modeled directly on `CloudPrepassRendererFeature.CloudPrepass`:
   normally written by the UI system on the Overlay path this design leaves behind, so it is stale
   here and must be set explicitly. **Copying the cloud pass faithfully is a bug**; this bullet is
   the deviation.
+- ⚠️ **No depth attachment means no stencil, so uGUI's stencil `Mask` silently stops clipping.**
+  This is the cost of the bullet above, and it was missed until UB-6: `Mask` writes a stencil
+  reference its children test against, and the band pass binds no depth-stencil buffer for either to
+  reach. Nothing errors — the mask simply passes everything, and a scroll list paints across the
+  whole screen. `RectMask2D` is unaffected, because it clips in the shader through `_ClipRect`, which
+  `MaskedUIBlur` already supports. **A banded scene must use `RectMask2D`, never `Mask`.** `World`
+  hid this by using `RectMask2D` throughout; `MainMenu`'s world list did not.
 
 ### 4.5 What the canvases change to
 
@@ -465,6 +482,25 @@ misconfiguration ships.
   touch controls sit above all banded UI and no panel can frost them. It is mobile-only
   (`Application.isMobilePlatform`, `InputManager.cs:387`), which is why this is recorded rather than
   fixed here. Routing it through the factory is the fix whenever mobile is next exercised.
+- ⚠️ **`MainMenu`'s screens never overlap, so banding there serves a different purpose.**
+  `MainMenuController.cs:77-119` deactivates the main panel whenever a submenu opens, so exactly one
+  screen is ever visible and no panel can frost another. Banding is still required, because the
+  camera renders only a skybox: without a band boundary between the full-screen `Background` image
+  and the panels, a frosted panel samples the skybox and punches a hole through the menu backdrop.
+  The band puts `Background` into the capture the panels read.
+- ⚠️ **A darkening frost under existing scrims darkens twice, and the second layer only drains color.**
+  `WorldSelectMenu` stacks three neutral layers: the frost's `_MultiplyColor`, `Scroll View`'s black
+  at `alpha 0.392`, and each world tile's black at `alpha 0.502`. The tiles are half-transparent, so
+  they show whatever is beneath them — against sharp dirt the scrims bought text contrast, but
+  against an already-darkened blur they only pulled a brown backdrop toward gray.
+  <br>The fix is to let each layer do one job: a **second material, `UIBlurClear.mat`, with
+  `_MultiplyColor` left at the shader's own default of white**, so the full-screen backdrop *blurs
+  without darkening* and the authored scrims supply all the contrast and color. This needs no shader
+  or feature change — the neutral path has always existed. It must be a separate asset: `UIBlur.mat`
+  is shared with `World`'s five frosted surfaces, which still want the `0.415` tint because nothing
+  is layered over them.
+  <br>The rule that generalizes: **tint the frost only where it is the sole darkening layer.** Where a
+  panel already carries its own colored scrims, frost neutral and let them keep their job.
 - **Always Included Shaders unchanged.** `Custom/MaskedUIBlur` stays listed; no new shader ships.
 - **Reserved seat: per-panel capture.** Nothing in the band design forbids a future band that holds
   exactly one panel, which is how a v2 per-panel mode would be expressed without restructuring.
@@ -501,7 +537,7 @@ misconfiguration ships.
 | **UB-3 — Canvas conversion**       | Render mode + camera in `ConfigureCanvas`; bands on the four code-built canvases; `World.unity` canvas to Screen Space - Camera with `UIBlurBand` on `Canvas` (Hud), `PauseMenuContainer` (Menus) and a new `TooltipRoot` (Notifications); **`TooltipManager` and `DragAndDropHandler` repositioning rewrites** (§5); the two menu prefabs' off-layer objects; the three retired GameObject layers. Mechanism reworked mid-phase from GameObject-layer to **sorting-layer** banding (§4.2, §9). | 🔴     | UB-2         | ✅ 2026-09-07 |
 | **UB-4 — Look reconciliation**     | Re-tune the six authored tints against the new post-processed capture. **Not needed:** the profile's only post effect is Bloom at `intensity 0.25` / `threshold 1.1`, so sub-white pixels contribute nothing and the tints still read correctly in game (both scenes, 2026-09-07). The phase's one real deliverable — closing the lighting report's accepted limitation 2 — was done separately. | 🟡     | UB-3         | ⏸️ 2026-09-07 |
 | **UB-5 — Workaround removal**      | Deleted `ToastManager._wasBlurSuppressed`/`Update`/`IsBlurSuppressed`/`ApplyBackdropForUIState` and the suppression branch in `BackdropMaterialFor`; `ToastCard.Variant` went with them. Corrected the now-false remarks in `RuntimeUIFactory`, `ToastManager`, `ToastCard`, and — found by phrase sweep, not by the identifier list above — `BenchmarkUIBuilder`, `WorldUIManager` and `UIBlurRenderValidationSuite`. Synced `TOAST_NOTIFICATION_SYSTEM.md` and `RUNTIME_UI_FACTORY.md`. | 🟢     | UB-3         | ✅ 2026-09-07 |
-| **UB-6 — MainMenu adoption**       | Convert `MainMenu.unity`'s canvas, declare its bands, and add the frosted panels it does not have today. Expect the same four Overlay-only assumptions UB-3 hit (§5), plus `CreditsMenuController.cs:69` and `WorldSelectMenu.prefab`'s dropdown. | 🟢     | UB-3         | —      |
+| **UB-6 — MainMenu adoption**       | Canvas to Screen Space - Camera; bands on the root, the three submenus and a new `TooltipRoot`; `CreditsMenuController.cs:69` given the canvas camera; 13 stray local-Z values zeroed (6 in scene, 7 in prefab assets); frosted backdrops on all three submenus — on the bounded content boxes, not the full-screen containers (§5) — plus the three WorldSelect modals on the `Modals` band. The two full-screen backdrops use a second material, `UIBlurClear.mat`, which blurs without darkening (§5). Two scroll viewports converted from stencil `Mask` to `RectMask2D`, without which the world list does not clip at all (§4.4). Baseline `L15`. **MainMenu's screens are mutually exclusive**, so banding here buys frost-over-`Background`, not panel-over-panel (§5). | 🟢     | UB-3         | ✅ 2026-09-07 |
 | **UB-7 — Validation & promotion**  | Play-mode capture harness + the baseline that actually pins the fix; `docs-sync` promotion of this doc into `UI_BLUR_BACKDROP_SYSTEM.md`.                                                                                                  | 🟡     | UB-5, UB-6   | —      |
 
 UB-0 through UB-5 is the minimal set that delivers standalone value: it closes §8's limitation for
@@ -619,6 +655,19 @@ Two more constraints only a running frame exposed, both now encoded in the featu
 
 ## Document History
 
+* **v1.12** - UB-6 shipped and confirmed in game, colors checked against an older production build. §1 retracts the "stencil `Mask` is unused"
+  non-goal and §4.4 explains why it mattered: the band pass binds no depth-stencil attachment, so a
+  stencil `Mask` silently clips nothing and `MainMenu`'s world list painted over the whole screen.
+  Six `Mask` users exist; the two WorldSelect viewports are converted, the two dropdown ones are
+  latent and shared with `World`. §5 also records why a frost must not darken where authored scrims
+  already do: that stacking is what grayed the world tiles, and `UIBlurClear.mat` (neutral
+  `_MultiplyColor`) resolves it without a shader change. §4.2 gains a fourth routing constraint: a band
+  root that starts **inactive** never receives `overrideSorting`, because an inactive nested canvas
+  reports itself as a root — every `MainMenu` band root is inactive at rest, where UB-3's was not.
+  §5 records that `MainMenu`'s screens are mutually exclusive, so banding there buys frost over the
+  `Background` image rather than panel-over-panel. Two scope claims in UB-6's original row were
+  wrong and are corrected in place: the dropdown needing the fixer (it inherits it — `L15` now pins
+  that), and "the same four assumptions" (only one screen-to-world site existed).
 * **v1.11** - UB-5 shipped and confirmed in game: the toast flat-fallback policy is deleted and
   cards frost unconditionally. The confirming case is the design's motivating one (§3) — a
   bottom-left toast over the open console shows the console's *typed text* blurred in its backdrop,
@@ -662,4 +711,4 @@ Two more constraints only a running frame exposed, both now encoded in the featu
 ---
 
 **Last Updated:** 2026-09-07  
-**Next Review:** when UB-6 (MainMenu adoption) starts
+**Next Review:** when UB-7 (validation harness + promotion) starts
