@@ -138,7 +138,7 @@ GameObject:
   - component: {fileID: 5351885946730847735}
   - component: {fileID: 1921325152934643309}
   - component: {fileID: 8119888637040446237}
-  m_Layer: 0
+  m_Layer: 5
   m_Name: Viewport
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -412,7 +412,7 @@ GameObject:
   - component: {fileID: 4888555067626387115}
   - component: {fileID: 3846306317756553037}
   - component: {fileID: 3306018801192626469}
-  m_Layer: 0
+  m_Layer: 5
   m_Name: TabBarButtons
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -497,7 +497,7 @@ GameObject:
   - component: {fileID: 4916622398990672146}
   - component: {fileID: 7167927072446741215}
   - component: {fileID: 8026115518235809925}
-  m_Layer: 0
+  m_Layer: 5
   m_Name: TabContentScrollArea
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -820,7 +820,7 @@ GameObject:
   - component: {fileID: 7882686360427451547}
   - component: {fileID: 5585807173745211633}
   - component: {fileID: 6641771934907853808}
-  m_Layer: 0
+  m_Layer: 5
   m_Name: TabBarScrollArea
   m_TagString: Untagged
   m_Icon: {fileID: 0}
@@ -1186,7 +1186,7 @@ GameObject:
   - component: {fileID: 209503874463190125}
   - component: {fileID: 7971920074805093224}
   - component: {fileID: 1696213656186545141}
-  m_Layer: 0
+  m_Layer: 5
   m_Name: Viewport
   m_TagString: Untagged
   m_Icon: {fileID: 0}
