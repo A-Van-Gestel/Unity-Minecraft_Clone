@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Editor.Dev;
 using Editor.Validation.Framework;
+using TMPro;
 using UI.Blur;
 using UI.Builders;
 using UnityEditor;
@@ -53,6 +54,18 @@ namespace Editor.Validation.UIBands
                     RunL7BandRouting),
                 new Scenario("L8 The factory builds one fully configured, banded canvas",
                     RunL8FactoryCanvas),
+                new Scenario("L9 A root band canvas routes without overrideSorting",
+                    RunL9RootCanvasRouting),
+                new Scenario("L10 The factory's canvas is visible to the band walk",
+                    RunL10FactoryCanvasIsBandVisible),
+                new Scenario("L11 A nested band canvas takes its subtree out of the parent's raycaster",
+                    RunL11NestedBandNeedsOwnRaycaster),
+                new Scenario("L12 A dropdown popup is re-banded onto its own band",
+                    RunL12DropdownPopupBanding),
+                new Scenario("L13 The shared dropdown prefab carries the band sorting fixer",
+                    RunL13DropdownPrefabCarriesFixer),
+                new Scenario("L14 UI sitting off the canvas plane is detected",
+                    RunL14DepthOffsetDetection),
             };
 
             return ValidationSuiteRunner.Execute("UI Band Layers", scenarios, KnownBugChannel.Bug,
@@ -75,6 +88,16 @@ namespace Editor.Validation.UIBands
         /// <returns>The created object.</returns>
         private static GameObject Temp(string name) =>
             new GameObject(name) { hideFlags = HideFlags.HideAndDontSave };
+
+        /// <summary>Creates a throwaway GameObject that already carries a <see cref="RectTransform"/>.</summary>
+        /// <param name="name">Name for the created object.</param>
+        /// <returns>The created object.</returns>
+        /// <remarks>
+        /// The type has to be supplied at creation: <c>AddComponent&lt;RectTransform&gt;</c> returns null
+        /// on an object that already has a plain <c>Transform</c>.
+        /// </remarks>
+        private static GameObject TempRect(string name) =>
+            new GameObject(name, typeof(RectTransform)) { hideFlags = HideFlags.HideAndDontSave };
 
         /// <summary>L1 — every band names a declared sorting layer, distinct, and in band order.</summary>
         /// <remarks>
@@ -330,22 +353,28 @@ namespace Editor.Validation.UIBands
         {
             const int sortingOrder = 42;
 
-            GameObject root = null;
+            // The object is created and flagged here, not inside the factory: a factory that throws
+            // part-way would otherwise strand a savable GameObject in whatever scene is open.
+            GameObject root = Temp("L8_FactoryCanvas");
             try
             {
-                root = RuntimeUIFactory.CreateCanvas("L8_FactoryCanvas", sortingOrder,
-                    band: UIBandId.Modals);
-                root.hideFlags = HideFlags.HideAndDontSave;
+                Canvas returned = RuntimeUIFactory.ConfigureCanvas(root, sortingOrder, 0.5f, UIBandId.Modals);
+
+                bool ok = Check("the factory returned the canvas it configured rather than null",
+                    returned != null);
 
                 Canvas[] canvases = root.GetComponents<Canvas>();
-                bool ok = Check($"the factory left exactly one canvas on the object ({canvases.Length} == 1)",
+                ok &= Check($"the factory left exactly one canvas on the object ({canvases.Length} == 1)",
                     canvases.Length == 1);
                 if (canvases.Length == 0) return false;
 
                 Canvas canvas = canvases[0];
+                ok &= Check("the returned canvas is the one on the object", returned == canvas);
+                // Both halves discriminate against a bare auto-added canvas, which Unity creates with
+                // sorting order 0 and the Overlay default.
                 ok &= Check("that canvas is configured, not a bare one added to satisfy a requirement " +
                             $"(sortingOrder={canvas.sortingOrder}, renderMode={canvas.renderMode})",
-                    canvas.sortingOrder == sortingOrder && canvas.renderMode == RenderMode.ScreenSpaceOverlay);
+                    canvas.sortingOrder == sortingOrder && canvas.renderMode == RenderMode.ScreenSpaceCamera);
 
                 ok &= Check("the canvas got its scaler", root.GetComponent<CanvasScaler>() != null);
                 ok &= Check("the canvas got its raycaster", root.GetComponent<GraphicRaycaster>() != null);
@@ -358,7 +387,254 @@ namespace Editor.Validation.UIBands
             }
             finally
             {
-                if (root != null) Object.DestroyImmediate(root);
+                Object.DestroyImmediate(root);
+            }
+        }
+
+        /// <summary>L9 — a band root that is itself a root canvas still routes into its band.</summary>
+        /// <remarks>
+        /// The complement of L7, and not a duplicate of it: Unity forces <c>overrideSorting</c> off on a
+        /// root canvas, so the nested path L7 covers cannot show whether a root canvas routes at all.
+        /// The scene canvases that carry band 0 are root canvases, which is the case this pins.
+        /// </remarks>
+        /// <returns>True when every assertion holds.</returns>
+        private static bool RunL9RootCanvasRouting()
+        {
+            GameObject root = Temp("RootBandCanvas");
+            try
+            {
+                root.AddComponent<Canvas>();
+
+                UIBlurBand band = root.AddComponent<UIBlurBand>();
+                band.SetBand(UIBandId.Menus);
+
+                Canvas canvas = root.GetComponent<Canvas>();
+                bool ok = Check($"the band root is a root canvas (isRootCanvas={canvas.isRootCanvas})",
+                    canvas.isRootCanvas);
+
+                ok &= Check($"a root canvas carries the band's sorting layer anyway " +
+                            $"({canvas.sortingLayerID} == {UIBandLayers.SortingLayerIdOf(UIBandId.Menus)})",
+                    canvas.sortingLayerID == UIBandLayers.SortingLayerIdOf(UIBandId.Menus));
+
+                // Not a cosmetic assertion: if routing ever came to depend on overrideSorting, band 0
+                // would silently stop working on every scene canvas while L7 stayed green.
+                ok &= Check("routing did not depend on overrideSorting, which Unity forces off here",
+                    !canvas.overrideSorting);
+
+                band.SetBand(UIBandId.Notifications);
+                ok &= Check("re-banding moves a root canvas too",
+                    canvas.sortingLayerID == UIBandLayers.SortingLayerIdOf(UIBandId.Notifications));
+
+                return ok;
+            }
+            finally
+            {
+                Object.DestroyImmediate(root);
+            }
+        }
+
+        /// <summary>L10 — a canvas from the factory is one the band walk can actually draw.</summary>
+        /// <remarks>
+        /// Screen Space - Overlay is drawn by URP outside the render graph, so an overlay canvas is
+        /// invisible to the band pass however well it is banded — it renders, and simply never frosts
+        /// anything. That failure is silent, which is what makes it worth a baseline.
+        /// <para>
+        /// Coverage limit: this pins the <i>factory</i>, not the scenes. Suites here read project assets
+        /// and never open a scene, so a scene canvas left on Overlay is caught by the read-back at edit
+        /// time and by in-game confirmation, not from here.
+        /// </para>
+        /// </remarks>
+        /// <returns>True when every assertion holds.</returns>
+        private static bool RunL10FactoryCanvasIsBandVisible()
+        {
+            GameObject root = Temp("L10_FactoryCanvas");
+            try
+            {
+                Canvas canvas = RuntimeUIFactory.ConfigureCanvas(root, 0, 0.5f, UIBandId.Hud);
+                if (!Check("the factory returned a canvas", canvas != null)) return false;
+
+                bool ok = Check($"the canvas is not Screen Space - Overlay, so the band pass can draw it " +
+                                $"(got {canvas.renderMode})",
+                    canvas.renderMode != RenderMode.ScreenSpaceOverlay);
+
+                // A camera-space canvas with no camera falls back to overlay-like drawing, so the camera
+                // is part of the contract rather than a detail of it.
+                ok &= Check("the canvas resolved a camera to render through", canvas.worldCamera != null);
+
+                return ok;
+            }
+            finally
+            {
+                Object.DestroyImmediate(root);
+            }
+        }
+
+        /// <summary>L11 — banding a nested subtree moves its graphics out of the parent's raycaster.</summary>
+        /// <remarks>
+        /// Pins the uGUI rule behind a silent input loss: a <c>Graphic</c> registers against its nearest
+        /// canvas, and a <c>GraphicRaycaster</c> only serves the canvas on its own object. Banding a
+        /// subtree gives it a canvas, so its buttons keep drawing and stop being clickable unless that
+        /// band root carries a raycaster of its own. Asserting the re-parenting of ownership is what
+        /// makes the requirement visible; the warning in <see cref="UIBlurBand"/> reports it in-editor.
+        /// </remarks>
+        /// <returns>True when every assertion holds.</returns>
+        private static bool RunL11NestedBandNeedsOwnRaycaster()
+        {
+            GameObject root = Temp("RaycastRoot");
+            try
+            {
+                Canvas rootCanvas = root.AddComponent<Canvas>();
+                root.AddComponent<GraphicRaycaster>();
+
+                GameObject bandRoot = Temp("BandRoot");
+                bandRoot.transform.SetParent(root.transform, false);
+
+                GameObject button = Temp("Button");
+                button.transform.SetParent(bandRoot.transform, false);
+                Image graphic = button.AddComponent<Image>();
+
+                bool ok = Check("before banding, the graphic belongs to the root canvas",
+                    graphic.canvas == rootCanvas);
+
+                bandRoot.AddComponent<UIBlurBand>().SetBand(UIBandId.Menus);
+                Canvas bandCanvas = bandRoot.GetComponent<Canvas>();
+
+                ok &= Check("after banding, the graphic belongs to the band canvas instead",
+                    graphic.canvas == bandCanvas);
+
+                ok &= Check("so the root raycaster no longer owns it, and the band root needs its own",
+                    graphic.canvas != rootCanvas);
+
+                return ok;
+            }
+            finally
+            {
+                Object.DestroyImmediate(root);
+            }
+        }
+
+        /// <summary>L12 — a dropdown's self-sorting popup follows its band, not the root canvas.</summary>
+        /// <remarks>
+        /// <c>TMP_Dropdown</c> resolves the popup's sorting layer from the first <c>isRootCanvas</c>
+        /// ancestor and ignores <c>overrideSorting</c>, so inside a banded subtree it sends the popup to
+        /// the root canvas's band — behind the very panel that opened it. The untouched-canvas assertion
+        /// is the other half: the fixer must not seize canvases that never opted out of inherited
+        /// sorting.
+        /// </remarks>
+        /// <returns>True when every assertion holds.</returns>
+        private static bool RunL12DropdownPopupBanding()
+        {
+            GameObject root = Temp("DropdownRoot");
+            try
+            {
+                Canvas rootCanvas = root.AddComponent<Canvas>();
+                rootCanvas.sortingLayerID = UIBandLayers.SortingLayerIdOf(UIBandId.Hud);
+
+                GameObject bandRoot = Temp("BandRoot");
+                bandRoot.transform.SetParent(root.transform, false);
+                bandRoot.AddComponent<UIBlurBand>().SetBand(UIBandId.Menus);
+
+                GameObject dropdown = Temp("Dropdown");
+                dropdown.transform.SetParent(bandRoot.transform, false);
+                dropdown.AddComponent<TMP_Dropdown>();
+                UIBandDropdownSorting fixer = dropdown.AddComponent<UIBandDropdownSorting>();
+
+                // Stands in for the popup TMP_Dropdown clones on Show(): self-sorting, on the root's band.
+                GameObject popup = Temp("Dropdown List");
+                popup.transform.SetParent(dropdown.transform, false);
+                Canvas popupCanvas = popup.AddComponent<Canvas>();
+                popupCanvas.overrideSorting = true;
+                popupCanvas.sortingLayerID = UIBandLayers.SortingLayerIdOf(UIBandId.Hud);
+
+                GameObject inherited = Temp("InheritingChild");
+                inherited.transform.SetParent(dropdown.transform, false);
+                Canvas inheritedCanvas = inherited.AddComponent<Canvas>();
+                inheritedCanvas.overrideSorting = false;
+
+                bool ok = Check("the popup starts on the root canvas's band, which is the defect",
+                    popupCanvas.sortingLayerID == UIBandLayers.SortingLayerIdOf(UIBandId.Hud));
+
+                fixer.ApplyBandToPopup();
+
+                ok &= Check($"the popup moved to the dropdown's own band " +
+                            $"({SortingLayer.IDToName(popupCanvas.sortingLayerID)})",
+                    popupCanvas.sortingLayerID == UIBandLayers.SortingLayerIdOf(UIBandId.Menus));
+
+                ok &= Check("a canvas that never overrode sorting was left alone",
+                    !inheritedCanvas.overrideSorting);
+
+                return ok;
+            }
+            finally
+            {
+                Object.DestroyImmediate(root);
+            }
+        }
+
+        /// <summary>L13 — the shared dropdown prefab still carries the band sorting fixer.</summary>
+        /// <remarks>
+        /// Every settings dropdown is instantiated from this one prefab, so the component going missing
+        /// there silently returns every one of them to drawing behind its own menu.
+        /// </remarks>
+        /// <returns>True when every assertion holds.</returns>
+        private static bool RunL13DropdownPrefabCarriesFixer()
+        {
+            const string prefabPath = "Assets/Prefabs/UI/Components/Dropdown.prefab";
+
+            GameObject prefab = AssetDatabase.LoadAssetAtPath<GameObject>(prefabPath);
+            if (!Check($"the dropdown prefab loaded from {prefabPath}", prefab != null)) return false;
+
+            TMP_Dropdown dropdown = prefab.GetComponentInChildren<TMP_Dropdown>(true);
+            bool ok = Check("the prefab still hosts a TMP_Dropdown", dropdown != null);
+            if (dropdown == null) return false;
+
+            // On the dropdown itself, not merely somewhere in the prefab: the component reads the
+            // popup out of its own children.
+            ok &= Check("the dropdown object carries UIBandDropdownSorting",
+                dropdown.GetComponent<UIBandDropdownSorting>() != null);
+
+            return ok;
+        }
+
+        /// <summary>L14 — the depth-offset detector finds off-plane UI and exempts the canvas root.</summary>
+        /// <remarks>
+        /// A screen-space canvas on a perspective camera scales anything off its plane, so a stray local
+        /// Z that did nothing under an overlay canvas becomes a visible mis-size. The root-canvas
+        /// exemption is the half worth pinning: Unity puts the canvas at its plane distance, so a
+        /// detector without that exemption reports every converted canvas and gets ignored.
+        /// </remarks>
+        /// <returns>True when every assertion holds.</returns>
+        private static bool RunL14DepthOffsetDetection()
+        {
+            GameObject root = TempRect("DepthRoot");
+            try
+            {
+                Canvas rootCanvas = root.AddComponent<Canvas>();
+                RectTransform rootRect = (RectTransform)root.transform;
+                rootRect.localPosition = new Vector3(0f, 0f, 100f);
+
+                bool ok = Check($"the root canvas's own plane distance is exempt " +
+                                $"(z={rootRect.localPosition.z}, isRootCanvas={rootCanvas.isRootCanvas})",
+                    !UIBandLayers.TryFindDepthOffset(root, out _));
+
+                GameObject child = TempRect("Panel");
+                child.transform.SetParent(root.transform, false);
+
+                ok &= Check("a child flush with the canvas plane is not reported",
+                    !UIBandLayers.TryFindDepthOffset(root, out _));
+
+                child.transform.localPosition = new Vector3(0f, 0f, 1f);
+
+                bool found = UIBandLayers.TryFindDepthOffset(root, out Transform offender);
+                ok &= Check("a child pushed off the plane is reported", found);
+                ok &= Check("the reported transform is the offending child",
+                    found && offender == child.transform);
+
+                return ok;
+            }
+            finally
+            {
+                Object.DestroyImmediate(root);
             }
         }
 

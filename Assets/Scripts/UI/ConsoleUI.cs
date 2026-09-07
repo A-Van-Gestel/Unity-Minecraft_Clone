@@ -2,6 +2,7 @@ using System.Collections;
 using System.Text;
 using Commands;
 using TMPro;
+using UI.Blur;
 using UI.Builders;
 using UnityEngine;
 using UnityEngine.UI;
@@ -397,7 +398,7 @@ namespace UI
             // Own overlay canvas so the console sorts above the scene UI without touching scene objects.
             // Width-matched (0), unlike the benchmark's balanced canvas — the console is anchored to the
             // bottom-left corner, so height scaling would drift it away from that corner.
-            RuntimeUIFactory.ConfigureCanvas(gameObject, SORT_ORDER, 0f);
+            RuntimeUIFactory.ConfigureCanvas(gameObject, SORT_ORDER, 0f, UIBandId.Modals);
 
             BuildPanel();
         }

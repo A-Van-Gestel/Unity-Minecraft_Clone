@@ -24,6 +24,9 @@ namespace UI.Builders
         /// <summary>Name of the UI blur consumer shader, listed in Always Included Shaders so player builds resolve it.</summary>
         private const string BLUR_SHADER_NAME = "Custom/MaskedUIBlur";
 
+        /// <summary>Camera distance the canvas plane sits at, inside the camera's near/far range.</summary>
+        private const float CANVAS_PLANE_DISTANCE = 100f;
+
         private static readonly int s_multiplyColorId = Shader.PropertyToID("_MultiplyColor");
         private static readonly int s_additiveColorId = Shader.PropertyToID("_AdditiveColor");
 
@@ -50,7 +53,7 @@ namespace UI.Builders
 
         #region Canvas
 
-        /// <summary>Creates a new screen-space overlay canvas GameObject with a scaler and raycaster.</summary>
+        /// <summary>Creates a new screen-space camera canvas GameObject with a scaler and raycaster.</summary>
         /// <param name="name">Name for the created GameObject.</param>
         /// <param name="sortingOrder">Canvas sorting order (the scene UI canvas sits at 0).</param>
         /// <param name="matchWidthOrHeight">Scaler width/height match blend.</param>
@@ -64,21 +67,32 @@ namespace UI.Builders
         }
 
         /// <summary>
-        /// Adds the overlay canvas components to an existing GameObject, for a caller that hosts its
-        /// canvas on an object it already owns rather than on a freshly created one.
+        /// Adds the screen-space canvas components to an existing GameObject, for a caller that hosts
+        /// its canvas on an object it already owns rather than on a freshly created one.
         /// </summary>
-        /// <param name="target">The GameObject to turn into an overlay canvas.</param>
+        /// <param name="target">The GameObject to turn into a canvas.</param>
         /// <param name="sortingOrder">Canvas sorting order (the scene UI canvas sits at 0).</param>
         /// <param name="matchWidthOrHeight">Scaler width/height match blend.</param>
-        /// <param name="band">Compositing band this canvas draws in, which decides its layer.</param>
+        /// <param name="band">Compositing band this canvas draws in.</param>
         /// <returns>The added <see cref="Canvas"/>.</returns>
-        /// <remarks>Carries a <see cref="UIBlurBand"/>, so the subtree owns a band layer from the start.</remarks>
+        /// <remarks>Carries a <see cref="UIBlurBand"/>, so the subtree is routed into its band from the start.</remarks>
         public static Canvas ConfigureCanvas(GameObject target, int sortingOrder, float matchWidthOrHeight = 0.5f,
             UIBandId band = UIBandId.Hud)
         {
             Canvas canvas = target.AddComponent<Canvas>();
-            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+
+            // Screen Space - Camera, not Overlay: overlay canvases are drawn by URP outside the render
+            // graph, where the band walk cannot interleave a blur between them.
+            canvas.renderMode = RenderMode.ScreenSpaceCamera;
+            canvas.worldCamera = Camera.main;
+            canvas.planeDistance = CANVAS_PLANE_DISTANCE;
             canvas.sortingOrder = sortingOrder;
+
+            // A camera-space canvas with no camera falls back to overlay-like drawing, which renders
+            // correctly but silently leaves the subtree out of every band. Say so rather than hide it.
+            if (canvas.worldCamera == null)
+                Debug.LogWarning($"RuntimeUIFactory: no Camera.main while building '{target.name}'. " +
+                                 "Its canvas will draw, but outside the UI blur bands.");
 
             CanvasScaler scaler = target.AddComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;

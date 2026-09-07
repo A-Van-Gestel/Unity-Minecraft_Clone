@@ -103,6 +103,37 @@ namespace UI.Blur
             return true;
         }
 
+        /// <summary>Largest depth offset treated as zero, absorbing authoring noise.</summary>
+        private const float DEPTH_EPSILON = 0.0001f;
+
+        /// <summary>Finds UI in a subtree that sits off the canvas plane.</summary>
+        /// <param name="root">Subtree root. Ignored when null.</param>
+        /// <param name="offender">The first transform with a depth offset, when this returns true.</param>
+        /// <returns>True when some descendant carries a non-zero local Z.</returns>
+        /// <remarks>
+        /// A screen-space canvas rendered through a perspective camera projects anything off its plane at
+        /// a different scale, so a stray Z shrinks or grows that element by a fraction of a percent per
+        /// unit. On an overlay canvas the same value does nothing at all, which is how it survives
+        /// authoring unnoticed. The root canvas is exempt: its Z is the plane distance Unity places it at.
+        /// </remarks>
+        public static bool TryFindDepthOffset(GameObject root, out Transform offender)
+        {
+            offender = null;
+            if (root == null) return false;
+
+            foreach (RectTransform rect in root.GetComponentsInChildren<RectTransform>(true))
+            {
+                Canvas canvas = rect.GetComponent<Canvas>();
+                if (canvas != null && canvas.isRootCanvas) continue;
+                if (Mathf.Abs(rect.localPosition.z) <= DEPTH_EPSILON) continue;
+
+                offender = rect;
+                return true;
+            }
+
+            return false;
+        }
+
         /// <summary>Puts a GameObject and every descendant on a layer.</summary>
         /// <param name="root">Subtree root. Ignored when null.</param>
         /// <param name="layer">Layer index to apply; values outside 0-31 are ignored.</param>

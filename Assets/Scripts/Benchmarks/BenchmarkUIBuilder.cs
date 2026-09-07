@@ -1,4 +1,5 @@
 using TMPro;
+using UI.Blur;
 using UI.Builders;
 using UnityEngine;
 using UnityEngine.UI;
@@ -96,7 +97,8 @@ namespace Benchmarks
         public static BenchmarkResultsScreen CreateResultsScreen(string title = "Benchmark Complete",
             Material blurMaterial = null)
         {
-            GameObject canvasObj = RuntimeUIFactory.CreateCanvas("BenchmarkResults_Canvas", RESULTS_SORT_ORDER);
+            GameObject canvasObj = RuntimeUIFactory.CreateCanvas("BenchmarkResults_Canvas", RESULTS_SORT_ORDER,
+                band: UIBandId.Modals);
 
             // Full-screen dark overlay
             GameObject overlay = RuntimeUIFactory.CreatePanel("Results_Overlay", canvasObj.transform);

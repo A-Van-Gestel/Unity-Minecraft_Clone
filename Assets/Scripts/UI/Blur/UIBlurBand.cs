@@ -72,9 +72,47 @@ namespace UI.Blur
             if (!_canvas.isRootCanvas) _canvas.overrideSorting = true;
 
             _canvas.sortingLayerID = sortingLayerId;
+
+#if UNITY_EDITOR
+            WarnIfInteractiveWithoutRaycaster();
+            WarnIfOffCanvasPlane();
+#endif
         }
 
 #if UNITY_EDITOR
+        /// <summary>
+        /// Reports a nested band root whose interactive content can render but never be clicked.
+        /// </summary>
+        /// <remarks>
+        /// uGUI registers a <c>Graphic</c> against its nearest canvas, and a <c>GraphicRaycaster</c> only
+        /// serves the canvas on its own object — so the canvas this component needs for banding moves the
+        /// subtree out of the parent raycaster's reach. The UI still draws, which is what makes the loss
+        /// of input silent.
+        /// </remarks>
+        private void WarnIfInteractiveWithoutRaycaster()
+        {
+            if (_canvas.isRootCanvas || GetComponent<UnityEngine.UI.GraphicRaycaster>() != null) return;
+            if (GetComponentInChildren<UnityEngine.UI.Selectable>(true) == null) return;
+
+            Debug.LogWarning($"UIBlurBand on '{name}' banded a nested canvas holding interactive UI, but " +
+                             "the object has no GraphicRaycaster. Its buttons will draw and never " +
+                             "receive pointer events.", this);
+        }
+
+        /// <summary>Reports UI in this band that sits off the canvas plane.</summary>
+        /// <remarks>
+        /// An overlay canvas ignores local Z; a screen-space canvas rendered through a perspective
+        /// camera projects anything off its plane at a different scale.
+        /// </remarks>
+        private void WarnIfOffCanvasPlane()
+        {
+            if (!UIBandLayers.TryFindDepthOffset(gameObject, out Transform offender)) return;
+
+            Debug.LogWarning($"UIBlurBand on '{name}': '{offender.name}' has local Z " +
+                             $"{offender.localPosition.z}. A screen-space canvas renders through a " +
+                             "perspective camera, so it will be scaled off-size.", offender);
+        }
+
         private void OnValidate() => UnityEditor.EditorApplication.delayCall += ApplyDeferred;
 
         /// <summary>

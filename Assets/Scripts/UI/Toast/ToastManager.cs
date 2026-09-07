@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using UI.Blur;
 using UI.Builders;
 using UnityEngine;
 using UnityEngine.UI;
@@ -121,7 +122,7 @@ namespace UI.Toast
 
             // The canvas first: UIScaleController requires a CanvasScaler and reads it in its own Awake,
             // which runs synchronously inside AddComponent — so the scaler has to exist by then.
-            RuntimeUIFactory.ConfigureCanvas(gameObject, SORT_ORDER);
+            RuntimeUIFactory.ConfigureCanvas(gameObject, SORT_ORDER, band: UIBandId.Notifications);
             gameObject.AddComponent<UIScaleController>();
 
             BuildVariantMaterials();
