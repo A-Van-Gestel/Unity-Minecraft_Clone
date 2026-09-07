@@ -1,6 +1,6 @@
 # UI Blur Backdrop System
 
-**Version:** 2.1  
+**Version:** 2.2  
 **Date:** 2026-09-07  
 **Status:** **Implemented (Stable)** — `UB-0`…`UB-6` and `UB-8` shipped and confirmed in game in both
 scenes (`UB-4` ⏸️ paused, no retune due). `UB-8`'s confirmation was the Render Graph Viewer's pass
@@ -87,7 +87,7 @@ serialized assets, not assumed.
 | `Assets/Shaders/UIBlurBlit.shader`                             | `Hidden/UI/KawaseBlur` — the kernel the chain's iterations run.                                 |
 | `Assets/Shaders/MaskedUIBlur.shader`                           | Consumer. A UI shader that samples `_UIBlurTexture` by screen UV.                               |
 | `Assets/Materials/UI/UIBlur.mat`                               | The shared tinted material (`_MultiplyColor` `0.415`).                                          |
-| `Assets/Materials/UI/UIBlurClear.mat`                          | The neutral variant (`_MultiplyColor` white) — blurs without darkening (§5).                    |
+| `Assets/Materials/UI/UIBlurClear.mat`                          | The neutral variant (`_MultiplyColor` white) — blurs without darkening. Unreferenced today (§5). |
 | `Assets/Editor/Validation/UIBlur/`                             | The rendered-pixel consumer suite and its quad renderer.                                        |
 | `Assets/Editor/Validation/UIBands/`                            | The band-routing suite.                                                                         |
 
@@ -376,16 +376,35 @@ share one material and vary `Image.color.a`.
 
 Two shared assets exist:
 
-- **`UIBlur.mat`** — `_MultiplyColor` `0.415`, the darkening frost used where the panel is the sole
-  darkening layer.
+- **`UIBlur.mat`** — `_MultiplyColor` `0.415`, the darkening frost. **Every frosted surface in both
+  scenes uses it.**
 - **`UIBlurClear.mat`** — `_MultiplyColor` white, so the backdrop **blurs without darkening**. It needs
-  no shader or feature change; the neutral path has always existed.
+  no shader or feature change; the neutral path has always existed. **Currently referenced by nothing**,
+  and kept as the ready-made option for a surface that must not darken.
 
-**The rule that decides between them: tint the frost only where it is the sole darkening layer.** A
-darkening frost stacked under authored scrims darkens twice, and the second layer only drains color —
-`MainMenu`'s world tiles are half-transparent black over a `Scroll View` scrim, which bought text
-contrast against sharp dirt but against an already-darkened blur only pulled a brown backdrop toward
-gray. Where a panel already carries its own colored scrims, frost neutral and let them keep their job.
+**The rule: frost darkens, everywhere.** Legibility is what the tint buys — text over a blurred
+backdrop reads better against the darkened one — and a single frost value across every screen is what
+makes the interface look like one interface. A panel carrying its own scrims therefore darkens twice
+by design rather than by oversight.
+
+**Every darkening layer past the frost must be near-opaque, or it drains color.** Layers stack
+multiplicatively, so a half-transparent one shows the already-darkened result through itself and a
+colored backdrop arrives pulled toward gray. The settings menu's tooltip is the reference: at
+`α 0.949` it is effectively opaque, so nothing beneath it reaches the eye and it reads clean. Both of
+`MainMenu`'s `SelectPanel` layers now match it — the `Scroll View` scrim and the world tiles sit at
+`α 0.95`.
+
+Measured on a 4K frame, the ladder that produced is worth keeping, because it shows where a screen's
+brightness actually comes from: the dirt backdrop renders at roughly `0.52` sRGB, the frost takes it
+to `0.204`, and each near-opaque layer past that lands near its own color. A half-transparent layer
+sits *between* those steps — `α 0.392` put the gaps between rows at `0.157` brown against rows at
+`0.114`, which reads as regular banding down the list. **The frost is never the layer to change**;
+it was doing its job at every point in this.
+
+**A tile's own color cannot be black, because `Selectable` tints multiply.** `ColorTint` resolves to
+`graphic.color × stateColor`, so a black background renders hover (`× 0.9`) and pressed (`× 0.78`)
+identical to normal and the row stops responding to the cursor. The tiles keep `rgb 0.10`. The same
+trap applies to any darkened surface that is also a `Selectable`.
 
 **No tint retune was due when the capture point moved past post-processing** (`UB-4`, ⏸️). The profile's
 only post effect is Bloom at `intensity 0.25` / `threshold 1.1` (`VoxelEngine-Post-Profile.asset`), so
@@ -461,7 +480,7 @@ but still clickable, which is the reason the gates remain.
 Adopted in `UB-6`. One root `Canvas` in Screen Space - Camera (`Hud`), three submenu band roots on
 `Menus` (`Credits&LicencesMenu`, the `SettingsMenu.prefab` instance, the `WorldSelectMenu.prefab`
 instance), three modals inside `WorldSelectMenu` on `Modals`, and a `TooltipRoot` on `Notifications`.
-Seven blurred graphics: five on `UIBlur.mat`, two on `UIBlurClear.mat`.
+Seven blurred graphics, all on `UIBlur.mat`.
 
 **`MainMenu`'s screens never overlap** — `MainMenuController` deactivates the main panel whenever a
 submenu opens — so banding there buys something different from panel-over-panel: the camera renders only
@@ -627,6 +646,16 @@ The standing "do not re-litigate" list.
 
 ## Document History
 
+* **v2.2** - Frost tinting settled the other way: **every frosted surface in both scenes now uses the
+  darkening `UIBlur.mat`**, for text legibility and one consistent look across screens.
+  `MainMenu`'s `SelectPanel` and `CreatePanel` moved off `UIBlurClear.mat`, which is now referenced by
+  nothing and kept as the ready-made neutral option. §6's `MainMenu` count follows. That surfaced the
+  color drain on `SelectPanel`, the one screen stacking layers past the frost; it was closed by raising
+  both to the opacity of the settings tooltip, which occupies the same position and reads cleanly
+  because it is effectively opaque — the world tiles from `α 0.502` and the `Scroll View` scrim from
+  `α 0.392`, both to **`α 0.95`**. §5 now carries the rules that fell out of it, with the measured
+  brightness ladder: every layer past the frost is opaque or it drains, and a `Selectable`'s background
+  cannot be black because `ColorTint` multiplies.
 * **v2.1** - `UB-8`: occupancy reads a band's **content** instead of its root being enabled, which is
   what the v2.0 headline already claimed. Both scenes kept every declared band root enabled for the
   scene's lifetime, so the idle mask was `15` in `World` (four blurs) and `9` in `MainMenu` (two) where
