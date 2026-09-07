@@ -1,6 +1,6 @@
 # Runtime UI Factory
 
-**Version:** 2.0  
+**Version:** 2.1  
 **Date:** 2026-08-15  
 **Status:** **Implemented (Stable)** — RUF-1…RUF-3 all shipped and confirmed in game 2026-08-15.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
@@ -26,8 +26,8 @@ shipped state, §5 the shipped phases, and §4 the resolution of the console/too
   its §4 authoring rules are binding on every panel built here.
 - [`COMMAND_CONSOLE_SYSTEM.md`](COMMAND_CONSOLE_SYSTEM.md) — the console whose view is the second
   consumer.
-- [`TOAST_NOTIFICATION_SYSTEM.md`](TOAST_NOTIFICATION_SYSTEM.md) — the third consumer; its canvas,
-  its per-variant blur materials and its state-dependent backdrop are the §2 toast rows.
+- [`TOAST_NOTIFICATION_SYSTEM.md`](TOAST_NOTIFICATION_SYSTEM.md) — the third consumer; its canvas
+  and its per-variant blur materials are the §2 toast rows.
 - [`../Bugs/_FIXED_BUGS.md`](../Bugs/_FIXED_BUGS.md) — UI_BUGS **#06**, whose remaining benchmark-HUD
   symptom was closed by §5 phase RUF-2.
 
@@ -68,9 +68,9 @@ shipped state, §5 the shipped phases, and §4 the resolution of the console/too
 | `FluidStressController.cs:147`   | Calls `CreateResultsScreen` with **no** blur material — the null-fallback path is live in production, not dead defensive code.       |
 | `ConsoleUI`                      | Hosts its canvas on its own GameObject via `ConfigureCanvas` at `sortingOrder = 100`; panel backdrop goes through `ApplyBlurBackground`. |
 | `TouchControls.cs:371`           | Sets `sortingOrder = 90` directly on its own canvas — above the scene UI, below the console.                                        |
-| `ToastManager` canvas            | `sortingOrder = 250` via `ConfigureCanvas` — above the benchmark results modal (200), so toasts draw over every screen including the pause menu. Safe only because every card sets `blocksRaycasts = false`. Adds `UIScaleController`, so cards honour the UI Scale setting.                                        |
+| `ToastManager` canvas            | `sortingOrder = 250` via `ConfigureCanvas`, in the `Notifications` band — the band is what draws toasts over every other screen; the order places them above the benchmark results modal (200) within it. Safe only because every card sets `blocksRaycasts = false`. Adds `UIScaleController`, so cards honor the UI Scale setting.                                        |
 | …its blur materials              | **One instance per `ToastVariant`**, owned by the manager and destroyed in `OnDestroy` — a variant needs its own tint, but a per-*card* instance would leak one material per card the session ever built. Cards go through `ApplyBlurBackground`.                                                                    |
-| …its state-dependent backdrop    | The manager polls `WorldUIManager.IsPauseMenuOpen` — the pause-menu family being the only full-screen blurred panels — and swaps every live card between the blur material and the flat fallback on the transition. A blurred panel *replaces* the UI beneath it rather than compositing over it (blur doc §4.2), so a frosted card at 250 over a dimmed pause screen would paint un-dimmed world. Cards stay visible in both states; only the material changes. |
+| …its unconditional backdrop      | Cards always frost. The toast canvas is in the `Notifications` band, drawn last with the screen re-blurred just before it, so a card composites over whatever panel is beneath it. The manager's flat-fallback policy was deleted with the limitation that forced it.                                                  |
 | Console panel rect               | x 12–692, y 12–452 at a fixed 1920x1080 reference.                                                                                  |
 | `Toolbar` rect                   | 218x26 at scale 3, bottom-centre, y 5 → spans x ≈ 633–1287, y ≈ 15–93 in reference pixels.                                           |
 
@@ -199,8 +199,11 @@ layout or policy change the arc's non-goals rule out.
 * **v2.0** - RUF-1…RUF-3 shipped and confirmed in game; promoted from `Design/` to `Architecture/`.
   §2 rewritten to the shipped structure, §5 to the shipped phases, and the console/toolbar overlap
   decision recorded in RUF-3's note.
+* **v2.1** - UB-5: the toast row's state-dependent backdrop became unconditional, and
+  `ApplyBlurBackground`'s "pass null where a panel can overlap another" guidance retired with it —
+  the flat fallback is now only the missing-shader path.
 
 ---
 
-**Last Updated:** 2026-08-15  
+**Last Updated:** 2026-09-07  
 **Next Review:** when a third screen adopts the factory, or when §7's vertex-color tinting is measured

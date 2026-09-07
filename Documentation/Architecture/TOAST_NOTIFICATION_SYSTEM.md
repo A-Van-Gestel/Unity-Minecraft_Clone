@@ -1,6 +1,6 @@
 # Toast Notification System
 
-**Version:** 1.0  
+**Version:** 1.1  
 **Date:** 2026-09-02  
 **Status:** **Implemented (Stable)** — TN-0…TN-9 shipped and confirmed in game 2026-09-02.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
@@ -25,9 +25,10 @@ coverage from a live `TMP_FontAsset` query.
 
 - [`RUNTIME_UI_FACTORY.md`](RUNTIME_UI_FACTORY.md) — the code-built-UI factory this is the third
   consumer of; §2's canvas inventory carries the toast rows.
-- [`UI_BLUR_BACKDROP_SYSTEM.md`](UI_BLUR_BACKDROP_SYSTEM.md) — §4's authoring rules and §4.2's
-  "a blurred panel replaces the UI beneath it" govern the backdrop; §8 owns the residual stacking
-  limit this system works around.
+- [`UI_BLUR_BACKDROP_SYSTEM.md`](UI_BLUR_BACKDROP_SYSTEM.md) — §4's authoring rules govern the
+  backdrop. Its §8 stacking limit no longer binds this system: see
+  [`../Design/UI_BLUR_BANDED_COMPOSITING.md`](../Design/UI_BLUR_BANDED_COMPOSITING.md), which put
+  toasts in their own band and removed the flat-fallback policy this system used to carry.
 - [`COMMAND_CONSOLE_SYSTEM.md`](COMMAND_CONSOLE_SYSTEM.md) — §8.5 documents the `/toast` command.
 - [`../Design/SOUND_ENGINE_DESIGN.md`](../Design/SOUND_ENGINE_DESIGN.md) — §5.3 is the music layer
   the first consumer hooks.
@@ -115,12 +116,13 @@ manager exists — toasts are a feedback layer and must never break a caller.
 
 ### 3.1 Canvas
 
-`RuntimeUIFactory.ConfigureCanvas(gameObject, 250)`, then `AddComponent<UIScaleController>()` — in
-that order, because `UIScaleController` requires a `CanvasScaler` and reads it in its own `Awake`,
-which runs synchronously inside `AddComponent`.
+`RuntimeUIFactory.ConfigureCanvas(gameObject, 250, band: UIBandId.Notifications)`, then
+`AddComponent<UIScaleController>()` — in that order, because `UIScaleController` requires a
+`CanvasScaler` and reads it in its own `Awake`, which runs synchronously inside `AddComponent`.
 
-`sortingOrder 250` is above the benchmark results modal at 200, so toasts draw over every screen
-including the pause menu. That is safe only because every card sets `blocksRaycasts = false` and
+The **band** is what puts toasts over every other screen: `Notifications` is the last band drawn.
+`sortingOrder 250` orders this canvas within that band and is above the benchmark results modal at
+200. Drawing on top is safe only because every card sets `blocksRaycasts = false` and
 `interactable = false`, so a card can never eat a click on the menu beneath it.
 
 ### 3.2 Anchors and stacking
@@ -157,30 +159,22 @@ have to know about.
 `AnchorCapacity` is public so a caller raising a batch can size it to what will actually be shown
 rather than hard-coding a number that desyncs when either limit moves.
 
-### 3.4 Backdrop material and suppression
+### 3.4 Backdrop material
 
 The manager owns **one blur material instance per `ToastVariant`**, built in `Awake` from
 `ToastStyles.For(variant).BlurTint` and all destroyed in `OnDestroy`. Per variant rather than per
 card: a variant needs its own tint, but cards are pooled and built lazily, so a per-card instance
 would leak one material per card the session ever needed.
 
-`IsBlurSuppressed` is true while `WorldUIManager.IsPauseMenuOpen`. While suppressed,
-`BackdropMaterialFor` returns null and each card paints its variant's flat colour instead.
+**Cards frost unconditionally.** The toast canvas sits in the `Notifications` band, which is drawn
+last, and the band walk re-blurs the screen immediately before it — so a card's backdrop samples a
+capture that already contains every panel beneath it, including that panel's text. A card raised
+over the pause menu, the settings menu or the open console frosts what is there rather than
+replacing it.
 
-The reason is `UI_BLUR_BACKDROP_SYSTEM.md` §4.2: a blurred panel does not composite over the UI
-beneath it, it *replaces* it with a hole back to the pre-UI frame. A frosted card at order 250 over
-a dimmed pause screen would therefore paint un-dimmed world — `UI_BUGS #06`'s symptom.
-
-**Keyed to the pause menu rather than to "some UI is open"**, because only the pause-menu family is
-full-screen: `PauseMenu` and `HelpMenu` are anchored (0,0)–(1,1) with zero `sizeDelta`, and
-`IsPauseMenuOpen` stays true across the pause panel, the settings menu and the help menu (opening
-either hides the pause panel without clearing the flag). Every other blurred surface is bounded and
-nowhere near the default anchor — the creative inventory is centre-anchored 216×168, the toolbar
-bottom-centre 218×26, the console panel bottom-left 680×440.
-
-`Update` polls that flag every frame — a null check and a bool compare — and runs the swap only on
-the transition, re-resolving the material **per card** from its own `Variant`, since cards of
-different variants can be on screen together.
+`BackdropMaterialFor` therefore returns null only when no material could be built at all, which is
+the missing-shader path; the card paints its variant's flat color instead. There is no state in
+which a card is deliberately flattened, and the manager has no `Update`.
 
 ---
 
@@ -387,10 +381,9 @@ rest of the sound engine, never a verification of the trigger seam.
 
 ## 8. Known limitations
 
-- **A card over a bounded blurred panel still paints un-dimmed world.** Suppression is keyed to
-  full-screen menus, so a bottom-left toast raised while the console is open is not covered. This is
-  the blur system's inability to stack panels, not a policy gap here — see
-  `UI_BLUR_BACKDROP_SYSTEM.md` §8, where the real fix (a second capture point) is tracked.
+- **A card cannot frost another card.** Both sit in the `Notifications` band, and the screen is
+  re-blurred between bands rather than between panels, so the lower card is absent from the capture
+  the upper one samples. Toasts do not overlap, so this is currently unobservable.
 - **The enter/exit fade briefly bleeds sharp screen.** `CanvasGroup.alpha` sweeps during the ~0.22 s
   and ~0.3 s transitions, and alpha *is* sharpness bleed for a blurred panel (blur doc §4.1). No tint
   compensates; removing the fade is the only alternative.
@@ -418,18 +411,20 @@ rest of the sound engine, never a verification of the trigger seam.
 | A `ToastCard.prefab` | Needs a scene-wired manager reference and drags prefab/`.meta` churn into every visual tweak. | 2026-09-02 |
 | Suppressing toasts entirely while any UI is open | A surface that hides whenever a menu opens is not a notification surface. Made safe by non-interactive cards instead. | 2026-09-02 |
 | Offsetting the stack below the F3 panel | Same reasoning; the overlap is accepted. | 2026-09-02 |
-| No blur on the card at all | The compositing constraint is real but the all-or-nothing conclusion was wrong: frosted glass is the intended treatment for every UI surface here, and a state-dependent fallback satisfies both. | 2026-09-02 |
-| Suppressing the backdrop on `WorldUIManager.InUI` | Also true for the console and the creative inventory, neither of which is full-screen nor near the default anchor — it cost the frost and bought nothing. Narrowed to `IsPauseMenuOpen`. | 2026-09-02 |
 | Hand-rolled stack offset math | `VerticalLayoutGroup` + `ContentSizeFitter` handles non-overlap, variable card heights and mid-stack gap closure for free; hand-rolled math would re-derive all three and get wrapped titles wrong. | 2026-09-02 |
 | A `static TrackStarted` event | Would need its own domain-reload handling for the subscriber list. | 2026-09-02 |
 | `event Action<MusicTrack> TrackStarted` | Would require widening the scheduler's pending state, rippling into `QueueTrack`, `ForcePick`, `DiagPendingTrack` and `ForceTrack` — which holds no `MusicTrack` and would have had to fabricate a weight and environment — for fields no subscriber reads. | 2026-09-02 |
-| Moving the flat-fallback policy into `RuntimeUIFactory` | The factory is a stateless builder that deliberately holds no policy; the fallback needs per-frame state and a `WorldUIManager` dependency the factory must not have (it also serves scenes with no `WorldUIManager`). Extract to a `MonoBehaviour` if a second consumer appears. | 2026-09-02 |
 | A per-variant style entry guarded by a test | Made unnecessary by a total switch with an Info default — there is no missing-entry state to catch. | 2026-09-02 |
 
 ---
 
 ## Document History
 
+* **v1.1** - UB-5 removed the flat-fallback policy this system carried: cards frost
+  unconditionally now that the toast canvas has its own band and the screen is re-blurred before it.
+  §3.1 re-points the "draws on top" guarantee from `sortingOrder` to the band, §3.4 drops the
+  suppression rules, §8's un-dimmed-world limitation is replaced by the card-cannot-frost-a-card
+  one, and §9's three suppression-policy rows go with the policy.
 * **v1.0** - Promoted from `Design/TOAST_NOTIFICATION_SYSTEM.md` (v1.4) on TN-9's in-game
   confirmation — **v1.4** being the content that was merged. The design was later bumped to
   **v1.5** by its own freeze edit and then deleted 2026-09-05 per `DG-*`, so
@@ -440,5 +435,5 @@ rest of the sound engine, never a verification of the trigger seam.
 
 ---
 
-**Last Updated:** 2026-09-02  
+**Last Updated:** 2026-09-07  
 **Next Review:** when a second consumer, cover art, or an achievement variant lands

@@ -1,8 +1,8 @@
 # UI Blur Banded Compositing Design
 
-**Version:** 1.10  
+**Version:** 1.11  
 **Date:** 2026-09-06  
-**Status:** Proposed design — not implemented.  
+**Status:** Partially implemented — UB-0…UB-5 shipped and confirmed in game (UB-4 ⏸️); UB-6 and UB-7 remain.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > Moves every UI canvas out of Screen Space - Overlay and into the URP render graph, so the UI blur
@@ -500,7 +500,7 @@ misconfiguration ships.
 | **UB-2 — Band infrastructure**     | `UIBlurChain` lifted out of `UIBlurRendererFeature`, which is then **absorbed**; `UIBandRegistry`; `UIBandCompositeRendererFeature` at `AfterRenderingPostProcessing`, Game camera only; all three renderer-asset masks; **Underwater B17 rewritten** to compare pass events. | 🔴     | UB-1         | ✅ 2026-09-06 |
 | **UB-3 — Canvas conversion**       | Render mode + camera in `ConfigureCanvas`; bands on the four code-built canvases; `World.unity` canvas to Screen Space - Camera with `UIBlurBand` on `Canvas` (Hud), `PauseMenuContainer` (Menus) and a new `TooltipRoot` (Notifications); **`TooltipManager` and `DragAndDropHandler` repositioning rewrites** (§5); the two menu prefabs' off-layer objects; the three retired GameObject layers. Mechanism reworked mid-phase from GameObject-layer to **sorting-layer** banding (§4.2, §9). | 🔴     | UB-2         | ✅ 2026-09-07 |
 | **UB-4 — Look reconciliation**     | Re-tune the six authored tints against the new post-processed capture. **Not needed:** the profile's only post effect is Bloom at `intensity 0.25` / `threshold 1.1`, so sub-white pixels contribute nothing and the tints still read correctly in game (both scenes, 2026-09-07). The phase's one real deliverable — closing the lighting report's accepted limitation 2 — was done separately. | 🟡     | UB-3         | ⏸️ 2026-09-07 |
-| **UB-5 — Workaround removal**      | Delete `ToastManager._wasBlurSuppressed`/`Update`/`IsBlurSuppressed`/`ApplyBackdropForUIState` and the suppression branch in `BackdropMaterialFor`; correct the now-false XML remarks in `RuntimeUIFactory`, `ToastManager`, `ToastCard`.  | 🟢     | UB-3         | —      |
+| **UB-5 — Workaround removal**      | Deleted `ToastManager._wasBlurSuppressed`/`Update`/`IsBlurSuppressed`/`ApplyBackdropForUIState` and the suppression branch in `BackdropMaterialFor`; `ToastCard.Variant` went with them. Corrected the now-false remarks in `RuntimeUIFactory`, `ToastManager`, `ToastCard`, and — found by phrase sweep, not by the identifier list above — `BenchmarkUIBuilder`, `WorldUIManager` and `UIBlurRenderValidationSuite`. Synced `TOAST_NOTIFICATION_SYSTEM.md` and `RUNTIME_UI_FACTORY.md`. | 🟢     | UB-3         | ✅ 2026-09-07 |
 | **UB-6 — MainMenu adoption**       | Convert `MainMenu.unity`'s canvas, declare its bands, and add the frosted panels it does not have today. Expect the same four Overlay-only assumptions UB-3 hit (§5), plus `CreditsMenuController.cs:69` and `WorldSelectMenu.prefab`'s dropdown. | 🟢     | UB-3         | —      |
 | **UB-7 — Validation & promotion**  | Play-mode capture harness + the baseline that actually pins the fix; `docs-sync` promotion of this doc into `UI_BLUR_BACKDROP_SYSTEM.md`.                                                                                                  | 🟡     | UB-5, UB-6   | —      |
 
@@ -512,7 +512,14 @@ result defensible over time.
 deleting the toast suppression policy while band 0's capture point was unsettled would remove the
 fallback covering the toast-over-menu case — UB-3 settled that point
 (`AfterRenderingPostProcessing`, confirmed in game). UB-6 was held back to avoid tuning `MainMenu`'s
-tints twice, which cannot happen if no retune is due. Both now depend on **UB-3**.
+tints twice, which cannot happen if no retune is due. Both were re-pointed at **UB-3**; UB-5 has
+since shipped, leaving **UB-6 and UB-7** as the remaining phases.
+
+**No suite can see UB-5, and none was added.** The band ordering it depends on is already pinned by
+`UI Band Layers` `L1` (sorting-layer order ascends with band order), and the only assertion with
+teeth — a toast showing the console's *text* in its backdrop — is a play-mode capture that UB-7
+owns. A baseline asserting the manager has no `Update` would restate the deletion rather than test
+it. The gate was the in-game check plus `Validate All` as regression cover.
 
 **Validation is built alongside, not after.** The existing `Validate UI Blur Render` suite tests the
 consumer contract offscreen and **cannot see any of this** — it will stay green whether banding
@@ -612,6 +619,14 @@ Two more constraints only a running frame exposed, both now encoded in the featu
 
 ## Document History
 
+* **v1.11** - UB-5 shipped and confirmed in game: the toast flat-fallback policy is deleted and
+  cards frost unconditionally. The confirming case is the design's motivating one (§3) — a
+  bottom-left toast over the open console shows the console's *typed text* blurred in its backdrop,
+  which the deleted policy never covered even when it was working as designed. The phrase sweep it required found three stale-comment sites the phase's own
+  identifier list had missed (`BenchmarkUIBuilder`, `WorldUIManager`, `UIBlurRenderValidationSuite`),
+  and the two Architecture docs carrying the policy were synced. The doc's `Status:` line, which had
+  read "not implemented" since v1.0, now reads partially implemented, and the doc gained the
+  `OPEN_WORK_INDEX` row it had never had.
 * **v1.10** - UB-4 paused: measured the post profile (Bloom only, `threshold 1.1`) and confirmed in
   game that the authored tints still read correctly, so no retune is due. Its one real deliverable —
   the lighting report's limitation 2 — closed separately. UB-5 and UB-6 re-pointed to UB-3.
@@ -646,5 +661,5 @@ Two more constraints only a running frame exposed, both now encoded in the featu
 
 ---
 
-**Last Updated:** 2026-09-06  
-**Next Review:** when UB-4 (look reconciliation) starts
+**Last Updated:** 2026-09-07  
+**Next Review:** when UB-6 (MainMenu adoption) starts
