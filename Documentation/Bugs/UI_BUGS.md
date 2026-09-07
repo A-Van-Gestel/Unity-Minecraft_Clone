@@ -139,7 +139,7 @@ adjacent frames to finally name the destroyer. (If deeper capture is again neede
 **Status:** **Reported, not started.** Reproduced 2026-08-14; deferred by the user as non-blocking. Wants a
 full implementation plan before any code change, because both candidate fixes alter the blur's *look* and
 need a visual sign-off.  
-**Files:** `Assets/Shaders/UIBlurBlit.shader` (kernel), `Assets/Scripts/Rendering/UIBlurRendererFeature.cs`
+**Files:** `Assets/Shaders/UIBlurBlit.shader` (kernel), `Assets/Scripts/Rendering/UIBlurChain.cs`
 (offset progression + blur target size)
 
 **Description:**
@@ -155,7 +155,7 @@ Game view is enough. The backdrop's blur strength visibly shifts as the resoluti
 
 `UIBlurBlit.shader:31` reads `_BlitTexture_TexelSize.xy` (`1/width`, `1/height` of the source) and lines
 37-40 place the four Kawase taps at `(±offset ± 0.5) * texelSize`. The UV-space radius is therefore
-`offset / width`. `UIBlurRendererFeature.cs` derives the blur target from `cameraTargetDescriptor` divided by
+`offset / width`. `UIBlurChain.cs` derives the blur target from `cameraTargetDescriptor` divided by
 `downsample`, so the `downsample` setting shifts the constant but not the proportionality.
 
 With `downsample: 2` and 4 iterations (max offset ~2 texels):

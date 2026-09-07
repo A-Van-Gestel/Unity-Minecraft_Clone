@@ -1,5 +1,5 @@
 // URP replacement for the legacy GrabPass-based MaskedUIBlur.
-// Samples the pre-blurred _UIBlurTexture provided by UIBlurRendererFeature.
+// Samples the pre-blurred _UIBlurTexture published by UIBandCompositeRendererFeature.
 
 Shader "Custom/MaskedUIBlur"
 {
@@ -82,7 +82,7 @@ Shader "Custom/MaskedUIBlur"
             SAMPLER(sampler_MainTex);
             float4 _MainTex_ST;
 
-            // The pre-blurred screen texture provided by UIBlurRendererFeature
+            // The pre-blurred screen texture published by UIBandCompositeRendererFeature
             TEXTURE2D(_UIBlurTexture);
             SAMPLER(sampler_UIBlurTexture);
 
@@ -120,7 +120,7 @@ Shader "Custom/MaskedUIBlur"
             {
                 float2 screenUV = i.screenPos.xy / i.screenPos.w;
 
-                // Sample the pre-blurred screen texture from UIBlurRendererFeature
+                // Sample the pre-blurred screen texture, republished once per UI band
                 half4 blurred = SAMPLE_TEXTURE2D(_UIBlurTexture, sampler_UIBlurTexture, screenUV);
 
                 // Material tints first, then the UI vertex color scales the whole panel — so fading a

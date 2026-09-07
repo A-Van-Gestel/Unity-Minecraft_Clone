@@ -1,9 +1,10 @@
 # UI Blur Backdrop System
 
-**Version:** 1.1  
+**Version:** 1.2  
 **Date:** 2026-08-15  
-**Status:** **Implemented (Stable)** — the producer (`UIBlurRendererFeature`) and the consumer shader
-(`Custom/MaskedUIBlur`) both ship. The consumer's UI contract was completed in `36b74204` (UI_BUGS #06)
+**Status:** **Implemented — superseded in part.** The consumer shader (`Custom/MaskedUIBlur`) ships
+unchanged, but the producer is now `UIBandCompositeRendererFeature`, not `UIBlurRendererFeature`,
+which no longer exists. See the supersession note below before relying on §2 or §4. The consumer's UI contract was completed in `36b74204` (UI_BUGS #06)
 and is guarded by the `Validate UI Blur Render` suite (**5** baselines on rendered pixels) — see §7.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
@@ -13,6 +14,16 @@ and is guarded by the `Validate UI Blur Render` suite (**5** baselines on render
 > overlay canvas draws*, so it contains no UI at all.** A panel therefore does not "see through" to what
 > is behind it — it *replaces* those pixels with a blurred copy of the world. Everything in §4 follows
 > from that one fact.
+
+> ⚠️ **Superseded in part, 2026-09-07 (UB-3).** The premise above — *the blur is captured before any
+> overlay canvas draws, so it contains no UI at all* — **no longer holds for `World.unity`**. UI now
+> draws inside the render graph in ordered bands, and the screen is re-blurred between them, so a
+> panel composites over the UI beneath it instead of replacing it. That retires §8's "panels cannot
+> blur each other" limitation and most of §4's consequences for that scene. `MainMenu.unity` is still
+> on the old path until UB-6. **§1's file table, §2 and §4 are stale in the ways the note in each
+> says; §3, §5, §6 and §7 are unaffected.** The full merge is owned by **UB-7** in
+> [`../Design/UI_BLUR_BANDED_COMPOSITING.md`](../Design/UI_BLUR_BANDED_COMPOSITING.md) — this note
+> exists so the doc does not mislead in the meantime, and is deliberately not that merge.
 
 **Audited:** 2026-08-15, at commit `8c002371` (branch `feat/world-scaling`).
 Findings are from static review of `UIBlurRendererFeature.cs`, `UIBlurHistory.cs`, `MaskedUIBlur.shader`,
@@ -42,7 +53,8 @@ reading the serialized scene and by rendered-pixel measurement through the valid
 
 | File                                                  | Role                                                                             |
 |-------------------------------------------------------|----------------------------------------------------------------------------------|
-| `Assets/Scripts/Rendering/UIBlurRendererFeature.cs`    | Producer. Kawase-blurs the camera color, publishes `_UIBlurTexture`.             |
+| `Assets/Scripts/Rendering/UIBandCompositeRendererFeature.cs` | Producer since UB-3. Walks the UI bands, re-blurring between them. Replaced `UIBlurRendererFeature.cs`. |
+| `Assets/Scripts/Rendering/UIBlurChain.cs`              | The Kawase chain itself, lifted out of the old producer and recorded once per band. |
 | `Assets/Scripts/Rendering/UIBlurHistory.cs`            | Per-camera persistent blur target, so the result survives past the render graph. |
 | `Assets/Shaders/UIBlurBlit.shader`                     | The Kawase blur kernel used by the producer's iterations.                        |
 | `Assets/Shaders/MaskedUIBlur.shader`                   | Consumer. A UI shader that samples `_UIBlurTexture` by screen UV.                |
@@ -53,7 +65,11 @@ reading the serialized scene and by rendered-pixel measurement through the valid
 
 ## 2. Producer: how the blur is made
 
-`UIBlurRendererFeature` enqueues one pass at **`RenderPassEvent.AfterRenderingTransparents`**. It
+⚠️ *Stale since UB-3: the producer is now `UIBandCompositeRendererFeature`, recording at
+`RenderPassEvent.AfterRenderingPostProcessing` once per occupied band rather than once per frame.
+The downsample/iteration/target mechanics below still describe `UIBlurChain` accurately.*
+
+`UIBlurRendererFeature` enqueued one pass at **`RenderPassEvent.AfterRenderingTransparents`**. It
 downsamples the camera color by `downsample` (default 2), runs `iterations` (default 4) Kawase blur
 steps ping-ponging between two render-graph temporaries, and writes the final iteration into a
 **persistent per-camera target** obtained from `UIBlurHistory` — not a pooled render-graph texture,
@@ -249,6 +265,9 @@ Two properties of the harness are load-bearing:
   consumer's UI contract and added the rendered-pixel suite.
 * **v1.1** - `RuntimeUIFactory` took ownership of blur material instances (RUF-1…RUF-3): §5 records the
   shared entry points, §6 adds the three code-built panels and the HUD's negative sorting order.
+* **v1.2** - Supersession note added after UB-3 replaced the producer with
+  `UIBandCompositeRendererFeature`; §1's table and §2's opening corrected. Not a re-audit — the full
+  merge is UB-7's.
 
 ---
 
