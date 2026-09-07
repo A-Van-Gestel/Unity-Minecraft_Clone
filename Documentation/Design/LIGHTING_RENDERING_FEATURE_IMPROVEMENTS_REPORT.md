@@ -456,10 +456,17 @@ game. Tonemapping (§1's second half) and the §5 effects remain open, each stil
 1. **Tonemapping + HDR colour grading not adopted.** Shipped with `m_ColorGradingMode` at LDR and no
    tonemapper, so exactly one variable changed and the A/B captures stayed readable. ACES visibly shifts
    every existing colour and still needs its own capture pass and sign-off.
-2. **Bloom does not appear in the UI blur backdrop.** `UIBlurRendererFeature` injects at
-   `RenderPassEvent.AfterRenderingTransparents` (`UIBlurRendererFeature.cs:73`), and URP composites the
-   post stack *after* that — so the blur snapshots scene colour one stage before bloom exists. Verified in
-   game and **accepted**; changing it means moving the injection point past post-processing.
+2. ~~**Bloom does not appear in the UI blur backdrop.**~~ **CLOSED 2026-09-07 by UB-3.** The entry
+   correctly named the fix — "moving the injection point past post-processing" — and that is what
+   happened: UI moved into the render graph and the capture now records at
+   `RenderPassEvent.AfterRenderingPostProcessing`
+   (`UIBandCompositeRendererFeature.CompositeEvent`), so every blurred surface samples a
+   post-processed screen. `UIBlurRendererFeature` no longer exists; its Kawase chain lives in
+   `UIBlurChain`. Confirmed in game in both scenes. See
+   [`UI_BLUR_BANDED_COMPOSITING.md`](UI_BLUR_BANDED_COMPOSITING.md) §5.
+   <br>Note the bloom actually reaching the backdrop is small: the profile's only effect is Bloom at
+   `intensity 0.25`, `threshold 1.1`, so sub-white pixels contribute nothing and the visible change is
+   confined to over-bright content.
 3. **No performance capture was taken.** Bloom ships default-on without a measured frame cost; the
    post stack adds a full-screen pass plus an intermediate target. Waived by the user for desktop.
 4. **§5 effects** (vignette, DoF, motion blur) remain unstarted — the Volume now exists, so each is one
