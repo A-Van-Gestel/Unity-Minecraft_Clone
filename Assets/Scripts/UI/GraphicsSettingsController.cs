@@ -221,7 +221,10 @@ namespace UI
         /// </summary>
         /// <remarks>
         /// URP clamps render scale to [0.1, 3.0] internally, so the setting's 30–200 % range always lands
-        /// verbatim. Screen-space overlay UI is composited after the upscale and is unaffected.
+        /// verbatim. <b>UI scales with it.</b> UI draws inside the render graph, into the same
+        /// intermediate target the final blit rescales, so at 30 % the interface and its text are
+        /// rendered at 30 % and upscaled with the world. That is a consequence of drawing UI in-pipeline
+        /// and cannot be avoided while it composites there.
         /// </remarks>
         /// <param name="percent">Render resolution as a percentage of the window resolution.</param>
         public static void ApplyRenderScale(int percent)

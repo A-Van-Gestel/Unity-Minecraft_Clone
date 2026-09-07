@@ -76,6 +76,9 @@ namespace Rendering
             TextureHandle tempB = UniversalRenderer.CreateRenderGraphTexture(
                 renderGraph, desc, "_UIBlurTempB", false, FilterMode.Bilinear);
 
+            // Imported per call: each band's chain gets its own handle over the same persistent RTHandle,
+            // so the graph sees no edge between one band's blur and the next band's draw. Record order
+            // plus AllowPassCulling(false) hold that ordering — reorder or cull them and it breaks silently.
             TextureHandle blurResult = renderGraph.ImportTexture(GetBlurTarget(cameraData, ref desc));
             int lastIteration = iterations - 1;
 

@@ -14,7 +14,7 @@ namespace UI
     /// TMP history over a <see cref="TMP_InputField"/>, driving a <see cref="CommandEngine"/>.
     /// <para>
     /// A stateless view over the engine — all output/history/confirmation state lives in
-    /// <see cref="Engine"/>. The whole hierarchy (own overlay canvas included) is built in code at
+    /// <see cref="Engine"/>. The whole hierarchy (own banded canvas included) is built in code at
     /// runtime (TouchControls precedent), so no scene or prefab edits are involved. Spawned and
     /// owned by <see cref="WorldUIManager"/>, which also owns the InUI/cursor/action-map policy.
     /// </para>
@@ -392,10 +392,10 @@ namespace UI
         //  Hierarchy construction (runtime, code-only)
         // ──────────────────────────────────────────────
 
-        /// <summary>Builds the overlay canvas (once, in <see cref="Awake"/>) then the panel and its contents.</summary>
+        /// <summary>Builds the canvas (once, in <see cref="Awake"/>) then the panel and its contents.</summary>
         private void BuildHierarchy()
         {
-            // Own overlay canvas so the console sorts above the scene UI without touching scene objects.
+            // Its own canvas so the console sorts above the scene UI without touching scene objects.
             // Width-matched (0), unlike the benchmark's balanced canvas — the console is anchored to the
             // bottom-left corner, so height scaling would drift it away from that corner.
             RuntimeUIFactory.ConfigureCanvas(gameObject, SORT_ORDER, 0f, UIBandId.Modals);

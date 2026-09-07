@@ -131,7 +131,7 @@ namespace UI
                 consoleObj.transform.SetParent(transform, false);
                 _console = consoleObj.AddComponent<ConsoleUI>();
 
-                // Spawn the toast surface the same way — its own overlay canvas, built in code. The
+                // Spawn the toast surface the same way — its own canvas, built in code. The
                 // now-playing presenter shares the host rather than taking one of its own: it is meaningless
                 // without the manager, and one GameObject keeps their lifetimes identical.
                 GameObject toastObj = new GameObject("Toasts");
