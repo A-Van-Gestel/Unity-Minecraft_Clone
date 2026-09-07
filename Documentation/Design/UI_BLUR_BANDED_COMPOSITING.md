@@ -251,7 +251,7 @@ whole subtree in one component, so a band declaration writes **no property on an
 therefore no prefab overrides — decisive here, because `World.unity`'s UI is 61 prefab instances out
 of 91 canvas objects, and `PauseMenuContainer` alone is 29 (§9).
 
-Four API constraints govern the routing, each found by it breaking something:
+Five API constraints govern the routing, each found by it breaking something:
 
 - `overrideSorting` applies only to a **nested** canvas; Unity forces it back off on a root canvas,
   which already owns its sorting natively. (`L7`, `L9`)
@@ -271,6 +271,13 @@ Four API constraints govern the routing, each found by it breaking something:
   is inactive at rest. Authoring fix: activate the object, call `Apply`, restore its state — the flag
   survives deactivation. At runtime `OnEnable` gets it right on its own, so the defect is confined
   to what the scene file records.
+- **A canvas that loses its camera does not stay camera-space — Unity flips it to overlay.** Assigning
+  a null `worldCamera` silently sets `renderMode` to `ScreenSpaceOverlay`, so the "camera-space with no
+  camera" state does not exist to be detected. That matters because an overlay canvas draws outside the
+  render graph entirely: the subtree leaves the band walk while still looking correct on screen. The
+  detectable state is therefore an **overlay root canvas under a band**, which is always wrong, and
+  `UIBlurBand` restores both the render mode and the camera when it sees one. Measured 2026-09-07 while
+  writing `L16` against the opposite assumption.
 
 A band root that holds no interactive content should *not* get a raycaster — `TooltipRoot` has none
 deliberately, so tooltips cannot intercept clicks meant for the UI beneath them.
@@ -504,6 +511,19 @@ misconfiguration ships.
   is layered over them.
   <br>The rule that generalizes: **tint the frost only where it is the sole darkening layer.** Where a
   panel already carries its own colored scrims, frost neutral and let them keep their job.
+- ⚠️ **Render scale now scales the UI, and this cannot be fixed while banding exists.** UI draws into
+  the same intermediate target URP's final blit rescales, so at the graphics setting's 30 % floor the
+  interface and its text render at 30 % and are upscaled with the world. On the Overlay path UI was
+  composited *after* that blit and was immune, which is what
+  `GraphicsSettingsController.ApplyRenderScale`'s remark used to say. The only way back is to draw UI
+  after the upscale — the backbuffer — which UB-2 measured as unusable for banding, since a band drawn
+  there cannot be captured by the next band's blur. **Accepted, not open**: recorded here so it is not
+  rediscovered as a defect. Confirmed in game at the 30 % floor (2026-09-07, both scenes): everything
+  works, the UI reads softer, nothing regresses.
+  <br>**Two effects stack there, with different causes** — worth separating before anyone tunes either.
+  The soft text and edges are this bullet: UI rasterized at 30 % and upscaled. The *blur's* softness
+  also shifts, and that is `UI_BUGS #05` — the Kawase kernel is specified in texels, so render scale is
+  a second lever onto it beside window resolution. Fixing #05 changes the second and leaves the first.
 - **Always Included Shaders unchanged.** `Custom/MaskedUIBlur` stays listed; no new shader ships.
 - **Reserved seat: per-panel capture.** Nothing in the band design forbids a future band that holds
   exactly one panel, which is how a v2 per-panel mode would be expressed without restructuring.
