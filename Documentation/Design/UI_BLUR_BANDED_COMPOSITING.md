@@ -388,7 +388,10 @@ Modeled directly on `CloudPrepassRendererFeature.CloudPrepass`:
   reach. Nothing errors — the mask simply passes everything, and a scroll list paints across the
   whole screen. `RectMask2D` is unaffected, because it clips in the shader through `_ClipRect`, which
   `MaskedUIBlur` already supports. **A banded scene must use `RectMask2D`, never `Mask`.** `World`
-  hid this by using `RectMask2D` throughout; `MainMenu`'s world list did not.
+  hid this by using `RectMask2D` for its own UI; the two defects it did carry came in through the
+  shared `Dropdown.prefab`. All six stencil `Mask` users are converted and the project now has
+  **zero** — the resolution dropdown was the worst case, spilling 24 of its 27 entries down the
+  screen unclipped in both scenes.
 
 ### 4.5 What the canvases change to
 
@@ -655,19 +658,21 @@ Two more constraints only a running frame exposed, both now encoded in the featu
 
 ## Document History
 
-* **v1.12** - UB-6 shipped and confirmed in game, colors checked against an older production build. §1 retracts the "stencil `Mask` is unused"
-  non-goal and §4.4 explains why it mattered: the band pass binds no depth-stencil attachment, so a
-  stencil `Mask` silently clips nothing and `MainMenu`'s world list painted over the whole screen.
-  Six `Mask` users exist; the two WorldSelect viewports are converted, the two dropdown ones are
-  latent and shared with `World`. §5 also records why a frost must not darken where authored scrims
-  already do: that stacking is what grayed the world tiles, and `UIBlurClear.mat` (neutral
-  `_MultiplyColor`) resolves it without a shader change. §4.2 gains a fourth routing constraint: a band
-  root that starts **inactive** never receives `overrideSorting`, because an inactive nested canvas
-  reports itself as a root — every `MainMenu` band root is inactive at rest, where UB-3's was not.
-  §5 records that `MainMenu`'s screens are mutually exclusive, so banding there buys frost over the
-  `Background` image rather than panel-over-panel. Two scope claims in UB-6's original row were
-  wrong and are corrected in place: the dropdown needing the fixer (it inherits it — `L15` now pins
-  that), and "the same four assumptions" (only one screen-to-world site existed).
+* **v1.12** - UB-6 shipped and confirmed in game, colors checked against an older production build.
+  §1 retracts the "stencil `Mask` is unused" non-goal and §4.4 explains why it mattered: the band
+  pass binds no depth-stencil attachment, so a stencil `Mask` silently clips nothing and
+  `MainMenu`'s world list painted over the whole screen. All six `Mask` users are converted to
+  `RectMask2D`, `Dropdown.prefab` included — the resolution dropdown spilled 24 of 27 entries in
+  both scenes, so the shared-prefab case was live, not latent. §5 also records why a frost must not
+  darken where authored scrims already do: that stacking is what grayed the world tiles, and
+  `UIBlurClear.mat` (neutral `_MultiplyColor`) resolves it without a shader change. §4.2 gains a
+  fourth routing constraint: a band root that starts **inactive** never receives `overrideSorting`,
+  because an inactive nested canvas reports itself as a root — every `MainMenu` band root is
+  inactive at rest, where UB-3's was not. §5 records that `MainMenu`'s screens are mutually
+  exclusive, so banding there buys frost over the `Background` image rather than panel-over-panel.
+  Two scope claims in UB-6's original row were wrong and are corrected in place: the dropdown
+  needing the fixer (it inherits it — `L15` now pins that), and "the same four assumptions" (only
+  one screen-to-world site existed).
 * **v1.11** - UB-5 shipped and confirmed in game: the toast flat-fallback policy is deleted and
   cards frost unconditionally. The confirming case is the design's motivating one (§3) — a
   bottom-left toast over the open console shows the console's *typed text* blurred in its backdrop,
