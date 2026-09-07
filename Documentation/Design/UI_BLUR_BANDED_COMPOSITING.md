@@ -1,6 +1,6 @@
 # UI Blur Banded Compositing Design
 
-**Version:** 1.4  
+**Version:** 1.9  
 **Date:** 2026-09-06  
 **Status:** Proposed design — not implemented.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
@@ -31,6 +31,10 @@ UB-3, after a prefab audit of `World.unity` refuted the premise §9 rejected it 
 §6 and §9 are rewritten to match; the `UI` GameObject layer survives for a narrower job. §4.1 and
 §4.3 also pick up the `AfterRenderingPostProcessing` event that UB-2 settled but left stated only
 in §8.
+
+**Amended:** 2026-09-07 — UB-3 converted the `World` scene. Recorded here: the second Overlay-coordinate
+site (`DragAndDropHandler`) the original audit missed, the retirement of the three band GameObject
+layers the sorting-layer rework made redundant, and the renderer masks restored to excluding only `UI`.
 
 **Relationship to other documents:**
 
@@ -90,13 +94,13 @@ in §8.
 | Area                        | State                                                                                                                                                                            |
 |-----------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | Capture point               | One Kawase chain at `RenderPassEvent.AfterRenderingTransparents`, into a per-camera `UIBlurHistory` RTHandle, published as `_UIBlurTexture` from an unsafe pass. One capture, ever. |
-| Why UI is invisible to it   | Every canvas is Screen Space - Overlay (`World.unity` `m_RenderMode: 0`; `MainMenu.unity` `m_RenderMode: 0`; `RuntimeUIFactory.cs:54` for all four code-built canvases). URP 17.6 *does* draw overlay uGUI inside the render graph — `DrawScreenSpaceUIPass` at `AfterRendering + 2`, i.e. **after** `FinalBlitPass` at `+1` — but it emits **all** overlay UI as one renderer list (`UISubset.UIToolkit_UGUI`, `DrawScreenSpaceUIPass.cs:263`) at a queue offset no user feature can address (`RenderPassEvent` tops out at `AfterRendering`; the `+1`/`+2` offsets are internal constants). So the blur cannot be interleaved between canvases without taking UI off that path. |
+| Why UI is invisible to it   | Every canvas is Screen Space - Overlay (`World.unity` `m_RenderMode: 0`; `MainMenu.unity` `m_RenderMode: 0`; `RuntimeUIFactory.cs:86` for all four code-built canvases). URP 17.6 *does* draw overlay uGUI inside the render graph — `DrawScreenSpaceUIPass` at `AfterRendering + 2`, i.e. **after** `FinalBlitPass` at `+1` — but it emits **all** overlay UI as one renderer list (`UISubset.UIToolkit_UGUI`, `DrawScreenSpaceUIPass.cs:263`) at a queue offset no user feature can address (`RenderPassEvent` tops out at `AfterRendering`; the `+1`/`+2` offsets are internal constants). So the blur cannot be interleaved between canvases without taking UI off that path. |
 | Consumer                    | `MaskedUIBlur.shader` samples `_UIBlurTexture` by screen UV. Output is affine in the sample: `blur * _MultiplyColor + _AdditiveColor`, times vertex color.                        |
 | Blurred surfaces            | 5 in `World.unity` sharing `UIBlur.mat` (grep of its GUID: 5 hits) + Benchmark HUD at sortingOrder −10, benchmark results at 200, `ConsoleUI` at 100, and toast cards at 250 — 8 surfaces across 4 code-built canvases. |
 | `MainMenu.unity`            | **Zero** blur consumers (0 GUID hits). One canvas, Overlay, sortingOrder 0. Adoption here is new work, not conversion.                                                            |
 | Existing workarounds        | `ToastManager.IsBlurSuppressed` polls `WorldUIManager.IsPauseMenuOpen` each frame and flattens cards; `ApplyBlurBackground`'s remarks instruct callers to pass `null` where overlap is possible. Both are policy, and both miss bounded panels — a bottom-left toast over the open console still paints un-dimmed world (observed 2026-09-02). |
 | In-repo draw-pass precedent | `CloudPrepassRendererFeature.cs:73-122` already does render-graph `DrawRenderers`: `RendererListParams(cullResults, drawingSettings, filteringSettings)` → `UseRendererList` → `SetRenderAttachment(activeColorTexture, ReadWrite)` → `DrawRendererList`. The band pass is this file with a different sort and filter, and **without** its depth attachment (§4.4). |
-| Canvases built in code      | **Four**, not three: `BenchmarkUIBuilder.cs:57` (HUD), `BenchmarkUIBuilder.cs:99` (results), `ConsoleUI.cs:400`, `ToastManager.cs:124`. All four route through `RuntimeUIFactory.CreateCanvas`/`ConfigureCanvas`, which hardcodes the render mode at `RuntimeUIFactory.cs:54`. |
+| Canvases built in code      | **Four**, not three: `BenchmarkUIBuilder.cs:57` (HUD), `BenchmarkUIBuilder.cs:99` (results), `ConsoleUI.cs:400`, `ToastManager.cs:124`. All four route through `RuntimeUIFactory.CreateCanvas`/`ConfigureCanvas`, which sets the render mode at `RuntimeUIFactory.cs:86`. |
 | Colour space                | Project is **Linear** (`ProjectSettings.asset` `m_ActiveColorSpace: 1`); the URP asset has HDR on. `FinalBlitPass` applies the `LinearToSRGBConversion` keyword from `cameraData.requireSrgbConversion` (`FinalBlitPass.cs:200`), so anything drawn into the camera colour is encoded on the way out — which overlay UI, drawn after that blit, currently escapes. |
 | Canvas gamma flag           | `m_VertexColorAlwaysGammaSpace` is **0 in `World.unity:4637` but 1 in `MainMenu.unity:3258`** — the two scenes already disagree about how UI vertex colours are treated. Pre-existing and unrelated to this design, but it lands directly in UB-6's path. Both carry `m_AdditionalShaderChannelsFlag: 25` (Tangent + Normal + TexCoord1). |
 | Canvas draw path            | URP's `DrawObjectsPass` includes `SortingCriteria.CanvasOrder` in its sort flags (`DrawObjectsPass.cs:205`), and URP's runtime contains **no** special-casing for `ScreenSpaceCamera` canvases — so such canvases already render through the standard cull-results → `DrawRenderers` path this design filters. |
@@ -245,12 +249,34 @@ whole subtree in one component, so a band declaration writes **no property on an
 therefore no prefab overrides — decisive here, because `World.unity`'s UI is 61 prefab instances out
 of 91 canvas objects, and `PauseMenuContainer` alone is 29 (§9).
 
-Two API constraints govern the routing, both pinned by the `L7` baseline:
+Three API constraints govern the routing, each found by it breaking something:
 
 - `overrideSorting` applies only to a **nested** canvas; Unity forces it back off on a root canvas,
-  which already owns its sorting natively.
+  which already owns its sorting natively. (`L7`, `L9`)
 - It must be set **before** `sortingLayerID` — a canvas still inheriting its parent's sorting ignores
-  the assignment, leaving the id at 0 with no error.
+  the assignment, leaving the id at 0 with no error. (`L7`)
+- **A nested band root needs its own `GraphicRaycaster`.** uGUI registers a `Graphic` against its
+  nearest canvas, and a `GraphicRaycaster` serves only the canvas on its own object — so the canvas
+  that buys the banding takes the whole subtree out of the parent raycaster's reach. The UI still
+  draws, which is exactly what makes the loss of input silent: `PauseMenuContainer` rendered and
+  frosted correctly with all ten of its buttons dead. `UIBlurBand` now warns in-editor when a nested
+  band root holds a `Selectable` and carries no raycaster. (`L11`)
+
+A band root that holds no interactive content should *not* get a raycaster — `TooltipRoot` has none
+deliberately, so tooltips cannot intercept clicks meant for the UI beneath them.
+
+**A control that sorts itself can escape its band.** `TMP_Dropdown` resolves its popup's sorting layer
+from the first ancestor canvas with `isRootCanvas`, ignoring `overrideSorting`
+(`TMP_Dropdown.cs:806`), so a dropdown inside a banded subtree sends its popup to the *root* canvas's
+band — behind the very panel that opened it. uGUI's own `Dropdown` tests
+`isRootCanvas || overrideSorting` (`Dropdown.cs:756`) and is unaffected; the TMP control never
+received that fix. `UIBandDropdownSorting` restores it by re-stamping the band's sorting layer onto
+any self-sorting canvas in the dropdown when the popup is parented, which happens before the blocker
+is built so both follow. It rides on the shared `Dropdown.prefab`, which every settings dropdown is
+instantiated from. (`L12`, `L13`)
+
+The general shape, worth checking for any future control: **anything that sets `overrideSorting`
+itself will pick a sorting layer, and it will not pick the band's.**
 
 Two consequences the per-canvas reading hid:
 
@@ -350,7 +376,7 @@ Modeled directly on `CloudPrepassRendererFeature.CloudPrepass`:
 ### 4.5 What the canvases change to
 
 `RenderMode.ScreenSpaceCamera` with `worldCamera` set. The edit is a **one-line change inside
-`RuntimeUIFactory.ConfigureCanvas` (`RuntimeUIFactory.cs:54`)**, which all four code-built canvases
+`RuntimeUIFactory.ConfigureCanvas` (`RuntimeUIFactory.cs:86`)**, which all four code-built canvases
 route through (§2), plus the serialized canvases of `World.unity` and `MainMenu.unity`. It is not an
 edit at the call sites.
 
@@ -372,7 +398,16 @@ misconfiguration ships.
   geometry draws from a URP raster pass at `AfterRendering`, and row 3 retired the colour-space
   NO-GO branch by measurement. The spike is preserved on `spike/ub0-inpipeline-ui` (`e369f061`)
   as a working reference for UB-2; it ships nothing.
-- ⚠️ **`TooltipManager` is a guaranteed rewrite, not a verification item.** It assigns screen-pixel
+- ✅ **Two guaranteed rewrites, not verification items — and the audit found only one of them.**
+  `TooltipManager` was named here from the start; **`DragAndDropHandler.cs:97`** was not, because it
+  lives outside `Assets/Scripts/UI/` and the original sweep did not reach it. It assigns
+  `_input.MousePosition` straight into the creative-inventory cursor slot's transform — the same
+  identity error, in band 0 of the scene this phase converts. Both now map through the canvas rect
+  with `RectTransformUtility.ScreenPointToLocalPointInRectangle`. The lesson for UB-6 is that this
+  defect class is found by searching for the *pattern*, not by listing UI files:
+  `CreditsMenuController.cs:69` passes a null camera to `FindIntersectingLink` and is the remaining
+  instance, in `MainMenu`.
+- ⚠️ **The original `TooltipManager` finding, kept for the reasoning.** It assigns screen-pixel
   coordinates directly into a world-space transform at `:244`, `:282` and `:316`, and says so in a
   comment at `:243`: *"Setting position directly works perfectly for Overlay canvases."* That
   identity holds only because an Overlay canvas' world space **is** screen pixels. Under
@@ -414,6 +449,22 @@ misconfiguration ships.
 - **UI_BUGS #05 is amplified.** Running the kernel once per occupied band multiplies the
   resolution-dependent radius error rather than introducing it. If #05 is fixed first the two
   changes are independent; if not, the visible inconsistency between bands grows with band count.
+- ⚠️ **Leaving Overlay makes stray Z offsets visible.** An overlay canvas ignores local Z entirely; a
+  screen-space canvas rendered through a **perspective** camera projects anything off its plane at a
+  different scale. Six objects in `World.unity`'s UI carried one — `SettingsMenu` at `z = 1` shrank the
+  full-screen frosted panel by 1.66 px horizontally and 0.93 px vertically, leaving an untinted frame
+  around the whole screen, and `Help & Info Details Text` at `z = 50` was off by ~6 %. The values were
+  harmless for as long as the canvas was an overlay, so nothing flagged them. `UIBandLayers`
+  `TryFindDepthOffset` now detects them and `UIBlurBand` warns in-editor; the root canvas is exempt,
+  because its Z *is* the plane distance Unity places it at. (`L14`)
+  <br>Expect the same sweep to be needed for `MainMenu` in UB-6.
+- ⚠️ **`TouchControls` opts itself out, on every platform it runs on.** It builds its own canvas in
+  code (`TouchControls.cs:365-378`) instead of going through `RuntimeUIFactory`, and sets
+  `RenderMode.ScreenSpaceOverlay` directly, so it takes neither the render mode nor a band. The
+  consequence is not cosmetic: an Overlay canvas is drawn by URP *after* every band, so on mobile the
+  touch controls sit above all banded UI and no panel can frost them. It is mobile-only
+  (`Application.isMobilePlatform`, `InputManager.cs:387`), which is why this is recorded rather than
+  fixed here. Routing it through the factory is the fix whenever mobile is next exercised.
 - **Always Included Shaders unchanged.** `Custom/MaskedUIBlur` stays listed; no new shader ships.
 - **Reserved seat: per-panel capture.** Nothing in the band design forbids a future band that holds
   exactly one panel, which is how a v2 per-panel mode would be expressed without restructuring.
@@ -447,7 +498,7 @@ misconfiguration ships.
 | **UB-0 — Feasibility spike**       | Throwaway branch. One canvas → Screen Space - Camera, one band pass at `AfterRendering`, all three layer masks cleared. Measured against `main`; results in §8. Gated on row 1. Shipped nothing. | 🟡     | —            | ✅ 2026-09-06 (GO) |
 | **UB-1 — Layer discipline**        | The foundation §2 says does not exist: `UIBandId`/`UIBandLayers`, the four band layers in the Tag Manager, layer assignment **at creation** via `RuntimeUIFactory.Attach` (15 call sites), `UIBlurBand`'s enable-time repair pass, and the no-foreign-layer baselines. | 🟡     | UB-0         | ✅ 2026-09-06 |
 | **UB-2 — Band infrastructure**     | `UIBlurChain` lifted out of `UIBlurRendererFeature`, which is then **absorbed**; `UIBandRegistry`; `UIBandCompositeRendererFeature` at `AfterRenderingPostProcessing`, Game camera only; all three renderer-asset masks; **Underwater B17 rewritten** to compare pass events. | 🔴     | UB-1         | ✅ 2026-09-06 |
-| **UB-3 — Canvas conversion**       | Render mode at `RuntimeUIFactory.cs:54`; `UIBlurBand` on the four band roots in `World.unity` + the four code-built canvases; **`TooltipManager` repositioning rewrite** (§5) and its new band-3 root. Mechanism reworked mid-phase from GameObject-layer to **sorting-layer** banding (§4.2, §9). | 🔴     | UB-2         | In progress |
+| **UB-3 — Canvas conversion**       | Render mode + camera in `ConfigureCanvas`; bands on the four code-built canvases; `World.unity` canvas to Screen Space - Camera with `UIBlurBand` on `Canvas` (Hud), `PauseMenuContainer` (Menus) and a new `TooltipRoot` (Notifications); **`TooltipManager` and `DragAndDropHandler` repositioning rewrites** (§5); the two menu prefabs' off-layer objects; the three retired GameObject layers. Mechanism reworked mid-phase from GameObject-layer to **sorting-layer** banding (§4.2, §9). | 🔴     | UB-2         | ✅ 2026-09-07 |
 | **UB-4 — Look reconciliation**     | Re-tune the six authored tints against the new post-processed capture — all eight blurred surfaces now show bloom (§5). In-game A/B against pre-UB-3 captures; closes the lighting report's accepted limitation 2. | 🟡     | UB-3         | —      |
 | **UB-5 — Workaround removal**      | Delete `ToastManager._wasBlurSuppressed`/`Update`/`IsBlurSuppressed`/`ApplyBackdropForUIState` and the suppression branch in `BackdropMaterialFor`; correct the now-false XML remarks in `RuntimeUIFactory`, `ToastManager`, `ToastCard`.  | 🟢     | UB-4         | —      |
 | **UB-6 — MainMenu adoption**       | Convert `MainMenu.unity`'s canvas, declare its bands, and add the frosted panels it does not have today.                                                                                                                                   | 🟢     | UB-4         | —      |
@@ -561,6 +612,21 @@ Two more constraints only a running frame exposed, both now encoded in the featu
 
 ## Document History
 
+* **v1.9** - UB-3 complete and confirmed in game: the `World` scene renders its UI through the band
+  composite, the pause menu frosts the HUD beneath it, and all 748 baselines across 30 suites pass.
+* **v1.8** - Converting `World` exposed six stray local-Z offsets that an overlay canvas had made
+  inert (§5); `SettingsMenu`'s shrank the frosted panel off the screen edges. Zeroed them, added
+  `UIBandLayers.TryFindDepthOffset` with a `UIBlurBand` warning, and baseline `L14`.
+* **v1.7** - `TMP_Dropdown` popups escaped their band (§4.2): TMP resolves the popup's sorting layer
+  from `isRootCanvas` only, unlike uGUI's `Dropdown`. Added `UIBandDropdownSorting` on the shared
+  dropdown prefab, with baselines `L12` and `L13`.
+* **v1.6** - The nested-canvas raycaster constraint (§4.2): banding `PauseMenuContainer` silently
+  killed its buttons, since a nested canvas owns its subtree's graphics for raycasting. Added the
+  raycaster, an in-editor warning on `UIBlurBand`, and baseline `L11`.
+* **v1.5** - UB-3 converted `World`: canvas to Screen Space - Camera with a resolved camera, three
+  band roots declared, `DragAndDropHandler` added to §5's rewrite list, both menu prefabs' off-layer
+  objects fixed, GameObject layers 8-10 retired and the renderer masks narrowed to `UI` only.
+  Baselines `L9` (root-canvas routing) and `L10` (the factory's canvas is band-visible) added.
 * **v1.4** - Band identity moved from GameObject layer to **sorting layer** mid-UB-3 (§4.2, §9's
   rejection reversed by a prefab audit); `UIBlurBand` routes through a nested canvas with
   `overrideSorting`; §4.4 filters on both layer and sorting range; §6 gains the factory
@@ -578,4 +644,4 @@ Two more constraints only a running frame exposed, both now encoded in the featu
 ---
 
 **Last Updated:** 2026-09-06  
-**Next Review:** when UB-3 (canvas conversion) closes
+**Next Review:** when UB-4 (look reconciliation) starts
