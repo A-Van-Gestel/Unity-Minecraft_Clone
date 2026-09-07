@@ -128,6 +128,13 @@ namespace Rendering
             private readonly Settings _settings;
             private readonly UIBandId[] _walk = new UIBandId[UIBandLayers.BandCount];
 
+            /// <summary>Bands already reported as undeclared, so the warning does not repeat per frame.</summary>
+            /// <remarks>
+            /// An instance field rather than a static: the pass is rebuilt by <c>Create</c> on every
+            /// domain reload and inspector edit, so this resets with it and needs no play-mode reset.
+            /// </remarks>
+            private int _warnedBands;
+
             /// <summary>Pass data carrying one band's culled renderers.</summary>
             private class BandPassData
             {
@@ -159,6 +166,15 @@ namespace Rendering
                 for (int i = 0; i < bandCount; i++)
                 {
                     UIBandId band = _walk[i];
+
+                    // An undeclared sorting layer resolves to -1, which collapses the band's filter to a
+                    // range that matches nothing — the band would draw empty and still pay for its blur.
+                    if (UIBandLayers.SortingValueOf(band) < 0)
+                    {
+                        WarnUndeclaredBandOnce(band);
+                        continue;
+                    }
+
                     string label = "UI Band " + band;
 
                     // Re-blur before every band, so this band's panels sample the bands already drawn.
@@ -167,6 +183,23 @@ namespace Rendering
 
                     RecordBandDraw(renderGraph, renderingData, cameraData, lightData, resourceData, band, label);
                 }
+            }
+
+            /// <summary>Reports a band whose sorting layer is missing from the project, once per band.</summary>
+            /// <param name="band">The band whose sorting layer could not be resolved.</param>
+            /// <remarks>
+            /// Silence is the danger here: the band's UI simply stops appearing, with the rest of the walk
+            /// still drawing normally, so nothing about the frame suggests a project-settings problem.
+            /// </remarks>
+            private void WarnUndeclaredBandOnce(UIBandId band)
+            {
+                int bit = 1 << (int)band;
+                if ((_warnedBands & bit) != 0) return;
+
+                _warnedBands |= bit;
+                Debug.LogWarning($"UIBandComposite: band {band} wants sorting layer " +
+                                 $"'{UIBandLayers.SortingLayerNameOf(band)}', which this project does not " +
+                                 "declare. That band's UI will not draw. Add it in Tags and Layers.");
             }
 
             /// <summary>Draws one band's renderers into the camera color.</summary>
@@ -197,10 +230,13 @@ namespace Rendering
 
                 builder.UseRendererList(passData.RendererList);
 
-                // ReadWrite: UI alpha-blends against the frame already in the attachment.
+                // ReadWrite: UI alpha-blends against the frame already in the attachment. No depth
+                // attachment is declared — UI is not world geometry and must never depth-test against
+                // terrain, or a panel disappears behind a hill.
                 builder.SetRenderAttachment(resourceData.activeColorTexture, 0, AccessFlags.ReadWrite);
 
-                // No depth attachment. UI is not world geometry and must never depth-test against terrain.
+                // The band draws whether or not the graph thinks its output is read: the next band's blur
+                // samples the color attachment, which is not a dependency the graph can see.
                 builder.AllowPassCulling(false);
 
                 // Required before the render func may write unity_GUIZTestMode; a raster pass rejects

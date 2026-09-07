@@ -28,6 +28,7 @@ namespace UI.Tooltip
 
         /// <summary>Scratch buffers for corner conversion, so positioning allocates nothing per frame.</summary>
         private readonly Vector3[] _worldCorners = new Vector3[4];
+
         private readonly Vector2[] _screenCorners = new Vector2[4];
 
         [Tooltip("The tooltip UI prefab.")]
@@ -206,8 +207,20 @@ namespace UI.Tooltip
         }
 
         /// <summary>Camera the canvas renders through, or null while it is an overlay canvas.</summary>
-        private Camera UIEventCamera =>
-            _parentCanvas.renderMode == RenderMode.ScreenSpaceOverlay ? null : _parentCanvas.worldCamera;
+        /// <remarks>
+        /// Resolved from the <b>root</b> canvas, which owns render mode and camera: this field is wired to
+        /// a band root, and a band root is a nested canvas. An active nested canvas reports its root's
+        /// values, so both readings agree today — the root is named explicitly so that stays true if the
+        /// field is ever pointed somewhere else.
+        /// </remarks>
+        private Camera UIEventCamera
+        {
+            get
+            {
+                Canvas root = _parentCanvas.rootCanvas;
+                return root.renderMode == RenderMode.ScreenSpaceOverlay ? null : root.worldCamera;
+            }
+        }
 
         /// <summary>Reads a rect's corners in screen pixels, whichever render mode the canvas uses.</summary>
         /// <param name="rect">The rect to measure.</param>

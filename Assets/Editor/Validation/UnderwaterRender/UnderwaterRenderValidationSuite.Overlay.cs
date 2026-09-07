@@ -1,3 +1,4 @@
+using System.Reflection;
 using Data;
 using Editor.Validation.Framework;
 using Editor.Validation.PhysicsSolver.Framework;
@@ -1203,10 +1204,19 @@ namespace Editor.Validation.UnderwaterRender
 
             if (overlay == null || composite == null) return false;
 
-            ok &= Check($"the UI blur composites at {UIBandCompositeRendererFeature.CompositeEvent}, " +
-                        $"after the overlay at {UnderwaterOverlayRendererFeature.OverlayEvent}, so it " +
-                        "samples an already-tinted screen whatever the feature list order",
-                UIBandCompositeRendererFeature.CompositeEvent > UnderwaterOverlayRendererFeature.OverlayEvent);
+            RenderPassEvent? overlayEvent = LivePassEvent(overlay);
+            RenderPassEvent? compositeEvent = LivePassEvent(composite);
+
+            // Reported separately so a feature disabled by a missing shader cannot read as an ordering
+            // failure: both features null their pass in that case.
+            ok &= Check("the overlay feature has created its pass", overlayEvent.HasValue);
+            ok &= Check("the composite feature has created its pass", compositeEvent.HasValue);
+
+            if (overlayEvent.HasValue && compositeEvent.HasValue)
+                ok &= Check($"the UI blur composites at {compositeEvent.Value}, after the overlay at " +
+                            $"{overlayEvent.Value}, so it samples an already-tinted screen whatever the " +
+                            "feature list order",
+                    compositeEvent.Value > overlayEvent.Value);
 
             SerializedObject featureObject = new SerializedObject(overlay);
             SerializedProperty shaderProperty = featureObject.FindProperty("_settings.overlayShader");
@@ -1227,6 +1237,31 @@ namespace Editor.Validation.UnderwaterRender
                     blurShader.objectReferenceValue != null);
 
             return ok;
+        }
+
+        /// <summary>The pass event a feature's live pass carries, or null when it has not created one.</summary>
+        /// <param name="feature">The renderer feature to inspect.</param>
+        /// <returns>The pass's <c>renderPassEvent</c>, or null when the feature holds no pass.</returns>
+        /// <remarks>
+        /// Read off the pass instance rather than the feature's <c>const</c>. Comparing the two constants
+        /// is a compile-time expression that holds however the passes are actually configured, so it
+        /// cannot observe a regression in what <c>Create</c> assigns. The pass is a private field on both
+        /// features and its name differs between them, so it is found by type rather than by name.
+        /// </remarks>
+        private static RenderPassEvent? LivePassEvent(ScriptableRendererFeature feature)
+        {
+            if (feature == null) return null;
+
+            FieldInfo[] fields = feature.GetType()
+                .GetFields(BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
+
+            foreach (FieldInfo field in fields)
+            {
+                if (!typeof(ScriptableRenderPass).IsAssignableFrom(field.FieldType)) continue;
+                if (field.GetValue(feature) is ScriptableRenderPass pass) return pass.renderPassEvent;
+            }
+
+            return null;
         }
     }
 }

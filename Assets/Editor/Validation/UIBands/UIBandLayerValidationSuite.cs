@@ -68,6 +68,8 @@ namespace Editor.Validation.UIBands
                     RunL14DepthOffsetDetection),
                 new Scenario("L15 A nested dropdown instance inherits the band sorting fixer",
                     RunL15NestedDropdownInheritsFixer),
+                new Scenario("L16 A band restores a root canvas that fell back to overlay",
+                    RunL16BandRebindsLostCamera),
             };
 
             return ValidationSuiteRunner.Execute("UI Band Layers", scenarios, KnownBugChannel.Bug,
@@ -222,7 +224,8 @@ namespace Editor.Validation.UIBands
         /// <remarks>
         /// The prepass mask is the one that is easy to leave set and expensive to get wrong: UI in the
         /// depth prepass writes depth on the camera plane, corrupting every consumer that reads camera
-        /// depth. An assertion covering only opaque and transparent passes while that ships.
+        /// depth. An assertion covering only the opaque and transparent masks would pass while that
+        /// misconfiguration ships, which is why the prepass mask is checked alongside them.
         /// </remarks>
         /// <returns>True when every assertion holds.</returns>
         private static bool RunL5RendererMasksCleared()
@@ -450,6 +453,16 @@ namespace Editor.Validation.UIBands
         private static bool RunL10FactoryCanvasIsBandVisible()
         {
             GameObject root = Temp("L10_FactoryCanvas");
+
+            // Camera.main resolves against whatever scene is open, so the fixture supplies its own. It is
+            // hidden and never saved; when the open scene already has one, either satisfies the contract.
+            GameObject camera = Camera.main == null ? Temp("L10_Camera") : null;
+            if (camera != null)
+            {
+                camera.tag = "MainCamera";
+                camera.AddComponent<Camera>();
+            }
+
             try
             {
                 Canvas canvas = RuntimeUIFactory.ConfigureCanvas(root, 0, 0.5f, UIBandId.Hud);
@@ -460,7 +473,8 @@ namespace Editor.Validation.UIBands
                     canvas.renderMode != RenderMode.ScreenSpaceOverlay);
 
                 // A camera-space canvas with no camera falls back to overlay-like drawing, so the camera
-                // is part of the contract rather than a detail of it.
+                // is part of the contract rather than a detail of it. The fixture supplies its own rather
+                // than leaning on whatever scene is open, which decides Camera.main.
                 ok &= Check("the canvas resolved a camera to render through", canvas.worldCamera != null);
 
                 return ok;
@@ -468,6 +482,7 @@ namespace Editor.Validation.UIBands
             finally
             {
                 Object.DestroyImmediate(root);
+                if (camera != null) Object.DestroyImmediate(camera);
             }
         }
 
@@ -672,6 +687,56 @@ namespace Editor.Validation.UIBands
             finally
             {
                 Object.DestroyImmediate(root);
+            }
+        }
+
+        /// <summary>L16 — enabling a band repairs a root canvas that fell back to overlay.</summary>
+        /// <remarks>
+        /// Clearing <c>worldCamera</c> does not leave the canvas camera-space with a null camera: Unity
+        /// flips <c>renderMode</c> to overlay, and an overlay canvas draws outside the render graph, so
+        /// the subtree silently leaves the band walk while still looking right. The fixture asserts that
+        /// flip happened before asserting the repair — without it the scenario would be testing a state
+        /// the engine never produces.
+        /// </remarks>
+        /// <returns>True when every assertion holds.</returns>
+        private static bool RunL16BandRebindsLostCamera()
+        {
+            GameObject root = TempRect("L16_BandCanvas");
+
+            GameObject camera = Camera.main == null ? Temp("L16_Camera") : null;
+            if (camera != null)
+            {
+                camera.tag = "MainCamera";
+                camera.AddComponent<Camera>();
+            }
+
+            try
+            {
+                Canvas canvas = RuntimeUIFactory.ConfigureCanvas(root, 0, 0.5f, UIBandId.Hud);
+                if (!Check("the factory returned a canvas", canvas != null)) return false;
+
+                bool ok = Check("the canvas starts camera-space with a camera",
+                    canvas.renderMode == RenderMode.ScreenSpaceCamera && canvas.worldCamera != null);
+
+                canvas.worldCamera = null;
+
+                // Unity's own normalization is what produces the degraded state, so it is asserted
+                // rather than assumed: without this flip the repair below would have nothing to detect.
+                ok &= Check($"clearing the camera dropped the canvas to overlay (got {canvas.renderMode})",
+                    canvas.renderMode == RenderMode.ScreenSpaceOverlay);
+
+                root.GetComponent<UIBlurBand>().Apply();
+
+                ok &= Check($"enabling the band restored camera-space (got {canvas.renderMode})",
+                    canvas.renderMode == RenderMode.ScreenSpaceCamera);
+                ok &= Check("enabling the band re-bound a camera", canvas.worldCamera != null);
+
+                return ok;
+            }
+            finally
+            {
+                Object.DestroyImmediate(root);
+                if (camera != null) Object.DestroyImmediate(camera);
             }
         }
 

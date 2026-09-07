@@ -62,6 +62,8 @@ namespace UI.Blur
         {
             if (_canvas == null) _canvas = GetComponent<Canvas>();
 
+            RebindCameraIfLost();
+
             UIBandLayers.SetUILayerRecursively(gameObject);
 
             int sortingLayerId = SortingLayerId;
@@ -77,6 +79,34 @@ namespace UI.Blur
             WarnIfInteractiveWithoutRaycaster();
             WarnIfOffCanvasPlane();
 #endif
+        }
+
+        /// <summary>Restores camera-space rendering on a root canvas that has fallen back to overlay.</summary>
+        /// <remarks>
+        /// Losing the camera does not leave a canvas camera-space-with-no-camera: assigning a null
+        /// <c>worldCamera</c> makes Unity flip <c>renderMode</c> to <c>ScreenSpaceOverlay</c>, silently.
+        /// That is the state to detect, and under a band it is always wrong — overlay canvases draw
+        /// outside the render graph, so the whole subtree leaves the band walk while still looking
+        /// correct on screen. The canvas is configured once, so a camera absent at build time or replaced
+        /// by a scene load strands it until something re-binds; enabling the band is that moment.
+        /// The root canvas owns render mode and camera, so a nested band root defers to it.
+        /// </remarks>
+        private void RebindCameraIfLost()
+        {
+            Canvas root = _canvas.rootCanvas;
+            if (root.renderMode != RenderMode.ScreenSpaceOverlay) return;
+
+            Camera camera = Camera.main;
+            if (camera == null)
+            {
+                Debug.LogWarning($"UIBlurBand on '{name}': the root canvas fell back to overlay and no " +
+                                 "camera could be resolved, so this subtree draws outside every band.",
+                    this);
+                return;
+            }
+
+            root.renderMode = RenderMode.ScreenSpaceCamera;
+            root.worldCamera = camera;
         }
 
 #if UNITY_EDITOR
