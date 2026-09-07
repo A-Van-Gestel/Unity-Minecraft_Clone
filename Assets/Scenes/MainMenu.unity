@@ -1316,6 +1316,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::UI.Blur.UIBlurBand
   _band: 3
+  _alwaysOccupied: 0
 --- !u!223 &592831458
 Canvas:
   m_ObjectHideFlags: 0
@@ -1569,6 +1570,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::UI.Blur.UIBlurBand
   _band: 2
+  _alwaysOccupied: 0
 --- !u!223 &905695205
 Canvas:
   m_ObjectHideFlags: 0
@@ -1722,6 +1724,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::UI.Blur.UIBlurBand
   _band: 1
+  _alwaysOccupied: 0
 --- !u!223 &948903514
 Canvas:
   m_ObjectHideFlags: 0
@@ -1830,6 +1833,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::UI.Blur.UIBlurBand
   _band: 2
+  _alwaysOccupied: 0
 --- !u!223 &1092163523
 Canvas:
   m_ObjectHideFlags: 0
@@ -1925,6 +1929,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::UI.Blur.UIBlurBand
   _band: 2
+  _alwaysOccupied: 0
 --- !u!223 &1132429395
 Canvas:
   m_ObjectHideFlags: 0
@@ -2235,6 +2240,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::UI.Blur.UIBlurBand
   _band: 1
+  _alwaysOccupied: 0
 --- !u!223 &1355645076
 Canvas:
   m_ObjectHideFlags: 0
@@ -3766,6 +3772,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::UI.Blur.UIBlurBand
   _band: 0
+  _alwaysOccupied: 0
 --- !u!1 &1908709790
 GameObject:
   m_ObjectHideFlags: 0
@@ -3979,6 +3986,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::UI.Blur.UIBlurBand
   _band: 1
+  _alwaysOccupied: 0
 --- !u!223 &1912617581
 Canvas:
   m_ObjectHideFlags: 0
