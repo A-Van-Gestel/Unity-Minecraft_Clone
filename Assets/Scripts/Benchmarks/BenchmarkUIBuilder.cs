@@ -13,10 +13,9 @@ namespace Benchmarks
     /// </summary>
     public static class BenchmarkUIBuilder
     {
-        // The scene UI canvas sits at sortingOrder 0, and a blurred panel is opaque — it replaces the
-        // pixels beneath it rather than compositing over them (UI_BLUR_BACKDROP_SYSTEM.md §4.2). Sorting
-        // the HUD *below* the scene canvas is what lets the pause menu cover it (UI_BUGS #06); at a
-        // positive order the HUD punched a hole back to the un-blurred world over the paused screen.
+        // Below the scene UI canvas at sortingOrder 0. Both sit in the Hud band, where panels cannot frost
+        // each other, so this order is what keeps the HUD from covering the toolbar and inventory. Panels
+        // in a higher band frost it whatever this value is.
         private const int HUD_SORT_ORDER = -10;
         private const int RESULTS_SORT_ORDER = 200;
 

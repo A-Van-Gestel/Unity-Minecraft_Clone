@@ -19,8 +19,8 @@ namespace UI.Toast
     /// <para>
     /// The backdrop is frosted glass, using the blur material <see cref="ToastManager"/> owns for this
     /// card's <see cref="ToastVariant"/> — the card never allocates one, because cards are pooled and a
-    /// per-card instance would leak one material per toast ever shown. When blur is unavailable or
-    /// suppressed the factory paints the variant's flat color instead.
+    /// per-card instance would leak one material per toast ever shown. When blur is unavailable the
+    /// factory paints the variant's flat color instead.
     /// </para>
     /// <para>
     /// Because cards are reused, <see cref="Show"/> rewrites <b>every</b> variant-dependent property rather
@@ -76,14 +76,11 @@ namespace UI.Toast
         private Action<ToastCard> _onFinished;
 
         /// <summary>
-        /// The flat color this card paints when blur is unavailable or suppressed, from its variant's
-        /// style. Held because <see cref="SetBackdrop"/> is re-called mid-life by the manager's backdrop
-        /// swap and must not fall back to a neutral color on a warning card.
+        /// The flat color this card paints when blur is unavailable, from its variant's style. Held
+        /// because <see cref="SetBackdrop"/> can be re-called after construction and must not fall back to
+        /// a neutral color on a warning card.
         /// </summary>
         private Color _flatBackdrop;
-
-        /// <summary>The variant this card is currently showing, so the manager can re-resolve its material.</summary>
-        public ToastVariant Variant { get; private set; }
 
         /// <summary>
         /// Builds a card hierarchy under <paramref name="parent"/>, inactive and ready to be shown.
@@ -152,10 +149,9 @@ namespace UI.Toast
         /// </summary>
         /// <param name="blurInstance">The shared blur material, or null to force the flat fallback.</param>
         /// <remarks>
-        /// Re-callable at any point in a card's life, because the manager swaps every live card to the flat
-        /// backdrop while a full-screen panel is up: a blurred panel does not composite over the UI beneath it, it
-        /// replaces it (UI_BLUR_BACKDROP_SYSTEM.md §4.2), so a frosted card at this canvas's sorting order
-        /// would paint un-dimmed world over a dimmed pause screen.
+        /// Public and re-callable at any point in a card's life, which is more than <see cref="Show"/>
+        /// needs: it is the seam a caller would use to move a live card between backdrops without
+        /// rebuilding it.
         /// </remarks>
         public void SetBackdrop(Material blurInstance)
         {
@@ -278,7 +274,6 @@ namespace UI.Toast
 
             // Every variant-dependent property is rewritten here, not just the ones this request sets: a
             // pooled card last shown as an Error would otherwise come back red under a neutral title.
-            Variant = request.Variant;
             _flatBackdrop = style.FlatBackdrop;
             _titleText.color = style.Accent;
             _glyphText.color = style.Accent;

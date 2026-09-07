@@ -154,16 +154,13 @@ namespace UI.Builders
         /// <param name="fallbackColor">Flat color painted when no blur material is available.</param>
         /// <returns>True when the blur material was applied; false when the flat fallback was used.</returns>
         /// <remarks>
-        /// <b>A blurred panel cannot draw over other UI.</b> The blur is captured before any overlay canvas
-        /// draws, so a blurred graphic does not composite over what is beneath it — it replaces it with a
-        /// hole back to the pre-UI frame (UI_BLUR_BACKDROP_SYSTEM.md §4.2). Frosting a panel on a canvas
-        /// that can appear above another blurred or dimmed panel therefore paints un-dimmed world over it,
-        /// which is `UI_BUGS #06`'s symptom.
+        /// A blurred panel composites over the UI beneath it, provided that UI is in a lower band: the
+        /// screen is re-blurred before each band draws, so a panel frosts every band already painted.
+        /// Two panels in the <i>same</i> band still cannot stack — the lower one is not in the capture the
+        /// upper one samples — which is what a band declaration exists to resolve.
         /// <para>
-        /// Where that can happen, pass <c>null</c> for <paramref name="blurInstance"/> while it does: the
-        /// flat fallback composites normally. This method is safe to re-call at any point in a graphic's
-        /// life, which is what makes that swap possible: a caller can move a graphic between frosted and
-        /// flat as the UI state around it changes.
+        /// Safe to re-call at any point in a graphic's life, so a caller can move a graphic between the
+        /// frosted and flat backdrops as the UI around it changes.
         /// </para>
         /// </remarks>
         public static bool ApplyBlurBackground(Image image, Material blurInstance, Color fallbackColor)
