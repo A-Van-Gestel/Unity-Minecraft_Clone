@@ -26,9 +26,9 @@ coverage from a live `TMP_FontAsset` query.
 - [`RUNTIME_UI_FACTORY.md`](RUNTIME_UI_FACTORY.md) — the code-built-UI factory this is the third
   consumer of; §2's canvas inventory carries the toast rows.
 - [`UI_BLUR_BACKDROP_SYSTEM.md`](UI_BLUR_BACKDROP_SYSTEM.md) — §4's authoring rules govern the
-  backdrop. Its §8 stacking limit no longer binds this system: see
-  [`../Design/UI_BLUR_BANDED_COMPOSITING.md`](../Design/UI_BLUR_BANDED_COMPOSITING.md), which put
-  toasts in their own band and removed the flat-fallback policy this system used to carry.
+  backdrop. Its old global stacking limit no longer binds this system: banded compositing (`UB-*`)
+  put toasts in their own `Notifications` band and removed the flat-fallback policy this system used
+  to carry. What remains is the per-band limit in its §4.2.
 - [`COMMAND_CONSOLE_SYSTEM.md`](COMMAND_CONSOLE_SYSTEM.md) — §8.5 documents the `/toast` command.
 - [`../Design/SOUND_ENGINE_DESIGN.md`](../Design/SOUND_ENGINE_DESIGN.md) — §5.3 is the music layer
   the first consumer hooks.

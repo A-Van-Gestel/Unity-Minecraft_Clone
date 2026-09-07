@@ -51,8 +51,9 @@ shipped state, §5 the shipped phases, and §4 the resolution of the console/too
   UI stays scene-authored.
 - **Restyling the benchmark HUD or the console.** Both keep their current look; only the construction
   path changes.
-- **Making blurred panels stack.** Impossible without a second blur capture point — see the blur doc's
-  §8.
+- **Making blurred panels stack.** Not this factory's problem: it needed a second blur capture point,
+  which the `UB-*` banded-compositing arc shipped. Panels now stack across bands; see the blur doc's
+  §2 and §4.2.
 
 ---
 
@@ -188,7 +189,7 @@ layout or policy change the arc's non-goals rule out.
 |---------|-------------------------------------------------------------------------------------------------------------|
 | v2      | Vertex-color tinting (§4 Option A) once the `CanvasRenderer` color-space question is measured.               |
 | v2      | Fold `TouchControls`' runtime construction into the factory if its primitives turn out to overlap.           |
-| v3      | A blurred-graphic-inside-`Mask` path, once anything in the project needs one (blur doc §8).                   |
+| ⛔       | ~~A blurred-graphic-inside-`Mask` path.~~ Unreachable: the band pass binds no depth-stencil attachment, so a stencil `Mask` cannot clip there at all. `RectMask2D` is the only masking route (blur doc §8). |
 
 ---
 

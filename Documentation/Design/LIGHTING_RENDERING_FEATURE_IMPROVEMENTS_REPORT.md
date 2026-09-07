@@ -463,7 +463,7 @@ game. Tonemapping (§1's second half) and the §5 effects remain open, each stil
    (`UIBandCompositeRendererFeature.CompositeEvent`), so every blurred surface samples a
    post-processed screen. `UIBlurRendererFeature` no longer exists; its Kawase chain lives in
    `UIBlurChain`. Confirmed in game in both scenes. See
-   [`UI_BLUR_BANDED_COMPOSITING.md`](UI_BLUR_BANDED_COMPOSITING.md) §5.
+   [`../Architecture/UI_BLUR_BACKDROP_SYSTEM.md`](../Architecture/UI_BLUR_BACKDROP_SYSTEM.md) §2.1.
    <br>Note the bloom actually reaching the backdrop is small: the profile's only effect is Bloom at
    `intensity 0.25`, `threshold 1.1`, so sub-white pixels contribute nothing and the visible change is
    confined to over-bright content.
