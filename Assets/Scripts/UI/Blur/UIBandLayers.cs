@@ -150,5 +150,42 @@ namespace UI.Blur
         /// <summary>Puts a GameObject and every descendant on the UI layer, if that layer is declared.</summary>
         /// <param name="root">Subtree root. Ignored when null.</param>
         public static void SetUILayerRecursively(GameObject root) => SetLayerRecursively(root, UILayer);
+
+        /// <summary>Whether a subtree currently holds anything uGUI will draw.</summary>
+        /// <param name="root">Subtree root. A null or inactive root holds nothing.</param>
+        /// <returns>True at the first active, enabled <c>Graphic</c> found anywhere below the root.</returns>
+        /// <remarks>
+        /// A transform walk rather than a <c>GraphicRegistry</c> query: uGUI registers a graphic against
+        /// its nearest active canvas, so a subtree holding a nested <c>overrideSorting</c> canvas spreads
+        /// its graphics over several registry buckets while still drawing as one subtree.
+        /// <para>
+        /// Allocates nothing and returns at the first hit, because it is read per frame: an empty
+        /// subtree costs its inactive-child checks, an occupied one the depth to its first graphic.
+        /// </para>
+        /// </remarks>
+        public static bool HasVisibleGraphic(GameObject root)
+        {
+            if (root == null || !root.activeInHierarchy) return false;
+
+            return SubtreeHasVisibleGraphic(root.transform);
+        }
+
+        /// <summary>Depth-first search for the first drawable graphic, pruning inactive subtrees.</summary>
+        /// <param name="node">Node to test, whose ancestors are already known active.</param>
+        /// <returns>True when this node or any descendant draws.</returns>
+        private static bool SubtreeHasVisibleGraphic(Transform node)
+        {
+            if (!node.gameObject.activeSelf) return false;
+
+            // A disabled Graphic keeps its CanvasRenderer but submits no mesh, so the component's own
+            // enabled flag has to be tested beside the GameObject's.
+            if (node.TryGetComponent(out UnityEngine.UI.Graphic graphic) && graphic.enabled) return true;
+
+            for (int i = 0; i < node.childCount; i++)
+                if (SubtreeHasVisibleGraphic(node.GetChild(i)))
+                    return true;
+
+            return false;
+        }
     }
 }

@@ -19,6 +19,10 @@ namespace UI.Blur
         [SerializeField]
         private UIBandId _band = UIBandId.Hud;
 
+        [Tooltip("Keep this band in the walk even while its subtree draws nothing. Only needed for a band whose content is not a uGUI Graphic.")]
+        [SerializeField]
+        private bool _alwaysOccupied;
+
         private Canvas _canvas;
 
         /// <summary>The band this subtree draws in.</summary>
@@ -26,6 +30,19 @@ namespace UI.Blur
 
         /// <summary>The sorting layer id this subtree's canvas carries.</summary>
         public int SortingLayerId => UIBandLayers.SortingLayerIdOf(_band);
+
+        /// <summary>Whether this subtree currently has something for its band to draw.</summary>
+        /// <remarks>
+        /// Read from the subtree rather than from this component, because the two are independent: a
+        /// band root stays enabled for as long as the surface it declares exists, while the panels
+        /// below it come and go.
+        /// <para>
+        /// <c>_alwaysOccupied</c> overrides the test. The band draw filter matches any renderer on the
+        /// UI layer in the band's sorting layer, while the test sees only uGUI graphics, so a subtree
+        /// drawing through anything else must declare itself or leave the walk silently.
+        /// </para>
+        /// </remarks>
+        public bool HasVisibleContent => _alwaysOccupied || UIBandLayers.HasVisibleGraphic(gameObject);
 
         private void OnEnable()
         {

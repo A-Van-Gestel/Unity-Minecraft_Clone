@@ -70,6 +70,12 @@ namespace Editor.Validation.UIBands
                     RunL15NestedDropdownInheritsFixer),
                 new Scenario("L16 A band restores a root canvas that fell back to overlay",
                     RunL16BandRebindsLostCamera),
+                new Scenario("L17 A band is occupied by its content, not by its root being enabled",
+                    RunL17OccupancyTracksContent),
+                new Scenario("L18 A graphic built after the band root enabled still occupies its band",
+                    RunL18LateNestedContentOccupies),
+                new Scenario("L19 A disabled graphic vacates a band, and the always-occupied opt-out holds it",
+                    RunL19DisabledGraphicAndForcedOccupancy),
             };
 
             return ValidationSuiteRunner.Execute("UI Band Layers", scenarios, KnownBugChannel.Bug,
@@ -772,6 +778,163 @@ namespace Editor.Validation.UIBands
                     dropdown.GetComponent<UIBandDropdownSorting>() != null);
 
             return ok;
+        }
+
+        /// <summary>L17 — occupancy follows the subtree's content, not the band root's enabled state.</summary>
+        /// <remarks>
+        /// The band root is enabled across all three reads, so only its content varies — an occupancy
+        /// keyed on the component would report the band on every frame and pay for a blur it draws
+        /// nothing into.
+        /// <para>
+        /// The occupied half deliberately goes through <see cref="UIBandRegistry"/> rather than the
+        /// component: a band that failed to register would otherwise satisfy the two vacant assertions
+        /// and leave this baseline green while no band could ever draw.
+        /// </para>
+        /// </remarks>
+        /// <returns>True when every assertion holds.</returns>
+        private static bool RunL17OccupancyTracksContent()
+        {
+            GameObject root = Temp("Scene");
+            try
+            {
+                root.AddComponent<Canvas>();
+
+                GameObject bandRoot = TempRect("BandRoot");
+                bandRoot.transform.SetParent(root.transform, false);
+                UIBlurBand band = bandRoot.AddComponent<UIBlurBand>();
+                band.SetBand(UIBandId.Menus);
+
+                GameObject panel = TempRect("Panel");
+                panel.transform.SetParent(bandRoot.transform, false);
+                panel.AddComponent<Image>();
+                panel.SetActive(false);
+
+                bool ok = Check("the band root is enabled throughout, so only its content varies below",
+                    band.isActiveAndEnabled);
+
+                ok &= Check("an enabled band root whose only panel is inactive holds nothing drawable",
+                    !band.HasVisibleContent);
+
+                panel.SetActive(true);
+                ok &= Check("activating the panel gives the subtree content", band.HasVisibleContent);
+                ok &= Check($"and the registry reports the band occupied ({UIBandId.Menus})",
+                    UIBandRegistry.IsOccupied(UIBandId.Menus));
+
+                panel.SetActive(false);
+                ok &= Check("deactivating it vacates the band again", !band.HasVisibleContent);
+
+                return ok;
+            }
+            finally
+            {
+                Object.DestroyImmediate(root);
+            }
+        }
+
+        /// <summary>L18 — content built late, deep, and behind its own sorting canvas still occupies.</summary>
+        /// <remarks>
+        /// The failure this pins is a vanished band, the worst outcome available here: a panel whose
+        /// band left the walk still looks authored correctly and simply stops appearing. Both properties
+        /// of the scenario are load-bearing — content routinely appears after its band root enabled, and
+        /// a graphic under a nested <c>overrideSorting</c> canvas registers with uGUI against <i>that</i>
+        /// canvas rather than the band root's, so an occupancy test reading uGUI's per-canvas registry
+        /// instead of the subtree would miss it.
+        /// </remarks>
+        /// <returns>True when every assertion holds.</returns>
+        private static bool RunL18LateNestedContentOccupies()
+        {
+            GameObject root = Temp("Scene");
+            try
+            {
+                root.AddComponent<Canvas>();
+
+                GameObject bandRoot = TempRect("BandRoot");
+                bandRoot.transform.SetParent(root.transform, false);
+                UIBlurBand band = bandRoot.AddComponent<UIBlurBand>();
+                band.SetBand(UIBandId.Modals);
+
+                bool ok = Check("the band root starts empty", !band.HasVisibleContent);
+
+                // Built only now: the band root is already enabled, which is the ordering every
+                // code-built modal and notification surface actually has.
+                GameObject container = TempRect("Container");
+                container.transform.SetParent(bandRoot.transform, false);
+
+                GameObject popup = TempRect("SelfSortingPopup");
+                popup.transform.SetParent(container.transform, false);
+                Canvas popupCanvas = popup.AddComponent<Canvas>();
+                popupCanvas.overrideSorting = true;
+
+                GameObject label = TempRect("Label");
+                label.transform.SetParent(popup.transform, false);
+                label.AddComponent<Image>();
+
+                ok &= Check("the popup canvas really does sort itself, so its graphics leave the band " +
+                            "root's uGUI bucket", popupCanvas.overrideSorting);
+                ok &= Check("a graphic added after enable, three levels down and under its own sorting " +
+                            "canvas, occupies the band", band.HasVisibleContent);
+                ok &= Check($"and the registry reports the band occupied ({UIBandId.Modals})",
+                    UIBandRegistry.IsOccupied(UIBandId.Modals));
+
+                return ok;
+            }
+            finally
+            {
+                Object.DestroyImmediate(root);
+            }
+        }
+
+        /// <summary>L19 — a disabled graphic draws nothing, and the opt-out overrides the whole test.</summary>
+        /// <remarks>
+        /// The opt-out exists because the band draw filter matches any renderer on the UI layer in the
+        /// band's sorting layer, while this occupancy test only sees uGUI graphics. A band drawing
+        /// through anything else has to declare itself, and the flag is asserted through
+        /// <c>SerializedObject</c> so the serialized field name is pinned along with the behavior.
+        /// </remarks>
+        /// <returns>True when every assertion holds.</returns>
+        private static bool RunL19DisabledGraphicAndForcedOccupancy()
+        {
+            GameObject root = Temp("Scene");
+            try
+            {
+                root.AddComponent<Canvas>();
+
+                GameObject bandRoot = TempRect("BandRoot");
+                bandRoot.transform.SetParent(root.transform, false);
+                UIBlurBand band = bandRoot.AddComponent<UIBlurBand>();
+                band.SetBand(UIBandId.Notifications);
+
+                GameObject panel = TempRect("Panel");
+                panel.transform.SetParent(bandRoot.transform, false);
+                Image image = panel.AddComponent<Image>();
+
+                bool ok = Check("an active graphic occupies the band", band.HasVisibleContent);
+
+                image.enabled = false;
+                ok &= Check("disabling the graphic component on a still-active object vacates the band",
+                    !band.HasVisibleContent);
+
+                SerializedObject serialized = new SerializedObject(band);
+                SerializedProperty forced = serialized.FindProperty("_alwaysOccupied");
+
+                ok &= Check("UIBlurBand serializes an _alwaysOccupied opt-out", forced != null);
+                if (forced == null) return false;
+
+                ok &= Check("the opt-out defaults off, so a band earns its place by drawing",
+                    !forced.boolValue);
+
+                forced.boolValue = true;
+                serialized.ApplyModifiedPropertiesWithoutUndo();
+
+                ok &= Check("an opted-out band stays occupied with nothing drawable below it",
+                    band.HasVisibleContent);
+
+                return ok;
+            }
+            finally
+            {
+                Object.DestroyImmediate(root);
+            }
         }
     }
 }

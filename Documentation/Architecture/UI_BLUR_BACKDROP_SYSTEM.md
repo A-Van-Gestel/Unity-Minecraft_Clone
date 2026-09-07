@@ -1,10 +1,12 @@
 # UI Blur Backdrop System
 
-**Version:** 2.0  
+**Version:** 2.1  
 **Date:** 2026-09-07  
-**Status:** **Implemented (Stable)** — `UB-0`…`UB-6` shipped and confirmed in game in both scenes
-(`UB-4` ⏸️ paused, no retune due). `UB-7`'s promotion half is this document; its play-mode regression
-guard is `NS-12` in
+**Status:** **Implemented (Stable)** — `UB-0`…`UB-6` and `UB-8` shipped and confirmed in game in both
+scenes (`UB-4` ⏸️ paused, no retune due). `UB-8`'s confirmation was the Render Graph Viewer's pass
+list on 2026-09-07: bands appear and disappear from the recorded frame as surfaces open and close, in
+`World` and `MainMenu` alike. `UB-7`'s promotion half is this document; its play-mode regression guard
+is `NS-12` in
 [`../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md`](../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md).  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
@@ -12,8 +14,8 @@ guard is `NS-12` in
 > *bands*, and the screen is re-blurred between them — so a panel samples a `_UIBlurTexture` that
 > already contains every band beneath it. **The pivotal property: correctness comes from *when* a
 > panel is drawn, not from what its shader does.** `Custom/MaskedUIBlur` samples one global by screen
-> UV and knows nothing about bands. Cost tracks *occupied bands*, not panels: an idle HUD-only frame
-> records exactly one blur.
+> UV and knows nothing about bands. Cost tracks the bands that currently *draw something*, not panels
+> and not declared bands: an idle HUD-only frame records exactly one blur in both scenes.
 
 **Audited:** 2026-09-07, at commit `0c2d3f7a` (branch `feat/ui-blur-rework`).
 Every claim below was re-verified against current code this session, from the code rather than from
@@ -66,6 +68,7 @@ serialized assets, not assumed.
 | **UB-5** | Toast flat-fallback policy deleted; cards frost unconditionally | §6, and `TOAST_NOTIFICATION_SYSTEM.md` |
 | **UB-6** | `MainMenu.unity` adoption: bands, `UIBlurClear.mat`, stencil `Mask` → `RectMask2D`, canvas camera for link hit-testing | §2.2, §5, §6, §8 |
 | **UB-7** | Validation & promotion | **Split.** The promotion is this document. The play-mode regression guard is `NS-12` in [`../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md`](../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md) |
+| **UB-8** | Occupancy reads a band's *content* rather than its root being enabled, so a declared-but-empty band leaves the walk | §2.1, §6, §7 (`L17`–`L19`), §8 |
 
 ---
 
@@ -77,7 +80,7 @@ serialized assets, not assumed.
 | `Assets/Scripts/Rendering/UIBlurChain.cs`                      | The Kawase chain and the `_UIBlurTexture` publish, recorded once per band.                     |
 | `Assets/Scripts/Rendering/UIBlurHistory.cs`                    | Per-camera persistent blur target, so the result is not a pooled render-graph texture.          |
 | `Assets/Scripts/UI/Blur/UIBandId.cs`                           | The four ordered bands. The enum value *is* the paint order and the walk index.                 |
-| `Assets/Scripts/UI/Blur/UIBandLayers.cs`                       | Resolves a band's sorting layer and the single `UI` GameObject layer; off-plane Z detection.    |
+| `Assets/Scripts/UI/Blur/UIBandLayers.cs`                       | Resolves a band's sorting layer and the single `UI` GameObject layer; off-plane Z detection; the subtree content test occupancy reads. |
 | `Assets/Scripts/UI/Blur/UIBandRegistry.cs`                     | Which bands currently have content, and the walk order derived from that.                       |
 | `Assets/Scripts/UI/Blur/UIBlurBand.cs`                         | Declares a subtree as a band. One component routes the whole subtree.                           |
 | `Assets/Scripts/UI/Blur/UIBandDropdownSorting.cs`              | Keeps a `TMP_Dropdown`'s self-sorting popup inside its own band.                                |
@@ -120,8 +123,33 @@ RenderPassEvent.AfterRenderingPostProcessing
 └─ draw band 3  (Notifications)                toasts · tooltips
 ```
 
-A band with nothing registered is skipped along with the blur that would have preceded it, so cost is
-one blur plus one draw per **occupied** band. **The base band (`Hud`) always walks** (`:157`) —
+A band with nothing to draw is skipped along with the blur that would have preceded it, so cost is
+one blur plus one draw per **occupied** band.
+
+**Occupancy is the subtree's content, not the band root's enabled state.** A `UIBlurBand` registers in
+`OnEnable`, but a band root outlives its content by design: `PauseMenuContainer`, `TooltipRoot`, and the
+runtime `Console` and `Toasts` canvases are all enabled for the whole scene while the panels *below*
+them toggle. Keying occupancy on registration therefore reported every declared band on every frame —
+an idle `World` frame walked all four bands and an idle `MainMenu` two, paying a full Kawase chain and
+a renderer-list draw for three of them that rendered nothing. `UIBandRegistry.OccupiedMask` asks each
+registered band for `UIBlurBand.HasVisibleContent`, which is `UIBandLayers.HasVisibleGraphic`: an
+allocation-free descent that prunes at the first inactive GameObject and returns at the first active,
+enabled `Graphic`. An empty band costs the inactive-child checks; an occupied one costs the depth to
+its first graphic, never the size of its subtree. It is recomputed per read rather than memoized —
+there is one read per camera per frame, so a cache would buy nothing and would hand a stale mask to
+consecutive edit-mode reads inside one editor frame.
+
+**A transform walk, not a `GraphicRegistry` query.** uGUI registers a `Graphic` against its *nearest
+active* ancestor canvas, so anything under a nested `overrideSorting` canvas — a `TMP_Dropdown` popup,
+most of all — lands in a different bucket than the band root's. A per-canvas query would need a cached
+canvas set, and a stale one would take that band out of the walk and make its UI vanish with nothing on
+screen to explain it. `L18` is the baseline that pins this.
+
+A subtree can also draw through something that is not a uGUI `Graphic`, which this test cannot see;
+`UIBlurBand`'s `_alwaysOccupied` opt-out keeps such a band in the walk unconditionally. No band uses it
+today.
+
+**The base band (`Hud`) always walks** (`:157`) —
 `_UIBlurTexture` must publish every frame whatever the registry reports, because edit-mode registration
 does not survive a domain reload and gating the base capture on occupancy would silently cost every
 panel its blur in the editor while looking correct in play mode.
@@ -415,6 +443,13 @@ Four canvases are built in code, each with its own material instance (§5):
 Cross-band ordering is the band's, not `sortingOrder`'s — the bands draw in separate passes, in walk
 order, and `sortingOrder` now only orders within a band.
 
+**All four bands are declared here and all four band roots stay enabled**: the root `Canvas`,
+`PauseMenuContainer` (whose three menus are all inactive by default), `TooltipRoot`, and the
+`Console` and `Toasts` canvases `WorldUIManager.Awake` builds. Before `UB-8` that was an idle
+occupancy mask of `15` — four blurs and four draws for one band's worth of visible UI. It is now `1`
+on an idle frame, rising only as surfaces actually open (`3` with the pause menu, `5` with the
+console, `9` with a toast live).
+
 **The full-screen menus and the creative inventory are still mutually exclusive**, and that gate survives
 for its own reason rather than the compositing one: `WorldUIManager.HandleEscape` dismisses the inventory
 on the first Escape and only opens the pause menu on a second press, and the inventory toggle is gated on
@@ -433,6 +468,10 @@ submenu opens — so banding there buys something different from panel-over-pane
 a skybox, and without a band boundary between the full-screen `Background` image and the panels, a
 frosted panel would sample the skybox and punch a hole through the menu backdrop. The band puts
 `Background` into the capture the panels read.
+
+Every submenu and modal root here already starts inactive, so only `TooltipRoot` — enabled for the
+whole scene with its tooltip instantiated on demand — leaked a band before `UB-8`. The idle mask was
+`9`, two blurs; it is now `1`.
 
 ### Consequences elsewhere
 
@@ -461,7 +500,7 @@ frosted panel would sample the skybox and punch a hole through the menu backdrop
 
 Two registered suites (`ValidationSuiteRegistry.cs:94-95`), both in `Validate All`.
 
-**`Minecraft Clone/Dev/Validate UI Band Layers` — 16 baselines.** Synthetic hierarchies, no graphics
+**`Minecraft Clone/Dev/Validate UI Band Layers` — 19 baselines.** Synthetic hierarchies, no graphics
 device, so they stay meaningful before any scene declares a band.
 
 | ID | Asserts |
@@ -482,12 +521,20 @@ device, so they stay meaningful before any scene declares a band.
 | `L14` | UI sitting off the canvas plane is detected, and the canvas root is exempt |
 | `L15` | A dropdown nested inside another prefab inherits the fixer |
 | `L16` | A band restores a root canvas that fell back to overlay |
+| `L17` | A band is occupied by its content, not by its root being enabled |
+| `L18` | A graphic built after the band root enabled, deep and under its own sorting canvas, still occupies |
+| `L19` | A disabled graphic vacates a band, and `_alwaysOccupied` holds it in the walk regardless |
 
-Three of these are load-bearing in a way their one-line summary hides. `L5` covers the prepass mask
+Five of these are load-bearing in a way their one-line summary hides. `L5` covers the prepass mask
 because omitting it is how the assertion passes while the misconfiguration ships. `L6` asserts the
 *count* as well as the order, because a band silently dropping out of the walk leaves the remaining order
 correct. `L8` goes **through the factory** rather than exercising `UIBlurBand` directly, because the
-`[RequireComponent]` construction-order fault is invisible to a component-level test.
+`[RequireComponent]` construction-order fault is invisible to a component-level test. `L17` reads its
+*occupied* half through `UIBandRegistry` rather than the component, so a band that failed to register
+reds there instead of satisfying the two vacancy assertions and going green while nothing can draw.
+`L18` is the one that pins the worst outcome available here — a band that leaves the walk still looks
+authored correctly and simply stops appearing — which is why it asserts the late, deep,
+`overrideSorting`-nested case rather than a graphic sitting on the band root.
 
 **`Minecraft Clone/Dev/Validate UI Blur Render` — 5 baselines.** Drives the material offscreen with a
 synthetic `_UIBlurTexture`, so it tests the **consumer contract in isolation**: `B1` round-trip, `B2`
@@ -501,6 +548,12 @@ inside `Validate All`. The renderer also snapshots and restores the shader globa
 assigned, and it records **after** the underwater overlay so a frosted panel samples an already-tinted
 screen. It compares the two features' **live pass events**, read off the features rather than restated,
 so it holds for any renderer-list order and cannot degenerate into comparing two literals.
+
+**Reading occupancy from a live frame.** The **Render Graph Viewer** (`Window/Analysis/Render Graph
+Viewer`) names every recorded pass, so a band that left the walk is directly observable: an idle
+`World` frame lists exactly `UI Band Hud Iter 0`…`Iter 3`, `Set Global` and `Draw`, and gains a
+matching six-pass group per band as surfaces open. `UIBandRegistry.OccupiedMask` is the same fact one
+step earlier, readable from a play-mode query. Both were used to confirm `UB-8`.
 
 **What no suite reaches.** The system's defining assertion — a toast raised over the open console shows
 the console's *text* blurred in its backdrop — is only observable in a running game. It was **confirmed
@@ -540,6 +593,12 @@ found by playing.
   text and edges are this item (UI rasterized at 30 % and upscaled), while the *blur's* softness shifting
   is `UI_BUGS #05` — render scale is a second lever onto the texel-specified kernel, beside window
   resolution. Fixing #05 changes the second and leaves the first.
+- **Occupancy is deliberately conservative in three cases.** A band still counts as occupied when its
+  canvas is `enabled == false`, when a `CanvasGroup` has faded it to `alpha 0`, and when its content is
+  entirely off-screen or fully clipped by a `RectMask2D`. Each costs one wasted blur; the opposite bias
+  would cost a panel its band, which is invisible on screen. Occupancy also only sees uGUI `Graphic`s,
+  while the band draw filter matches *any* renderer on the `UI` layer in the band's sorting layer — a
+  band drawing through something else must set `UIBlurBand._alwaysOccupied`.
 - **Panels within one band cannot stack** (§4.2). Expressible as a one-panel band today; worth
   formalizing as a per-panel mode if it becomes common.
 - **The UI blur no longer runs in the Scene view.** The absorbed producer ran there deliberately; the
@@ -568,6 +627,13 @@ The standing "do not re-litigate" list.
 
 ## Document History
 
+* **v2.1** - `UB-8`: occupancy reads a band's **content** instead of its root being enabled, which is
+  what the v2.0 headline already claimed. Both scenes kept every declared band root enabled for the
+  scene's lifetime, so the idle mask was `15` in `World` (four blurs) and `9` in `MainMenu` (two) where
+  the document said one — measured, then corrected here rather than restated. §2.1 gains the content
+  test and why it is a transform walk rather than a `GraphicRegistry` query, §6 records the per-scene
+  idle masks, §7 goes 16 → 19 baselines with `L17`–`L19`, and §8 records the three conservative cases
+  and the `_alwaysOccupied` opt-out.
 * **v2.0** - **Promoted from `Design/UI_BLUR_BANDED_COMPOSITING.md` (v1.12)** on `UB-6`'s in-game
   confirmation, per the `docs-sync` promotion protocol; the design was deleted in the same commit and is
   retrievable at `git show 0c2d3f7a:Documentation/Design/UI_BLUR_BANDED_COMPOSITING.md`. Every claim was

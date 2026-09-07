@@ -8,22 +8,35 @@ namespace UI.Blur
     /// draw.
     /// </summary>
     /// <remarks>
-    /// Occupancy is keyed on the declaring components, so registering twice is idempotent and a
+    /// Membership is keyed on the declaring components, so registering twice is idempotent and a
     /// component destroyed without a matching unregister is pruned on the next read rather than
-    /// occupying its band forever.
+    /// occupying its band forever. Membership is not occupancy: a registered band still has to hold
+    /// something drawable to enter the walk.
     /// </remarks>
     public static class UIBandRegistry
     {
         private static readonly HashSet<UIBlurBand> s_bands = new HashSet<UIBlurBand>();
 
-        /// <summary>Bitmask of bands that currently have at least one enabled subtree.</summary>
+        /// <summary>Bitmask of bands whose subtrees currently have something to draw.</summary>
+        /// <remarks>
+        /// A registered band enters the walk only while <see cref="UIBlurBand.HasVisibleContent"/>
+        /// holds, so a band root that outlives its panels costs nothing between them.
+        /// <para>
+        /// Recomputed on every read rather than cached per frame: there is one read per camera per
+        /// frame, so a memo would buy nothing and would hand a stale mask to consecutive edit-mode
+        /// reads inside a single editor frame.
+        /// </para>
+        /// </remarks>
         public static int OccupiedMask
         {
             get
             {
                 int mask = 0;
                 s_bands.RemoveWhere(static b => b == null);
-                foreach (UIBlurBand band in s_bands) mask |= 1 << (int)band.Band;
+                foreach (UIBlurBand band in s_bands)
+                    if (band.HasVisibleContent)
+                        mask |= 1 << (int)band.Band;
+
                 return mask;
             }
         }
@@ -44,7 +57,7 @@ namespace UI.Blur
 
         /// <summary>Whether a band currently has content.</summary>
         /// <param name="band">The band to test.</param>
-        /// <returns>True when at least one enabled subtree declares it.</returns>
+        /// <returns>True when at least one registered subtree declaring it has something to draw.</returns>
         public static bool IsOccupied(UIBandId band) => (OccupiedMask & (1 << (int)band)) != 0;
 
         /// <summary>Number of blur captures the walk records for an occupancy mask.</summary>
