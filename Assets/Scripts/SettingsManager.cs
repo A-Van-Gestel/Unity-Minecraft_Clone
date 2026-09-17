@@ -9,6 +9,7 @@ using Sky;
 using UI;
 using UI.Attributes;
 using UI.Enums;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 #if UNITY_EDITOR
 using UnityEditor;
@@ -991,12 +992,14 @@ public static class SettingsManager
     /// Cached singleton Settings instance. Populated on first LoadSettings() call,
     /// invalidated only on domain reload via ResetStatics().
     /// </summary>
+    [NoAutoStaticsCleanup] // reset in ResetStatics
     private static Settings s_cachedSettings;
 
     /// <summary>
     /// Invoked by the UI generator when a setting value changes.
     /// Broadcasts the field name so subscribers can filter efficiently.
     /// </summary>
+    [NoAutoStaticsCleanup] // reset in ResetStatics
     public static event Action<string> OnSettingChanged;
 
     /// <summary>

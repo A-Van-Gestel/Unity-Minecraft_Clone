@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Helpers;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 
 namespace DebugVisualizations
@@ -60,12 +61,17 @@ namespace DebugVisualizations
         // --- Static Caching ---
         // We cache the mesh so we don't regenerate it for every single chunk.
         // This reduces memory overhead from ~400 meshes to 1 mesh for the entire world.
+        [NoAutoStaticsCleanup] // reset in DomainReset
         private static Mesh s_cachedMesh;
 
         // Track settings to detect changes in the Inspector and rebuild the mesh if necessary.
+        [NoAutoStaticsCleanup] // reset in DomainReset
         private static int s_cachedGridInterval;
+        [NoAutoStaticsCleanup] // reset in DomainReset
         private static bool s_cachedCrossSectionSetting;
+        [NoAutoStaticsCleanup] // reset in DomainReset
         private static float s_cachedBorderThick;
+        [NoAutoStaticsCleanup] // reset in DomainReset
         private static float s_cachedSectionThick;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]

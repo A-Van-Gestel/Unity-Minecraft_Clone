@@ -1,3 +1,4 @@
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 
 namespace UI.Toast
@@ -89,11 +90,14 @@ namespace UI.Toast
         /// </remarks>
         private const float ALERT_DWELL_SECONDS = 7f;
 
+        [NoAutoStaticsCleanup] // immutable table
         private static readonly ToastStyle s_info = Build(s_infoAccent, string.Empty, INFO_DWELL_SECONDS);
 
+        [NoAutoStaticsCleanup] // immutable table
         private static readonly ToastStyle s_warning = Build(Parse(ConsoleTextFormatter.WarningColor),
             WarningGlyph, ALERT_DWELL_SECONDS);
 
+        [NoAutoStaticsCleanup] // immutable table
         private static readonly ToastStyle s_error = Build(Parse(ConsoleTextFormatter.ErrorColor),
             ErrorGlyph, ALERT_DWELL_SECONDS);
 

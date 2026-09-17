@@ -1,3 +1,4 @@
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 using Random = System.Random;
 
@@ -16,11 +17,13 @@ public static class VoxelData
     public const float UnitOfLight = 1f / 16f;
 
     /// Ticks per second.
+    [NoAutoStaticsCleanup] // reset in DomainReset
     public static float TickLength = 1f;
 
     // Block Behavior
     public const float GrassSpreadChance = 0.02f;
 
+    [NoAutoStaticsCleanup] // reset in DomainReset
     public static int Seed = 0;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]

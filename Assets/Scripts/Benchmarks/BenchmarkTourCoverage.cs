@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Data;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 
 namespace Benchmarks
@@ -45,12 +46,18 @@ namespace Benchmarks
 
         // Only chunks the loading pass will actually visit are retained, so this never grows past the
         // footprint (~19 k chunks at vd 32) no matter how much terrain the run generates.
+        [NoAutoStaticsCleanup] // contents cleared in DomainReset
         private static readonly HashSet<ChunkCoord> s_required = new HashSet<ChunkCoord>();
+        [NoAutoStaticsCleanup] // contents cleared in DomainReset
         private static readonly HashSet<ChunkCoord> s_covered = new HashSet<ChunkCoord>();
 
+        [NoAutoStaticsCleanup] // reset in DomainReset
         private static bool s_armed;
+        [NoAutoStaticsCleanup] // reset in DomainReset
         private static bool s_frozen;
+        [NoAutoStaticsCleanup] // reset in DomainReset
         private static bool s_ensurePassSnapshotTaken;
+        [NoAutoStaticsCleanup] // reset in DomainReset
         private static int s_ensurePassCovered;
 
         /// <summary>Whether marking is currently accruing.</summary>

@@ -4,6 +4,7 @@ using Unity.Burst;
 using Unity.Collections;
 using Unity.Collections.LowLevel.Unsafe;
 using Unity.Mathematics;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 
 namespace Libraries
@@ -3431,6 +3432,7 @@ namespace Libraries
             public static readonly SharedStatic<LookupPointers> Ref = SharedStatic<LookupPointers>.GetOrCreate<LookupPointers>();
             public static ref LookupPointers Data => ref Ref.Data;
 
+            [NoAutoStaticsCleanup] // reset in DomainReset
             private static bool s_initialized;
 
             [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]

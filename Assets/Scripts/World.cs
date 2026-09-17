@@ -29,6 +29,7 @@ using UI;
 using Unity.Collections;
 using Unity.Jobs;
 using Unity.Profiling;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 using UnityEngine.Pool;
 using Debug = UnityEngine.Debug;
@@ -449,6 +450,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     public long UnloadedLightPersisted => _unloadedLightPersisted;
 
     // Load-arm fault counter (F1). Dev/editor-only: incremented via CountLoadFault, compiled out in release.
+    [NoAutoStaticsCleanup] // reset in DomainReset
     private static long s_loadArmFaults;
 
     /// <summary>Cumulative faults escaping the load arm (dev/editor builds only; F1 — today's silent loss, until CP-3).</summary>
@@ -624,6 +626,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
 
     #region Singleton pattern
 
+    [NoAutoStaticsCleanup] // reset in DomainReset
     public static World Instance { get; private set; }
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]

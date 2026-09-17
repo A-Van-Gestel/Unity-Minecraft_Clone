@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Unity.Scripting.LifecycleManagement;
 
 namespace Commands
 {
@@ -32,6 +33,7 @@ namespace Commands
     /// </summary>
     public readonly struct CommandResult
     {
+        [NoAutoStaticsCleanup] // immutable table
         private static readonly ConsoleLine[] s_noLines = Array.Empty<ConsoleLine>();
 
         private readonly ConsoleLine[] _lines;

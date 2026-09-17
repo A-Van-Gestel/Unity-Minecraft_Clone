@@ -1,5 +1,6 @@
 using Data.Enums;
 using Data.WorldTypes;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 
 namespace Data
@@ -9,13 +10,17 @@ namespace Data
     /// </summary>
     public static class WorldLaunchState
     {
+        [NoAutoStaticsCleanup] // reset in DomainReset
         public static string WorldName = "New World";
+        [NoAutoStaticsCleanup] // reset in DomainReset
         public static int Seed = 0;
+        [NoAutoStaticsCleanup] // reset in DomainReset
         public static bool IsNewGame = true;
 
         /// <summary>
         /// The current operational mode of the game.
         /// </summary>
+        [NoAutoStaticsCleanup] // reset in DomainReset
         public static RuntimeMode CurrentMode = RuntimeMode.Default;
 
         /// <summary>
@@ -30,12 +35,14 @@ namespace Data
         /// The world type selected by the user during world creation.
         /// New worlds default to the fast, Burst-compiled Standard path.
         /// </summary>
+        [NoAutoStaticsCleanup] // reset in DomainReset
         public static WorldTypeID SelectedWorldType = WorldTypeID.Standard;
 
         /// <summary>
         /// Gameplay border half-extent (in voxels) chosen for a new world, or <c>0</c> for no border (the default).
         /// Persisted into level.dat on the world's first save (TF-14).
         /// </summary>
+        [NoAutoStaticsCleanup] // reset in DomainReset
         public static int BorderRadius = 0;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]

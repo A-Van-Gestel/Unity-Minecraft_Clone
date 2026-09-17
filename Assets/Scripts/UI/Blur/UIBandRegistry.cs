@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 
 namespace UI.Blur
@@ -15,6 +16,7 @@ namespace UI.Blur
     /// </remarks>
     public static class UIBandRegistry
     {
+        [NoAutoStaticsCleanup] // contents cleared in Clear
         private static readonly HashSet<UIBlurBand> s_bands = new HashSet<UIBlurBand>();
 
         /// <summary>Bitmask of bands whose subtrees currently have something to draw.</summary>

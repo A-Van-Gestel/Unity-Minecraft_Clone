@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using Data;
 using JetBrains.Annotations;
 using Unity.Mathematics;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 using Random = Unity.Mathematics.Random;
 
@@ -13,6 +14,7 @@ using Random = Unity.Mathematics.Random;
 public static partial class BlockBehavior
 {
     [ThreadStatic]
+    [NoAutoStaticsCleanup] // per-thread list, cleared before every use; DomainReset only nulls the main thread's slot
     private static List<VoxelMod> s_tMods;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]

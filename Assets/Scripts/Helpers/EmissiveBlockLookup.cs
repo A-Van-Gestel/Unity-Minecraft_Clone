@@ -1,5 +1,6 @@
 using Data;
 using JetBrains.Annotations;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 
 namespace Helpers
@@ -17,6 +18,7 @@ namespace Helpers
     {
         /// <summary>Per-block-ID emissive flag, or null before any <see cref="Initialize(BlockType[])"/> call.</summary>
         [CanBeNull]
+        [NoAutoStaticsCleanup] // reset in DomainReset
         private static bool[] s_isEmissive;
 
         /// <summary>

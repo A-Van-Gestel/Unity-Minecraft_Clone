@@ -6,6 +6,7 @@ using System.Text;
 using System.Threading;
 using Data;
 using Helpers;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 
 namespace Serialization
@@ -32,6 +33,7 @@ namespace Serialization
 
         // CP-1 probe (F1 corruption signal): parse failures only — distinct from the benign "not on disk"
         // null in ChunkStorageManager.LoadChunkAsync. Runs on the background deserialize thread.
+        [NoAutoStaticsCleanup] // reset in ResetDeserializeProbeCounter
         private static long s_deserializeFailures;
 
         /// <summary>Cumulative count of chunk payloads that failed to deserialize and returned null (CP-1 probe).</summary>

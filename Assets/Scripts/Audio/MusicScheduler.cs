@@ -1,5 +1,6 @@
 using Data;
 using Data.WorldTypes;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 using UnityEngine.Audio;
 
@@ -89,6 +90,7 @@ namespace Audio
         private uint _sessionSeed;
 
         /// <summary>The live scheduler, for the console readout. Null outside play mode.</summary>
+        [NoAutoStaticsCleanup] // reset in ResetStatics
         public static MusicScheduler Instance { get; private set; }
 
         /// <summary>

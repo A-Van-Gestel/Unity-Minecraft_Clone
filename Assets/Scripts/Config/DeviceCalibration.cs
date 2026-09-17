@@ -5,6 +5,7 @@ using Data;
 using Data.JobData;
 using Data.NativeData;
 using Helpers;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 
 namespace Config
@@ -103,6 +104,7 @@ namespace Config
         private const int LIGHT_BUDGET_FLOOR = 4;
         private const int LIGHT_BUDGET_CEILING = 128; // Settings.maxLightJobsPerFrame [Range(1,128)]
 
+        [NoAutoStaticsCleanup] // reset in ResetStatics
         private static CalibrationResult? s_override;
 
         /// <summary>Forces a fixed result for testing (e.g. simulating a low-spec device). Cleared on domain reload.</summary>

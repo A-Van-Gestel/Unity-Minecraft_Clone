@@ -1,6 +1,7 @@
 using System.Collections;
 using TMPro;
 using UI.Blur;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.UI;
@@ -13,6 +14,7 @@ namespace UI.Tooltip
     /// </summary>
     public class TooltipManager : MonoBehaviour
     {
+        [NoAutoStaticsCleanup] // reset in DomainReset
         public static TooltipManager Instance { get; private set; }
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]

@@ -6,6 +6,7 @@ using Helpers;
 using JetBrains.Annotations;
 using Jobs.BurstData;
 using Unity.Collections;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
 
@@ -97,6 +98,7 @@ namespace Data
         /// Static callback invoked when any lighting work flag transitions to <c>true</c>.
         /// Set by <see cref="World"/> during initialization to register the chunk in the dirty set.
         /// </summary>
+        [NoAutoStaticsCleanup] // reset in DomainReset
         public static Action<Vector2Int> OnLightWorkFlagged;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]

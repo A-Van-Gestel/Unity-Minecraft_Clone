@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using Helpers;
 using Unity.Collections;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 using UnityEngine.Pool;
 using Debug = UnityEngine.Debug;
@@ -275,6 +276,7 @@ namespace Data
                            "Further occurrences suppressed this session.");
         }
 
+        [NoAutoStaticsCleanup] // reset in ResetFloatPrecisionTripwire
         private static bool s_floatPrecisionTripped;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]

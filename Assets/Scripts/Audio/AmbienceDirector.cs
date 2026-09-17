@@ -1,5 +1,6 @@
 using Data;
 using Data.WorldTypes;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 using UnityEngine.Audio;
 
@@ -26,6 +27,7 @@ namespace Audio
         /// </summary>
         private const int BED_VOICE_COUNT = 4;
 
+        [NoAutoStaticsCleanup] // reset in ResetStatics
         private static AmbienceDirector s_instance;
 
         /// <summary>The active director, or null when the scene has none. Diagnostics only.</summary>

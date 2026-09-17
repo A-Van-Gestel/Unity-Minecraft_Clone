@@ -1,6 +1,7 @@
 using JetBrains.Annotations;
 using Serialization;
 using UI;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.UI;
@@ -14,6 +15,7 @@ using UnityEngine.UI;
 public class DragAndDropHandler : MonoBehaviour
 {
     /// <summary>Singleton instance, set in <see cref="Awake"/>. Used by <see cref="UIItemSlot"/> to forward pointer events.</summary>
+    [NoAutoStaticsCleanup] // reset in DomainReset
     public static DragAndDropHandler Instance { get; private set; }
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]

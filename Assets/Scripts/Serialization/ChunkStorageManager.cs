@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Data;
 using Helpers;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 using UnityEngine.Pool;
 
@@ -18,8 +19,11 @@ namespace Serialization
 
         // CP-1 save-durability probe (F5 evidence). Static so the debug HUD can read them without a manager ref.
         // Interlocked: SaveChunkAsync's body resumes on a ThreadPool thread, so Completed/Failed cross threads.
+        [NoAutoStaticsCleanup] // reset in ResetSaveProbeCounters
         private static long s_savesFired;
+        [NoAutoStaticsCleanup] // reset in ResetSaveProbeCounters
         private static long s_savesCompleted;
+        [NoAutoStaticsCleanup] // reset in ResetSaveProbeCounters
         private static long s_savesFailed;
 
         /// <summary>Cumulative count of <see cref="SaveChunkAsync"/> invocations (CP-1 probe).</summary>
@@ -34,9 +38,13 @@ namespace Serialization
 #if UNITY_INCLUDE_INSTRUMENTATION
         // CP-6/CP-3 test seams: upcoming save write attempts that throw / serializations that return
         // 0 bytes / chunk load reads that throw (dev-only fault injection).
+        [NoAutoStaticsCleanup] // reset in ResetSaveProbeCounters
         private static int s_injectedSaveFaults;
+        [NoAutoStaticsCleanup] // reset in ResetSaveProbeCounters
         private static int s_injectedZeroLengthSerializes;
+        [NoAutoStaticsCleanup] // reset in ResetSaveProbeCounters
         private static int s_injectedLoadFaults;
+        [NoAutoStaticsCleanup] // reset in ResetSaveProbeCounters
         private static int s_injectedTooLargeSaves;
 
         /// <summary>Arms the dev-only save fault injection: the next <paramref name="count"/> save write
