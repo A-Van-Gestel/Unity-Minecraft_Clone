@@ -11,13 +11,17 @@ namespace Rendering
     /// it exponentially against scene depth while the eye is under a fluid surface (UW-4).
     /// </summary>
     /// <remarks>
-    /// Must be listed <b>before</b> <see cref="UIBlurRendererFeature"/> in the renderer asset: both run at
-    /// <see cref="RenderPassEvent.AfterRenderingTransparents"/>, URP records same-event passes in
-    /// renderer-feature list order, and the blur samples the camera color to build the HUD's frosted
-    /// backdrop — so a blur recorded first shows an untinted world behind every panel.
+    /// Records before the UI blur composites, so the blur samples an already-tinted screen. That
+    /// ordering follows from the two pass events and holds whatever the renderer-feature list order.
     /// </remarks>
     public class UnderwaterOverlayRendererFeature : ScriptableRendererFeature
     {
+        /// <summary>
+        /// Event the overlay records at. Earlier than the UI blur's composite event, so the blur
+        /// samples an already-tinted screen.
+        /// </summary>
+        public const RenderPassEvent OverlayEvent = RenderPassEvent.AfterRenderingTransparents;
+
         /// <summary>
         /// User-configurable settings exposed in the URP Renderer Asset inspector.
         /// </summary>
@@ -44,7 +48,7 @@ namespace Rendering
         public override void Create()
         {
             // Runs again on domain reload and on every inspector edit, with no matching Dispose, so it
-            // must both clear stale state and stay idempotent — the UIBlurRendererFeature contract.
+            // must both clear stale state and stay idempotent.
             if (_settings.overlayShader == null)
             {
                 ReleaseResources();
@@ -59,7 +63,7 @@ namespace Rendering
             ReleaseResources();
             _overlayMaterial = CoreUtils.CreateEngineMaterial(_settings.overlayShader);
             _overlayPass = new UnderwaterOverlayPass(_overlayMaterial);
-            _overlayPass.renderPassEvent = RenderPassEvent.AfterRenderingTransparents;
+            _overlayPass.renderPassEvent = OverlayEvent;
 
             // URP schedules the depth copy from the earliest DECLARED depth reader. This project's
             // AfterTransparents mode already lands it before this event, so the declaration is what keeps

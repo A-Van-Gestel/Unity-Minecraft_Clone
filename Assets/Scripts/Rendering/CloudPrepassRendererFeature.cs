@@ -46,7 +46,7 @@ namespace Rendering
         public override void Create()
         {
             // Runs again on domain reload and on every inspector edit with no matching Dispose, so it must
-            // stay idempotent — the UIBlurRendererFeature contract. Nothing here owns a resource.
+            // stay idempotent. Nothing here owns a resource.
             _cloudPass = new CloudPrepass(new ShaderTagId(CloudLightModeTag))
             {
                 // Recorded before m_CopyColorPass, which is the entire point of the feature.

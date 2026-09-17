@@ -21,6 +21,7 @@ using Editor.Validation.PoolPrune;
 using Editor.Validation.SaveDurability;
 using Editor.Validation.SerializationRoundTrip;
 using Editor.Validation.SoundEngine;
+using Editor.Validation.UIBands;
 using Editor.Validation.UIBlur;
 using Editor.Validation.UnderwaterRender;
 using Editor.Validation.WorldClock;
@@ -63,7 +64,7 @@ namespace Editor.Validation.Framework
     public static class ValidationSuiteRegistry
     {
         /// <summary>The number of standard suites expected on the list — a floor the aggregate runner asserts against.</summary>
-        public const int ExpectedSuiteCount = 29;
+        public const int ExpectedSuiteCount = 30;
 
         /// <summary>The registered suites, in run/report order.</summary>
         public static readonly IReadOnlyList<RegisteredSuite> Suites = new[]
@@ -90,6 +91,7 @@ namespace Editor.Validation.Framework
             new RegisteredSuite("World Clock", WorldClockValidationSuite.Execute),
             new RegisteredSuite("Sky & Celestial", SkyValidationSuite.Execute),
             new RegisteredSuite("Sky Render", SkyRenderValidationSuite.Execute),
+            new RegisteredSuite("UI Band Layers", UIBandLayerValidationSuite.Execute),
             new RegisteredSuite("UI Blur Render", UIBlurRenderValidationSuite.Execute),
             new RegisteredSuite("Underwater Render", UnderwaterRenderValidationSuite.Execute),
             new RegisteredSuite("Cloud Render", CloudRenderValidationSuite.Execute),

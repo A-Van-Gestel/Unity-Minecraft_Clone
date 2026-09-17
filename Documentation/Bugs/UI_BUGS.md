@@ -139,7 +139,7 @@ adjacent frames to finally name the destroyer. (If deeper capture is again neede
 **Status:** **Reported, not started.** Reproduced 2026-08-14; deferred by the user as non-blocking. Wants a
 full implementation plan before any code change, because both candidate fixes alter the blur's *look* and
 need a visual sign-off.  
-**Files:** `Assets/Shaders/UIBlurBlit.shader` (kernel), `Assets/Scripts/Rendering/UIBlurRendererFeature.cs`
+**Files:** `Assets/Shaders/UIBlurBlit.shader` (kernel), `Assets/Scripts/Rendering/UIBlurChain.cs`
 (offset progression + blur target size)
 
 **Description:**
@@ -155,7 +155,7 @@ Game view is enough. The backdrop's blur strength visibly shifts as the resoluti
 
 `UIBlurBlit.shader:31` reads `_BlitTexture_TexelSize.xy` (`1/width`, `1/height` of the source) and lines
 37-40 place the four Kawase taps at `(±offset ± 0.5) * texelSize`. The UV-space radius is therefore
-`offset / width`. `UIBlurRendererFeature.cs` derives the blur target from `cameraTargetDescriptor` divided by
+`offset / width`. `UIBlurChain.cs` derives the blur target from `cameraTargetDescriptor` divided by
 `downsample`, so the `downsample` setting shifts the constant but not the proportionality.
 
 With `downsample: 2` and 4 iterations (max offset ~2 texels):
@@ -183,5 +183,33 @@ because resolution never changes mid-session in normal play.
 
 Whichever is chosen, the acceptance test is a **matched capture at two resolutions** showing equal blur
 softness as a fraction of the screen — a single-resolution capture cannot observe this defect at all.
+
+---
+
+## 07. Dropdown Popup Template Is Too Short For Long Option Lists
+
+**Severity:** Improvement (cosmetic) — **open, not started**  
+**Status:** **Reported 2026-09-07, filed at the user's request** while fixing a separate clipping defect
+in the same prefab. The list is now correctly clipped and scrollable, so this is a comfort issue, not a
+correctness one — the user noted the taller popup "should be its own backlog item".  
+**Files:** `Assets/Prefabs/UI/Components/Dropdown.prefab` (`Template` height)
+
+> Numbered **07**, not 06: `_FIXED_BUGS.md` already carries an archived `UI_BUGS #06` that twelve
+> live code and doc references still cite by that number. The gap is deliberate — do not close it.
+
+**Description:**
+
+The dropdown popup template is **150 px tall against a 40 px item height**, so it shows **3.75 items**
+before the list has to scroll. Most settings dropdowns are enum-backed with 2-4 members and fit, but the
+Display tab's resolution dropdown is built from `Screen.resolutions` — **27 entries on the development
+machine** — leaving it a four-item window over a long scroll.
+
+**Why it is filed rather than fixed:** the template height is a visual-design choice that changes every
+dropdown in both scenes at once, and it was noticed during an unrelated clipping fix. Growing it is a
+one-property change; deciding *how* tall, and whether the popup should size to its content up to a cap,
+is the part that wants a decision.
+
+**Related:** the stencil-`Mask` clipping defect that exposed it is fixed (UB-6) — before that fix the
+overflow items rendered outside the popup entirely, which is how the short template got noticed.
 
 ---

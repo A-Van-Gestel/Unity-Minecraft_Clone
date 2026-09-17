@@ -2,6 +2,7 @@ using System.Collections;
 using System.Text;
 using Commands;
 using TMPro;
+using UI.Blur;
 using UI.Builders;
 using UnityEngine;
 using UnityEngine.UI;
@@ -13,7 +14,7 @@ namespace UI
     /// TMP history over a <see cref="TMP_InputField"/>, driving a <see cref="CommandEngine"/>.
     /// <para>
     /// A stateless view over the engine — all output/history/confirmation state lives in
-    /// <see cref="Engine"/>. The whole hierarchy (own overlay canvas included) is built in code at
+    /// <see cref="Engine"/>. The whole hierarchy (own banded canvas included) is built in code at
     /// runtime (TouchControls precedent), so no scene or prefab edits are involved. Spawned and
     /// owned by <see cref="WorldUIManager"/>, which also owns the InUI/cursor/action-map policy.
     /// </para>
@@ -391,13 +392,13 @@ namespace UI
         //  Hierarchy construction (runtime, code-only)
         // ──────────────────────────────────────────────
 
-        /// <summary>Builds the overlay canvas (once, in <see cref="Awake"/>) then the panel and its contents.</summary>
+        /// <summary>Builds the canvas (once, in <see cref="Awake"/>) then the panel and its contents.</summary>
         private void BuildHierarchy()
         {
-            // Own overlay canvas so the console sorts above the scene UI without touching scene objects.
+            // Its own canvas so the console sorts above the scene UI without touching scene objects.
             // Width-matched (0), unlike the benchmark's balanced canvas — the console is anchored to the
             // bottom-left corner, so height scaling would drift it away from that corner.
-            RuntimeUIFactory.ConfigureCanvas(gameObject, SORT_ORDER, 0f);
+            RuntimeUIFactory.ConfigureCanvas(gameObject, SORT_ORDER, 0f, UIBandId.Modals);
 
             BuildPanel();
         }
@@ -411,7 +412,7 @@ namespace UI
         {
             // Panel: bottom-left frosted backdrop.
             _panel = new GameObject("ConsolePanel", typeof(RectTransform), typeof(Image));
-            _panel.transform.SetParent(transform, false);
+            RuntimeUIFactory.Attach(_panel, transform);
             RectTransform panelRect = (RectTransform)_panel.transform;
             panelRect.anchorMin = Vector2.zero;
             panelRect.anchorMax = Vector2.zero;
@@ -434,7 +435,7 @@ namespace UI
         {
             GameObject scrollGo = DefaultControls.CreateScrollView(new DefaultControls.Resources());
             scrollGo.name = "History";
-            scrollGo.transform.SetParent(panelRect, false);
+            RuntimeUIFactory.Attach(scrollGo, panelRect);
 
             RectTransform scrollRectTransform = (RectTransform)scrollGo.transform;
             scrollRectTransform.anchorMin = new Vector2(0f, 0f);
@@ -452,7 +453,7 @@ namespace UI
             // Content: a single wrapped TMP text that grows vertically; ContentSizeFitter drives content height.
             RectTransform content = _scrollRect.content;
             GameObject textGo = new GameObject("HistoryText", typeof(RectTransform));
-            textGo.transform.SetParent(content, false);
+            RuntimeUIFactory.Attach(textGo, content);
             RectTransform textRect = (RectTransform)textGo.transform;
             textRect.anchorMin = new Vector2(0f, 1f);
             textRect.anchorMax = new Vector2(1f, 1f);
@@ -482,7 +483,7 @@ namespace UI
         {
             GameObject inputGo = TMP_DefaultControls.CreateInputField(new TMP_DefaultControls.Resources());
             inputGo.name = "Input";
-            inputGo.transform.SetParent(panelRect, false);
+            RuntimeUIFactory.Attach(inputGo, panelRect);
             inputGo.AddComponent<InputFieldDeathSentinel>(); // UI_BUGS #04 tripwire — see the class below.
 
             RectTransform inputRect = (RectTransform)inputGo.transform;
@@ -521,7 +522,7 @@ namespace UI
             TMP_Text src = _inputField.textComponent;
 
             GameObject ghostGo = new GameObject("GhostSuggestion", typeof(RectTransform));
-            ghostGo.transform.SetParent(src.rectTransform.parent, false);
+            RuntimeUIFactory.Attach(ghostGo, src.rectTransform.parent);
 
             RectTransform srcRect = src.rectTransform;
             RectTransform ghostRect = (RectTransform)ghostGo.transform;

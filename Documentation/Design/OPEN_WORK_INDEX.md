@@ -1,6 +1,6 @@
 # Open Work Index
 
-**Version:** 1.4  
+**Version:** 1.5  
 **Date:** 2026-09-05  
 **Status:** **Open backlog.** A pointer map, not a tracker — rows are added and removed as docs
 gain or lose open work, never as individual items move.  
@@ -134,6 +134,12 @@ doc, not to grow an item row here.
 
 ## Document History
 
+* **v1.5** - The `UB-*` row **removed** (2026-09-07): `UI_BLUR_BANDED_COMPOSITING.md` was promoted into
+  `Architecture/UI_BLUR_BACKDROP_SYSTEM.md` and deleted per the promotion protocol, so it owns nothing
+  and no longer exists to own it. `UB-7`'s open half did not become an orphan — it was split before the
+  promotion, and the play-mode harness it needs is `NS-12` under the **Validation coverage** row, which
+  is where §4's rule says a named deferral's owner belongs. First removal caused by a deletion rather
+  than by a document finishing its work; the §1 rule reads the same either way.
 * **v1.4** - **Scope settled and the harness backlogs admitted (2026-09-06).** §1 now states which
   documents can appear here at all, because the `Architecture/` tree is three populations and only
   one is a candidate: its ~20 current-state docs own nothing, its limitation sections only *name*

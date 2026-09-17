@@ -10,7 +10,7 @@ namespace Editor.Validation.UIBlur
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Deliberately does not involve <c>UIBlurRendererFeature</c>. The blurred screen is supplied directly
+    /// Deliberately does not involve the blur producer. The blurred screen is supplied directly
     /// as the <c>_UIBlurTexture</c> global, which isolates what is under test — how a UI graphic composites
     /// that texture — from how the texture is produced. The producer's own defect (UI_BUGS #05) therefore
     /// cannot red these scenarios.

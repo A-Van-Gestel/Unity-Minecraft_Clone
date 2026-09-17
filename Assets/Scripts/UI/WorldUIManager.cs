@@ -125,11 +125,13 @@ namespace UI
                 if (pauseMenuController == null) Debug.LogError("PauseMenuController is not assigned.");
 
                 // Spawn the command console view (runtime-built UI — TouchControls precedent, no scene edit).
+                // Band roots: each AddComponent below configures its own canvas and assigns the band
+                // layer, so Attach would wrongly hand them this manager's layer instead.
                 GameObject consoleObj = new GameObject("Console");
                 consoleObj.transform.SetParent(transform, false);
                 _console = consoleObj.AddComponent<ConsoleUI>();
 
-                // Spawn the toast surface the same way — its own overlay canvas, built in code. The
+                // Spawn the toast surface the same way — its own canvas, built in code. The
                 // now-playing presenter shares the host rather than taking one of its own: it is meaningless
                 // without the manager, and one GameObject keeps their lifetimes identical.
                 GameObject toastObj = new GameObject("Toasts");
@@ -251,8 +253,8 @@ namespace UI
             // 4. If the inventory is open, Escape dismisses it and stops there (Minecraft's behavior) —
             // reaching the pause menu from the inventory takes a second press. Together with the
             // !IsPauseMenuOpen gate on the inventory toggle, this keeps the two from ever being open at
-            // once, which matters because the pause backdrop is opaque and would leave the inventory
-            // invisible but still clickable (UI_BUGS #06).
+            // once, which matters because the pause backdrop is full-screen and would leave the inventory
+            // frosted over but still clickable.
             else if (IsCreativeInventoryOpen)
             {
                 IsCreativeInventoryOpen = false;

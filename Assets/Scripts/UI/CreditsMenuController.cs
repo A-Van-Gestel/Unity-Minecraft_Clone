@@ -55,8 +55,28 @@ namespace UI
             { CreditCategory.Reference, "References & Further Reading" },
         };
 
+        /// <summary>The canvas this screen draws on, resolved once so link hit-testing can use its camera.</summary>
+        private Canvas _canvas;
+
+        /// <summary>Camera the canvas renders through, or null while it is an overlay canvas.</summary>
+        /// <remarks>
+        /// <see cref="TMP_TextUtilities.FindIntersectingLink"/> maps the screen point through this camera.
+        /// An overlay canvas wants null — its world space already is screen pixels — but any other render
+        /// mode needs the real camera, or every link tests against the wrong point and never hits.
+        /// </remarks>
+        private Camera UIEventCamera =>
+            _canvas == null || _canvas.renderMode == RenderMode.ScreenSpaceOverlay ? null : _canvas.worldCamera;
+
         private void OnEnable()
         {
+            // The root canvas, not the nearest: a band root is a nested canvas, and render mode and
+            // camera live on the root.
+            if (_canvas == null)
+            {
+                Canvas nearest = GetComponentInParent<Canvas>();
+                if (nearest != null) _canvas = nearest.rootCanvas;
+            }
+
             BuildCreditsText();
         }
 
@@ -66,7 +86,8 @@ namespace UI
             InputManager input = InputManager.Instance;
             if (_creditsText != null && input != null && input.UIClickPressed)
             {
-                int linkIndex = TMP_TextUtilities.FindIntersectingLink(_creditsText, input.MousePosition, null);
+                int linkIndex = TMP_TextUtilities.FindIntersectingLink(_creditsText, input.MousePosition,
+                    UIEventCamera);
                 if (linkIndex != -1)
                 {
                     TMP_LinkInfo linkInfo = _creditsText.textInfo.linkInfo[linkIndex];

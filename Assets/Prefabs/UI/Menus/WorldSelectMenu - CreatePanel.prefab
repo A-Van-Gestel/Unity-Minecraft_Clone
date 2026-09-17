@@ -1217,6 +1217,10 @@ PrefabInstance:
       propertyPath: m_Options.m_Options.Array.data[1].m_Text
       value: Standard (new)
       objectReference: {fileID: 0}
+    - target: {fileID: 7238458240793297673, guid: 8e59a98c6bec2994ca8b0588a803b51e, type: 3}
+      propertyPath: m_Color.a
+      value: 0
+      objectReference: {fileID: 0}
     - target: {fileID: 9061950427408505054, guid: 8e59a98c6bec2994ca8b0588a803b51e, type: 3}
       propertyPath: m_Name
       value: World Type (Dropdown)
@@ -1225,16 +1229,39 @@ PrefabInstance:
       propertyPath: m_text
       value: Legacy
       objectReference: {fileID: 0}
-    m_RemovedComponents: []
+    m_RemovedComponents:
+    - {fileID: 5586366856309305841, guid: 8e59a98c6bec2994ca8b0588a803b51e, type: 3}
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
-    m_AddedComponents: []
+    m_AddedComponents:
+    - targetCorrespondingSourceObject: {fileID: 4510832679457668861, guid: 8e59a98c6bec2994ca8b0588a803b51e, type: 3}
+      insertIndex: -1
+      addedObject: {fileID: 8043137288011303097}
   m_SourcePrefab: {fileID: 100100000, guid: 8e59a98c6bec2994ca8b0588a803b51e, type: 3}
 --- !u!224 &7484780195697485732 stripped
 RectTransform:
   m_CorrespondingSourceObject: {fileID: 3109709212417209666, guid: 8e59a98c6bec2994ca8b0588a803b51e, type: 3}
   m_PrefabInstance: {fileID: 5546376330910520038}
   m_PrefabAsset: {fileID: 0}
+--- !u!1 &8241901294135176219 stripped
+GameObject:
+  m_CorrespondingSourceObject: {fileID: 4510832679457668861, guid: 8e59a98c6bec2994ca8b0588a803b51e, type: 3}
+  m_PrefabInstance: {fileID: 5546376330910520038}
+  m_PrefabAsset: {fileID: 0}
+--- !u!114 &8043137288011303097
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 8241901294135176219}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 3312d7739989d2b4e91e6319e9a96d76, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.RectMask2D
+  m_Padding: {x: 0, y: 0, z: 0, w: 0}
+  m_Softness: {x: 0, y: 0}
 --- !u!1001 &7429117712478736526
 PrefabInstance:
   m_ObjectHideFlags: 0

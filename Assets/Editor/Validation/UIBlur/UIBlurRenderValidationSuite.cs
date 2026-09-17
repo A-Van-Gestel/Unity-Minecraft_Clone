@@ -209,7 +209,7 @@ namespace Editor.Validation.UIBlur
         /// </summary>
         /// <remarks>
         /// The alpha half is the stacking guard: an opaque panel replaces the pixels behind it instead of
-        /// compositing, which is what let the benchmark HUD show un-dimmed world over the pause menu.
+        /// compositing, which is what makes two panels in one band unable to stack.
         /// </remarks>
         /// <returns>True when every assertion holds.</returns>
         private static bool RunB4VertexColor()

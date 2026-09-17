@@ -66,7 +66,7 @@ namespace Editor.Validation.Framework
             {
                 foreach (Assembly asm in ProjectAssemblies())
                 {
-                    string path = asm.Location;
+                    string path = asm.GetLoadedAssemblyPath();
                     if (!string.IsNullOrEmpty(path) && File.Exists(path))
                         s_loadedDllMtimes[asm.GetName().Name] = File.GetLastWriteTimeUtc(path);
                 }
@@ -234,7 +234,8 @@ namespace Editor.Validation.Framework
             if (match == null)
                 return AssemblyFreshness.Unresolved(name);
 
-            string dllPath = !string.IsNullOrEmpty(asm.Location) ? asm.Location : Path.GetFullPath(match.outputPath);
+            string loadedPath = asm.GetLoadedAssemblyPath();
+            string dllPath = !string.IsNullOrEmpty(loadedPath) ? loadedPath : Path.GetFullPath(match.outputPath);
             if (!File.Exists(dllPath))
                 return AssemblyFreshness.Unresolved(name);
 

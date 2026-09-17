@@ -42,6 +42,15 @@ TagManager:
   - name: Default
     uniqueID: 0
     locked: 0
+  - name: UIBandMenus
+    uniqueID: 1343291393
+    locked: 0
+  - name: UIBandModals
+    uniqueID: 1343291394
+    locked: 0
+  - name: UIBandNotifications
+    uniqueID: 1907843371
+    locked: 0
   m_RenderingLayers:
   - Default
   m_MigratedRenderPipelines: []

@@ -254,7 +254,7 @@ No varying was added — `LiquidV2F` still uses 11 of 15 interpolators
 
 `Rendering/UnderwaterOverlayRendererFeature`, a RenderGraph `ScriptableRendererFeature`.
 
-`Create()` follows the `UIBlurRendererFeature` contract — it runs again on every domain reload and
+`Create()` follows the same contract as `UIBandCompositeRendererFeature` — it runs again on every domain reload and
 inspector edit with no matching `Dispose`, so it both clears stale state and stays idempotent, and
 warns and disables itself when no shader is assigned. It builds the pass at
 `RenderPassEvent.AfterRenderingTransparents` and declares
@@ -291,13 +291,16 @@ configuration; lava's glow is carried by its authored color instead.
 | Index | Feature | Event |
 |---|---|---|
 | 0 | `UnderwaterOverlayRendererFeature` | `AfterRenderingTransparents` |
-| 1 | `UIBlurRendererFeature` | `AfterRenderingTransparents` |
-| 2 | `CloudPrepassRendererFeature` | `AfterRenderingSkybox` |
+| 1 | `CloudPrepassRendererFeature` | `AfterRenderingSkybox` |
+| 2 | `UIBandCompositeRendererFeature` | `AfterRenderingPostProcessing` |
 
-URP records same-event custom passes in renderer-feature **list order**, and the blur samples
-`activeColorTexture` to build the HUD's frosted backdrop — a blur recorded first would show an
-untinted world behind every panel while the rest of the screen is tinted. `B17` asserts the
-**index**, not just membership; a membership-only check passes with that bug present.
+URP records same-event custom passes in renderer-feature **list order**, which is why this once
+mattered: the UI blur samples `activeColorTexture` to build its frosted backdrop, and a blur
+recorded first would show an untinted world behind every panel while the rest of the screen is
+tinted. The blur has since moved to `AfterRenderingPostProcessing`, so the two no longer share an
+event and the invariant is **structural** — unconditionally later, whatever the list order.
+`B17` therefore compares the two features' pass events rather than their indices, reading both from
+public constants on the features so the test cannot restate them and pass vacuously.
 
 The renderer runs `m_CopyDepthMode: 1` (`AfterTransparents`), and the URP asset has
 `m_RequireDepthTexture: 1`, `m_RequireOpaqueTexture: 1`, `m_OpaqueDownsampling: 1`, `m_MSAA: 2`.
@@ -612,8 +615,8 @@ Baselines that carry a specific lesson:
 - **`B16` and `B17` are deliberately not device-gated**, so a headless run still asserts something.
   `B16` pins the packing: the gate never takes an intermediate value, opens exactly when
   `IsSubmerged` does, and pitch and roll reach the published basis. `B17` reads back
-  `m_RendererFeatures` and asserts the overlay is present, its shader is **assigned**, and its
-  index is below `UIBlurRendererFeature`'s — three silent failures no render scenario can see.
+  `m_RendererFeatures` and asserts the overlay is present, its shader is **assigned**, and that its
+  pass event precedes the UI blur composite's — three silent failures no render scenario can see.
 - **`B18`** sinks an eye across two cell boundaries and pins that `SurfaceY` does not move, that
   `EyeDepth` deepens monotonically, and that the published depth tracks it.
 - **`B19` and `B20` are separate failures and need separate baselines.** `B19` pins the split's

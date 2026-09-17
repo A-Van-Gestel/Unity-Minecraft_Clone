@@ -235,7 +235,7 @@ MonoBehaviour:
     usageDescription: Implementation reference for own URP rendering pipeline compatible Kawase UI Blur implementation.
     sourceFiles: []
     projectFiles:
-    - Assets/Scripts/Rendering/UIBlurRendererFeature.cs
+    - Assets/Scripts/Rendering/UIBlurChain.cs
     - Assets/Shaders/UIBlurBlit.shader
     version: 
     notes: Optimized grab-pass blur for inventory backgrounds.

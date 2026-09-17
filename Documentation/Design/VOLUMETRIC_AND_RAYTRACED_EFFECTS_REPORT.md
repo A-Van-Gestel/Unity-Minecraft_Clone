@@ -106,7 +106,7 @@ that unblocks MR-8's smooth-lighting constraint), VX-9 (heat-haze distortion), V
    in the data). The expensive part of volumetrics elsewhere — computing visibility — is
    already paid for on the CPU.
 3. **The precedent stack exists.** A custom `ScriptableRendererFeature` already ships
-   (`UIBlurRendererFeature` on `VoxelEngine-URP-Renderer.asset`); CL-5 has a designed raymarch
+   (`UIBandCompositeRendererFeature` on `VoxelEngine-URP-Renderer.asset`); CL-5 has a designed raymarch
    shader; a re-anchor-safe voxel-space position must be derived per effect (see the WS-4 row); HDR is on.
 
 ### Hardware ray tracing (DXR / `RayTracingAccelerationStructure`) — ❌ rejected

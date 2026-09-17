@@ -1,4 +1,5 @@
 using TMPro;
+using UI.Blur;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -23,36 +24,75 @@ namespace UI.Builders
         /// <summary>Name of the UI blur consumer shader, listed in Always Included Shaders so player builds resolve it.</summary>
         private const string BLUR_SHADER_NAME = "Custom/MaskedUIBlur";
 
+        /// <summary>Camera distance the canvas plane sits at, inside the camera's near/far range.</summary>
+        private const float CANVAS_PLANE_DISTANCE = 100f;
+
         private static readonly int s_multiplyColorId = Shader.PropertyToID("_MultiplyColor");
         private static readonly int s_additiveColorId = Shader.PropertyToID("_AdditiveColor");
 
+        #region Layers
+
+        /// <summary>
+        /// Parents a freshly created UI object and gives it the parent's layer.
+        /// </summary>
+        /// <param name="obj">The object to attach.</param>
+        /// <param name="parent">Transform to parent under.</param>
+        /// <remarks>
+        /// The layer copy is the point: Unity does not inherit a layer on reparent, and compositing bands
+        /// are keyed on it (<see cref="UIBandLayers"/>), so an object built after its band root enabled
+        /// would otherwise fall outside every band. Applied to the whole subtree, so a helper that returns
+        /// a ready-made hierarchy lands entirely on the band.
+        /// </remarks>
+        public static void Attach(GameObject obj, Transform parent)
+        {
+            obj.transform.SetParent(parent, false);
+            if (parent != null) UIBandLayers.SetLayerRecursively(obj, parent.gameObject.layer);
+        }
+
+        #endregion
+
         #region Canvas
 
-        /// <summary>Creates a new screen-space overlay canvas GameObject with a scaler and raycaster.</summary>
+        /// <summary>Creates a new screen-space camera canvas GameObject with a scaler and raycaster.</summary>
         /// <param name="name">Name for the created GameObject.</param>
         /// <param name="sortingOrder">Canvas sorting order (the scene UI canvas sits at 0).</param>
         /// <param name="matchWidthOrHeight">Scaler width/height match blend.</param>
         /// <returns>The created canvas GameObject.</returns>
-        public static GameObject CreateCanvas(string name, int sortingOrder, float matchWidthOrHeight = 0.5f)
+        public static GameObject CreateCanvas(string name, int sortingOrder, float matchWidthOrHeight = 0.5f,
+            UIBandId band = UIBandId.Hud)
         {
             GameObject obj = new GameObject(name);
-            ConfigureCanvas(obj, sortingOrder, matchWidthOrHeight);
+            ConfigureCanvas(obj, sortingOrder, matchWidthOrHeight, band);
             return obj;
         }
 
         /// <summary>
-        /// Adds the overlay canvas components to an existing GameObject, for a caller that hosts its
-        /// canvas on an object it already owns rather than on a freshly created one.
+        /// Adds the screen-space canvas components to an existing GameObject, for a caller that hosts
+        /// its canvas on an object it already owns rather than on a freshly created one.
         /// </summary>
-        /// <param name="target">The GameObject to turn into an overlay canvas.</param>
+        /// <param name="target">The GameObject to turn into a canvas.</param>
         /// <param name="sortingOrder">Canvas sorting order (the scene UI canvas sits at 0).</param>
         /// <param name="matchWidthOrHeight">Scaler width/height match blend.</param>
+        /// <param name="band">Compositing band this canvas draws in.</param>
         /// <returns>The added <see cref="Canvas"/>.</returns>
-        public static Canvas ConfigureCanvas(GameObject target, int sortingOrder, float matchWidthOrHeight = 0.5f)
+        /// <remarks>Carries a <see cref="UIBlurBand"/>, so the subtree is routed into its band from the start.</remarks>
+        public static Canvas ConfigureCanvas(GameObject target, int sortingOrder, float matchWidthOrHeight = 0.5f,
+            UIBandId band = UIBandId.Hud)
         {
             Canvas canvas = target.AddComponent<Canvas>();
-            canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+
+            // Screen Space - Camera, not Overlay: overlay canvases are drawn by URP outside the render
+            // graph, where the band walk cannot interleave a blur between them.
+            canvas.renderMode = RenderMode.ScreenSpaceCamera;
+            canvas.worldCamera = Camera.main;
+            canvas.planeDistance = CANVAS_PLANE_DISTANCE;
             canvas.sortingOrder = sortingOrder;
+
+            // A camera-space canvas with no camera falls back to overlay-like drawing, which renders
+            // correctly but silently leaves the subtree out of every band. Say so rather than hide it.
+            if (canvas.worldCamera == null)
+                Debug.LogWarning($"RuntimeUIFactory: no Camera.main while building '{target.name}'. " +
+                                 "Its canvas will draw, but outside the UI blur bands.");
 
             CanvasScaler scaler = target.AddComponent<CanvasScaler>();
             scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
@@ -60,6 +100,10 @@ namespace UI.Builders
             scaler.matchWidthOrHeight = matchWidthOrHeight;
 
             target.AddComponent<GraphicRaycaster>();
+
+            // After the canvas, never before: UIBlurBand requires one, so adding it first makes Unity
+            // supply it and the add above return null. Still ahead of the caller's children.
+            target.AddComponent<UIBlurBand>().SetBand(band);
             return canvas;
         }
 
@@ -110,16 +154,13 @@ namespace UI.Builders
         /// <param name="fallbackColor">Flat color painted when no blur material is available.</param>
         /// <returns>True when the blur material was applied; false when the flat fallback was used.</returns>
         /// <remarks>
-        /// <b>A blurred panel cannot draw over other UI.</b> The blur is captured before any overlay canvas
-        /// draws, so a blurred graphic does not composite over what is beneath it — it replaces it with a
-        /// hole back to the pre-UI frame (UI_BLUR_BACKDROP_SYSTEM.md §4.2). Frosting a panel on a canvas
-        /// that can appear above another blurred or dimmed panel therefore paints un-dimmed world over it,
-        /// which is `UI_BUGS #06`'s symptom.
+        /// A blurred panel composites over the UI beneath it, provided that UI is in a lower band: the
+        /// screen is re-blurred before each band draws, so a panel frosts every band already painted.
+        /// Two panels in the <i>same</i> band still cannot stack — the lower one is not in the capture the
+        /// upper one samples — which is what a band declaration exists to resolve.
         /// <para>
-        /// Where that can happen, pass <c>null</c> for <paramref name="blurInstance"/> while it does: the
-        /// flat fallback composites normally. This method is safe to re-call at any point in a graphic's
-        /// life, which is what makes that swap possible: a caller can move a graphic between frosted and
-        /// flat as the UI state around it changes.
+        /// Safe to re-call at any point in a graphic's life, so a caller can move a graphic between the
+        /// frosted and flat backdrops as the UI around it changes.
         /// </para>
         /// </remarks>
         public static bool ApplyBlurBackground(Image image, Material blurInstance, Color fallbackColor)
@@ -163,7 +204,7 @@ namespace UI.Builders
         public static GameObject CreatePanel(string name, Transform parent)
         {
             GameObject obj = new GameObject(name, typeof(RectTransform));
-            obj.transform.SetParent(parent, false);
+            Attach(obj, parent);
             return obj;
         }
 
@@ -188,7 +229,7 @@ namespace UI.Builders
             TextAlignmentOptions alignment, Color color)
         {
             GameObject obj = new GameObject(name, typeof(RectTransform));
-            obj.transform.SetParent(parent, false);
+            Attach(obj, parent);
 
             TextMeshProUGUI text = obj.AddComponent<TextMeshProUGUI>();
             text.fontSize = fontSize;
@@ -218,7 +259,7 @@ namespace UI.Builders
             const float scrollbarWidth = 12f;
 
             GameObject scrollObj = new GameObject(name, typeof(RectTransform));
-            scrollObj.transform.SetParent(parent, false);
+            Attach(scrollObj, parent);
             StretchToParent((RectTransform)scrollObj.transform);
 
             Image scrollBg = scrollObj.AddComponent<Image>();
@@ -242,7 +283,7 @@ namespace UI.Builders
 
             // Vertical scrollbar
             GameObject scrollbarObj = new GameObject("Scrollbar", typeof(RectTransform));
-            scrollbarObj.transform.SetParent(scrollObj.transform, false);
+            Attach(scrollbarObj, scrollObj.transform);
             RectTransform scrollbarRect = scrollbarObj.GetComponent<RectTransform>();
             scrollbarRect.anchorMin = new Vector2(1, 0);
             scrollbarRect.anchorMax = Vector2.one;
@@ -310,7 +351,7 @@ namespace UI.Builders
             ButtonColors colors, Color labelColor, float labelFontSize)
         {
             GameObject btnObj = new GameObject($"Button_{label.Replace(" ", "")}", typeof(RectTransform));
-            btnObj.transform.SetParent(parent, false);
+            Attach(btnObj, parent);
 
             Image btnImage = btnObj.AddComponent<Image>();
             btnImage.color = colors.Normal;

@@ -1,6 +1,6 @@
 %YAML 1.1
 %TAG !u! tag:unity3d.com,2011:
---- !u!114 &-1806709187082933392
+--- !u!114 &-5528170520067848117
 MonoBehaviour:
   m_ObjectHideFlags: 1
   m_CorrespondingSourceObject: {fileID: 0}
@@ -9,9 +9,9 @@ MonoBehaviour:
   m_GameObject: {fileID: 0}
   m_Enabled: 1
   m_EditorHideFlags: 0
-  m_Script: {fileID: 11500000, guid: 732311bbda3c3734586acdeabb87f6d7, type: 3}
-  m_Name: UIBlurRendererFeature
-  m_EditorClassIdentifier: Assembly-CSharp::UIBlurRendererFeature
+  m_Script: {fileID: 11500000, guid: 792e3c625b124af4bbf25bcfe37844ae, type: 3}
+  m_Name: UIBandCompositeRendererFeature
+  m_EditorClassIdentifier: Assembly-CSharp::Rendering.UIBandCompositeRendererFeature
   m_Active: 1
   _settings:
     blurShader: {fileID: 4800000, guid: 97d0b6190b178a3458dbd5b797fd9121, type: 3}
@@ -43,20 +43,20 @@ MonoBehaviour:
     probeVolumeBlendStatesCS: {fileID: 0}
   m_RendererFeatures:
   - {fileID: 857030412932682748}
-  - {fileID: -1806709187082933392}
   - {fileID: 5954003064417997587}
-  m_RendererFeatureMap: fc138fac9ec8e40b70ab7c139147ede613d338ce3ddea052l
+  - {fileID: -5528170520067848117}
+  m_RendererFeatureMap: fc138fac9ec8e40b13d338ce3ddea0524bc8919533fe47b3l
   postProcessData: {fileID: 11400000, guid: 41439944d30ece34e96484bdb6645b55, type: 2}
   m_AssetVersion: 3
   m_PrepassLayerMask:
     serializedVersion: 2
-    m_Bits: 4294967295
+    m_Bits: 4294967263
   m_OpaqueLayerMask:
     serializedVersion: 2
-    m_Bits: 4294967295
+    m_Bits: 4294967263
   m_TransparentLayerMask:
     serializedVersion: 2
-    m_Bits: 4294967295
+    m_Bits: 4294967263
   m_DefaultStencilState:
     overrideStencilState: 0
     stencilReference: 0
