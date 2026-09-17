@@ -1,7 +1,7 @@
 # Open Work Index
 
-**Version:** 1.5  
-**Date:** 2026-09-05  
+**Version:** 1.6  
+**Date:** 2026-09-17  
 **Status:** **Open backlog.** A pointer map, not a tracker — rows are added and removed as docs
 gain or lose open work, never as individual items move.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production) — documentation only
@@ -71,6 +71,7 @@ would put the same item on the map twice and mis-sort the doc.
 | **Clouds** | [`CLOUD_RENDERING_IMPROVEMENTS_REPORT.md`](CLOUD_RENDERING_IMPROVEMENTS_REPORT.md) | `CL-` | Open backlog |
 | **Foliage liveliness** | [`FOLIAGE_LIVELINESS_IMPROVEMENTS_REPORT.md`](FOLIAGE_LIVELINESS_IMPROVEMENTS_REPORT.md) | `FL-` | Open backlog |
 | **Codebase (non-performance)** | [`CODEBASE_IMPROVEMENTS.md`](CODEBASE_IMPROVEMENTS.md) | — | Open backlog: API modernization and cleanup items |
+| **Project Auditor findings** | [`PROJECT_AUDITOR_FINDINGS_REPORT.md`](PROJECT_AUDITOR_FINDINGS_REPORT.md) | `AU-` | Open backlog from the 2026-09-17 run; `AU-4`/`AU-5` declined ⛔. Its §3 is the standing "these auditor counts are not defects" record |
 | **Third-party libraries** | [`THIRD_PARTY_LIBRARY_IDEAS_REPORT.md`](THIRD_PARTY_LIBRARY_IDEAS_REPORT.md) | — | Open backlog of *techniques*; all seven evaluated libraries were rejected |
 | **Validation coverage** | [`VALIDATION_SUITE_COVERAGE_ROADMAP.md`](VALIDATION_SUITE_COVERAGE_ROADMAP.md) | `NS-` | Living backlog; `NS-4`, `NS-5`, `NS-7`, `NS-7b` complete |
 | **Lighting async bugs & harness** | [`LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md`](LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md) | `AS-` `HF-` | In progress; `AS-1` closed, `HF-1`…`HF-3` done |
@@ -134,6 +135,9 @@ doc, not to grow an item row here.
 
 ## Document History
 
+* **v1.6** - `AU-*` row added (2026-09-17): `PROJECT_AUDITOR_FINDINGS_REPORT.md` now owns the
+  Project Auditor backlog. First row whose document also carries a standing *non*-findings record —
+  §1's rule is unaffected, since the open `AU-` items are what earn the row.
 * **v1.5** - The `UB-*` row **removed** (2026-09-07): `UI_BLUR_BANDED_COMPOSITING.md` was promoted into
   `Architecture/UI_BLUR_BACKDROP_SYSTEM.md` and deleted per the promotion protocol, so it owns nothing
   and no longer exists to own it. `UB-7`'s open half did not become an orphan — it was split before the
@@ -173,5 +177,5 @@ doc, not to grow an item row here.
 
 ---
 
-**Last Updated:** 2026-09-05  
+**Last Updated:** 2026-09-17  
 **Next Review:** when a document starts or stops owning open work
