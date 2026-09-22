@@ -1,5 +1,6 @@
 using Data;
 using Input;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 using UnityEngine.InputSystem;
 
@@ -17,6 +18,7 @@ using UnityEngine.InputSystem;
 public class InputManager : MonoBehaviour
 {
     /// <summary>Singleton instance, set in <see cref="Awake"/>.</summary>
+    [NoAutoStaticsCleanup] // reset in DomainReset
     public static InputManager Instance { get; private set; }
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]

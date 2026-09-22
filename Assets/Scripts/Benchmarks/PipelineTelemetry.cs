@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using Data;
 using Helpers;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
 
@@ -413,8 +414,10 @@ namespace Benchmarks
         /// When <c>false</c> (default) every method is a no-op guarded by a single bool read, so production
         /// frames pay nothing. Only a benchmark capture flips this on.
         /// </summary>
+        [NoAutoStaticsCleanup] // reset in DomainReset
         public static bool Enabled;
 
+        [NoAutoStaticsCleanup] // contents cleared in DomainReset
         private static readonly Dictionary<ChunkCoord, ChunkTrace> s_traces =
             new Dictionary<ChunkCoord, ChunkTrace>(MIN_TRACE_CAPACITY);
 
@@ -431,8 +434,10 @@ namespace Benchmarks
         /// about: un-populated placeholders parked pending neighbour terrain. Bounded by the size of the
         /// waiting set, since every exit path from that set stamps an unpark.
         /// </remarks>
+        [NoAutoStaticsCleanup] // contents cleared in DomainReset
         private static readonly Dictionary<ChunkCoord, long> s_parkStart = new Dictionary<ChunkCoord, long>();
 
+        [NoAutoStaticsCleanup] // contents cleared in DomainReset
         private static readonly List<PipelinePhaseMetrics> s_completedPhases = new List<PipelinePhaseMetrics>(16);
 
 #if UNITY_INCLUDE_INSTRUMENTATION
@@ -442,10 +447,15 @@ namespace Benchmarks
         private static readonly bool[] s_doubleRecordWarned = new bool[PassCount];
 #endif
 
+        [NoAutoStaticsCleanup] // reset in DomainReset
         private static PipelinePhaseMetrics s_activePhase;
+        [NoAutoStaticsCleanup] // reset in DomainReset
         private static float s_phaseStartTime;
+        [NoAutoStaticsCleanup] // reset in DomainReset
         private static int s_traceCapacity = MIN_TRACE_CAPACITY;
+        [NoAutoStaticsCleanup] // reset in DomainReset
         private static int s_frameWindowCursor;
+        [NoAutoStaticsCleanup] // reset in DomainReset
         private static AdmissionSample s_pendingFrame;
 
         /// <summary>Completed phase records, in capture order.</summary>

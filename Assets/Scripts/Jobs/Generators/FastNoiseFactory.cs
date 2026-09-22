@@ -1,5 +1,6 @@
 using Jobs.Data;
 using Libraries;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 
 namespace Jobs.Generators
@@ -17,6 +18,7 @@ namespace Jobs.Generators
         /// generator initialization. Reset on every play-mode entry by <see cref="DomainReset"/>,
         /// so editor preview tools always start from the default.
         /// </summary>
+        [NoAutoStaticsCleanup] // reset in DomainReset
         public static FastNoiseLite.CoordinatePrecision GlobalCoordinatePrecision { get; set; }
             = FastNoiseLite.CoordinatePrecision.Precise64;
 

@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UI.Blur;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.RenderGraphModule;
@@ -116,6 +117,7 @@ namespace Rendering
             /// resolve under <c>SRPDefaultUnlit</c>. <c>UniversalForward</c> covers a UI material that
             /// does declare one.
             /// </summary>
+            [NoAutoStaticsCleanup] // immutable table
             private static readonly List<ShaderTagId> s_shaderTags = new List<ShaderTagId>
             {
                 new ShaderTagId("SRPDefaultUnlit"),

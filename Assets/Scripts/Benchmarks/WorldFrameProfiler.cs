@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 
 namespace Benchmarks
@@ -109,6 +110,7 @@ namespace Benchmarks
         /// frames pay nothing. Flipped on for the duration of a capture by the full-world fluid stress pass
         /// and by the flight capture; both clear it again on teardown.
         /// </summary>
+        [NoAutoStaticsCleanup] // reset in DomainReset
         public static bool Enabled;
 
         private static readonly double s_tickToMs = 1000.0 / Stopwatch.Frequency;

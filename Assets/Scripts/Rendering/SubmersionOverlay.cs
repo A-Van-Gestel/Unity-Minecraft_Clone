@@ -1,4 +1,5 @@
 using Helpers;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 
 namespace Rendering
@@ -111,6 +112,7 @@ namespace Rendering
         /// <c>World.OnDestroy</c> disarms it too: it is only meaningful while a world republishes it.
         /// </para>
         /// </remarks>
+        [NoAutoStaticsCleanup] // reset in DomainReset
         public static bool Active { get; private set; }
 
         /// <summary>Records whether the overlay should draw, from this frame's eye query.</summary>

@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Diagnostics;
 using Helpers;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 using UnityEngine.Profiling;
 
@@ -34,6 +35,7 @@ public class PerformanceMonitor : MonoBehaviour
     /// <summary>
     /// The singleton instance of the PerformanceMonitor. Null if not yet initialized.
     /// </summary>
+    [NoAutoStaticsCleanup] // reset in DomainReset
     public static PerformanceMonitor Instance { get; private set; }
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]

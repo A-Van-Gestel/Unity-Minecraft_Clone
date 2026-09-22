@@ -1,5 +1,6 @@
 using System;
 using UI.Toast;
+using Unity.Scripting.LifecycleManagement;
 
 namespace Commands
 {
@@ -50,6 +51,7 @@ namespace Commands
         /// the warning glyph has to be chosen from substitutes. Measured 2026-09-02 against
         /// <c>Assets/Fonts/Monocraft/Monocraft.asset</c>.
         /// </remarks>
+        [NoAutoStaticsCleanup] // immutable table
         private static readonly (string Glyph, string Label)[] s_glyphCandidates =
         {
             ("!", "U+0021 EXCLAMATION (warning)"),

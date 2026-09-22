@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.IO.Compression;
 using NativeCompressions;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 
 namespace Serialization
@@ -19,6 +20,7 @@ namespace Serialization
         // deserializer handles via its "corrupt chunk -> warn -> regenerate" path.
         private const uint LZ4_FRAME_MAGIC = 0x184D2204;
 
+        [NoAutoStaticsCleanup] // reset in DomainReset
         private static bool? s_lz4Available;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]

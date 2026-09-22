@@ -1,5 +1,6 @@
 using Commands;
 using UI.Toast;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 
 namespace UI
@@ -10,6 +11,7 @@ namespace UI
     /// </summary>
     public class WorldUIManager : MonoBehaviour
     {
+        [NoAutoStaticsCleanup] // reset in DomainReset
         public static WorldUIManager Instance;
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]

@@ -5,6 +5,7 @@ using Data.WorldTypes;
 using Helpers;
 using Jobs.BurstData;
 using Jobs.Helpers;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 using UnityEngine.Audio;
 
@@ -31,6 +32,7 @@ namespace Audio
         /// </remarks>
         private static readonly int s_eventCount = Enum.GetValues(typeof(BlockSoundEvent)).Length;
 
+        [NoAutoStaticsCleanup] // reset in ResetStatics
         private static SoundManager s_instance;
 
         /// <summary>The active manager, or null when the scene has none.</summary>

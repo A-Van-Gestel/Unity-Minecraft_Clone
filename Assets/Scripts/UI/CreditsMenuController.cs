@@ -3,6 +3,7 @@ using System.Text;
 using Data;
 using Data.Enums;
 using TMPro;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 using UnityEngine.Events;
 
@@ -44,6 +45,7 @@ namespace UI
         /// <summary>
         /// Human-readable display names for each category.
         /// </summary>
+        [NoAutoStaticsCleanup] // immutable table
         private static readonly Dictionary<CreditCategory, string> s_categoryNames = new Dictionary<CreditCategory, string>
         {
             { CreditCategory.Library, "Libraries & Algorithms" },

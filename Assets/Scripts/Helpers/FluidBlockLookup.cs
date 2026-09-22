@@ -1,6 +1,7 @@
 using Data;
 using JetBrains.Annotations;
 using Jobs.BurstData;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 
 namespace Helpers
@@ -25,8 +26,10 @@ namespace Helpers
     {
         /// <summary>Per-block-ID fluid type, or null before any <see cref="Initialize(BlockType[])"/> call.</summary>
         [CanBeNull]
+        [NoAutoStaticsCleanup] // reset in DomainReset
         private static FluidType[] s_fluidTypes;
 
+        [NoAutoStaticsCleanup] // DomainReset increments this stamp; zeroing would pass a stale section as freshly counted
         private static int s_generation;
 
         /// <summary>

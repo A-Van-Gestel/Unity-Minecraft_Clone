@@ -10,6 +10,7 @@ using Jobs.Data;
 using Jobs.Generators;
 using Unity.Collections;
 using Unity.Jobs;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using Debug = UnityEngine.Debug;
@@ -367,6 +368,7 @@ namespace Benchmarks
         }
 
         /// <summary>The two allocation legs, ordered so each scenario's fresh/pooled rows sit adjacent.</summary>
+        [NoAutoStaticsCleanup] // immutable table
         private static readonly GenLeg[] s_legs = { new GenLeg("fresh", false), new GenLeg("pooled", true) };
 
         #endregion

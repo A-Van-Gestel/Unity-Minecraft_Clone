@@ -52,7 +52,7 @@ This project is built around a data-oriented and multi-threaded philosophy to ha
 ### Prerequisites
 
 * **Unity Hub**
-* **Unity 6.6** (6000.6.1f1 at time of writing)
+* **Unity 6.6** (6000.6.2f1 at time of writing)
 * A code editor like **Visual Studio** or **JetBrains Rider**.
 
 ### Setup

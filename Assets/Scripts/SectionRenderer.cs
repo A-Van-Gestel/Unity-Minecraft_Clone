@@ -2,6 +2,7 @@ using Data;
 using Helpers;
 using Unity.Collections;
 using Unity.Mathematics;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 using UnityEngine.Rendering;
 using Object = UnityEngine.Object;
@@ -73,9 +74,13 @@ public class SectionRenderer
     // bit2=fluid). Each cached array holds the present submeshes' materials in opaque → transparent →
     // fluid order, so UpdateMeshNative never allocates a Material[] in the hot apply path. Index 0
     // (the empty combination) is the empty array — the empty-section path returns before it is read.
+    [NoAutoStaticsCleanup] // cache keyed by s_materialCacheVersion, which DomainReset resets
     private static readonly Material[][] s_materialCombinations = new Material[8][];
+    [NoAutoStaticsCleanup] // reset in ResetStaticState
     private static Material s_cachedOpaque;
+    [NoAutoStaticsCleanup] // reset in ResetStaticState
     private static Material s_cachedTransparent;
+    [NoAutoStaticsCleanup] // reset in ResetStaticState
     private static Material s_cachedLiquid;
 
     /// <summary>
@@ -83,6 +88,7 @@ public class SectionRenderer
     /// identity). A renderer reassigns <c>sharedMaterials</c> when either its bitmask or this version
     /// differs from its last update, so a global material swap still propagates.
     /// </summary>
+    [NoAutoStaticsCleanup] // reset in ResetStaticState
     private static int s_materialCacheVersion;
 
     /// <summary>The submesh-presence bitmask assigned on this section's last update; -1 = none yet (MR-3).</summary>

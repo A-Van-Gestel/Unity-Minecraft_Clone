@@ -1,5 +1,6 @@
 using Data;
 using Data.WorldTypes;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 
 namespace Helpers
@@ -46,12 +47,14 @@ namespace Helpers
         public const int ShiftThresholdChunks = 64;
 
         /// <summary>The chunk whose minimum corner currently sits at the Unity-space origin.</summary>
+        [NoAutoStaticsCleanup] // reset in ResetOnPlayModeEnter
         public static ChunkCoord OriginChunk { get; private set; }
 
         /// <summary>
         /// The voxel-space coordinate of the Unity-space origin (<see cref="OriginChunk"/>'s corner), cached so the
         /// per-call-site conversions are a bare integer add. Y is always 0 - the origin never shifts vertically.
         /// </summary>
+        [NoAutoStaticsCleanup] // reset in ResetOnPlayModeEnter
         public static Vector3Int OriginVoxel { get; private set; }
 
         /// <summary>True while the origin is the identity (0, 0), where Unity and voxel space coincide.</summary>

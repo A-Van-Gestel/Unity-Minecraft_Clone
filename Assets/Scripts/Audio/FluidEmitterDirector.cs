@@ -3,6 +3,7 @@ using Data.Enums;
 using Helpers;
 using Jobs.Data;
 using Unity.Mathematics;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 using UnityEngine.Audio;
 
@@ -42,6 +43,7 @@ namespace Audio
         /// <summary>How many points the rolloff falloff is sampled at between full gain and silence.</summary>
         private const int ROLLOFF_SAMPLES = 8;
 
+        [NoAutoStaticsCleanup] // reset in ResetStatics
         private static FluidEmitterDirector s_instance;
 
         /// <summary>The active director, or null when the scene has none.</summary>

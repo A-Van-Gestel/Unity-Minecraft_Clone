@@ -1,4 +1,5 @@
 using System;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 using UnityEngine.Audio;
 
@@ -25,7 +26,9 @@ namespace Audio
 
         private static readonly int s_categoryCount = Enum.GetValues(typeof(AudioCategory)).Length;
 
+        [NoAutoStaticsCleanup] // reset in ResetStatics
         private static float[] s_linear;
+        [NoAutoStaticsCleanup] // reset in ResetStatics
         private static AudioMixer s_mixer;
 
         /// <summary>

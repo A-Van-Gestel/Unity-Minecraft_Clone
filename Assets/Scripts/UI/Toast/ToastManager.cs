@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using UI.Blur;
 using UI.Builders;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -64,6 +65,7 @@ namespace UI.Toast
         #endregion
 
         /// <summary>The live manager, or null when no scene hosts one.</summary>
+        [NoAutoStaticsCleanup] // reset in DomainReset
         public static ToastManager Instance { get; private set; }
 
         /// <summary>

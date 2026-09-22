@@ -1,4 +1,5 @@
 using UI.Enums;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
@@ -26,10 +27,13 @@ namespace UI
         /// like before the settings took it over, so <see cref="RestoreAuthoredPipelineDefaults"/> can hand
         /// it back on quit.
         /// </remarks>
+        [NoAutoStaticsCleanup] // reset in ResetStatics
         private static bool s_authoredCaptured;
 
+        [NoAutoStaticsCleanup] // reset in ResetStatics
         private static float s_authoredRenderScale;
 
+        [NoAutoStaticsCleanup] // reset in ResetStatics
         private static int s_authoredMsaaSampleCount;
 
         // Must match the global declared in VoxelLighting.hlsl.

@@ -1,3 +1,4 @@
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 
 namespace Physics
@@ -18,18 +19,23 @@ namespace Physics
     public static class PhysicsQueryStats
     {
         /// <summary>Gather passes run (one per resolve, so one per substep).</summary>
+        [NoAutoStaticsCleanup] // reset in Reset
         public static int Gathers;
 
         /// <summary>Cells visited by gather passes — the grid positions actually looked up.</summary>
+        [NoAutoStaticsCleanup] // reset in Reset
         public static int CellsScannedByGather;
 
         /// <summary>Cells visited by direct <c>World.CheckPhysicsCollision</c> scans (the pre-PH-1 cost shape).</summary>
+        [NoAutoStaticsCleanup] // reset in Reset
         public static int CellsScannedDirectly;
 
         /// <summary>Sweeps issued by the solver, however they were answered.</summary>
+        [NoAutoStaticsCleanup] // reset in Reset
         public static int SweepQueries;
 
         /// <summary>Sweeps the gathered buffer could not answer, which fell back to a direct scan.</summary>
+        [NoAutoStaticsCleanup] // reset in Reset
         public static int Fallbacks;
 
         /// <summary>
@@ -38,9 +44,11 @@ namespace Physics
         /// <see cref="CellsScannedByGather"/> so a before/after comparison needs no second build and carries no
         /// A/B drift — this is the number <c>PH-1</c> is judged on.
         /// </summary>
+        [NoAutoStaticsCleanup] // reset in Reset
         public static int CellsScannedIfUngathered;
 
         /// <summary>Physics ticks that ran collision (one per <c>CalculateVelocity</c>), for per-tick averages.</summary>
+        [NoAutoStaticsCleanup] // reset in Reset
         public static int Ticks;
 
         /// <summary>

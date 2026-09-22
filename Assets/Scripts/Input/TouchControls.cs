@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using Data;
 using TMPro;
 using UI;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 using UnityEngine.InputSystem.EnhancedTouch;
 using UnityEngine.UI;
@@ -20,6 +21,7 @@ namespace Input
     public class TouchControls : MonoBehaviour
     {
         /// <summary>Singleton instance, created by <see cref="InputManager"/> on mobile platforms.</summary>
+        [NoAutoStaticsCleanup] // reset in DomainReset
         public static TouchControls Instance { get; private set; }
 
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
