@@ -39,14 +39,14 @@ After your edit, use the CodeGraph CLI via Bash (exhaustive, and cheaper than an
 - `codegraph callers <flagSetter>` on any flag setter you changed — every caller must still be correct.
 - `codegraph impact <symbol>` on the modified type — confirm you didn't unintentionally destabilize an adjacent pipeline stage, especially the readiness gates.
 
-### Step 4 — Inspect live pipeline state (unity-mcp)
+### Step 4 — Inspect live pipeline state (Unity CLI)
 
-Before instrumenting, use the Unity MCP to observe the pipeline's current state:
+Before instrumenting, observe the pipeline's current state (mechanics: the `unity-editor` skill):
 
-- `Unity_ManageEditor` → `GetState` — check if the editor is in play mode and whether compilation errors are blocking the pipeline.
-- `Unity_ReadConsole` — filter for `Error` and `Warning` types to find pipeline-related exceptions (e.g. "chunk stuck", "meshing timeout", NullReference in job scheduling).
-- `Unity_RunCommand` — execute C# to query pipeline state directly (e.g. count loaded chunks, check flag values on specific chunks, inspect the generation/meshing queues).
-- `Unity_ManageGameObject` → `find` — locate chunk GameObjects in the hierarchy and inspect their component state to see which pipeline stage they're stuck in.
+- `unity command editor_status --result-only` — play mode, and whether a compile or domain reload is in progress. `unity recompile` shows compile errors that could be blocking the pipeline.
+- `unity command console --level warn --tail 50 --result-only` — pipeline-related exceptions (e.g. "chunk stuck", "meshing timeout", NullReference in job scheduling).
+- `unity command eval "<C#>"` — query pipeline state directly (e.g. count loaded chunks, check flag values on specific chunks, inspect the generation/meshing queues).
+- `find_gameobjects` + `get_serialized_fields` — locate chunk GameObjects and inspect their component state to see which pipeline stage they're stuck in.
 
 If these observations are insufficient to identify the stalled stage, switch to the `voxel-debugging` skill's instrumentation step. The pipeline's symptoms (stuck chunks, missing mesh, black lighting at borders) almost never point at their actual cause — instrument to confirm the stage that stalled before editing.
 

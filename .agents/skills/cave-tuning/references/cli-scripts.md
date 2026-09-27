@@ -1,91 +1,134 @@
-# Cave Tuning — Ready-to-Adapt Unity_RunCommand Scripts
+# Cave Tuning — Ready-to-Adapt Unity CLI Scripts
 
-Companion reference for the `cave-tuning` skill. All scripts run via `Unity_RunCommand`
-(see the `unity-mcp` skill for the `CommandScript` calling conventions).
+Companion reference for the `cave-tuning` skill. Each script is a small C# file run with
+`unity command run_script` (see the `unity-editor` skill for the CLI mechanics). Save it under the
+scratchpad, never under `Assets/`, and call its static entry point:
+
+```bash
+unity command run_script --file <path>.cs --entry <Class>.<Method> --args '[...]' \
+    --timeout_ms 180000 --timeout 200 --result-only
+```
+
+`run_script` compiles a real file, so `using` directives work. **Every argument must be passed**
+(C# default values are not applied). Check a script compiles without running it by adding
+`--dry_run true`. One-line analyzer calls go through `eval` instead, with fully qualified names,
+because `eval` rejects `using` directives (see the skill's "How to run it").
 
 ## Analyzing a biome NOT in the WorldTypeDefinition
 
 The string-name `RunAnalysis` overload only resolves biomes registered in the active
-`WorldTypeDefinition`. For others (e.g. Steep Grasslands), load the asset directly:
+`WorldTypeDefinition`. For others (e.g. Steep Grasslands), load the asset directly.
+Entry: `CaveUnregisteredBiome.Run`, args `["Steep Grasslands"]`.
 
 ```csharp
-using Editor.Dev;
+using System.IO;
 using Data.WorldTypes;
+using Editor.Dev;
 using UnityEditor;
-var guids = AssetDatabase.FindAssets("Steep Grasslands t:StandardBiomeAttributes");
-var biome = AssetDatabase.LoadAssetAtPath<StandardBiomeAttributes>(
-    AssetDatabase.GUIDToAssetPath(guids[0]));
-return CaveDensityAnalyzer.RunAnalysis(8, 42, 0, 0, true, biome);
+
+public static class CaveUnregisteredBiome
+{
+    public static string Run(string biomeFileName)
+    {
+        // FindAssets matches substrings ("Grasslands" also finds "Steep Grasslands"): filter by exact file name.
+        foreach (string guid in AssetDatabase.FindAssets(biomeFileName + " t:StandardBiomeAttributes"))
+        {
+            string path = AssetDatabase.GUIDToAssetPath(guid);
+            if (Path.GetFileNameWithoutExtension(path) == biomeFileName)
+                return CaveDensityAnalyzer.RunAnalysis(8, 42, 0, 0, true,
+                    AssetDatabase.LoadAssetAtPath<StandardBiomeAttributes>(path));
+        }
+
+        return "biome asset not found: " + biomeFileName;
+    }
+}
 ```
 
 ## Trunk worm domination — diagnostic script
 
 Temporarily disable trunk worms, analyze, re-enable. See the skill's "Trunk worm volume
-domination" section for when to run this and how to interpret the result.
+domination" section for when to run this and how to interpret the result. The `finally` block
+restores the asset even if the analysis throws. Entry: `CaveTrunkDiagnostic.Run`, args
+`["Grasslands"]`.
 
 ```csharp
-using Editor.Dev;
 using Data.WorldTypes;
+using Editor.Dev;
 using UnityEditor;
 
-// 1. Temporarily disable trunk worms
-var wtd = AssetDatabase.LoadAssetAtPath<WorldTypeDefinition>(
-    AssetDatabase.GUIDToAssetPath(
-        AssetDatabase.FindAssets("Standard t:WorldTypeDefinition")[0]));
-var so = new SerializedObject(wtd);
-so.FindProperty("trunkWormConfig.enabled").boolValue = false;
-so.ApplyModifiedProperties();
-AssetDatabase.SaveAssets();
+public static class CaveTrunkDiagnostic
+{
+    public static string Run(string biomeName)
+    {
+        var wtd = AssetDatabase.LoadAssetAtPath<WorldTypeDefinition>(
+            AssetDatabase.GUIDToAssetPath(AssetDatabase.FindAssets("Standard t:WorldTypeDefinition")[0]));
+        var so = new SerializedObject(wtd);
+        SerializedProperty enabled = so.FindProperty("trunkWormConfig.enabled");
 
-// 2. Analyze the biome (use fresh origin to bypass cache)
-var result = CaveDensityAnalyzer.RunAnalysis(8, 42, 200, 200, "Grasslands");
-
-// 3. Re-enable trunk worms
-so.FindProperty("trunkWormConfig.enabled").boolValue = true;
-so.ApplyModifiedProperties();
-AssetDatabase.SaveAssets();
-return result;
+        enabled.boolValue = false;
+        so.ApplyModifiedProperties();
+        AssetDatabase.SaveAssets();
+        try
+        {
+            // A fresh origin bypasses the analyzer's cache.
+            return CaveDensityAnalyzer.RunAnalysis(8, 42, 200, 200, biomeName);
+        }
+        finally
+        {
+            enabled.boolValue = true;
+            so.ApplyModifiedProperties();
+            AssetDatabase.SaveAssets();
+        }
+    }
+}
 ```
 
 ## Modifying biome .asset files
 
 Per CLAUDE.md rules, never edit `.asset` files directly. Use `SerializedObject`
-(property paths in [parameter-reference.md](parameter-reference.md)):
+(property paths in [parameter-reference.md](parameter-reference.md)). Adapt the values, then run
+it with entry `CaveBiomeTuning.Run`, args `["Grasslands"]`.
 
 ```csharp
+using System.IO;
 using Data.WorldTypes;
 using UnityEditor;
-using System.IO;
 
-// Safe biome lookup — FindAssets("Grasslands") also matches "Steep Grasslands"
-// (substring match). Always filter by exact asset filename.
-var guids = AssetDatabase.FindAssets("Grasslands t:StandardBiomeAttributes");
-string targetPath = null;
-foreach (var g in guids)
+public static class CaveBiomeTuning
 {
-    var p = AssetDatabase.GUIDToAssetPath(g);
-    if (Path.GetFileNameWithoutExtension(p) == "Grasslands") { targetPath = p; break; }
+    public static string Run(string biomeFileName)
+    {
+        // Safe biome lookup — FindAssets("Grasslands") also matches "Steep Grasslands".
+        string targetPath = null;
+        foreach (string guid in AssetDatabase.FindAssets(biomeFileName + " t:StandardBiomeAttributes"))
+        {
+            string path = AssetDatabase.GUIDToAssetPath(guid);
+            if (Path.GetFileNameWithoutExtension(path) == biomeFileName) { targetPath = path; break; }
+        }
+
+        if (targetPath == null)
+            return "biome asset not found: " + biomeFileName;
+
+        var so = new SerializedObject(AssetDatabase.LoadAssetAtPath<StandardBiomeAttributes>(targetPath));
+        so.FindProperty("caveZoneNoiseConfig.frequency").floatValue = 0.008f;
+
+        SerializedProperty layers = so.FindProperty("caveLayers");
+        SerializedProperty worm = layers.GetArrayElementAtIndex(0); // WormCarver layer
+        worm.FindPropertyRelative("wormSpawnChance").floatValue = 0.025f;
+        worm.FindPropertyRelative("wormShape.radiusMax").floatValue = 3.5f;
+        worm.FindPropertyRelative("wormShape.radiusNoiseStrength").floatValue = 0.15f;
+        worm.FindPropertyRelative("wormYAttraction.strength").floatValue = 0.18f;
+        worm.FindPropertyRelative("wormYAttraction.maxY").floatValue = 52.0f;
+
+        SerializedProperty cheese = layers.GetArrayElementAtIndex(1); // Cheese layer
+        cheese.FindPropertyRelative("threshold").floatValue = 0.84f;
+        cheese.FindPropertyRelative("zoneAttenuation").floatValue = 0.26f;
+        cheese.FindPropertyRelative("isSeekableByLocalWorms").boolValue = true;
+        cheese.FindPropertyRelative("isSeekableByTrunkWorms").boolValue = true;
+
+        so.ApplyModifiedProperties();
+        AssetDatabase.SaveAssets();
+        return "updated " + targetPath;
+    }
 }
-var biome = AssetDatabase.LoadAssetAtPath<StandardBiomeAttributes>(targetPath);
-var so = new SerializedObject(biome);
-
-so.FindProperty("caveZoneNoiseConfig.frequency").floatValue = 0.008f;
-
-var layers = so.FindProperty("caveLayers");
-var l0 = layers.GetArrayElementAtIndex(0); // WormCarver layer
-l0.FindPropertyRelative("wormSpawnChance").floatValue = 0.025f;
-l0.FindPropertyRelative("wormShape.radiusMax").floatValue = 3.5f;
-l0.FindPropertyRelative("wormShape.radiusNoiseStrength").floatValue = 0.15f;
-l0.FindPropertyRelative("wormYAttraction.strength").floatValue = 0.18f;
-l0.FindPropertyRelative("wormYAttraction.maxY").floatValue = 52.0f;
-
-var l1 = layers.GetArrayElementAtIndex(1); // Cheese layer
-l1.FindPropertyRelative("threshold").floatValue = 0.84f;
-l1.FindPropertyRelative("zoneAttenuation").floatValue = 0.26f;
-l1.FindPropertyRelative("isSeekableByLocalWorms").boolValue = true;
-l1.FindPropertyRelative("isSeekableByTrunkWorms").boolValue = true;
-
-so.ApplyModifiedProperties();
-AssetDatabase.SaveAssets();
-return "Done";
 ```

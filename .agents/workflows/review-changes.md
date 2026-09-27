@@ -44,6 +44,6 @@ gates, because a second copy drifts.
    invocation must not get wrong.)
 
 This layers on top of your tool's generic review (`/code-review`) and the
-compile/analyzer layer (the Execution Protocol's `dotnet build` + DLL-timestamp
-gate, Rider, `Unity_ValidateScript`) — it does not replace either. Reporting a
+compile/analyzer layer (the Execution Protocol's `unity recompile` gate with its
+`dotnet build` fallback, and Rider) — it does not replace either. Reporting a
 `CS####` error or a ReSharper style hit here is noise.

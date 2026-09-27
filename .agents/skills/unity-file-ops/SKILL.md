@@ -26,20 +26,20 @@ Every asset that Unity tracks has a `{asset}.meta` sibling containing a GUID. Sc
 - **Deleting a `.cs` file MUST delete its `.meta` file** in the same commit. An orphan `.meta` without its asset produces a duplicate-GUID warning on the next Editor import. Before deleting, `mcp__rider__safe_delete` with `preview: true` confirms no *code* references remain (it covers the code side only — still grep for the GUID to catch prefab/scene references).
 - **Adding a `.cs` file:** let Unity generate the `.meta` on import. Commit both in the same commit so teammates do not get a GUID-mismatch when they pull.
 
-### Verifying assets via unity-mcp
+### Verifying assets via the Unity CLI
 
-The Unity MCP provides live editor tools that complement file-level operations:
+Live Editor commands (mechanics: the `unity-editor` skill) complement file-level operations:
 
-- `Unity_ManageAsset` → `GetInfo` — get an asset's GUID, type, and metadata without manually parsing `.meta` files. Use `Search` to find assets by name/type when you don't know the exact path.
-- `Unity_ManageGameObject` → `find` / `get_components` — inspect live scene objects to verify component references are wired correctly after a move or rename. Use `include_non_public_serialized: true` to see `[SerializeField]` values.
-- `Unity_ManageEditor` → `GetTags` / `GetLayers` — verify tags and layers exist before referencing them in code. Use `AddTag` / `AddLayer` to create them programmatically instead of asking the user.
-- `Unity_ReadConsole` — after a file operation, check for "missing script", "missing reference", or "duplicate GUID" warnings that indicate a break the compiler won't catch.
+- `unity command find_assets --name <name>` (or `--type <Type>`) — an asset's path and GUID without parsing `.meta` files.
+- `get_scene_hierarchy` → `get_serialized_fields --target <instanceId> --component <Type>` — verify component references are wired correctly after a move or rename, private `[SerializeField]` values included.
+- `get_tags_layers` / `set_tags_layers` — verify tags and layers exist before referencing them in code, or create them instead of asking the user.
+- `unity command console --level warn --tail 50 --result-only` — after a file operation, check for "missing script", "missing reference", or "duplicate GUID" warnings that indicate a break the compiler won't catch.
 
 ### Deleting serialized assets
 
 Before deleting a prefab, ScriptableObject, or scene:
 
-1. Search for references by GUID, not by filename. Use `Unity_ManageAsset` → `GetInfo` to get the GUID, or open the `.meta` file and copy the `guid:` value. Then `Grep` the project for that 32-character string.
+1. Search for references by GUID, not by filename. Use `unity command find_assets` to get the GUID, or open the `.meta` file and copy the `guid:` value. Then `Grep` the project for that 32-character string.
 2. Check `.unity` scenes and `.prefab` files for hits — those are the call sites Unity will break.
 3. If references exist, either update them to a replacement asset or confirm with the user that breakage is intended.
 

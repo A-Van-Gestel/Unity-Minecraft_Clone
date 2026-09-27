@@ -53,7 +53,7 @@ is one section long, it is a section in an existing skill.
 
 - `name`: lowercase letters/numbers/hyphens, 1–64 chars, no leading/trailing/double hyphens,
   **must equal the directory name**. Verb-first names read best (`create-…`, `archive-…`,
-  `refactor-…`) for workflows; noun names (`chunk-lifecycle`, `unity-mcp`) for reference cards.
+  `refactor-…`) for workflows; noun names (`chunk-lifecycle`, `unity-editor`) for reference cards.
 - Save `SKILL.md` as **UTF-8 without BOM**. A BOM before the opening `---` breaks frontmatter
   parsing and the skill's description renders as garbage in the skills list (this has actually
   happened in this repo).
@@ -70,8 +70,8 @@ description: <what it does + when to use it, ≤1024 chars>
 ```
 
 (`license`, `compatibility`, `metadata`, `allowed-tools` exist in the spec — see the reference —
-add them only with a concrete reason. Precedent: `unity-mcp` uses `metadata` to pin the package
-version it was authored against, so version drift is detectable.)
+add them only with a concrete reason. Precedent: `unity-editor` uses `metadata` to pin the CLI and
+package versions it was authored against, so version drift is detectable.)
 
 **The description is the skill's only always-loaded surface** — the agent decides whether to
 activate the skill from the description alone. Write it as:

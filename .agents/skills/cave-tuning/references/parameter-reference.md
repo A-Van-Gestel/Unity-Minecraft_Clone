@@ -18,7 +18,7 @@ ScriptableObjects under `Assets/Data/WorldGen/Biomes/`.
 
 ## SerializedObject property names
 
-When using `FindPropertyRelative` to modify layers via `Unity_RunCommand`, the correct paths are:
+When using `FindPropertyRelative` to modify layers (e.g. from a `run_script` file), the correct paths are:
 
 - Mode field: `"mode"` (enum `CaveMode`: Cheese=0, Spaghetti2D=1, WormCarver=2, Noodle=3, Spaghetti3D=4)
 - WormCarver properties: `"wormSpawnChance"`, `"maxWormsPerChunk"`, `"wormShape.radiusMin"`, `"wormShape.radiusMax"`, `"wormShape.squashAxis"`, `"wormShape.squashFactor"`, `"wormShape.radiusWaveCount"`, `"wormShape.radiusNoiseStrength"`, `"wormShape.radiusNoiseFrequency"`, `"wormWaviness"`, `"wormHorizontalBias"`, `"wormYAttraction.strength"`, `"wormYAttraction.minY"`, `"wormYAttraction.maxY"`, `"wormMinLength"`, `"wormMaxLength"`, `"wormBranching.branchChance"`, `"wormBranching.maxBranchDepth"`, `"wormNoiseSeeking.checkInterval"`, `"wormNoiseSeeking.seekDistance"`, `"wormNoiseSeeking.seekChance"`
