@@ -1,6 +1,6 @@
 # Unity MCP → Unity CLI Migration Design
 
-**Version:** 1.0  
+**Version:** 1.1  
 **Date:** 2026-09-27  
 **Status:** Proposed design — not implemented.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
@@ -22,7 +22,8 @@ every claim in §2.2 and §4.3 was measured, not read from Unity's documentation
 inventory (`unity command --detail full`, 166 commands) and the Pipeline runtime asmdef
 (`Library/PackageCache/com.unity.pipeline@*/Runtime/Unity.Pipeline.asmdef`) were read directly.
 The repo-side blast radius (§5) is a grep for `Unity_*` / `unity-mcp` across the repo, excluding
-the embedded package itself.
+the embedded package itself.  
+**Amended:** 2026-09-27 — UC-1 shipped; the profiler carrier changed from `eval_file` to `run_script` (§3.3).
 
 **Relationship to other documents:**
 
@@ -139,14 +140,29 @@ and pre-release registry versions can be withdrawn. So UC-3 **starts** with the 
 - ❌ `burst-optimization` routes its evidence step through six of them; dropping them leaves that
   skill with no live-profiler path.
 
-#### Option B — repo-owned `eval_file` scripts ✅ **CHOSEN**
+#### Option B — one repo-owned script run by `run_script` ✅ **CHOSEN**
 
-`eval_file` accepts an absolute path **anywhere on disk** (verified — a scratchpad file outside the
-project ran), so scripts live in `Tools/UnityCli/Profiler/`, outside `Assets/` and therefore
-invisible to Unity's compiler and to `dotnet build`. Scope is the four queries
-`burst-optimization` leads with: overall GC allocations, top-time samples for a frame, self-time
-samples for a frame, and a frame-range time summary. Its other two (bottom-up, cross-thread
-related samples) and the four per-sample drill-downs become skill recipes, not scripts.
+`run_script` compiles a `.cs` file in memory with no domain reload, from any path (relative paths
+resolve against the project root), and calls a named static entry point with a JSON `args` array
+converted to its parameter types. That beats `eval_file`, which takes no arguments. So one file,
+`Tools/UnityCli/Profiler/ProfilerQueries.cs`, holds every query as an entry point. It sits outside
+`Assets/`, so neither Unity nor `dotnet build` compiles it, and `run_script --dry_run true` is its
+compile check.
+
+| Entry (`UnityCli.ProfilerQueries.*`) | `--args`                                               | Replaces                            |
+|--------------------------------------|--------------------------------------------------------|-------------------------------------|
+| `Status`                             | `[]`                                                   | the "is there data?" check          |
+| `Load` / `Clear`                     | `["ProfilerCaptures/<name>.data"]` / `[]`              | — (new: offline captures)           |
+| `Threads`                            | `[frame]`                                              | — (new: thread index/name map)      |
+| `OverallGc`                          | `[firstFrame, lastFrame, top, "threadName"]`           | `GetOverallGcAllocations`, `GetFrame(Range)GcAllocations` |
+| `FrameTopTime`                       | `[frame, top, targetFrameMs, threadIndex]`             | `GetFrameTopTimeSamples`            |
+| `FrameSelfTime`                      | `[frame, top, threadIndex]`                            | `GetFrameSelfTimeSamples`           |
+| `FrameRangeSummary`                  | `[firstFrame, lastFrame, targetFrameMs, top, "threadName"]` | `GetFrameRangeTopTimeSummary`  |
+
+Frame `-1` means first/last available. `burst-optimization`'s other two queries (bottom-up,
+cross-thread related samples) and the four per-sample drill-downs become skill recipes, not
+entries. Each call takes 1.4–2.6 s on a 2000-frame capture, including the in-memory compile.
+The verification (UC-1) is recorded in §4.3's profiler gotchas and the phase table.
 
 ### 3.4 Agent skill: vendor Unity's skills vs one project skill
 
@@ -185,7 +201,7 @@ ported. Installing the upstream skill **user-globally** remains a per-machine op
 | `ManageScene` (6)                 | `get_scene_hierarchy`, `list_open_scenes`, `open_scene`, `save_scene`, build-list commands          |                                                                                                       |
 | `PackageManager_GetData` (6)      | `package_list`, `package_status`                                                                    |                                                                                                       |
 | `FindInFile` (4)                  | Grep / Read                                                                                         | Dropped; the SHA256 check guarded a problem the CLI does not have.                                    |
-| `Profiler_*` (10 tools)           | `Tools/UnityCli/Profiler/*.cs` via `eval_file`; `get_performance_stats`                           | §3.3.                                                                                                 |
+| `Profiler_*` (10 tools)           | `run_script` on `Tools/UnityCli/Profiler/ProfilerQueries.cs`; `get_performance_stats`             | §3.3.                                                                                                 |
 
 New capabilities with no old equivalent: `unity recompile`, detached jobs, `audit` (Project
 Auditor), `run_tests`, `wait_for` (server-side condition wait), `set_autotick` (keeps an
@@ -223,6 +239,13 @@ unfocused Editor ticking), `batch` (transactional multi-command), `simulate_key`
 8. **A synchronous `wait_for` holds the whole command queue**; use `--async true` for anything
    that depends on another command.
 9. **`unity recompile` needs a running Editor** (exit `7` otherwise) — fall back to `dotnet build`.
+10. **`run_script` does not apply C# default parameter values** — every argument must be in
+    `--args`, or the call fails with *"Missing required argument #N"*.
+11. **Profiler thread indices are per-frame.** Only index 0 (main thread) is stable: index 57 was
+    `Job / Worker 0` in one frame of the same capture and `Background Job / Worker 1` in another.
+    Range queries therefore take a thread *name* and resolve it frame by frame.
+12. **`eval` formats numbers with the Editor's locale** (`58033,8` on this machine). Scripts that
+    produce numbers for agents format with `CultureInfo.InvariantCulture`.
 
 ### 4.4 Build-footprint note
 
@@ -301,7 +324,7 @@ restore the relay into `~/.unity/relay/`, and re-add the `unity-mcp` entry to `.
 | Phase                                   | Scope                                                                                                                                                                                                                                             | Effort | Depends on | Status       |
 |-----------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|------------|--------------|
 | **UC-0 — Trial**                        | CLI → beta.11; `com.unity.pipeline` 0.8.0-exp.1 alongside the embed; measure §2.2; `Validate All` green.                                                                                                                                           |   🟢   | —          | ✅ 2026-09-27 |
-| **UC-1 — Profiler scripts**             | `Tools/UnityCli/Profiler/` `eval_file` scripts: overall GC, frame top-time, frame self-time, frame-range summary (§3.3). Verify against a real captured session.                                                                                 |   🟡   | UC-0       | —            |
+| **UC-1 — Profiler scripts**             | `Tools/UnityCli/Profiler/ProfilerQueries.cs` run by `run_script`: overall GC, frame top-time, frame self-time, frame-range summary, plus status/load/clear/threads (§3.3). Verified on two real 2000-frame captures (IL2CPP + Mono) from `ProfilerCaptures/`; `OverallGc`'s total cross-checked against an independent root-level sum (58033.8 KB, exact). Live play-mode recording not exercised — same `ProfilerDriver` frames. |   🟡   | UC-0       | ✅ 2026-09-27 |
 | **UC-4 — `unity mcp` evaluation**       | `unity mcp configure claude --dry-run` first, then register it under a new server name beside `unity-mcp`. Re-run the §2.2 matrix through it (detached long op, reload mid-call, console cursor, reflection in `eval`, unfocused Editor), plus inline image captures and the tool-list context cost. Record the verdict in §3.1 (and §9 if rejected). |   🟢   | UC-0       | —            |
 | **UC-2 — Agent docs**                   | Rename + rewrite `unity-mcp` skill around the CLI (§3.4, §4.3), covering `unity mcp` too if UC-4 adopts it; rewrite the MCP sections of `CLAUDE.md` + `AGENTS.md` (twins, by hand) per §4.2; sweep the §5 blast radius; `.gitignore` `Assets/AgentCaptures~/`; `.claude` permission rules. |   🟡   | UC-1, UC-4 | —            |
 | **UC-3 — Cutover**                      | **§4.5 backup first, verified.** Then remove ai.assistant from the manifest + delete the embed; delete `Tools/Apply-AiAssistantMcpPatch.ps1`, the patch guide and `McpEval*`; drop `unity-mcp` from `.mcp*.json`; package-set check (§5); §4.4 build check; `recompile` + `Validate All` green. |   🟢   | UC-2       | —            |
@@ -345,6 +368,8 @@ longer exist. The regression gate for every phase is `unity recompile` clean plu
 
 ## Document History
 
+* **v1.1** - UC-1 shipped: the profiler queries run through `run_script` (not `eval_file`), one file
+  with an entry point per query; §3.3 lists the entries, §4.3 gains gotchas 10–12.
 * **v1.0** - Initial design (UC-0 trial results + tool mapping)
 
 ---
