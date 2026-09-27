@@ -410,7 +410,7 @@ chained-vs-separate equality baseline (B10) was the guard for MR-5.
 
 Mirrors the meshing/lighting wave structure: each wave leaves the suite green and unblocks the next. Build
 **test-first**, one commit per scenario, all baselines green after each (the `validation-driven-bugfix`
-lifecycle), driven via the menu item + `Unity_ReadConsole` (see §8 — `Unity_RunCommand` is unavailable).
+lifecycle), driven via the menu item + `unity command console` (see §8 for the Unity CLI mechanics).
 
 ### Wave 0 — Harness infrastructure · ✅ DONE (2026-06-20)
 
