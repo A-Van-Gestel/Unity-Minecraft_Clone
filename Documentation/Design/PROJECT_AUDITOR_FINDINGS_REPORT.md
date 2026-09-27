@@ -494,7 +494,7 @@ the sound engine's own listening passes raise something.
 `PAP0002`/`PAP0001` flagged `com.unity.ai.assistant` 2.6.0-pre.1 as preview and updatable to
 2.9.0-pre.2. That pin was load-bearing at the time of this run (the patched build kept the old
 `unity-mcp` bridge working). **Since 2026-09-27 the package is removed**: the Unity CLI replaced
-the bridge (see [`UNITY_MCP_TO_CLI_MIGRATION.md`](UNITY_MCP_TO_CLI_MIGRATION.md)), so these two
+the bridge (see [`UNITY_CLI_EDITOR_BRIDGE.md`](../Architecture/UNITY_CLI_EDITOR_BRIDGE.md)), so these two
 advisories no longer appear. The next run will instead flag `com.unity.pipeline` (an
 `-exp` version) as preview. That is deliberate too: it is the package the CLI talks to. `PAP0003` suggests
 *downgrading* `com.unity.ide.rider` (3.1.0 → 3.0.40) and `com.unity.project-auditor-rules`

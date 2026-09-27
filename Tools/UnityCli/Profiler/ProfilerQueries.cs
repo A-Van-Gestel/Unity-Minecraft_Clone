@@ -6,7 +6,7 @@
 // Every parameter must be passed in --args: run_script does not apply C# default values.
 // Lives outside Assets/ on purpose: neither Unity nor dotnet build compiles it, and editing it
 // never triggers an import or domain reload. run_script compiles it in memory on every call.
-// Replaces the Unity_Profiler_* MCP tools (Documentation/Design/UNITY_MCP_TO_CLI_MIGRATION.md §3.3).
+// Replaces the Unity_Profiler_* MCP tools (Documentation/Architecture/UNITY_CLI_EDITOR_BRIDGE.md §6).
 
 using System;
 using System.Collections.Generic;
