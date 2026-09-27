@@ -1,6 +1,6 @@
 # Unity MCP → Unity CLI Migration Design
 
-**Version:** 1.2  
+**Version:** 1.4  
 **Date:** 2026-09-27  
 **Status:** Proposed design — not implemented.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
@@ -11,9 +11,9 @@
 > direct `unity command` / `unity recompile` / `unity job` shell calls**, and the ai.assistant
 > embed, its patch script and its patch guide are backed up locally and then deleted at cutover.
 > A live trial (UC-0) resolved every long-standing bridge failure mode except the profiler tools,
-> which have no 1:1 command and are rebuilt as repo-owned `eval_file` scripts. The CLI's own MCP
-> server (`unity mcp`) is measured against the same matrix in UC-4 before the agent docs are
-> rewritten, and may be adopted alongside the shell path for what the shell cannot do.
+> which have no 1:1 command and are rebuilt as a repo-owned `run_script` file. UC-4 measured the
+> CLI's own MCP server (`unity mcp`) and a trimmed old bridge kept beside the CLI: **neither adds a
+> capability the shell path lacks**, so both are rejected and the CLI alone replaces the old bridge.
 
 **Audited:** 2026-09-27, at commit `e857a754` (branch `mcp-to-cli-migration`).
 Findings come from a live trial against the running 6000.6.3f1 Editor with Unity CLI
@@ -23,7 +23,9 @@ inventory (`unity command --detail full`, 166 commands) and the Pipeline runtime
 (`Library/PackageCache/com.unity.pipeline@*/Runtime/Unity.Pipeline.asmdef`) were read directly.
 The repo-side blast radius (§5) is a grep for `Unity_*` / `unity-mcp` across the repo, excluding
 the embedded package itself.  
-**Amended:** 2026-09-27 — UC-1 shipped; the profiler carrier changed from `eval_file` to `run_script` (§3.3).
+**Amended:** 2026-09-27 — UC-1 shipped; the profiler carrier changed from `eval_file` to `run_script` (§3.3).  
+**Amended:** 2026-09-27 — UC-4 protocol-level results and coexistence confirmed (§3.1); revoke cause found (§2.1).  
+**Amended:** 2026-09-27 — UC-4 complete: `unity mcp` rejected, hybrid rejected (§3.1, §3.5).
 
 **Relationship to other documents:**
 
@@ -70,7 +72,7 @@ the embedded package itself.
 | Why pinned            | Later ai.assistant versions enforce Unity AI entitlements on the MCP bridge. The CLI is free and needs no Unity AI subscription, which removes the reason for the pin.               |
 | Known failure modes   | RunCommand over ~3 min re-executes in a loop until an Editor restart; a domain reload mid-call burns the full timeout; `System.Reflection` & co. blocked (worked around by `McpEval`). |
 | Compile gate          | `dotnet build` + DLL-timestamp polling; a new `.cs` file is invisible to `dotnet build` until Unity regenerates the `.csproj` (false green).                                           |
-| Live state 2026-09-27 | After the Pipeline install's domain reload, `Unity_ManageEditor` returns *"Connection revoked"* (approval state `Denied`, `Bridge.cs:1660`). Whether the Pipeline install caused it was not determined. |
+| Live state 2026-09-27 | `Unity_ManageEditor` returns *"Connection revoked"* (approval state `Denied`, `Bridge.cs:1660`). **Not caused by the Pipeline package:** `Logs/traces.jsonl` shows *"Connection denied: previously rejected by user"* for `claude-code` from 09:01:25 UTC, 11 minutes before the Pipeline install (09:12 UTC). A stored *Rejected* approval record denies every new connection (`Bridge.cs:1187`). Resolved in UC-4: after approving in Project Settings → AI → Unity MCP, the **live** connection stayed denied, because approval is only evaluated at connect time. The next domain reload (`EditorUtility.RequestScriptReload()`) reconnected it as *"auto-approved: previously accepted by user"*. `RESTORE.md` (§4.5) repeats this step. |
 
 ### 2.2 What the trial measured (UC-0)
 
@@ -91,20 +93,24 @@ the embedded package itself.
 
 ### 3.1 Transport: direct CLI commands vs the CLI's MCP server
 
-#### Option A — `unity mcp` server (undecided — measured in UC-4)
+#### Option A — `unity mcp` server (rejected as a standing configuration — UC-4)
 
-- ✅ Same MCP protocol as today; tool calls stay structured and typed.
-- ✅ **An MCP tool result can carry an image**, which a shell call cannot: a capture could reach
-  the agent directly instead of going through a saved PNG and a separate read (§4.3 gotcha 1).
-- ❌ **Keeps some of the MCP plumbing this migration removes** — a `.mcp.json` entry, client
-  configuration, one more long-lived process. Unity positions it for agents that cannot run shell
-  commands; every agent used on this repo (Claude Code, Codex via `AGENTS.md`) can.
-- ❓ Not exercised in UC-0, so there is no evidence yet that it avoids the §2.2 failure modes, or
-  of what its tool list costs in context (the Editor registers 166 commands).
+- ✅ Same MCP protocol as the old bridge; tool calls stay structured and typed.
+- ✅ An MCP tool result can carry an image in one call. The shell path matches it in two: capture
+  to `Assets/AgentCaptures~/` at a chosen size, then read the PNG (verified, §3.5).
+- ✅ A persistent session answers in ~120 ms per call. The shell path answers in ~170 ms once the
+  project path is passed explicitly (§4.3 gotcha 14), so this is not a practical gap.
+- ❌ **Worse than the shell path on long work:** a fixed 60 s ceiling per call, no detach or job
+  tool, and a 5 s default `eval` timeout.
+- ❌ **160 tools** registered with the client for commands the shell reaches anyway, and a second
+  way to do everything that the agent docs would have to describe and keep in sync.
+- ❌ Keeps MCP plumbing this migration removes: a `.mcp.json` entry, client configuration, one
+  more long-lived process. Unity positions it for agents that cannot run shell commands; every
+  agent used on this repo (Claude Code, Codex via `AGENTS.md`) can.
 
-UC-4 settles this with the §2.2 matrix. Three outcomes are possible: **reject** (recorded in §9),
-**secondary** (kept for specific jobs such as inline captures, with the shell path primary), or
-**primary** (only if it beats the shell path on the matrix, which would reopen this decision).
+**Verdict (UC-4, 2026-09-27): reject** as a standing configuration. It has no capability the shell
+path lacks, and it is worse at long operations. It stays the documented fallback for an agent that
+cannot run shell commands; the `.mcp.json` snippet goes into the rewritten skill for that case.
 
 UC-4 also has to show that **`unity mcp` coexists with the existing `unity-mcp` bridge** until UC-3
 removes it. The two run on separate transports (relay on ports 9001/9002, the Pipeline server on
@@ -112,8 +118,21 @@ removes it. The two run on separate transports (relay on ports 9001/9002, the Pi
 That conflict check needs a working baseline, and there is none today: the old bridge answers
 *"Connection revoked"* (§2.1). So UC-4 first restores its approval (Project Settings → AI → Unity
 MCP) and confirms a `Unity_ManageEditor` call succeeds. Only then are both servers exercised in the
-same session. That order also answers §8 question 2: if the approval stays good while the Pipeline
-package is installed, the revoke was a stale approval state, not the documented conflict.
+same session.
+
+**Protocol-level results so far (UC-4, 2026-09-27).** Measured with a stdio JSON-RPC client driving
+`unity.exe mcp --project-path <project>` directly, before it was registered with any agent:
+
+| Check                    | Result through `unity mcp`                                                                                                                                                                  |
+|--------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Tool list                | **160 tools; `tools/list` is 103,751 chars (~26k tokens).** It is the whole Pipeline command set; `unity mcp` offers no option to narrow it.                                                  |
+| `eval`                   | Reflection and namespaced project types work. **Default timeout 5 s** (CLI: 30 s); a busy main thread fails the call with *"Main thread operation timed out after 5000ms"*.                   |
+| Inline capture           | ✅ `capture_scene_view` with no `save_path` returns an MCP **`image` block** (PNG, `max_resolution: 512` → 36,820 base64 chars). No file, no import, no separate read.                         |
+| Long operation           | ❌ **Every tool call times out at a fixed 60 s**, with no timeout parameter and no job/detach tool. `Validate All` ran on after the timeout and finished **once** (753/753, no re-execution); the result has to be read from `console`. |
+| Domain reload mid-call   | One call in a persistent session failed fast (*HTTP 400*) during the reload; the **same session** answered the next call. Same behavior as the shell path.                                   |
+| Coexistence              | ✅ With the old bridge's approval restored (baseline `Unity_ManageEditor` OK), the old bridge (`Unity_RunCommand`, `Unity_ReadConsole`), `unity command eval` and `unity mcp` `eval` all ran against the same Editor, and the old console saw all three markers. After a forced domain reload all three answered again. The relay logged only its normal reload disconnect/reconnect, the bridge re-approved (*"auto-approved: previously accepted by user"*), and `Editor.log` gained no MCP/Pipeline/relay errors. |
+| Latency                  | ~120 ms per `eval` in a persistent session (spawn + initialize: 26 ms). Shell path: ~1.27 s with auto-detection, ~170 ms with `--project-path` (§4.3 gotcha 14).                               |
+| In-client (Claude Code)  | Not run. The verdict does not depend on it: deferred tool loading can only lower the tool-list cost, and every capability is reachable through the shell path (§3.5).                         |
 
 #### Option B — direct `unity command` / `recompile` / `job` via the shell ✅ **CHOSEN** (primary)
 
@@ -191,6 +210,29 @@ agent: this project's recipes, the §4.3 gotchas, and the play-mode confirmation
 details come from `unity command --query`. The 553-line `references/tools.md` is replaced, not
 ported. Installing the upstream skill **user-globally** remains a per-machine option.
 
+### 3.5 Hybrid: keep a trimmed old bridge beside the CLI?
+
+The idea: keep `unity-mcp` running with every tool the CLI replaces disabled, so the old bridge
+covers whatever the CLI cannot. That is only worth it if some old tool is **unique**. UC-4 tested
+each candidate against the same Editor, the same scene and the same profiler capture:
+
+| Old tool (candidate)        | Measured                                                                                                                                                                                                  | Unique? |
+|-----------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-------:|
+| `Camera_Capture`            | Inline image, but always the full 1920×1080 (~2.7k vision tokens), no size control. CLI: `capture_scene_view --save_path "Assets/AgentCaptures~/x.png" --width 640 --height 360`, then read the PNG — sized, no `.meta`. |   ❌    |
+| `Profiler_*` (12)           | **Structurally broken over MCP:** every call throws `ArgumentNullException: conversationContext`. They wrap the in-Editor Assistant *chat* tools (`ConversationCache.cs:21`), which need a chat conversation MCP never provides. Failed on the same loaded frame `ProfilerQueries` handled. |   ❌    |
+| `ValidateScript`            | Whole-file substring heuristics (`ManageScript.cs:2534-2560`), no line numbers. Both warnings on `World.cs` were false positives: "Rigidbody" matched `VoxelRigidbody` in a docstring, and "string concatenation in Update()" matches any file containing `Update()`, a quote and a `+`. Rider `lint_files` is the real inspector. |   ❌    |
+| `RunCommand` (Undo)         | `eval` calls the `Undo` API directly: `RegisterCreatedObjectUndo` + `PerformUndo` removed the object and left the scene clean. Recipe: open a named group first (§4.3 gotcha 15).                          |   ❌    |
+| `ManageGameObject` (private `[SerializeField]`) | Parity with `get_serialized_fields` on `TooltipManager`: same four fields and scene values. The CLI returns enum *names* (`"BottomCenter"`, old: `3`) and GlobalObjectIds for references. |   ❌    |
+| Everything else             | `ReadConsole`, `ManageMenuItem`, `ManageEditor`, `ManageScene`, `ManageAsset`, `PackageManager_GetData`, `FindInFile` are covered 1:1 or better (§4.1).                                                    |   ❌    |
+
+Coexistence itself works (§3.1): nothing *breaks* by keeping both. But nothing is gained either,
+and keeping it has costs: the 19-patch embed, the pinned version, and a deprecated package that
+gets no fixes while every Unity upgrade can break it (as 6.5 did). It also leaves agents tools
+whose known failure modes (the long-operation loop, approval revokes) the CLI removed.
+
+**Verdict: no hybrid.** The old bridge is retired at UC-3 as planned, with the §4.5 backup, and
+`unity mcp` stays unconfigured (§3.1). The "best of both worlds" turned out to be the CLI alone.
+
 ---
 
 ## 4. Architecture
@@ -204,13 +246,13 @@ ported. Installing the upstream skill **user-globally** remains a per-machine op
 | `ManageEditor` (25)               | `editor_status`, `editor_play` / `editor_pause` / `editor_stop`, `settings/tags_layers` group       | Play/Pause/Stop still need user confirmation.                                                         |
 | `ReadConsole` (23)                | `console --tail --level --since`, `clear_console`                                                   | Follow with the returned `cursor` + `session`, not timestamps.                                        |
 | `ManageGameObject` (16)           | `find_gameobjects`, `get_component_properties`, `get_serialized_fields`, `set_*`                    | Handles are `instanceId` / `hierarchyPath` from `get_scene_hierarchy`.                                |
-| `ValidateScript` (10)             | `unity recompile` (+ Rider `lint_files` for inspections)                                            | **Accepted gap:** no Unity-aware GC lint. Its output was already documented as hints only.            |
+| `ValidateScript` (10)             | `unity recompile` (+ Rider `lint_files` for inspections)                                            | Nothing lost: its "Unity-aware" checks are whole-file substring heuristics (§3.5).                    |
 | `Camera_Capture` (10)             | `capture_game_view --source camera --camera <name>`, `capture_scene_view`                           | Save under `Assets/AgentCaptures~/` (§4.3).                                                           |
 | `ManageAsset` (8)                 | `find_assets`, `get_import_settings`, `move_asset`, `rename_asset`, …                               | Destructive ops take `--confirm true`; most take `--dry_run`.                                         |
 | `ManageScene` (6)                 | `get_scene_hierarchy`, `list_open_scenes`, `open_scene`, `save_scene`, build-list commands          |                                                                                                       |
 | `PackageManager_GetData` (6)      | `package_list`, `package_status`                                                                    |                                                                                                       |
 | `FindInFile` (4)                  | Grep / Read                                                                                         | Dropped; the SHA256 check guarded a problem the CLI does not have.                                    |
-| `Profiler_*` (10 tools)           | `run_script` on `Tools/UnityCli/Profiler/ProfilerQueries.cs`; `get_performance_stats`             | §3.3.                                                                                                 |
+| `Profiler_*` (10 tools)           | `run_script` on `Tools/UnityCli/Profiler/ProfilerQueries.cs`; `get_performance_stats`             | §3.3. The old tools never worked over MCP (§3.5).                                                     |
 
 New capabilities with no old equivalent: `unity recompile`, detached jobs, `audit` (Project
 Auditor), `run_tests`, `wait_for` (server-side condition wait), `set_autotick` (keeps an
@@ -237,8 +279,8 @@ unfocused Editor ticking), `batch` (transactional multi-command), `simulate_key`
    `set_authoring_root` only accepts folders under `Assets/`. Save captures to
    **`Assets/AgentCaptures~/`**: Unity skips `~` folders (verified: no `.meta`, no import). Needs a
    `.gitignore` entry.
-2. **`max_resolution` is ignored** by `capture_scene_view` (requested 800, got 1280×720). Pass
-   `--width` / `--height` instead (untested).
+2. **`max_resolution` only applies to an inline image.** With `save_path` set, the file is written
+   at `width` × `height` (default 1280×720); `max_resolution` is ignored.
 3. **Project types need their namespace in `eval`** — `Data.BlockIDs.Stone`, not `BlockIDs.Stone`.
 4. **Parameter syntax is `--name value`**; `name=value` is rejected with `INVALID_COMMAND_ARGS`.
 5. **Default timeout is 30 s** (`--timeout <s>` raises it); prefer `--detach` for anything long.
@@ -255,6 +297,16 @@ unfocused Editor ticking), `batch` (transactional multi-command), `simulate_key`
     Range queries therefore take a thread *name* and resolve it frame by frame.
 12. **`eval` formats numbers with the Editor's locale** (`58033,8` on this machine). Scripts that
     produce numbers for agents format with `CultureInfo.InvariantCulture`.
+13. **A command parameter named `format` collides with the global `--format` flag.**
+    `get_serialized_fields --format value` is parsed as the CLI output format and rejected. Omit it
+    (the default full descriptor works) or pass it through `eval`.
+14. **Always give the CLI the project path.** Without it, every `unity command` scans for Editors
+    (~1.1 s of the ~1.27 s per call; `unity status` alone takes 1.18 s). With `--project-path` or
+    `UNITY_PROJECT_PATH` a call takes ~170 ms. `unity shell` does not help (still ~1.2 s per call,
+    because the scan is per command, not per process).
+15. **`eval` does not open an Undo group.** Its Undo records join whatever group is current; an
+    earlier call's name showed up. Start undoable edits with `Undo.IncrementCurrentGroup()` +
+    `Undo.SetCurrentGroupName("…")`.
 
 ### 4.4 Build-footprint note
 
@@ -290,7 +342,9 @@ to the existing project backups:
    archive can rebuild the bridge without the network or this repo's working tree.
 
 `RESTORE.md` records the restore path: extract the embed into `Packages/`, add the manifest entry,
-restore the relay into `~/.unity/relay/`, and re-add the `unity-mcp` entry to `.mcp.json`.
+restore the relay into `~/.unity/relay/`, and re-add the `unity-mcp` entry to `.mcp.json`. If a
+client was ever denied, approve it in Project Settings → AI → Unity MCP **and then force a domain
+reload**; approval is only evaluated when a client connects (§2.1).
 
 ---
 
@@ -334,8 +388,8 @@ restore the relay into `~/.unity/relay/`, and re-add the `unity-mcp` entry to `.
 |-----------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|------------|--------------|
 | **UC-0 — Trial**                        | CLI → beta.11; `com.unity.pipeline` 0.8.0-exp.1 alongside the embed; measure §2.2; `Validate All` green.                                                                                                                                           |   🟢   | —          | ✅ 2026-09-27 |
 | **UC-1 — Profiler scripts**             | `Tools/UnityCli/Profiler/ProfilerQueries.cs` run by `run_script`: overall GC, frame top-time, frame self-time, frame-range summary, plus status/load/clear/threads (§3.3). Verified on two real 2000-frame captures (IL2CPP + Mono) from `ProfilerCaptures/`; `OverallGc`'s total cross-checked against an independent root-level sum (58033.8 KB, exact). Live play-mode recording not exercised — same `ProfilerDriver` frames. |   🟡   | UC-0       | ✅ 2026-09-27 |
-| **UC-4 — `unity mcp` evaluation**       | **Coexistence first (§3.1):** restore the old bridge's approval and confirm a `Unity_*` call works as a baseline. Then `unity mcp configure claude --dry-run`, and register it under a new server name beside `unity-mcp`. Re-run the §2.2 matrix through it (detached long op, reload mid-call, console cursor, reflection in `eval`, unfocused Editor), plus inline image captures and the tool-list context cost. Throughout, and after each domain reload, check that both servers still answer, and that neither the relay log nor `Logs/Editor.log` shows approval, port or connection errors. Record the verdict in §3.1 (and §9 if rejected). |   🟢   | UC-0       | —            |
-| **UC-2 — Agent docs**                   | Rename + rewrite `unity-mcp` skill around the CLI (§3.4, §4.3), covering `unity mcp` too if UC-4 adopts it; rewrite the MCP sections of `CLAUDE.md` + `AGENTS.md` (twins, by hand) per §4.2; sweep the §5 blast radius; `.gitignore` `Assets/AgentCaptures~/`; `.claude` permission rules. |   🟡   | UC-1, UC-4 | —            |
+| **UC-4 — `unity mcp` evaluation**       | **Coexistence first (§3.1):** restore the old bridge's approval and confirm a `Unity_*` call works as a baseline. Then `unity mcp configure claude --dry-run`, and register it under a new server name beside `unity-mcp`. Re-run the §2.2 matrix through it (detached long op, reload mid-call, console cursor, reflection in `eval`, unfocused Editor), plus inline image captures and the tool-list context cost. Throughout, and after each domain reload, check that both servers still answer, and that neither the relay log nor `Logs/Editor.log` shows approval, port or connection errors. Record the verdict in §3.1 (and §9 if rejected). **Extended:** a head-to-head of every old tool for a trimmed-bridge hybrid (§3.5). Verdict: reject `unity mcp` as standing config, no hybrid. |   🟢   | UC-0       | ✅ 2026-09-27 |
+| **UC-2 — Agent docs**                   | Rename + rewrite `unity-mcp` skill around the CLI (§3.4, §4.3), with the `unity mcp` snippet only as the no-shell fallback (§3.1); set `UNITY_PROJECT_PATH` in `.claude/settings.json` `env` (§4.3 gotcha 14); rewrite the MCP sections of `CLAUDE.md` + `AGENTS.md` (twins, by hand) per §4.2; sweep the §5 blast radius; `.gitignore` `Assets/AgentCaptures~/`; `.claude` permission rules. |   🟡   | UC-1, UC-4 | —            |
 | **UC-3 — Cutover**                      | **§4.5 backup first, verified.** Then remove ai.assistant from the manifest + delete the embed; delete `Tools/Apply-AiAssistantMcpPatch.ps1`, the patch guide and `McpEval*`; drop `unity-mcp` from `.mcp*.json`; package-set check (§5); §4.4 build check; `recompile` + `Validate All` green. |   🟢   | UC-2       | —            |
 
 **Order of work:** UC-0 → UC-1 and UC-4 (independent, either order) → UC-2 → UC-3. UC-4 keeps its
@@ -360,8 +414,6 @@ longer exist. The regression gate for every phase is `unity recompile` clean plu
 1. **Modal dialogs** — a modal blocks the main thread; untested whether commands queue, time out
    cleanly at `--timeout`, or wedge. Resolve with one deliberate probe during UC-2 and record the
    answer in §4.3.
-2. **What revoked the old bridge** (§2.1) — answered by UC-4's coexistence check (§3.1), which has
-   to restore the bridge's approval anyway to get a baseline.
 
 ---
 
@@ -370,6 +422,8 @@ longer exist. The regression gate for every phase is `unity recompile` clean plu
 | Alternative                                   | Why rejected                                                                                          | Date       |
 |-----------------------------------------------|-------------------------------------------------------------------------------------------------------|------------|
 | Keep ai.assistant alongside the CLI           | Two bridges, patch upkeep, documented <2.13 conflict, old bridge already `Denied` (§3.2).               | 2026-09-27 |
+| `unity mcp` as a standing MCP server          | UC-4: no capability the shell path lacks; fixed 60 s call ceiling, no detach, 5 s `eval` default, 160 tools (§3.1). Kept only as the fallback for no-shell agents. | 2026-09-27 |
+| Hybrid: trimmed old bridge beside the CLI     | UC-4 head-to-head: no old tool is unique; the profiler tools never worked over MCP, `ValidateScript` is substring heuristics (§3.5). | 2026-09-27 |
 | Upgrade ai.assistant to ≥2.13                 | Reintroduces the entitlement enforcement the 2.6.0-pre.1 pin avoided.                                   | 2026-09-27 |
 | Vendor Unity's generated `unity-cli` skills   | Regenerated per CLI release; committed copies go stale (§3.4).                                         | 2026-09-27 |
 | `set_authoring_root` to reach `Temp/`         | Measured: the root is confined to folders under `Assets/`; the `~` folder is the working alternative. | 2026-09-27 |
@@ -378,6 +432,13 @@ longer exist. The regression gate for every phase is `unity recompile` clean plu
 
 ## Document History
 
+* **v1.4** - UC-4 complete: `unity mcp` rejected as a standing server (§3.1); new §3.5 tests every old
+  tool for a trimmed-bridge hybrid and finds none unique (profiler tools broken over MCP,
+  `ValidateScript` heuristic-only); latency measured; §4.3 gotchas 13-15.
+* **v1.3** - UC-4 in progress: protocol-level `unity mcp` results in §3.1 (160 tools / ~26k-token list,
+  inline images, fixed 60 s call timeout); the old bridge's revoke traced to a stored rejection that
+  predates the Pipeline install (§2.1, closes the former §8 question 2); §4.3 gotcha 2 corrected.
+  Coexistence confirmed against the restored-approval baseline, including across a domain reload.
 * **v1.2** - UC-4 scope: coexistence with the existing `unity-mcp` bridge, checked against a restored
   approval baseline, before and throughout the `unity mcp` measurements.
 * **v1.1** - UC-1 shipped: the profiler queries run through `run_script` (not `eval_file`), one file

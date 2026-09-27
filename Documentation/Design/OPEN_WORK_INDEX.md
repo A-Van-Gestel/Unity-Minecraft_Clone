@@ -72,7 +72,7 @@ would put the same item on the map twice and mis-sort the doc.
 | **Foliage liveliness** | [`FOLIAGE_LIVELINESS_IMPROVEMENTS_REPORT.md`](FOLIAGE_LIVELINESS_IMPROVEMENTS_REPORT.md) | `FL-` | Open backlog |
 | **Codebase (non-performance)** | [`CODEBASE_IMPROVEMENTS.md`](CODEBASE_IMPROVEMENTS.md) | — | Open backlog: API modernization and cleanup items |
 | **Project Auditor findings** | [`PROJECT_AUDITOR_FINDINGS_REPORT.md`](PROJECT_AUDITOR_FINDINGS_REPORT.md) | `AU-` | Open backlog from the 2026-09-17 run; `AU-4`/`AU-5` declined ⛔. Its §3 is the standing "these auditor counts are not defects" record |
-| **Agent ↔ Editor tooling** | [`UNITY_MCP_TO_CLI_MIGRATION.md`](UNITY_MCP_TO_CLI_MIGRATION.md) | `UC-` | Proposed; `UC-0` trial and `UC-1` profiler scripts done, **`UC-2`…`UC-4` open** (agent docs, cutover, `unity mcp` evaluation) |
+| **Agent ↔ Editor tooling** | [`UNITY_MCP_TO_CLI_MIGRATION.md`](UNITY_MCP_TO_CLI_MIGRATION.md) | `UC-` | Proposed; `UC-0` trial, `UC-1` profiler scripts and `UC-4` `unity mcp` evaluation done, **`UC-2`, `UC-3` open** (agent docs, cutover) |
 | **Third-party libraries** | [`THIRD_PARTY_LIBRARY_IDEAS_REPORT.md`](THIRD_PARTY_LIBRARY_IDEAS_REPORT.md) | — | Open backlog of *techniques*; all seven evaluated libraries were rejected |
 | **Validation coverage** | [`VALIDATION_SUITE_COVERAGE_ROADMAP.md`](VALIDATION_SUITE_COVERAGE_ROADMAP.md) | `NS-` | Living backlog; `NS-4`, `NS-5`, `NS-7`, `NS-7b` complete |
 | **Lighting async bugs & harness** | [`LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md`](LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md) | `AS-` `HF-` | In progress; `AS-1` closed, `HF-1`…`HF-3` done |
