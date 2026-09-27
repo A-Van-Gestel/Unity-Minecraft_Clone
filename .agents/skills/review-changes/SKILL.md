@@ -1,6 +1,6 @@
 ---
 name: review-changes
-description: Reviews a working diff against this voxel engine's project-specific invariants — architecture constraints, Burst, hot-path GC, serialization, chunk pipeline, coordinate spaces, docs — and ends with a single merge verdict. Safe to run repeatedly mid-work. Use when the user says "review my changes", "review the diff", "pre-merge check", "is this ready to merge", "review before commit", "check my work", or before offering a commit on a non-trivial change.
+description: Reviews a working diff against this voxel engine's project-specific invariants — architecture constraints, Burst, hot-path GC, serialization, chunk pipeline, coordinate spaces, URP Render Graph, docs — and ends with a single merge verdict. Safe to run repeatedly mid-work. Use when the user says "review my changes", "review the diff", "pre-merge check", "is this ready to merge", "review before commit", "check my work", or before offering a commit on a non-trivial change.
 ---
 
 # Review changes
@@ -157,7 +157,7 @@ class of regression the `+` side cannot show you is a guard the `-` side removed
 
 ## Step 3 — load the shards the diff earns, then run the gates
 
-The nineteen gates are split across six reference files. **Read
+The twenty-three gates are split across seven reference files. **Read
 `references/gates-core.md` always**, plus each shard the changed-file list
 triggers. Loading a shard the diff cannot trip is wasted context; skipping one it
 does trip is a missed gate, so route from the actual file list, not from a guess
@@ -170,13 +170,14 @@ about what the change was "about".
 | `references/gates-serialization.md` | 8, 9 | `Assets/Scripts/Serialization/`, `ChunkData.cs`, `ChunkStorageManager.cs`, or a `[SerializeField]` / public field on a `MonoBehaviour` / `ScriptableObject` |
 | `references/gates-pipeline.md` | 10, 11, 12 | `World.cs`, `WorldJobManager.cs`, `ChunkPoolManager.cs`, a pooled type (`Chunk.cs`, `Data/ChunkData.cs`, `Data/ChunkSection.cs`, `VisualizerChunkData.cs`), lighting / fluid / meshing / chunk-management code, or a newly added mutable `static` |
 | `references/gates-coordinates.md` | 13, 14 | `Assets/Shaders/` (any `.shader` / `.hlsl`), `WorldOrigin.cs`, `ChunkMath.cs`, `ChunkCoord.cs`, noise sampling, or any code that converts a world/voxel position to `float` or moves one between coordinate spaces |
+| `references/gates-rendering.md` | 20, 21, 22, 23 | `Assets/Scripts/Rendering/`, or any code that records Render Graph passes (content trigger below) |
 | `references/gates-docs.md` | 15, 16, 17, 18, 19 | `Documentation/`, `.agents/skills/`, `CLAUDE.md`, or `AGENTS.md` — i.e. the diff **edits docs** (gate 3 in `core` covers the opposite case, code changed with no doc edit) |
 
 Most diffs load core plus one or two shards. A diff that touches everything loads
 everything — that is correct, not a failure of the router.
 
-Two triggers are **content-based, not path-based**, and neither can be settled
-from the file list alone. Scan the diff before deciding to skip either — no hits
+Three triggers are **content-based, not path-based**, and none can be settled
+from the file list alone. Scan the diff before deciding to skip any of them — no hits
 means the shard is genuinely not earned; not checking means you do not know.
 
 - **Serialization**, because any `MonoBehaviour` or `ScriptableObject` in the diff
@@ -185,6 +186,9 @@ means the shard is genuinely not earned; not checking means you do not know.
 - **Coordinates**, because a world position can be turned into a float, or moved
   between spaces, anywhere — not only under `Assets/Shaders/`:
   `git diff --no-color $RANGE | grep -nE '^\+.*(OriginVoxel|_LiquidNoiseOrigin|worldPos|positionWS|_Time\.y|FloorToInt|%\s*16)'`
+- **Rendering**, because Render Graph passes can be recorded from outside
+  `Assets/Scripts/Rendering/` (a helper, an editor validation renderer):
+  `git diff --no-color $RANGE | grep -nE '^[-+].*(ScriptableRendererFeature|RecordRenderGraph|Add(RasterRender|Unsafe|Compute)Pass|SetRenderFunc)'`
 
 **The shards summarize `.agents/rules/*.md`; the rules are the source of truth.**
 Those rule files are glob-attached by other harnesses while you *edit* a matching
@@ -217,6 +221,10 @@ are the part that matters, and the exceptions are where false positives come fro
 | 17 | A promotion or Architecture rewrite reuses an `Audited:` line it did not re-earn | docs |
 | 18 | An issued ID was deleted from an index table instead of marked superseded | docs |
 | 19 | `Last Updated:` / `Audited:` restamped for a targeted one-section edit | docs |
+| 20 | Render Graph resource access declared wrong (blend attachment not `ReadWrite`, invisible dependency still cullable, depth read without `ConfigureInput`) | rendering |
+| 21 | Render function reads stale or shared state (non-`static`, `PassData` not reassigned, shared `Material` mutated inside the render function) | rendering |
+| 22 | Global state published around the graph (no `AllowGlobalStateModification`, global with no consumer) | rendering |
+| 23 | Renderer-feature lifecycle leak (`Create` not idempotent, material or `RTHandle` never released) | rendering |
 
 ### On an intermediate run: what may wait, and what may not
 

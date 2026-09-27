@@ -1,8 +1,8 @@
 # Core gates — always run
 
 These four apply to any diff, whatever it touches, and they are the only gates
-that do. The other three shards — `jobs`, `serialization`, `pipeline` — are
-loaded per the router in `SKILL.md`.
+that do. The other six shards — `jobs`, `serialization`, `pipeline`,
+`coordinates`, `rendering`, `docs` — are loaded per the router in `SKILL.md`.
 
 Each gate carries **what fails**, **how to check**, **severity**, and whether it
 is **delta-based** (flag only what the diff adds) or absolute (any occurrence in
