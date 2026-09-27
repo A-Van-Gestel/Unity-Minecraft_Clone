@@ -1,6 +1,6 @@
 # Unity MCP → Unity CLI Migration Design
 
-**Version:** 1.4  
+**Version:** 1.5  
 **Date:** 2026-09-27  
 **Status:** Proposed design — not implemented.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
@@ -25,7 +25,8 @@ The repo-side blast radius (§5) is a grep for `Unity_*` / `unity-mcp` across th
 the embedded package itself.  
 **Amended:** 2026-09-27 — UC-1 shipped; the profiler carrier changed from `eval_file` to `run_script` (§3.3).  
 **Amended:** 2026-09-27 — UC-4 protocol-level results and coexistence confirmed (§3.1); revoke cause found (§2.1).  
-**Amended:** 2026-09-27 — UC-4 complete: `unity mcp` rejected, hybrid rejected (§3.1, §3.5).
+**Amended:** 2026-09-27 — UC-4 complete: `unity mcp` rejected, hybrid rejected (§3.1, §3.5).  
+**Amended:** 2026-09-27 — UC-2 complete: compile gate corrected to `recompile` → `ready` (§4.2); gotchas 16–19.
 
 **Relationship to other documents:**
 
@@ -263,8 +264,11 @@ unfocused Editor ticking), `batch` (transactional multi-command), `simulate_key`
 
 - **Compile gate:** `unity recompile --format json` becomes the primary check when the Editor is
   running — it compiles every assembly (runtime and editor), sees new files, and reports Unity's
-  own errors. `dotnet build` stays as the Editor-less fallback. The DLL-timestamp polling rule and
-  the "stale DLL means the Unity compile failed" corollary are superseded.
+  own errors. `dotnet build` stays as the Editor-less fallback. **`recompile` returns when
+  compilation ends, before the domain reload** (measured in UC-2: an `eval` sent straight after
+  failed three times out of three), so the gate is `unity recompile` → poll `editor_status` until
+  `ready`. Through that gate a changed constant read back its new value 3/3. It replaces the
+  DLL-timestamp polling rule.
 - **Long operations:** the "never over ~3 min through RunCommand" rule becomes "anything over the
   30 s default timeout runs with `--detach` + `unity job wait`".
 - **Mid-call edits:** the "never edit a `.cs` file while RunCommand is executing" rule is
@@ -307,6 +311,15 @@ unfocused Editor ticking), `batch` (transactional multi-command), `simulate_key`
 15. **`eval` does not open an Undo group.** Its Undo records join whatever group is current; an
     earlier call's name showed up. Start undoable edits with `Undo.IncrementCurrentGroup()` +
     `Undo.SetCurrentGroupName("…")`.
+16. **`eval` rejects `using` directives.** The code becomes a method body, so `using Editor.Dev;`
+    parses as a `using` *statement* and fails. Write names fully qualified, or put the code in a
+    `run_script` file, where `using` works.
+17. **`unity recompile` returns before the domain reload** — see §4.2 for the `ready` gate.
+18. **Obsolete APIs fail `eval` compilation** (e.g. `Object.GetInstanceID()` in 6.6 →
+    `GetEntityId()`), not just warn.
+19. **Never call `Undo.PerformUndo()` blind.** In UC-2 a verification undo ran after a failed create
+    and reverted the group on top of the stack. That group was the agent's own log-only probe;
+    it could as well have been the user's work. Check `Undo.GetCurrentGroupName()` first.
 
 ### 4.4 Build-footprint note
 
@@ -389,8 +402,8 @@ reload**; approval is only evaluated when a client connects (§2.1).
 | **UC-0 — Trial**                        | CLI → beta.11; `com.unity.pipeline` 0.8.0-exp.1 alongside the embed; measure §2.2; `Validate All` green.                                                                                                                                           |   🟢   | —          | ✅ 2026-09-27 |
 | **UC-1 — Profiler scripts**             | `Tools/UnityCli/Profiler/ProfilerQueries.cs` run by `run_script`: overall GC, frame top-time, frame self-time, frame-range summary, plus status/load/clear/threads (§3.3). Verified on two real 2000-frame captures (IL2CPP + Mono) from `ProfilerCaptures/`; `OverallGc`'s total cross-checked against an independent root-level sum (58033.8 KB, exact). Live play-mode recording not exercised — same `ProfilerDriver` frames. |   🟡   | UC-0       | ✅ 2026-09-27 |
 | **UC-4 — `unity mcp` evaluation**       | **Coexistence first (§3.1):** restore the old bridge's approval and confirm a `Unity_*` call works as a baseline. Then `unity mcp configure claude --dry-run`, and register it under a new server name beside `unity-mcp`. Re-run the §2.2 matrix through it (detached long op, reload mid-call, console cursor, reflection in `eval`, unfocused Editor), plus inline image captures and the tool-list context cost. Throughout, and after each domain reload, check that both servers still answer, and that neither the relay log nor `Logs/Editor.log` shows approval, port or connection errors. Record the verdict in §3.1 (and §9 if rejected). **Extended:** a head-to-head of every old tool for a trimmed-bridge hybrid (§3.5). Verdict: reject `unity mcp` as standing config, no hybrid. |   🟢   | UC-0       | ✅ 2026-09-27 |
-| **UC-2 — Agent docs**                   | Rename + rewrite `unity-mcp` skill around the CLI (§3.4, §4.3), with the `unity mcp` snippet only as the no-shell fallback (§3.1); set `UNITY_PROJECT_PATH` in `.claude/settings.json` `env` (§4.3 gotcha 14); rewrite the MCP sections of `CLAUDE.md` + `AGENTS.md` (twins, by hand) per §4.2; sweep the §5 blast radius; `.gitignore` `Assets/AgentCaptures~/`; `.claude` permission rules. |   🟡   | UC-1, UC-4 | —            |
-| **UC-3 — Cutover**                      | **§4.5 backup first, verified.** Then remove ai.assistant from the manifest + delete the embed; delete `Tools/Apply-AiAssistantMcpPatch.ps1`, the patch guide and `McpEval*`; drop `unity-mcp` from `.mcp*.json`; package-set check (§5); §4.4 build check; `recompile` + `Validate All` green. |   🟢   | UC-2       | —            |
+| **UC-2 — Agent docs**                   | Rename + rewrite `unity-mcp` skill around the CLI (§3.4, §4.3), with the `unity mcp` snippet only as the no-shell fallback (§3.1); set `UNITY_PROJECT_PATH` in `.claude/settings.json` `env` (§4.3 gotcha 14); rewrite the MCP sections of `CLAUDE.md` + `AGENTS.md` (twins, by hand) per §4.2; sweep the §5 blast radius; `.gitignore` `Assets/AgentCaptures~/`; `.claude` permission rules. **Done:** skill renamed to `unity-editor` and rewritten (every documented command and recipe run once; the asset-mutating cave scripts compile-checked only); gotchas 16–19 found while verifying. Historical/closed-arc mentions left as written. |   🟡   | UC-1, UC-4 | ✅ 2026-09-27 |
+| **UC-3 — Cutover**                      | **§4.5 backup first, verified.** Then remove ai.assistant from the manifest + delete the embed; delete `Tools/Apply-AiAssistantMcpPatch.ps1`, the patch guide and `McpEval*`; drop `unity-mcp` from `.mcp*.json`, `.claude/settings.local.json` and the `mcp__unity-mcp__*` allow rule in `.claude/settings.json`; remove the embed's `.gitignore` block; rewrite `PROJECT_AUDITOR_FINDINGS_REPORT.md` §3.4 (the pin it defends is gone); package-set check (§5); §4.4 build check; `recompile` + `Validate All` green. |   🟢   | UC-2       | —            |
 
 **Order of work:** UC-0 → UC-1 and UC-4 (independent, either order) → UC-2 → UC-3. UC-4 keeps its
 number although it runs before UC-2, because its verdict decides whether UC-2 documents one
@@ -432,6 +445,9 @@ longer exist. The regression gate for every phase is `unity recompile` clean plu
 
 ## Document History
 
+* **v1.5** - UC-2 complete: `unity-editor` skill, CLAUDE/AGENTS, 15 skill files, living docs and config
+  moved to the CLI. `recompile` measured to return before the domain reload, so the gate is
+  `recompile` → `editor_status` `ready` (§4.2); §4.3 gotchas 16–19; UC-3 scope extended.
 * **v1.4** - UC-4 complete: `unity mcp` rejected as a standing server (§3.1); new §3.5 tests every old
   tool for a trimmed-bridge hybrid and finds none unique (profiler tools broken over MCP,
   `ValidateScript` heuristic-only); latency measured; §4.3 gotchas 13-15.

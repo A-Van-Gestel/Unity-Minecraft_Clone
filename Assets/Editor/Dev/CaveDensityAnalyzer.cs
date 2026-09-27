@@ -30,7 +30,7 @@ namespace Editor.Dev
     /// <summary>
     /// Editor window that generates a grid of chunks and reports cave density, pocket distribution,
     /// and shape quality statistics. Provides both a UI for manual use and a static API for
-    /// programmatic invocation via Unity_RunCommand.
+    /// programmatic invocation via <c>unity command eval</c>.
     /// </summary>
     public class CaveDensityAnalyzer : EditorWindow
     {

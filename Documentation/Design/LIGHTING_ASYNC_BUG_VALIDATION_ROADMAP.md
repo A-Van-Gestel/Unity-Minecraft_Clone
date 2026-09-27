@@ -77,7 +77,7 @@ Two additional facts ground the per-bug plans:
 - **Numbering:** the lighting suite is at **B70** (B62/B63 = Bug-15 stamp, B64 = Bug-05 border fuzz, B65 = HF-4 #2 fault isolation, B66–B70 = AS-2 scheduler mode). New baselines take **B71+**. The retired numbers B17–B21 / B23–B25 stay unused (fidelity §5).
 - **Expected-red scenarios** register via `AddKnownBugScenarios` in
   `Assets/Editor/Validation/Lighting/LightingValidationSuite.KnownBugs.cs` (reported as warnings, not regressions).
-- **Workflow gotchas:** newly created `.cs` files are invisible to `dotnet build` until Unity imports them; the menu suite can run stale code after `IsCompiling == false` — confirm red/green flips with a fresh `Unity_RunCommand` wave.
+- **Workflow gotchas:** newly created `.cs` files are invisible to `dotnet build` until Unity imports them — `unity recompile` covers them; wait for `editor_status` `ready` before running the menu suite, and confirm red/green flips with a fresh `unity command eval` wave.
 
 ---
 

@@ -92,11 +92,9 @@ does its position still resolve via `TryGetChunk`, is that chunk populated, does
 work? The expected split tells the two candidate causes apart — unresolvable positions mean stale entries
 for unloaded chunks, resolvable-and-flagged ones mean the ~1 s walk is somehow not reaching them.
 
-`LightWorkScheduler` exposes only `ReadyCount`/`WaitingCount`, and `Unity_RunCommand` cannot read private
-state (its analyzer blocks `System.Reflection`) — but **no production accessor is required**. Use the
-`McpEval` harness (`Assets/Editor/Dev/McpEvalScratch.cs`), which is an ordinary editor script with full
-namespace access including reflection: write the probe into `Run()`, then invoke
-`Minecraft Clone/Dev/MCP Eval` and read the `[MCP-EVAL]` console output.
+`LightWorkScheduler` exposes only `ReadyCount`/`WaitingCount`, but **no production accessor is
+required**: `unity command eval` (or a `run_script` file) has full reflection, so the probe can read the
+scheduler's private state directly and return it.
 
 **Order matters, because this bug only exists in a dirtied live session.** Editing the scratch file
 triggers a domain reload, which ends play mode — so write and compile the probe *first*, then enter play

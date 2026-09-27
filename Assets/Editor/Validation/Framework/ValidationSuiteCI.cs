@@ -12,7 +12,7 @@ namespace Editor.Validation.Framework
     /// results file, and exits the editor with a non-zero code on any baseline failure (or a suite that ran nothing).
     /// <para>
     /// Near-term the primary consumer is an AI agent driving the editor, which calls <see cref="RunSelected"/> (no
-    /// process exit) via <c>Unity_RunCommand</c> and inspects the returned <see cref="AggregateRunResult"/>. The
+    /// process exit) via <c>unity command eval</c> and inspects the returned <see cref="AggregateRunResult"/>. The
     /// batch <see cref="RunHeadless"/> path is built for the same set + a real exit code whenever CI actually lands.
     /// </para>
     /// <para>Command line: <c>Unity -batchmode -projectPath &lt;p&gt; -executeMethod

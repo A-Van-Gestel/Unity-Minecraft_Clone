@@ -527,16 +527,14 @@ doc, and the inbound cross-references were updated (`PERFORMANCE_IMPROVEMENTS_RE
 
 - **Run it:** menu item **`Minecraft Clone/Dev/Validate Behavior`**. Green when the console logs
   `ALL N BEHAVIOR BASELINE TESTS PASSED`.
-- **`Unity_RunCommand` works again (since 2026-07-06)** — the embedded, patched `com.unity.ai.assistant`
-  restored the C#-exec backend; the former `ApiNoLongerSupported` note here was stale as of 2026-07-27.
-  It compiles fresh against the loaded assemblies on every call, which makes it the reliable way to force
-  a recompile (`AssetDatabase.Refresh` + `CompilationPipeline.RequestScriptCompilation`) and to probe state
-  the menu cannot show. It still blocks `System.Reflection`/`System.IO` and injects your class into a
-  package namespace, so fully qualify types that collide (e.g. `UnityEditor.Compilation.CompilationPipeline`).
-- **New-file / edit cycle:** after editing, `Unity_ManageMenuItem Execute "Assets/Refresh"` → poll
-  `Unity_ManageEditor GetState` until `IsCompiling == false` → check `Unity_ReadConsole` (Type=Error) for
-  compile errors → run the suite. `Clear` the console before a run and use `FilterText` + `IncludeStacktrace=false`
-  so the result fits the tool's output cap.
+- **Driving it from an agent** goes through the Unity CLI (the `unity-editor` skill). `unity command eval`
+  compiles fresh against the loaded assemblies on every call, which makes it the way to probe state the menu
+  cannot show; reflection and `System.IO` are available, but `using` directives are not, so write types fully
+  qualified.
+- **New-file / edit cycle:** after editing, `unity recompile --format json` (it covers new `.cs` files and
+  lists compile errors with file and line) → wait until `unity command editor_status` reports `ready` → run
+  the suite. `unity command clear_console` before a run, then read only what you need with
+  `unity command console --level error` (or `--tail <n>`).
 - **Capturing a golden master:** leave the scenario's golden constant null/empty; `GoldenMaster.AssertOrCapture`
   logs the snapshot between `<<<GOLDEN-BEGIN>>>`/`<<<GOLDEN-END>>>`. Paste it into the constant, re-run to
   confirm `golden master matched`. **Confirm the behavior in-game first** (per Wave 1).
