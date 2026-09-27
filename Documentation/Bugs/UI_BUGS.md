@@ -213,3 +213,46 @@ is the part that wants a decision.
 overflow items rendered outside the popup entirely, which is how the short template got noticed.
 
 ---
+
+## 08. UI Blur Kawase Iterations All Draw With The Last Offset
+
+**Severity:** Bug (cosmetic) — **open, suspected**  
+**Status:** **Mechanism confirmed from URP source; visual effect not yet measured.** Found 2026-09-27 while
+calibrating the `review-changes` Render Graph gates (gate 21).  
+**Files:** `Assets/Scripts/Rendering/UIBlurChain.cs` (`AddKawaseBlitPass`), `Assets/Shaders/UIBlurBlit.shader`
+
+**Description:**
+
+`UIBlurChain` records one raster pass per Kawase iteration, all sharing one `Material`, and each render
+function calls `data.Material.SetFloat(_BlurOffset, data.BlurOffset)` before `Blitter.BlitTexture`. The
+documented `[0.5, 0.5, 1.5, 1.5, …]` offset progression (`UI_BLUR_BACKDROP_SYSTEM.md`) therefore probably
+never reaches the GPU: every iteration, in every band, samples at the **last** offset set that frame
+(`1.5` with the shipped 4 iterations).
+
+**Mechanism (read from code, not inferred):**
+
+- The render graph runs every render function in turn into **one** command buffer, executed later
+  (`NativePassCompiler.cs` only calls `ExecuteCommandBuffer` at async-compute boundaries and at the end).
+- `Blitter.BlitTexture(cmd, source, scaleBias, material, pass)` puts the **source texture and scale-bias**
+  in a property block, which is captured per draw (`Blitter.cs:865`). `_BlurOffset` is not in it. It is
+  read from the material, which the command buffer holds **by reference**.
+- URP works around the same hazard in its own bloom: *"Materials are references in the command buffer, so
+  we need a separate material for each mip level"* (`BloomPostProcessPass.cs:40`).
+
+**Suspected, not measured:** that the frame actually renders with a uniform offset. A Frame Debugger or
+RenderDoc capture of one band's `Iter 0..3` draws, reading `_BlurOffset` per draw, settles it.
+
+**Candidate fixes (unverified):**
+
+1. **One material per iteration**, as URP's bloom does. Allocated in `UIBandCompositeRendererFeature.Create`
+   and released with the existing one.
+2. **Per-draw value through the command buffer** — `cmd.SetGlobalFloat` before each blit (needs
+   `AllowGlobalStateModification(true)`). `_BlurOffset` is not in the shader's `Properties` block, but a
+   material that has had `SetFloat` called on it carries the value and overrides the global, so the
+   material write must go too.
+
+**Interaction with #05:** both of #05's candidate fixes change the offsets. Fix this first, or #05's
+before/after captures compare against a progression that never ran. Fixing this alone will also change the
+blur's look (iterations 0–1 get sharper taps), so it needs the same visual sign-off.
+
+---
