@@ -1,6 +1,6 @@
 ---
 name: editor-tool
-description: Standards and patterns for building custom Unity Editor tools in this project — shared UI libraries, window/tab architecture, lifecycle cleanup, SerializedObject editing, and Burst-powered preview generation. Use when creating or modifying Unity Editor tools (EditorWindows, custom inspectors, editor utilities), or when debugging editor memory leaks (textures, meshes, materials not cleaned up).
+description: Standards and patterns for building custom Unity Editor tools in this project — shared UI libraries, window/tab architecture, lifecycle cleanup, SerializedObject editing, and Burst-powered preview generation. Use when creating or modifying Unity Editor tools (EditorWindows, custom inspectors, editor utilities), or when debugging editor memory leaks (textures, meshes, materials not cleaned up). For in-game (runtime) menus, HUD and uGUI use game-ui instead.
 ---
 
 # Editor Tool Development Guide
@@ -13,6 +13,8 @@ Standards and patterns for building custom Unity Editor tools in this project. P
 - Adding tabs, panels, or preview features to an existing editor tool.
 - Refactoring editor UI code for consistency or performance.
 - Debugging editor memory leaks (textures, meshes, materials not cleaned up).
+
+Not for in-game UI (menus, HUD, runtime uGUI/TMP) — that is the `game-ui` skill.
 
 ---
 
