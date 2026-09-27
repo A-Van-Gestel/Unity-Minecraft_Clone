@@ -25,7 +25,7 @@ When debugging complex systems in this voxel engine, you must act as a Senior Sy
 2. **INSPECT LIVE STATE (Unity CLI):** Before guessing, observe what's actually happening (mechanics: the `unity-editor` skill):
     - `unity command console --level warn --tail 50 --result-only` — errors/warnings/exceptions that correlate with the symptom.
     - `get_scene_hierarchy` / `find_gameobjects`, then `get_serialized_fields` — the affected chunk/object's component state, including `[SerializeField]` values not visible from code reads.
-    - `unity command eval "<C#>"` — arbitrary queries against runtime state (e.g. `World.Instance.LoadedChunks.Count`, flag values on a specific chunk, static counters). Reflection works.
+    - `unity command eval "<C#>"` — arbitrary queries against runtime state (e.g. `World.Instance.worldData.Chunks.Count`, flag values on a specific chunk, static counters). Reflection works.
     - `capture_scene_view` / `capture_game_view` into `Assets/AgentCaptures~/`, then read the PNG — visual evidence (lighting artifacts, mesh holes, rendering glitches).
     - `unity command editor_status --result-only` — play mode, compiling, domain reload.
 3. **DO NOT GUESS:** Do not offer a hypothetical fix immediately if the root cause is not 100% obvious. Searching in the dark breaks things in a multi-threaded engine.
