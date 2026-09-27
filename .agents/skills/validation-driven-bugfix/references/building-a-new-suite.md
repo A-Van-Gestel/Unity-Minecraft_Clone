@@ -22,7 +22,7 @@ Under `Assets/Editor/Validation/<System>/Framework/`, namespace `Editor.Validati
 3. **`<System>Oracle`**: naive borderless solver encoding the spec from the architecture doc. ~100–200 lines, readability over speed.
 4. **`<System>Assert`**: oracle compare + invariant asserts + convergence assert, bounded diffs, `[PASS]`/`[FAIL]` style.
 
-**Smoke-test the framework end-to-end via `Unity_RunCommand` before writing scenarios** — a healthy scenario must match the oracle bit-for-bit. If it doesn't, the harness or oracle is wrong, not the engine (usually).
+**Smoke-test the framework end-to-end via `unity command eval` before writing scenarios** — a healthy scenario must match the oracle bit-for-bit. If it doesn't, the harness or oracle is wrong, not the engine (usually).
 
 ## Phase 2 — Baselines
 

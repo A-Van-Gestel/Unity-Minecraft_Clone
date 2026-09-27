@@ -94,6 +94,9 @@ crashlytics-build.properties
 # Auto generated backup files
 *.*~
 
+# Agent screenshots from the Unity CLI (the ~ suffix keeps Unity from importing them)
+/[Aa]ssets/AgentCaptures~/
+
 # Repomix
 /repomix-output.*
 
@@ -111,8 +114,3 @@ __pycache__/
 
 # MCP
 .mcp.json
-
-# Embedded com.unity.ai.assistant (external package source, ~48 MB).
-# Recreate after clone with Tools/Apply-AiAssistantMcpPatch.ps1
-# (see Documentation/Guides/UNITY_MCP_RUNCOMMAND_PATCH_GUIDE.md)
-/Packages/com.unity.ai.assistant/

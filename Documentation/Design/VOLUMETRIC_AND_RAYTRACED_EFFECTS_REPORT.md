@@ -338,7 +338,7 @@ in-scattering along the view ray, which no analytic fog can fake.
 4. **Transparent-pass watchpoint:** fog composites after opaques, so water/glass surfaces need
    the fog applied in their own shaders or accept slight mismatch — same class of issue as
    CL-5's depth compositing and GS-2's opaque-texture reliance; resolve in the item's plan with
-   A/B captures (`Unity_Camera_Capture`).
+   A/B captures (`unity command capture_game_view`).
 5. Knobs (all `SettingFieldAttribute`, experimental block): quality (steps/resolution),
    density, enable.
 

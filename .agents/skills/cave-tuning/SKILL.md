@@ -20,7 +20,7 @@ Load on demand — not needed for every activation:
 |--------------------------------------------------------------------------------------------|----------------------------------------------------------------|
 | Analyzer report sections, metric interpretation ranges, grid-size vs zone-frequency table | [references/analyzer-metrics.md](references/analyzer-metrics.md)     |
 | Parameter catalog, SerializedObject property paths, formulas, suppression math, guidelines | [references/parameter-reference.md](references/parameter-reference.md) |
-| Ready-to-adapt `Unity_RunCommand` scripts (asset edits, trunk diagnostic, biome lookup)    | [references/runcommand-scripts.md](references/runcommand-scripts.md)  |
+| Ready-to-adapt `run_script` files (asset edits, trunk diagnostic, biome lookup)            | [references/cli-scripts.md](references/cli-scripts.md)                |
 
 ## Cave Density Analyzer Tool
 
@@ -28,24 +28,24 @@ The project includes a dedicated analysis tool at `Assets/Editor/Dev/CaveDensity
 
 ### How to run it
 
-Use `Unity_RunCommand` to invoke the static API:
+Call the static API through `unity command eval` (mechanics: the `unity-editor` skill). `eval`
+rejects `using` directives, so write the names fully qualified:
 
-```csharp
-// Single biome (in WorldTypeDefinition)
-using Editor.Dev;
-return CaveDensityAnalyzer.RunAnalysis(8, 42, 0, 0, "Grasslands");
+```bash
+# Single biome (in WorldTypeDefinition)
+unity command eval 'return Editor.Dev.CaveDensityAnalyzer.RunAnalysis(8, 42, 0, 0, "Grasslands");' --timeout 180 --result-only
 
-// With forceRefresh — use immediately after a SerializedObject config change
-// to guarantee the analysis reads the updated asset data.
-return CaveDensityAnalyzer.RunAnalysis(8, 42, 0, 0, "Grasslands", forceRefresh: true);
+# With forceRefresh — use immediately after a SerializedObject config change
+# to guarantee the analysis reads the updated asset data.
+unity command eval 'return Editor.Dev.CaveDensityAnalyzer.RunAnalysis(8, 42, 0, 0, "Grasslands", forceRefresh: true);' --timeout 180 --result-only
 
-// With trunkMode override — e.g. exclude trunk worms to isolate local-only density
-return CaveDensityAnalyzer.RunAnalysis(8, 42, 0, 0, "Grasslands", TrunkWormMode.Exclude);
+# With trunkMode override — e.g. exclude trunk worms to isolate local-only density
+unity command eval 'return Editor.Dev.CaveDensityAnalyzer.RunAnalysis(8, 42, 0, 0, "Grasslands", Editor.Dev.TrunkWormMode.Exclude);' --timeout 180 --result-only
 ```
 
 Parameters: `RunAnalysis(gridSize, seed, originX, originZ, singleBiomeMode, biome)`. For biomes
 not registered in the `WorldTypeDefinition`, load the asset directly — script in
-[references/runcommand-scripts.md](references/runcommand-scripts.md).
+[references/cli-scripts.md](references/cli-scripts.md).
 
 What each report section means and the good/problem ranges for every metric are in
 [references/analyzer-metrics.md](references/analyzer-metrics.md).
@@ -84,7 +84,7 @@ Trunk worms contribute to **every biome** they traverse, independent of per-biom
 
 **Symptom**: density stays high even after reducing `wormSpawnChance` to very low values (e.g. 0.004–0.008). The Layer Breakdown section will show worm blocks unchanged.
 
-**Diagnostic test** — run this before any further spawn tuning: temporarily disable `trunkWormConfig.enabled` on the `WorldTypeDefinition`, analyze at a fresh origin, re-enable (full script in [references/runcommand-scripts.md](references/runcommand-scripts.md)).
+**Diagnostic test** — run this before any further spawn tuning: temporarily disable `trunkWormConfig.enabled` on the `WorldTypeDefinition`, analyze at a fresh origin, re-enable (full script in [references/cli-scripts.md](references/cli-scripts.md)).
 
 **Interpreting the result**:
 
@@ -99,4 +99,4 @@ If caves appear everywhere despite high attenuation, grep the three evaluation p
 
 ## Modifying biome .asset files (hard rule)
 
-Per CLAUDE.md rules, never edit `.asset` files directly. Use `Unity_RunCommand` with `SerializedObject` — a ready-to-adapt script (including the exact-filename biome lookup that avoids the "Grasslands" / "Steep Grasslands" substring-match trap) is in [references/runcommand-scripts.md](references/runcommand-scripts.md), and the full property-path catalog is in [references/parameter-reference.md](references/parameter-reference.md).
+Per CLAUDE.md rules, never edit `.asset` files directly. Use a `run_script` file with `SerializedObject` — a ready-to-adapt script (including the exact-filename biome lookup that avoids the "Grasslands" / "Steep Grasslands" substring-match trap) is in [references/cli-scripts.md](references/cli-scripts.md), and the full property-path catalog is in [references/parameter-reference.md](references/parameter-reference.md).

@@ -372,11 +372,11 @@ This is the recommended order to build the remaining gaps, grouped into **waves*
 after each commit and a final docs-sync commit flipping the closed items' status here + in the skill ref.
 
 > **Cold-start checklist for any wave** (matches how Wave 1 was executed):
-> 1. `dotnet build "Assembly-CSharp-Editor.csproj"` after edits.
-> 2. In the live Editor: `CompilationPipeline.RequestScriptCompilation()` (via `Unity_RunCommand`, fully
->    qualify the type — the MCP wrapper namespace shadows `CompilationPipeline`), then poll
->    `Unity_ManageEditor → GetState` until `IsCompiling == false`. A bare `dotnet build` does **not** make the
->    Editor re-run the menu suite (stale-code trap — see [[feedback-editor-validation-workflow]]).
+> 1. `unity recompile --format json` after edits (falls back to `dotnet build "Assembly-CSharp-Editor.csproj"`
+>    only when no Editor is running).
+> 2. Wait until `unity command editor_status` reports `ready` — `recompile` returns before the domain reload
+>    that loads the new code. A bare `dotnet build` does **not** make the Editor re-run the menu suite
+>    (stale-code trap — see [[feedback-editor-validation-workflow]]).
 > 3. Run `Minecraft Clone/Dev/Validate Meshing` (menu item), read the console, confirm
 >    `ALL N MESHING BASELINE TESTS PASSED`.
 > 4. Every new differential/value baseline needs a **positive control** so it can't pass vacuously (the B8/B9

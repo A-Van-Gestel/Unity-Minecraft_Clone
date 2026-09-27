@@ -22,9 +22,8 @@ to changed code but never to code the diff left alone.
   built-in `/code-review`. That covers general correctness; this covers *this
   engine's* invariants. Running both is normal.
 - It does not re-verify that the code compiles. The Execution Protocol in
-  `AGENTS.md` owns that (`dotnet build`, the DLL-timestamp gate, the stale-DLL
-  and phantom-`CS0103` traps), and Rider / `Unity_ValidateScript` own the
-  analyzer layer. Reporting a compile error or a ReSharper warning here is noise
+  `AGENTS.md` owns that (`unity recompile`, the `dotnet build` fallback and its
+  new-file / phantom-`CS0103` traps), and Rider owns the analyzer layer. Reporting a compile error or a ReSharper warning here is noise
   — those tools catch it and say it better.
 - It does not review code the diff did not touch. Pre-existing debt is not a
   finding — see the delta rule. This engine has thousands of pre-existing
@@ -275,9 +274,9 @@ other side, and land on one of:
   `DomainReset`, a pool `Get`/`Release` pair), or it is pre-existing and the diff
   did not make it worse (the delta rule).
 
-Tools serve this step; they do not replace it. `Unity_ValidateScript` on a
-changed `.cs` file corroborates a hot-path allocation candidate; Rider
-`lint_files` corroborates a UDR domain-reload candidate or a dead/unused member.
+Tools serve this step; they do not replace it. Rider `lint_files` on a changed
+`.cs` file corroborates a hot-path allocation candidate, a UDR domain-reload
+candidate or a dead/unused member.
 Use them to *confirm or refute* — but if the Editor/IDE is not running, the
 candidate does not vanish, it goes to the report as uncertain and the tool goes
 on the `Not verified` line.
@@ -404,7 +403,7 @@ none of them catch.
   "this fails at scale or in IL2CPP, or corrupts a save, or violates a Core
   Architecture Constraint the team wrote down deliberately".
 - **Reporting the compiler's or the analyzer's job.** `CS####` errors, ReSharper
-  style hits, format deviations — the Execution Protocol and Rider/`Unity_ValidateScript`
+  style hits, format deviations — the Execution Protocol and Rider
   own those. This skill's output is the invariants they cannot see.
 - **Blaming pre-existing allocations.** The engine is full of `new` and LINQ the
   diff did not add. Flagging them is the fastest way to get this review ignored —

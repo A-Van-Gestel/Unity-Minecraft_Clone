@@ -327,8 +327,8 @@ skill: version bump + frozen-DTO migration step) and a scope change to bring bac
 
 Ranked by value-vs-risk with PRIMARY = clarity/testability. Every phase is independently landable and leaves the repo green. **Universal regression gate for every phase** (stated once, applies to all): all **106** baselines of `Minecraft Clone/Dev/Validate Lighting Engine` green (legacy + scheduler mode), the LightScheduler suite (9 baselines) green, **and the NS-3 Chunk Pipeline suite (6 baselines) green** — it did not exist at v1.0 and it models the flag cluster directly, so it is now the closest thing to a state-machine regression gate this plan has;
 `dotnet build "Assembly-CSharp.csproj"` AND `dotnet build "Assembly-CSharp-Editor.csproj"` clean (harness files are editor-assembly), plus the per-phase extras below. Workflow gotchas apply:
-newly created `.cs` files need a Unity import before `dotnet build` sees them; the menu suite can run stale code after compilation — confirm red/green flips with a fresh
-`RequestScriptCompilation` + `Unity_RunCommand` wave, gating on the DLL timestamp rather than `IsCompiling`.
+newly created `.cs` files need a Unity import before `dotnet build` sees them — `unity recompile` covers them; the menu suite can run stale code after compilation — gate on
+`unity recompile` + `editor_status` `ready`, and confirm red/green flips with a fresh `unity command eval` wave.
 
 > **Baseline counts are re-verified as of 2026-08-23** against `VALIDATION_SUITE_COVERAGE_ROADMAP.md`'s census
 > (568 baselines / 25 suites as of 2026-08-23, LP-2's `B7` included). v1.0's "62 lighting baselines" and its "B71+ / B62–B70 taken" numbering advice are

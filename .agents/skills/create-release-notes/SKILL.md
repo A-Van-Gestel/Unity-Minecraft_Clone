@@ -78,8 +78,9 @@ that tag after the commit is what makes the URL resolve.
    ```
    VALIDATE ALL: all <N> baselines across <S> suites PASSED
    ```
-   Fire `Minecraft Clone/Dev/Validate All` with `Unity_ManageMenuItem`, then read the
-   `=== Validate All — combined summary ===` block with `Unity_ReadConsole`. Mechanics, the
+   Fire `Minecraft Clone/Dev/Validate All` with `unity command menu --path … --detach` +
+   bounded `unity job wait --timeout 90` calls, then read the `=== Validate All — combined summary ===` block with
+   `unity command console`. Mechanics, the
    programmatic alternatives, and how to read PASS / FAIL / known-bug / Inconclusive lines belong to
    the `run-validation-suite` skill — follow it there rather than re-deriving them here.
     - **Budget ~4 minutes**, and start the run early so it finishes while the git passes above run.

@@ -1,7 +1,18 @@
 {
+  "env": {
+    "UNITY_PROJECT_PATH": ".",
+    "UNITY_NO_BANNER": "1",
+    "UNITY_NO_UPDATE_CHECK": "1"
+  },
   "permissions": {
     "allow": [
-      "mcp__unity-mcp__Unity_ReadConsole",
+      "Bash(unity recompile:*)",
+      "Bash(unity status:*)",
+      "Bash(unity command editor_status:*)",
+      "Bash(unity command console:*)",
+      "Bash(unity command console_status:*)",
+      "Bash(unity job status:*)",
+      "Bash(unity job wait:*)",
       "mcp__codegraph__*",
       "mcp__unity-api__get_method_signature",
       "mcp__unity-api__get_namespace",

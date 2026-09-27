@@ -368,10 +368,10 @@ slabs all at 0.5 where the chosen rule scores 1 / 0.5 / 0.
   (or one Rider `build_solution_start`, which covers both).
 - Suites: **Validate Lighting Engine**, **Validate Meshing**, **Validate Physics Solver**
   (`NS-4` — every phase touching the bounds path), and **Validate All** before closing a phase.
-- The stale-editor-code gotchas apply in full: a new `.cs` file needs `AssetDatabase.Refresh()`
-  before `dotnet build` reports truthfully, and the reliable readiness gate is the **DLL timestamp**,
-  not `IsCompiling`. When a menu-suite result contradicts the analysis, re-run the scenario inline via
-  `Unity_RunCommand` — that never gives a false green on a stale build.
+- The stale-editor-code gotchas apply in full: a new `.cs` file is invisible to `dotnet build` until
+  Unity imports it, and the readiness gate is `unity recompile` followed by `editor_status` reporting
+  `ready`. When a menu-suite result contradicts the analysis, re-run the scenario inline via
+  `unity command eval` — that never gives a false green on a stale build.
 - **Serialization tripwire (every phase):** zero on-disk *format* change **and no version bump** (VO-7
   descoped). If any phase finds it wants either — stop, invoke `serialization-migration`, and treat it
   as a scope change.

@@ -1,6 +1,6 @@
 ---
 name: run-validation-suite
-description: How to RUN the editor validation suites (one, a subset, or all via "Validate All"/headless CI) and how to READ their console + NUnit3 XML output. Use when the user asks to "run the validation suite(s)", "validate the engine/lighting/meshing/etc.", "run Validate All", "run the regression suites", check a change didn't regress, run suites in batch/headless/CI, or asks what a suite's PASS/FAIL/Inconclusive/"fix candidate"/"isolation violation" output means. For WRITING new suites/scenarios or fixing a documented bug through a suite, use validation-driven-bugfix instead; for live-editor MCP mechanics see unity-mcp.
+description: How to RUN the editor validation suites (one, a subset, or all via "Validate All"/headless CI) and how to READ their console + NUnit3 XML output. Use when the user asks to "run the validation suite(s)", "validate the engine/lighting/meshing/etc.", "run Validate All", "run the regression suites", check a change didn't regress, run suites in batch/headless/CI, or asks what a suite's PASS/FAIL/Inconclusive/"fix candidate"/"isolation violation" output means. For WRITING new suites/scenarios or fixing a documented bug through a suite, use validation-driven-bugfix instead; for live-editor CLI mechanics see unity-editor.
 ---
 
 # Running & reading the validation suites
@@ -13,8 +13,8 @@ point (VS-2).
 Neighboring concerns owned elsewhere — stated here so the seam is explicit:
 - **Building a new suite, adding a scenario, or fixing a documented bug test-first** → the
   `validation-driven-bugfix` skill (red→green→promote→archive lifecycle).
-- **Live-editor MCP tool mechanics** (RunCommand quirks, ReadConsole, menu execution) → the
-  `unity-mcp` skill; this skill only names the recipes it needs.
+- **Live-editor CLI mechanics** (`unity command eval`, console reads, menu execution, detached
+  jobs) → the `unity-editor` skill; this skill only names the recipes it needs.
 - **Coverage gaps / known blind spots of a specific suite** → that suite's
   `*_VALIDATION_HARNESS_FIDELITY.md` under `Documentation/Architecture/Testing Framework/`.
 
@@ -31,12 +31,12 @@ A green suite on **stale** code launders a regression. `dotnet build` alone does
 the running editor domain, and a newly-created `.cs` file is not in the suite until Unity imports
 it. Before trusting any suite run after an edit:
 
-1. Trigger a recompile: `AssetDatabase.Refresh()` +
-   `UnityEditor.Compilation.CompilationPipeline.RequestScriptCompilation()` (via `Unity_RunCommand`
-   — note the RunCommand wrapper shadows a bare `CompilationPipeline`, so **fully-qualify** it).
-2. Wait until `Unity_ManageEditor → GetState` reports `IsCompiling == false`.
+1. `unity recompile --format json` — compiles the running Editor's assemblies, new files included,
+   and must come back clean (exit `0`).
+2. Wait for the domain reload that loads them: poll `unity command editor_status --result-only`
+   until it reports `"status": "ready"`. `recompile` returns **before** that reload.
 3. Only then run the suite. (There is no automatic stale-assembly guard yet — that is the open
-   VS-3 item.) When in doubt, a fresh `Unity_RunCommand` wave is the reliable ground truth.
+   VS-3 item.)
 
 ## Step 2 — Run
 
@@ -57,7 +57,7 @@ UI Blur Render · Worm Carver · Biome Selection · Sound Engine · Validation F
 Each has a `Minecraft Clone/Dev/Validate <name>` menu item, plus the aggregate **Validate All** —
 **with two where the menu path is NOT the display name**: `Voxel Occlusion` → *Validate Occlusion*,
 and `Sky & Celestial` → *Validate Sky*. Use the display name for `RunSelected`, the menu path for
-`Unity_ManageMenuItem`; crossing them fails (an unknown subset name rejects the whole request).
+`unity command menu --path`; crossing them fails (an unknown subset name rejects the whole request).
 
 Not in the aggregate (run individually): the nightly fuzz deep-runs (`Validate Lighting Engine
 (Border Height Fuzz)`, `(Bug 09 Geometry Fuzz)`, `(Bug 05 Canopy Fuzz)`,
@@ -74,47 +74,37 @@ Subset names are the **display names** (case-insensitive), comma-separated; a si
 **rejects the whole request** (returns null + logs the known names) so a typo can't silently run a
 smaller set. Output order is registry order regardless of request order.
 
-**Agent recipe (Unity MCP).** Two ways:
-- `Unity_ManageMenuItem` to fire a `Minecraft Clone/Dev/Validate …` item, then `Unity_ReadConsole`
-  to read the summary.
-- `Unity_RunCommand` calling `ValidationSuiteCI.RunSelected("…", true)` (or `…AggregateRunner.Run`)
-  and inspecting the returned result object. **Caveat:** RunCommand reports `success:false` whenever
-  the run emits *any* `Debug.LogWarning`/`LogError` — and healthy runs do (every known-bug repro is a
-  warning; some suites log a `B7 INCONCLUSIVE` zero-alloc note). That is **not** a suite failure —
-  read the real verdict from `executionLogs` / the returned counts, not from the tool's success flag.
+**Agent recipe (Unity CLI).** Two ways:
+- `unity command menu --path "Minecraft Clone/Dev/Validate …"`, then read the summary with
+  `unity command console --tail <n> --result-only`.
+- `unity command eval` calling `Editor.Validation.Framework.ValidationSuiteCI.RunSelected("…", true)`
+  and returning the counts from the `AggregateRunResult` (`SuiteCount`, `BaselinePassed`,
+  `BaselineFailed`, `BugsReproduced`, …). `eval`'s `success` reflects compile + execution only;
+  suite warnings (known-bug repros, `B7 INCONCLUSIVE`) do not flip it.
 
-**⚠️ Runtime budget — never drive `Validate All` through MCP.** A full pass is **~190–205 s**
-(last verified run: 204 s), and **Lighting alone is the dominant share — ~182 s when measured**;
-the other 23 suites together take ~6 s. Anything sent through
-`Unity_RunCommand` that outlives the MCP response window is **re-issued**, and the retries stack on
-the Editor's main thread, survive a client-side task stop, and are cleared only by restarting the
-Editor — so a single `Validate All` over MCP becomes an endless re-run loop that blocks every later
-call. Route it accordingly:
+**Runtime budget.** A full pass takes about **3.5 minutes** (last measured 2026-09-27: 3 min 28 s to
+3 min 37 s), and **Lighting alone is almost all of it** (3 min 24 s of that run); the other suites
+together take seconds. That is far past a command's 30 s default timeout, so run it detached:
 
 | Want | Do |
 |---|---|
-| The full aggregate, agent-driven | `Unity_ManageMenuItem` → `Minecraft Clone/Dev/Validate All` (recipe below) |
+| The full aggregate, agent-driven | `unity command menu --path "Minecraft Clone/Dev/Validate All" --detach`, then bounded `unity job wait <jobId> --timeout 90` calls |
 | The full aggregate, by hand | `Minecraft Clone/Dev/Validate All` from the Editor menu |
-| A fast agent-side sweep | `Unity_RunCommand` over the registry **skipping `"Lighting Engine"`** (~6 s, safely inside the window) |
+| A fast agent-side sweep | `eval` → `RunSelected(...)` over the registry **without `"Lighting Engine"`** (seconds) |
 
-**Menu-item recipe** — the reliable way to drive the full aggregate from an agent. `Unity_ManageMenuItem`
-Execute `Minecraft Clone/Dev/Validate All`. The call exceeds 120 s and the harness **moves it to a
-background task cleanly** — no stacking, no re-execution — then delivers a completion notification. Do not
-`TaskStop` it or re-issue it; just wait, then read the combined summary from the editor log.
+**Detached recipe:** `unity command clear_console`, fire the menu item with `--detach` (the reply
+carries a `jobId`), then call `unity job wait <jobId> --timeout 90` as separate shell calls until one
+returns the result (each bounded one that runs out exits `6` with *"The job keeps running"*; see the
+`unity-editor` recipes), then read the combined summary with `unity command console --tail 400
+--result-only`. A detached job neither blocks the shell nor re-runs.
 
-**Resolve that log by newest write time** — it is usually `<project>/Logs/Editor.log` but some sessions
-write only `%LOCALAPPDATA%\Unity\Editor\Editor.log` (when the project log cannot be opened, the editor
-logs that reason at startup and falls back). A frozen log looks exactly like a job that never started. Use
-`Get-Content -Tail N` (that file reaches GB scale).
-
-**Do not try to schedule long work off a `Unity_RunCommand` via `EditorApplication.delayCall`.** The call
-returns `success: true` and the queued delegate then does not run on any predictable schedule. Observed
-2026-08-25: no output for **70 minutes** on an idle editor — no marker, no exception, nothing to
-distinguish it from a slow run — and it then fired unprompted when an unrelated
-`RequestScriptCompilation` pumped the editor, **executing the pre-edit assembly** and interleaving with a
-menu-item run issued in the meantime. Two hazards, not one: you cannot tell "queued" from "finished", and a
-forgotten delegate can wake up later and run **stale code** whose output looks current. Route long work
-through a menu item; if a task has no menu item, add one rather than scheduling it.
+**Do not schedule long work from `eval` via `EditorApplication.delayCall`.** The call returns
+`success: true`, and the queued delegate then does not run on any predictable schedule. Observed
+2026-08-25: no output for **70 minutes** on an idle editor, and it then fired unprompted when an
+unrelated `RequestScriptCompilation` pumped the editor, **executing the pre-edit assembly** and
+interleaving with a menu-item run issued in the meantime. You cannot tell "queued" from "finished",
+and a forgotten delegate can wake up later and run **stale code** whose output looks current. Use a
+menu item with `--detach`; if a task has no menu item, add one rather than scheduling it.
 
 **Batch / headless / CI.** `ValidationSuiteCI.RunHeadless` is the `-executeMethod` target:
 
@@ -127,7 +117,7 @@ Unity -batchmode -projectPath <path> \
 It runs the selected suites (all by default), writes NUnit3 XML (default
 `TestResults/validation-results.xml`, gitignored), and **exits 0 only when every baseline passed and
 no suite ran nothing, else 1**. Do **not** pass `-quit` (it exits itself), and **never** call
-`RunHeadless` from `Unity_RunCommand` in a live editor — `EditorApplication.Exit` would quit the
+`RunHeadless` from `unity command eval` in a live editor — `EditorApplication.Exit` would quit the
 editor. (Batchmode also needs Unity license activation on the runner.)
 
 ## Step 3 — Read the console output
@@ -177,8 +167,8 @@ scenario→test-case mapping: [references/nunit-xml-output.md](references/nunit-
 - **Confirm current code first** (Step 1) — a stale green run is worse than no run.
 - A **baseline failure is a regression**; an **Inconclusive/known-bug repro is expected**. Never
   invert these when reporting a result.
-- RunCommand `success:false` ≠ suite failure — read the counts/logs (Step 2 caveat).
-- Do not call `RunHeadless` in a live editor (it exits the editor); file writes are blocked inside
-  `Unity_RunCommand`, so generate the XML via the menu-less batch path, not RunCommand.
+- **Long runs go through `--detach` + bounded `unity job wait --timeout 90` calls**, never a blocking call.
+- Do not call `RunHeadless` in a live editor (it exits the editor); generate the XML through the
+  batch path.
 - This skill runs and reads suites; it does not author them — route creation/bugfix work to
   `validation-driven-bugfix`.

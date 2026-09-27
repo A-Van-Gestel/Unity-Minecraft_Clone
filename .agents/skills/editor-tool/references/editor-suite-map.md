@@ -16,7 +16,7 @@ from scratch.
 | `StructureEditor/`   | `StructurePreviewWindow`                                                                       | Structure template preview                                                                        |
 | `SoundEditor/`       | `SoundEditorWindow` (partials: `Blocks`, `Ambience`, `Emitters`, `Loudness`) + `BlockAudioImportPostprocessor` | Audio content authoring: block sound materials, ambience beds, fluid emitters, and an ffmpeg-backed loudness audit |
 | `CreditsEditor/`     | `CreditsEditorWindow`                                                                          | Credits database editing (`REFERENCES_AND_CREDITS` policy)                                        |
-| `Dev/`               | `CaveDensityAnalyzer`                                                                          | Static-API analysis tool, invoked via `Unity_RunCommand` (see the `cave-tuning` skill)            |
+| `Dev/`               | `CaveDensityAnalyzer`                                                                          | Static-API analysis tool, invoked via `unity command eval` (see the `cave-tuning` skill)          |
 | `DataGeneration/`    | `BlockIdGenerator`, `FluidDataGenerator`, `GameActionGenerator`, `PlacementTagMigration` + `Editor*DatabaseCache` | Code generators behind `Minecraft Clone/*` menu items + asset caches                              |
 | `ProjectUtilities/`  | `AssetReserializer`, `GameVersionManager`                                                      | Project maintenance utilities                                                                     |
 | `PropertyDrawers/`   | `BlockIDDrawer`                                                                                | Custom drawer for block-ID fields                                                                 |
@@ -38,5 +38,5 @@ from scratch.
 | Burst `IJobParallelFor` → `Texture2D` preview          | `Jobs/NoisePreviewJob.cs` and its window call sites                       |
 | Manual field editing on an in-memory database copy     | `BlockEditor/BlockEditorWindow.BlockEditor.cs`                            |
 | 3D mesh preview widget usage                           | `StructureEditor/StructurePreviewWindow.cs`, `BlockEditor/`               |
-| Static-API tool driven by `Unity_RunCommand`           | `Dev/CaveDensityAnalyzer.cs`                                              |
+| Static-API tool driven by `unity command eval`         | `Dev/CaveDensityAnalyzer.cs`                                              |
 | Menu-item code generator writing `.cs` output          | `DataGeneration/BlockIdGenerator.cs`                                      |

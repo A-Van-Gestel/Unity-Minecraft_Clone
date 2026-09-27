@@ -504,7 +504,7 @@ because §1's tonemapping half and §5 are still open and still describe intende
 1. **Enable the stack:** camera `renderPostProcessing = true` + a global `Volume` with Bloom
    (threshold ≥ 1.1 so nothing LDR blooms) and — as a *separate, deliberate art decision* —
    Tonemapping (ACES visibly changes every existing color; get user sign-off with A/B captures
-   via `Unity_Camera_Capture` before adopting).
+   via `unity command capture_game_view` before adopting).
 2. **HDR emissive path for blocks** (what makes bloom worth it): emitter *faces* need output > 1.
    The meshing job knows the block type per face, so bake an emissive flag/strength per vertex
    and boost in the fragment shader (`finalColor += albedo * emissiveStrength * k`, k ≈ 2–4).  

@@ -1,6 +1,6 @@
 # Open Work Index
 
-**Version:** 1.6  
+**Version:** 1.8  
 **Date:** 2026-09-17  
 **Status:** **Open backlog.** A pointer map, not a tracker — rows are added and removed as docs
 gain or lose open work, never as individual items move.  
@@ -72,6 +72,7 @@ would put the same item on the map twice and mis-sort the doc.
 | **Foliage liveliness** | [`FOLIAGE_LIVELINESS_IMPROVEMENTS_REPORT.md`](FOLIAGE_LIVELINESS_IMPROVEMENTS_REPORT.md) | `FL-` | Open backlog |
 | **Codebase (non-performance)** | [`CODEBASE_IMPROVEMENTS.md`](CODEBASE_IMPROVEMENTS.md) | — | Open backlog: API modernization and cleanup items |
 | **Project Auditor findings** | [`PROJECT_AUDITOR_FINDINGS_REPORT.md`](PROJECT_AUDITOR_FINDINGS_REPORT.md) | `AU-` | Open backlog from the 2026-09-17 run; `AU-4`/`AU-5` declined ⛔. Its §3 is the standing "these auditor counts are not defects" record |
+| **Agent ↔ Editor tooling** | [`UNITY_CLI_EXTENSIONS_ROADMAP.md`](UNITY_CLI_EXTENSIONS_ROADMAP.md) | `UC-` | Open backlog: `UC-6`…`UC-8` unscheduled (`UC-5` closed 2026-09-27). `UC-0`…`UC-4` shipped and promoted to `Architecture/UNITY_CLI_EDITOR_BRIDGE.md` |
 | **Third-party libraries** | [`THIRD_PARTY_LIBRARY_IDEAS_REPORT.md`](THIRD_PARTY_LIBRARY_IDEAS_REPORT.md) | — | Open backlog of *techniques*; all seven evaluated libraries were rejected |
 | **Validation coverage** | [`VALIDATION_SUITE_COVERAGE_ROADMAP.md`](VALIDATION_SUITE_COVERAGE_ROADMAP.md) | `NS-` | Living backlog; `NS-4`, `NS-5`, `NS-7`, `NS-7b` complete |
 | **Lighting async bugs & harness** | [`LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md`](LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md) | `AS-` `HF-` | In progress; `AS-1` closed, `HF-1`…`HF-3` done |
@@ -135,6 +136,11 @@ doc, not to grow an item row here.
 
 ## Document History
 
+* **v1.8** - `UC-*` row repointed (2026-09-27): the migration design was promoted to
+  `Architecture/UNITY_CLI_EDITOR_BRIDGE.md` and deleted; its unbuilt work lives in
+  `UNITY_CLI_EXTENSIONS_ROADMAP.md`.
+* **v1.7** - `UC-*` row added (2026-09-27): `UNITY_MCP_TO_CLI_MIGRATION.md` owns the move from the
+  patched ai.assistant MCP bridge to the Unity CLI.
 * **v1.6** - `AU-*` row added (2026-09-17): `PROJECT_AUDITOR_FINDINGS_REPORT.md` now owns the
   Project Auditor backlog. First row whose document also carries a standing *non*-findings record —
   §1's rule is unaffected, since the open `AU-` items are what earn the row.
@@ -177,5 +183,5 @@ doc, not to grow an item row here.
 
 ---
 
-**Last Updated:** 2026-09-17  
+**Last Updated:** 2026-09-27  
 **Next Review:** when a document starts or stops owning open work

@@ -972,10 +972,10 @@ get to rely on them.
   (or one Rider `build_solution_start`, which covers both).
 - Suites: **Validate Meshing**, **Validate Occlusion**, **Validate Lighting Engine**, and
   **Validate All** before closing a phase.
-- The stale-editor-code gotchas in full: a **new** `.cs` file needs `AssetDatabase.Refresh()` before
-  `dotnet build` reports truthfully (it reports a *false green* for a file not yet in the `.csproj`),
-  and the reliable readiness gate is the **DLL timestamp**, not `IsCompiling`. When a menu-suite
-  result contradicts the analysis, re-run the scenario inline via `Unity_RunCommand`.
+- The stale-editor-code gotchas in full: `dotnet build` reports a *false green* for a **new** `.cs`
+  file not yet in the `.csproj`, so use `unity recompile`, which covers it; then wait for
+  `editor_status` to report `ready` before running anything in-editor. When a menu-suite result
+  contradicts the analysis, re-run the scenario inline via `unity command eval`.
 - **Serialization tripwire:** zero on-disk change in every phase — mesh output is not persisted and
   no phase touches block-type authoring on disk. If a phase finds it wants a format change or a
   version bump, **stop**, invoke `serialization-migration`, and treat it as a scope change.

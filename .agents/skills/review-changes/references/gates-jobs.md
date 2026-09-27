@@ -40,8 +40,8 @@ execution or fails AOT in the player:
 - `new` of a managed type, including a managed array (`new int[]`) — use
   `NativeArray<T>`/`NativeList<T>` or a `static readonly` array for constants
 
-**How to check.** Read the added lines inside the job. `Unity_ValidateScript` on
-the file corroborates but does not replace this — if the Editor is not running,
+**How to check.** Read the added lines inside the job. Rider `lint_files` on
+the file corroborates but does not replace this — if Rider is not running,
 the candidate still ships (uncertain) and the tool goes on `Not verified`. A
 `[BurstCompile]` that the diff *removed* is gate 4, not this gate.
 
@@ -71,7 +71,7 @@ Only a hit the *diff introduces into a hot path* is a candidate. Then split
 now/owed per `SKILL.md`: the **pattern** is the now half — you do not need the
 profiler to know `new List<int>()` in `LateUpdate` allocates. The **measured GC
 bytes** are the owed half — real numbers need a play-mode profiling session
-(the Profiler MCP tools return nothing without one), so on an intermediate run
+(the profiler queries in the `unity-editor` skill need recorded frames), so on an intermediate run
 that measurement is `Still owed`, not a blocker on the commit.
 
 Suggest the pooled alternative: `DynamicPool<T>`, `ConcurrentDynamicPool<T>`,

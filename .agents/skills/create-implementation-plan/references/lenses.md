@@ -148,7 +148,7 @@ be surprised to find still broken?
 | Hot-path / runtime perf | Burst compatibility, GC allocs in `Update()`/core loops, pooling, measure-first frame-level GO/NO-GO | `burst-optimization`, `perf-benchmark` |
 | Chunk gen → lighting → meshing pipeline | readiness/neighbor gates, deadlock invariants, pool recycle path, state-flag pairing | `chunk-lifecycle` |
 | Anything that ends up on disk | format version bump, migration path, "zero on-disk change unless the plan says otherwise" tripwire | `serialization-migration` |
-| Editor tooling / windows / menu items | lifecycle cleanup (textures/meshes/materials), domain reload survival, batchmode viability, stale-compiled-code gotcha | `editor-tool`, `unity-mcp` (recipes) |
+| Editor tooling / windows / menu items | lifecycle cleanup (textures/meshes/materials), domain reload survival, batchmode viability, stale-compiled-code gotcha | `editor-tool`, `unity-editor` (recipes) |
 | Documented bug fix | deterministic prove-red repro before the fix, baseline promotion after in-game confirmation | `validation-driven-bugfix` |
 | Warm start from a doc/report | doc-vs-code drift check on every asserted count/name/API (see `SKILL.md` Step 0) | `docs-sync` (for the corrections) |
 | Failure-path / durability / retry-replay change | full pack below (no owning skill) | — |

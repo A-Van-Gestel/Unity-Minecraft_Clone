@@ -22,13 +22,12 @@ When debugging complex systems in this voxel engine, you must act as a Senior Sy
     - `codegraph callers <sym>` / `codegraph callees <sym>` (CLI, via Bash) to trace call chains exhaustively into and out of the suspected function — `explore`'s results are capped, these are not.
     - `codegraph impact <sym>` (CLI) on suspected structs to see everything that depends on them before altering them.
     - Shaders are NOT indexed — if the symptom is visual and lives in `Assets/Shaders/`, go straight to Grep/Read.
-2. **INSPECT LIVE STATE (unity-mcp):** Before guessing, use the Unity MCP to observe what's actually happening:
-    - `Unity_ReadConsole` — check for errors/warnings/exceptions that correlate with the symptom. Filter by type (`Error`, `Warning`) and text.
-    - `Unity_ManageGameObject` — find the affected chunk/object and inspect its component state, including `[SerializeField]` values not visible from code reads (e.g. `find` by name, then `get_components` with `include_non_public_serialized: true`).
-    - `Unity_ManageScene` — verify which scene is active, check the hierarchy for expected objects (e.g. `GetHierarchy` with depth limit to find World, ChunkPoolManager, etc.).
-    - `Unity_RunCommand` — execute arbitrary C# queries in the editor to inspect runtime state (e.g. query `World.Instance.LoadedChunks.Count`, check flag values on a specific chunk, read static counters).
-    - `Unity_Camera_Capture` — capture visual evidence of the bug (lighting artifacts, mesh holes, rendering glitches).
-    - `Unity_ManageEditor` → `GetState` — check if the editor is in play mode, has compilation errors, or is paused.
+2. **INSPECT LIVE STATE (Unity CLI):** Before guessing, observe what's actually happening (mechanics: the `unity-editor` skill):
+    - `unity command console --level warn --tail 50 --result-only` — errors/warnings/exceptions that correlate with the symptom.
+    - `get_scene_hierarchy` / `find_gameobjects`, then `get_serialized_fields` — the affected chunk/object's component state, including `[SerializeField]` values not visible from code reads.
+    - `unity command eval "<C#>"` — arbitrary queries against runtime state (e.g. `World.Instance.worldData.Chunks.Count`, flag values on a specific chunk, static counters). Reflection works.
+    - `capture_scene_view` / `capture_game_view` into `Assets/AgentCaptures~/`, then read the PNG — visual evidence (lighting artifacts, mesh holes, rendering glitches).
+    - `unity command editor_status --result-only` — play mode, compiling, domain reload.
 3. **DO NOT GUESS:** Do not offer a hypothetical fix immediately if the root cause is not 100% obvious. Searching in the dark breaks things in a multi-threaded engine.
     - **When the report follows a recent change, settle "did my change cause this?" by measurement, not by reasoning — and do it FIRST.** Copy the suspect file aside, `git show <commit>^:<path> > <path>`, rebuild, run an identical probe, restore. Compare a **checksum over the whole output** (fingerprint every element by position + normal + value), not a handful of spot probes: byte-identical output over a thousand vertices is proof, four matching probes is an anecdote. Old engine files usually still compile, because most changes add helpers rather than remove callees — and if one does not compile, that is itself informative.
     - **Run the comparison under both a uniform and a non-uniform input field.** Uniform inputs hide whole classes of defect — a weighted mean equals its value however it is weighted, so any error in *which* elements are averaged or *how* they are weighted is invisible. (The `SS-*` arc shipped two such defects behind uniform light.)
