@@ -181,7 +181,7 @@ The running Editor is driven from the shell with the **Unity CLI** (`unity`), wh
 | `unity command run_script --file <path> --entry <Type.Method> --args '[...]'` | Run a C# file with arguments, compiled in memory (no domain reload)          |
 | `unity command console --level error --tail 20 --result-only`    | Read the console; follow with the returned `cursor` + `session`                           |
 | `unity command menu --path "<menu path>"`                        | Run a menu item (code generation, validation suites, dev tools)                           |
-| `… --detach` then `unity job wait <jobId>`                       | Anything that can take longer than the 30 s default timeout                               |
+| `… --detach` then `unity job wait <jobId> --timeout 90`          | Anything that can take longer than the 30 s default timeout                               |
 | `unity command editor_status --result-only`                      | Editor state: `ready` / compiling / domain reload / play mode                             |
 | `get_scene_hierarchy`, `find_gameobjects`, `get_serialized_fields` | Scene objects and their serialized fields (incl. private)                              |
 | `find_assets`, `package_list`                                    | Asset paths/GUIDs, installed package versions                                             |
@@ -192,7 +192,7 @@ The running Editor is driven from the shell with the **Unity CLI** (`unity`), wh
 
 ### Rules
 
-- **Long operations run detached.** `--detach` returns a job id; `unity job wait <id>` returns the result. `Validate All` is the standard case.
+- **Long operations run detached, and every wait is bounded.** `--detach` returns a job id; `unity job wait <id> --timeout 90` returns the result, or exits `6` with *"The job keeps running; reattach …"* — then run it again, as a separate shell call, until the result arrives. A bare `unity job wait` blocks for the whole job (`Validate All` ≈ 3.5 min), longer than an agent shell's default timeout. `Validate All` is the standard case.
 - **A call during a domain reload fails fast** with a network error. Retry it once the Editor is `ready`; it is not a hang.
 - **Captures go to `Assets/AgentCaptures~/` only.** Save paths are confined to `Assets/`, and any other folder there is imported with a `.meta`. The `~` folder is gitignored and never imported.
 - **Play/Pause/Stop affect the user's Editor** — always confirm with the user before `editor_play`, `editor_pause` or `editor_stop`.

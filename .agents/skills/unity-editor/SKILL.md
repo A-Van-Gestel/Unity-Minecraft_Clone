@@ -31,8 +31,9 @@ collides with the global `--format` flag; leave it out.
 the live Editor.
 
 **Timeouts.** The default is 30 s (`--timeout <s>` raises it). Anything longer, such as
-`Validate All`, runs detached: `--detach`, then `unity job wait <id>`. A long operation never
-wedges the Editor.
+`Validate All`, runs detached: `--detach`, then **bounded** waits — `unity job wait <id>
+--timeout 90`, repeated as separate shell calls until the result arrives (recipe in
+`references/recipes.md`). A long operation never wedges the Editor.
 
 **Compile gate.** `unity recompile` compiles every assembly (runtime and editor) in the running
 Editor, sees brand-new `.cs` files, and prints Unity's own `error CS…` with file and line. Exit
@@ -55,7 +56,7 @@ Retry it; it is not a hang.
 | Does it compile in Unity?              | `unity recompile --format json`                                                           |
 | Read the console                       | `unity command console --level error --tail 20 --result-only`                             |
 | Run a menu item                        | `unity command menu --path "Minecraft Clone/…"` (`--detach` if long)                      |
-| Wait for a detached job                | `unity job wait <jobId>`                                                                  |
+| Wait for a detached job                | `unity job wait <jobId> --timeout 90` (repeat until the result arrives)                  |
 | Editor state                           | `unity command editor_status --result-only`                                               |
 | Scene tree / find objects              | `get_scene_hierarchy`, `find_gameobjects`                                                 |
 | Serialized fields (incl. private)      | `get_serialized_fields --target <instanceId> --component <Type>`                          |
@@ -77,8 +78,8 @@ Retry it; it is not a hang.
 - **Confirm before play mode** (`editor_play` / `editor_pause` / `editor_stop`).
 - **Never save captures outside `Assets/AgentCaptures~/`.** Save paths are confined to `Assets/`,
   and any other folder there gets imported with a `.meta` file. Unity skips `~` folders.
-- **Long work goes through `--detach` + `unity job wait`**, not a raised `--timeout` on a
-  blocking call.
+- **Long work goes through `--detach` + bounded `unity job wait --timeout 90` calls**, not a raised
+  `--timeout` on a blocking call, and never one unbounded wait longer than the shell's timeout.
 - **Destructive asset commands** (`delete_asset`, overwriting `write_text_file`, …) take
   `--confirm true`; run them with `--dry_run true` first.
 - **Version drift:** this card was verified against the versions in `metadata`. If `unity --version`

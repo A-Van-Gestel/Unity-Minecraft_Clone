@@ -38,9 +38,19 @@ Verified: a constant changed three times read back its new value each time throu
 ```bash
 unity command clear_console
 unity command menu --path "Minecraft Clone/Dev/Validate All" --detach --format json   # → jobId
-unity job wait <jobId>
+
+# Then, as SEPARATE shell calls, repeat until the result arrives:
+unity job wait <jobId> --timeout 90
+#   exit 6 + "The job keeps running; reattach ..."  -> run it again
+#   exit 0 + result                                  -> done
+
 unity command console --tail 400 --result-only    # read the summary
 ```
+
+Keep each wait under the shell's own timeout (agent shells commonly default to 120 s). A single
+unbounded `unity job wait` blocks for the whole job, ~3.5 minutes for `Validate All`. The exit `6`
+of a bounded wait is not a failure when the message says the job keeps running; any other exit
+`6` is a real one, and `unity job status <jobId>` shows the job's `state` if in doubt.
 
 How to read a suite's output is owned by run-validation-suite.
 

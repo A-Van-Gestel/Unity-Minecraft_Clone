@@ -1,6 +1,6 @@
 # Unity CLI Editor Bridge
 
-**Version:** 1.1  
+**Version:** 1.2  
 **Date:** 2026-09-27  
 **Status:** Implemented (Stable)  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production) — agent tooling, Editor only
@@ -132,6 +132,11 @@ see a new `.cs` file until Unity regenerates the `.csproj` (see `CLAUDE.md`'s Ex
 - **Long work runs detached.** `--detach` returns a job id at once; `unity job wait <id>` returns
   the command's result. `Validate All` (~3.5 minutes on 2026-09-27, almost all of it the Lighting
   suite) runs this way, completes once, and leaves the Editor responsive.
+- **Waits are bounded.** `unity job wait <id> --timeout <s>` gives up after `<s>` seconds with exit
+  `6` and *"The job keeps running; reattach with unity job wait …"*. The job is unaffected, and a
+  later wait returns its result; `unity job status <id>` reports `state` (`running` / `completed`).
+  Without `--timeout` the wait lasts as long as the job, which outlives an agent shell's default
+  timeout, so agents repeat bounded waits as separate calls.
 - **A call that lands during a domain reload fails fast** (network error / HTTP 400) and can be
   retried. It never hangs and never needs an Editor restart.
 - **A blocked main thread** — a long synchronous command, a compile, or a modal dialog — makes
@@ -246,6 +251,8 @@ bridge installed is `61480be4`.
 
 ## Document History
 
+* **v1.2** - §4: bounded `unity job wait --timeout` behavior recorded (review finding: an unbounded wait
+  outlives agent shell timeouts).
 * **v1.1** - §7: `UC-5` closed with the RC 94 vs RC 93 release-build comparison (Roslyn plugins
   stripped, identical 69-assembly set, build ~85 KB smaller); §8 limitation removed.
 * **v1.0** - Promoted from `Design/UNITY_MCP_TO_CLI_MIGRATION.md` (`UC-0`…`UC-4` complete

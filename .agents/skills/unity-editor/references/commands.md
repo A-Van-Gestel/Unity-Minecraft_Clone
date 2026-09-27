@@ -30,8 +30,10 @@ also matches `batch`). Pick the entry by its `name`.
 - `eval` takes its code as the first positional argument: `unity command eval "return 1;"`.
 - **Every `run_script` argument must be passed**; C# default parameter values are not applied.
 
-**Long work:** add `--detach` to get a job id back immediately, then `unity job wait <id>` (or
-`unity job status <id>` to poll). The job's result is the command's result.
+**Long work:** add `--detach` to get a job id back immediately, then `unity job wait <id> --timeout 90`
+(or `unity job status <id>`, whose `state` reads `running` / `completed`). The job's result is the
+command's result. A bounded wait that runs out exits `6` with *"The job keeps running; reattach …"*;
+the job is unaffected, and the next `unity job wait` picks it up.
 
 </calling>
 

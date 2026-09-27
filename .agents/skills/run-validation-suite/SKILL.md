@@ -88,14 +88,15 @@ together take seconds. That is far past a command's 30 s default timeout, so run
 
 | Want | Do |
 |---|---|
-| The full aggregate, agent-driven | `unity command menu --path "Minecraft Clone/Dev/Validate All" --detach`, then `unity job wait <jobId>` |
+| The full aggregate, agent-driven | `unity command menu --path "Minecraft Clone/Dev/Validate All" --detach`, then bounded `unity job wait <jobId> --timeout 90` calls |
 | The full aggregate, by hand | `Minecraft Clone/Dev/Validate All` from the Editor menu |
 | A fast agent-side sweep | `eval` → `RunSelected(...)` over the registry **without `"Lighting Engine"`** (seconds) |
 
 **Detached recipe:** `unity command clear_console`, fire the menu item with `--detach` (the reply
-carries a `jobId`), `unity job wait <jobId>` until it completes, then read the combined summary with
-`unity command console --tail 400 --result-only`. A detached job neither blocks the shell nor
-re-runs.
+carries a `jobId`), then call `unity job wait <jobId> --timeout 90` as separate shell calls until one
+returns the result (each bounded one that runs out exits `6` with *"The job keeps running"*; see the
+`unity-editor` recipes), then read the combined summary with `unity command console --tail 400
+--result-only`. A detached job neither blocks the shell nor re-runs.
 
 **Do not schedule long work from `eval` via `EditorApplication.delayCall`.** The call returns
 `success: true`, and the queued delegate then does not run on any predictable schedule. Observed
@@ -166,7 +167,7 @@ scenario→test-case mapping: [references/nunit-xml-output.md](references/nunit-
 - **Confirm current code first** (Step 1) — a stale green run is worse than no run.
 - A **baseline failure is a regression**; an **Inconclusive/known-bug repro is expected**. Never
   invert these when reporting a result.
-- **Long runs go through `--detach` + `unity job wait`**, never a blocking call.
+- **Long runs go through `--detach` + bounded `unity job wait --timeout 90` calls**, never a blocking call.
 - Do not call `RunHeadless` in a live editor (it exits the editor); generate the XML through the
   batch path.
 - This skill runs and reads suites; it does not author them — route creation/bugfix work to

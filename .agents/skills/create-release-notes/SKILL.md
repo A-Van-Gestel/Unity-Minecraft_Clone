@@ -79,7 +79,7 @@ that tag after the commit is what makes the URL resolve.
    VALIDATE ALL: all <N> baselines across <S> suites PASSED
    ```
    Fire `Minecraft Clone/Dev/Validate All` with `unity command menu --path … --detach` +
-   `unity job wait`, then read the `=== Validate All — combined summary ===` block with
+   bounded `unity job wait --timeout 90` calls, then read the `=== Validate All — combined summary ===` block with
    `unity command console`. Mechanics, the
    programmatic alternatives, and how to read PASS / FAIL / known-bug / Inconclusive lines belong to
    the `run-validation-suite` skill — follow it there rather than re-deriving them here.
