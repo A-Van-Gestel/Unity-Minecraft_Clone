@@ -37,7 +37,8 @@ the live Editor.
 
 **Compile gate.** `unity recompile` compiles every assembly (runtime and editor) in the running
 Editor, sees brand-new `.cs` files, and prints Unity's own `error CS…` with file and line. Exit
-`0` = clean, `6` = compile errors, `7` = no Editor (fall back to `dotnet build`, see `CLAUDE.md`).
+`0` = clean, `6` = compile errors, `7` = no Editor (fall back to `dotnet build`, see `CLAUDE.md`;
+an Editor that is open but unreachable may be in Safe Mode, gotcha 14 in `references/recipes.md`).
 It returns **before** the domain reload that loads the new code. Wait for `editor_status` to
 report `ready` before running anything that needs it (recipe in `references/recipes.md`).
 

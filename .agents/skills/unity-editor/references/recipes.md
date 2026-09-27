@@ -138,5 +138,12 @@ images, never to a saved file.
     work doesn't queue behind it. Only dismiss a dialog your own command raised; anything else
     is the user's call. `PlayerBuildInterface.CompilePlayerScripts` raises one when its output
     folder's parent does not exist, so create it first.
+14. **Exit `7` with an Editor visibly open may be Safe Mode.** An Editor that *starts* with C#
+    compile errors boots into Safe Mode, where no package loads, `com.unity.pipeline` included, so
+    every `unity command` fails as if no Editor were running. Confirm with
+    `unity pipeline list --format json` (`data.summary.instancesInSafeMode` > 0). Take the errors from
+    Unity's own `error CS…` lines in `Logs/Editor.log`, not `dotnet build`: it cannot see a `.cs` file
+    the `.csproj` does not list yet and reports green for it. Fix them, then have the user leave Safe
+    Mode or restart the Editor.
 
 </gotchas>

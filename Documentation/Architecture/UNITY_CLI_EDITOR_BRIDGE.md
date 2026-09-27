@@ -1,6 +1,6 @@
 # Unity CLI Editor Bridge
 
-**Version:** 1.2  
+**Version:** 1.3  
 **Date:** 2026-09-27  
 **Status:** Implemented (Stable)  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production) — agent tooling, Editor only
@@ -242,6 +242,7 @@ bridge installed is `61480be4`.
 | Keep ai.assistant installed alongside the CLI           | Two bridges, 19 patches to maintain, a deprecated package pinned against entitlement changes.                                                                               | 2026-09-27 |
 | Upgrade ai.assistant to ≥ 2.13                          | Reintroduces the entitlement enforcement the 2.6.0-pre.1 pin avoided.                                                                                                         | 2026-09-27 |
 | Vendor Unity's generated `unity-cli` / `unity-pipeline` skills | Regenerated per CLI release; committed copies go stale. One project skill + the CLI's live schemas instead.                                                          | 2026-09-27 |
+| Install Unity's official agent plugin (`Unity-Technologies/unity-agent-plugin`, 32 skills) | All-or-nothing: ~16 KB of always-loaded skill descriptions (1.6× this project's whole set), UI skills that steer editor tooling to UI Toolkit against the IMGUI `editor-tool` standard, and 2D/IAP/ads/multiplayer skills with no use here. Its one gap-filler, the Render Graph checklist, was adapted into `.agents/rules/render-graph.md` + `review-changes` gates 20–23; its Safe Mode note into `unity-editor`. | 2026-09-27 |
 | `set_authoring_root` to save captures under `Temp/`     | Measured: the root is confined to folders under `Assets/`; the `~` folder works.                                                                                              | 2026-09-27 |
 | `unity shell` to cut per-call latency                   | Measured ~1.2 s per call either way; the cost is the per-command Editor scan, which the project path removes.                                                                 | 2026-09-27 |
 | `eval_file` for the profiler queries                    | Takes no arguments; `run_script` passes typed arguments to named entry points.                                                                                                | 2026-09-27 |
@@ -251,6 +252,8 @@ bridge installed is `61480be4`.
 
 ## Document History
 
+* **v1.3** - §10: Unity's official agent plugin evaluated and rejected; its two useful parts adapted
+  into project rules and skills.
 * **v1.2** - §4: bounded `unity job wait --timeout` behavior recorded (review finding: an unbounded wait
   outlives agent shell timeouts).
 * **v1.1** - §7: `UC-5` closed with the RC 94 vs RC 93 release-build comparison (Roslyn plugins
