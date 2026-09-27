@@ -1,12 +1,12 @@
 # Unity CLI Extensions Roadmap
 
-**Version:** 1.0  
+**Version:** 1.1  
 **Date:** 2026-09-27  
 **Status:** Open backlog. Items are removed (archived) when implemented and verified.
 
 > Unbuilt work on the agent ↔ Editor bridge described in
 > [`../Architecture/UNITY_CLI_EDITOR_BRIDGE.md`](../Architecture/UNITY_CLI_EDITOR_BRIDGE.md): one
-> open verification (`UC-5`) and three unscheduled extensions (`UC-6`…`UC-8`). The `UC-*` ID
+> verification (`UC-5`, closed 2026-09-27) and three unscheduled extensions (`UC-6`…`UC-8`). The `UC-*` ID
 > space continues from the migration that built the bridge; `UC-0`…`UC-4` are closed and indexed
 > in the Architecture doc.
 
@@ -42,26 +42,21 @@ migration design.
 
 | ID       | Item                                                        | Effort | Risk | Benefit | Seed | Save | Status |
 |----------|-------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|--------|
-| **UC-5** | Confirm the Roslyn plugins are stripped from a release build |   🟢   |  🟢  |   🟡    |  ✅  |  ✅  | —      |
+| **UC-5** | Confirm the Roslyn plugins are stripped from a release build |   🟢   |  🟢  |   🟡    |  ✅  |  ✅  | ✅ 2026-09-27 |
 | **UC-6** | Headless `Validate All` via `unity run --command` / `unity test` |   🟡   |  🟢  |   🟡    |  ✅  |  ✅  | —      |
 | **UC-7** | `--runtime` inspection of a Development player              |   🟡   |  🟡  |   ⚪    |  ✅  |  ✅  | —      |
 | **UC-8** | Re-run the Project Auditor report through `audit`           |   🟢   |  🟢  |   ⚪    |  ✅  |  ✅  | —      |
 
 ---
 
-## UC-5 — Confirm Roslyn stripping in a release build
+## UC-5 — Confirm Roslyn stripping in a release build ✅ 2026-09-27
 
-**What exists today.** `com.unity.pipeline` bundles five precompiled Roslyn plugin DLLs
-(~9.1 MB), enabled for the Win64/Linux64/macOS players and auto-referenced. Release player
-scripts do not include `Unity.Pipeline`, the only assembly that uses them, and the IL2CPP linker
-removed the previous package's unreferenced assemblies from RC 93. Whether it also removes these
-plugins has not been measured.
-
-**Do.** On the next IL2CPP release build, search `<build>_Data/il2cpp_data/Metadata/global-metadata.dat`
-and the `…_BackUpThisFolder_ButDontShipItWithYourGame/Managed` folder for `UnityPipeline` and
-`CodeAnalysis`. Zero hits closes this item; record the result in the Architecture doc's §7. Any
-hit means the plugins ship: restrict their player platforms (a package-level change, so it needs
-an embed or an asset postprocessor) and re-measure.
+**Closed.** The RC 94 IL2CPP release build (the first with the bridge) ships no `UnityPipeline.*`
+or `Unity.Pipeline*` assembly. Its post-strip `Managed/` set is the same 69 assemblies as RC 93,
+and the build is ~85 KB smaller. The Architecture doc's §7 holds the measurement. The check planned
+here, zero hits for `CodeAnalysis`, turned out too broad: that string also matches the compiler's
+own attribute namespace, present identically in both builds. Match the plugin names exactly
+(`UnityPipeline.`) when re-checking after a package bump.
 
 ## UC-6 — Headless `Validate All` in CI
 
@@ -95,10 +90,11 @@ saved-report route before switching.
 
 ## Document History
 
+* **v1.1** - `UC-5` closed: RC 94 release build ships no Pipeline/Roslyn assembly (Architecture §7).
 * **v1.0** - Initial backlog, split out of `Design/UNITY_MCP_TO_CLI_MIGRATION.md` on its promotion to
   `Architecture/UNITY_CLI_EDITOR_BRIDGE.md`.
 
 ---
 
 **Last Updated:** 2026-09-27  
-**Next Review:** on the next release build (`UC-5`), or when CI work starts (`UC-6`)
+**Next Review:** when CI work starts (`UC-6`)

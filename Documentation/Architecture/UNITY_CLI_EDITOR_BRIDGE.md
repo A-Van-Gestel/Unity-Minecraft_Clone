@@ -1,6 +1,6 @@
 # Unity CLI Editor Bridge
 
-**Version:** 1.0  
+**Version:** 1.1  
 **Date:** 2026-09-27  
 **Status:** Implemented (Stable)  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production) — agent tooling, Editor only
@@ -26,7 +26,7 @@ the same day during the migration. Exit code `7` comes from the CLI's release no
 **Relationship to other documents:**
 
 - [`../Design/UNITY_CLI_EXTENSIONS_ROADMAP.md`](../Design/UNITY_CLI_EXTENSIONS_ROADMAP.md) — owns
-  the bridge's unbuilt work (`UC-5`…`UC-8`), including the one open verification in §7.
+  the bridge's unbuilt work (`UC-6`…`UC-8`); `UC-5`, the §7 release-build check, closed there.
 - [`../Design/PROJECT_AUDITOR_FINDINGS_REPORT.md`](../Design/PROJECT_AUDITOR_FINDINGS_REPORT.md) —
   §3.4 records why the package advisories for this bridge are deliberate.
 - [`../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md`](../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md)
@@ -47,7 +47,7 @@ The `UC-*` IDs were issued by the design this document was promoted from
 | **UC-2** | Agent docs: `unity-editor` skill, `CLAUDE.md`/`AGENTS.md`, config, sweep               | ✅ 2026-09-27 | §1, §3         |
 | **UC-3** | Cutover: verified backup, old package removed, footprint measured                      | ✅ 2026-09-27 | §7, §9         |
 | **UC-4** | `unity mcp` evaluation + trimmed-old-bridge hybrid                                     | ✅ 2026-09-27 | §10 (both rejected) |
-| **UC-5** | Confirm on a release build that the Roslyn plugins are stripped                        | —             | Roadmap doc    |
+| **UC-5** | Confirm on a release build that the Roslyn plugins are stripped                        | ✅ 2026-09-27 | §7             |
 | **UC-6** | Headless `Validate All` in CI via `unity run --command` / `unity test`                 | —             | Roadmap doc    |
 | **UC-7** | `--runtime` connection to a Development player                                         | —             | Roadmap doc    |
 | **UC-8** | Re-run the Project Auditor report through the `audit` command                          | —             | Roadmap doc    |
@@ -186,15 +186,24 @@ StandaloneWindows64 player scripts on 2026-09-27:
 
 The package also bundles five precompiled Roslyn plugin DLLs (~9.1 MB; the `CodeAnalysis` ones
 are enabled for the Win64/Linux64/macOS players and auto-referenced). Nothing references them in
-a Release build, and the IL2CPP linker strips unreferenced assemblies. The last release build
-before the switch (RC 93) contains none of the old package's compiled-in `Unity.AI.*` assemblies.
-That this also holds for the Roslyn plugins is **not yet measured** — `UC-5`.
+a Release build, and the IL2CPP linker strips them. **Measured on the RC 94 IL2CPP release build
+(2026-09-27), the first built with this bridge, against RC 93, the last built without it:**
+
+- No `UnityPipeline.*` or `Unity.Pipeline*` assembly in the post-strip `Managed/` set, and no such
+  name in `global-metadata.dat`.
+- The post-strip set is the **same 69 assemblies** by name in both builds; sizes moved by at most
+  ~3.5 KB per assembly.
+- The build shrank slightly: `GameAssembly.dll` −104,960 bytes, `global-metadata.dat`
+  −4,448 bytes, the shipped build (excluding the backup folder) −85,220 bytes.
+- The metadata strings that do match `CodeAnalysis` / `Unity.AI` are identical in both builds and
+  come from elsewhere. `System.Diagnostics.CodeAnalysis` / `Microsoft.CodeAnalysis` is the attribute
+  namespace the C# compiler emits into ordinary assemblies. The `Unity.AI.*` names are
+  `[InternalsVisibleTo]` entries inside Unity's own engine modules (e.g. `UnityEngine.AudioModule`).
 
 ---
 
 ## 8. Limitations
 
-- **Roslyn stripping in Release is precedent, not measurement** (§7) — owned by `UC-5`.
 - **The Development-build size delta was not measured.** Development players carry
   `Unity.Pipeline` and the Roslyn plugins by design.
 - **No Unity-aware lint.** Script inspections come from Rider (`lint_files`), not the Editor.
@@ -237,6 +246,8 @@ bridge installed is `61480be4`.
 
 ## Document History
 
+* **v1.1** - §7: `UC-5` closed with the RC 94 vs RC 93 release-build comparison (Roslyn plugins
+  stripped, identical 69-assembly set, build ~85 KB smaller); §8 limitation removed.
 * **v1.0** - Promoted from `Design/UNITY_MCP_TO_CLI_MIGRATION.md` (`UC-0`…`UC-4` complete
   2026-09-27). Claims re-verified live at `58bbdecc`; unbuilt work split into
   `Design/UNITY_CLI_EXTENSIONS_ROADMAP.md`.
@@ -244,4 +255,4 @@ bridge installed is `61480be4`.
 ---
 
 **Last Updated:** 2026-09-27  
-**Next Review:** on a Unity CLI or `com.unity.pipeline` version bump, or when `UC-5` measures §7
+**Next Review:** on a Unity CLI or `com.unity.pipeline` version bump (re-check §7 on the next release build after one)
