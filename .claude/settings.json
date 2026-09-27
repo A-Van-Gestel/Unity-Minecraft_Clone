@@ -6,7 +6,6 @@
   },
   "permissions": {
     "allow": [
-      "mcp__unity-mcp__Unity_ReadConsole",
       "Bash(unity recompile:*)",
       "Bash(unity status:*)",
       "Bash(unity command editor_status:*)",

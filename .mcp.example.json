@@ -11,12 +11,6 @@
                 "UNITY_PROJECT_PATH": "ProjectSettings/ProjectVersion.txt"
             }
         },
-        "unity-mcp": {
-            "command": "C:\\Users\\axelv\\.unity\\relay\\relay_win.exe",
-            "args": [
-                "--mcp"
-            ]
-        },
         "codegraph": {
             "type": "stdio",
             "command": "codegraph",
