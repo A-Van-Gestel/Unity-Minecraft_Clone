@@ -250,8 +250,9 @@ Everything else fires on every run. Three that look deferrable and are not:
   is silent data loss the instant the scene/prefab re-serializes. There is no
   later — the reference is already gone.
 - **Gate 11 (domain-reload static).** A mutable `static` with no per-play reset
-  leaks a stale value into the next play session immediately (this project runs
-  with *Reload Domain* off). A field initializer is not a fix.
+  leaks a stale value into the next play session the moment fast enter play mode
+  (*Reload Domain* off) is switched on, and both analyzers flag it today. A field
+  initializer is not a fix.
 
 On an intermediate run the owed halves go under `Still owed before merge` in the
 report — a checklist, not findings. On a pre-merge run there is no owed half:

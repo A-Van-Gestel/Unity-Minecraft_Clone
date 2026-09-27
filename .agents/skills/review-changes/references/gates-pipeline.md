@@ -68,21 +68,25 @@ suite that would settle it (gate 12 / `run-validation-suite`).
 
 ## Gate 11 — Mutable `static` added without a per-play reset
 
-**What fails.** This project runs with *Enter Play Mode → Reload Domain*
-**disabled**, so `static` fields are **not** re-initialized between play sessions.
-The diff adds a mutable `static` (counter, cache, singleton back-reference, event
-list) and either:
+**What fails.** *Enter Play Mode → Reload Domain* is currently **enabled**
+(`ProjectSettings/EditorSettings.asset`: `m_EnterPlayModeOptions: 0`), so statics
+do reset today. The rules still bind: Rider (UDR0004/UDR0005) and Project Auditor
+(UAL0010/UAL0013) flag them, and they must hold before fast enter play mode can be
+turned on. See `CLAUDE.md` § Unity Static Fields & Domain Reload. The diff adds a
+mutable `static` (counter, cache, singleton back-reference, event list) and either:
 
 - gives it **no per-play reset** — a field initializer (`= 0`) is not enough, it
-  only runs on domain reload, so a stale value from the last session leaks into
-  the next run; or
+  only runs on domain reload, which fast enter play mode skips; or
 - adds a **second `[RuntimeInitializeOnLoadMethod]`** to a class that already has
   one — Rider's **UDR0005** — instead of folding the reset into the existing one
   (e.g. `World.DomainReset`).
 
 **How to check.** For each added `static`, ask: is it mutated across a play
-session, and is it zeroed by code that runs each play start? `const`, `readonly`,
-and `[ThreadStatic]` are exempt (never mutated across sessions). Rider
+session, and is it zeroed by code that runs each play start? `const` is exempt;
+`readonly` and `[ThreadStatic]` only when the value never goes stale (a `readonly`
+container's *contents* still need clearing, and a `[ThreadStatic]` reset only
+reaches the calling thread). Every added static also needs `[NoAutoStaticsCleanup]
+// reset in <actual method>` or `[AutoStaticsCleanup]` for UAL0010/UAL0013. Rider
 `lint_files` reports UDR0004/UDR0005 directly — corroborate with it when the IDE
 is running; if not, flag from the source (uncertain) and put Rider on `Not
 verified`. A static the diff *removed a reset from* is gate 4.
