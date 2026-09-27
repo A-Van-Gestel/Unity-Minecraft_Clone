@@ -172,6 +172,8 @@ because resolution never changes mid-session in normal play.
 
 **Candidate fixes (not yet decided — this is the plan's job):**
 
+> Fix #08 first: the offset progression both candidates adjust is probably not reaching the GPU.
+
 1. **Scale the offsets by resolution** — multiply the `0.5f + step` progression by
    `blurTargetWidth / referenceWidth`. Smallest diff. Risk: at high resolutions the taps grow large in texels,
    which is the regime the existing comment in `RecordRenderGraph` warns produces blocky artifacts, so it may
