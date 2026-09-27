@@ -1,6 +1,6 @@
 # Unity MCP → Unity CLI Migration Design
 
-**Version:** 1.1  
+**Version:** 1.2  
 **Date:** 2026-09-27  
 **Status:** Proposed design — not implemented.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
@@ -105,6 +105,15 @@ the embedded package itself.
 UC-4 settles this with the §2.2 matrix. Three outcomes are possible: **reject** (recorded in §9),
 **secondary** (kept for specific jobs such as inline captures, with the shell path primary), or
 **primary** (only if it beats the shell path on the matrix, which would reopen this decision).
+
+UC-4 also has to show that **`unity mcp` coexists with the existing `unity-mcp` bridge** until UC-3
+removes it. The two run on separate transports (relay on ports 9001/9002, the Pipeline server on
+7800), but Unity documents a conflict with ai.assistant below 2.13 without naming its symptom.
+That conflict check needs a working baseline, and there is none today: the old bridge answers
+*"Connection revoked"* (§2.1). So UC-4 first restores its approval (Project Settings → AI → Unity
+MCP) and confirms a `Unity_ManageEditor` call succeeds. Only then are both servers exercised in the
+same session. That order also answers §8 question 2: if the approval stays good while the Pipeline
+package is installed, the revoke was a stale approval state, not the documented conflict.
 
 #### Option B — direct `unity command` / `recompile` / `job` via the shell ✅ **CHOSEN** (primary)
 
@@ -325,7 +334,7 @@ restore the relay into `~/.unity/relay/`, and re-add the `unity-mcp` entry to `.
 |-----------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|------------|--------------|
 | **UC-0 — Trial**                        | CLI → beta.11; `com.unity.pipeline` 0.8.0-exp.1 alongside the embed; measure §2.2; `Validate All` green.                                                                                                                                           |   🟢   | —          | ✅ 2026-09-27 |
 | **UC-1 — Profiler scripts**             | `Tools/UnityCli/Profiler/ProfilerQueries.cs` run by `run_script`: overall GC, frame top-time, frame self-time, frame-range summary, plus status/load/clear/threads (§3.3). Verified on two real 2000-frame captures (IL2CPP + Mono) from `ProfilerCaptures/`; `OverallGc`'s total cross-checked against an independent root-level sum (58033.8 KB, exact). Live play-mode recording not exercised — same `ProfilerDriver` frames. |   🟡   | UC-0       | ✅ 2026-09-27 |
-| **UC-4 — `unity mcp` evaluation**       | `unity mcp configure claude --dry-run` first, then register it under a new server name beside `unity-mcp`. Re-run the §2.2 matrix through it (detached long op, reload mid-call, console cursor, reflection in `eval`, unfocused Editor), plus inline image captures and the tool-list context cost. Record the verdict in §3.1 (and §9 if rejected). |   🟢   | UC-0       | —            |
+| **UC-4 — `unity mcp` evaluation**       | **Coexistence first (§3.1):** restore the old bridge's approval and confirm a `Unity_*` call works as a baseline. Then `unity mcp configure claude --dry-run`, and register it under a new server name beside `unity-mcp`. Re-run the §2.2 matrix through it (detached long op, reload mid-call, console cursor, reflection in `eval`, unfocused Editor), plus inline image captures and the tool-list context cost. Throughout, and after each domain reload, check that both servers still answer, and that neither the relay log nor `Logs/Editor.log` shows approval, port or connection errors. Record the verdict in §3.1 (and §9 if rejected). |   🟢   | UC-0       | —            |
 | **UC-2 — Agent docs**                   | Rename + rewrite `unity-mcp` skill around the CLI (§3.4, §4.3), covering `unity mcp` too if UC-4 adopts it; rewrite the MCP sections of `CLAUDE.md` + `AGENTS.md` (twins, by hand) per §4.2; sweep the §5 blast radius; `.gitignore` `Assets/AgentCaptures~/`; `.claude` permission rules. |   🟡   | UC-1, UC-4 | —            |
 | **UC-3 — Cutover**                      | **§4.5 backup first, verified.** Then remove ai.assistant from the manifest + delete the embed; delete `Tools/Apply-AiAssistantMcpPatch.ps1`, the patch guide and `McpEval*`; drop `unity-mcp` from `.mcp*.json`; package-set check (§5); §4.4 build check; `recompile` + `Validate All` green. |   🟢   | UC-2       | —            |
 
@@ -351,7 +360,8 @@ longer exist. The regression gate for every phase is `unity recompile` clean plu
 1. **Modal dialogs** — a modal blocks the main thread; untested whether commands queue, time out
    cleanly at `--timeout`, or wedge. Resolve with one deliberate probe during UC-2 and record the
    answer in §4.3.
-2. **What revoked the old bridge** (§2.1) — moot after UC-3; recorded only in case UC-3 is reverted.
+2. **What revoked the old bridge** (§2.1) — answered by UC-4's coexistence check (§3.1), which has
+   to restore the bridge's approval anyway to get a baseline.
 
 ---
 
@@ -368,6 +378,8 @@ longer exist. The regression gate for every phase is `unity recompile` clean plu
 
 ## Document History
 
+* **v1.2** - UC-4 scope: coexistence with the existing `unity-mcp` bridge, checked against a restored
+  approval baseline, before and throughout the `unity mcp` measurements.
 * **v1.1** - UC-1 shipped: the profiler queries run through `run_script` (not `eval_file`), one file
   with an entry point per query; §3.3 lists the entries, §4.3 gains gotchas 10–12.
 * **v1.0** - Initial design (UC-0 trial results + tool mapping)
