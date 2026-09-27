@@ -94,6 +94,9 @@ crashlytics-build.properties
 # Auto generated backup files
 *.*~
 
+# Agent screenshots from the Unity CLI (the ~ suffix keeps Unity from importing them)
+/[Aa]ssets/AgentCaptures~/
+
 # Repomix
 /repomix-output.*
 

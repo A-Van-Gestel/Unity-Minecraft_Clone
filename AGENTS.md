@@ -40,9 +40,9 @@ Applies to any `static` that accumulates runtime state (counters, caches, single
 
 - **Always use `BlockIDs` constants, never raw IDs.** Reference blocks via `BlockIDs.Stone`, `BlockIDs.Grass`, `BlockIDs.Air`, etc. — never hardcode raw `ushort` literals or guess IDs. The class is auto-generated at `Assets/Scripts/Data/BlockIDs.cs` from `BlockDatabase.asset`.
   These constants are Burst-safe and compile to integer literals.
-- **Adding a new block:** Use the in-editor `BlockEditor` tool (writes to `BlockDatabase.asset`), then regenerate `BlockIDs.cs` via `Unity_ManageMenuItem` → `Minecraft Clone/Generate Block IDs`. Do NOT hand-author `BlockIDs.cs` — its header warns against manual edits.
+- **Adding a new block:** Use the in-editor `BlockEditor` tool (writes to `BlockDatabase.asset`), then regenerate `BlockIDs.cs` via `unity command menu --path "Minecraft Clone/Generate Block IDs"`. Do NOT hand-author `BlockIDs.cs` — its header warns against manual edits.
 - If a block you need is missing from `BlockIDs`, ask the user to add it via the editor tool rather than inventing an ID.
-- **Programmatic code generation:** Any `Minecraft Clone/*` menu item (Generate Block IDs, Generate Fluid Mesh Data, Generate Game Actions, etc.) can be triggered via the `Unity_ManageMenuItem` MCP tool instead of asking the user to click through menus.
+- **Programmatic code generation:** Any `Minecraft Clone/*` menu item (Generate Block IDs, Generate Fluid Mesh Data, Generate Game Actions, etc.) can be triggered with `unity command menu --path "<menu path>"` instead of asking the user to click through menus.
 
 ## Unity API Lookup (unity-api MCP)
 
@@ -102,13 +102,10 @@ When a change touches the chunk generation → lighting → meshing pipeline spe
 - **Atomic Commits:** When completing a complex workflow, ensure the codebase is in a compilable state before moving to the next logical step.
 - **Committing is the user's call — never commit unprompted.** Finish the work and **stop with it uncommitted**, ending the response with a suggested commit message. The user reads the diff and routinely reformats before it lands; that review window is the point. The **next forward instruction** — "proceed", "continue with the next item", or an outright "commit" — *is* the trigger: commit then, without asking again. Two things feel like triggers and are **not**: executing a plan the user already approved, and the user confirming a fix works in game. Both are stopping points that invite a commit message, not commit requests.
 - **Commit message format:** a single brief subject line, `Verb: description` — past-tense verbs (`Fixed:`, `Added:`, `Updated:`, `Removed:`, `Refactored:`, `Optimized:`) or scope prefixes (`Docs:`, `Editor:`, `Skill:`, `AGENTS:`). Join aspects with ` + `, express cause/effect with ` -> `. No body text, and **no `Co-Authored-By` trailer** — this overrides the harness default that asks for one. Group unrelated changes into separate commits, including tiny standalone cleanups.
-- **Compile Command:** Run `dotnet build "Assembly-CSharp.csproj"` in your terminal/command execution tool. When the change touches any file under `Assets/Editor/`, also build the editor assembly: `dotnet build "Assembly-CSharp-Editor.csproj"`. Editor-only code lives in a separate assembly that `Assembly-CSharp.csproj` does not compile — a green runtime build does not guarantee editor code compiles. Alternatively, the Rider MCP pair `build_solution_start` → `build_solution_state` builds every assembly (runtime + editor) in one call and closes that gap.
-- **New `.cs` files & stale projects (Unity gotcha):** A *newly-created* `.cs` file is not in the `.csproj` until Unity regenerates it. This cuts **both** ways: `dotnet build` reports **phantom `CS0103` "does not exist in the current context"** for the new type even though the code is correct, **and — more dangerously — it reports a FALSE GREEN for the new file itself**, because a file absent from the `.csproj` is never compiled, so real errors inside it are invisible. Let Unity import it first — `AssetDatabase.Refresh()` via `Unity_RunCommand` (or just
-  focus the Editor) — then re-run `dotnet build`.
-- **`IsCompiling == false` does not mean "my code is loaded".** `RequestScriptCompilation()` is *asynchronous*, so `Unity_ManageEditor → GetState` can report idle simply because the compile has not started yet. Two consequences: (1) if the domain reload lands **mid-`Unity_RunCommand`**, the executing script's context is torn down and the MCP call **never returns** (it burns the full idle timeout); (2) a **failed** Unity compile leaves the previous DLL in place, so `Unity_RunCommand` keeps compiling against **stale assemblies** and emits errors that
-  contradict a green `dotnet build` ("does not contain a constructor that takes N arguments", "does not contain a definition for X") — those are stale-DLL symptoms, not real code errors.
-  **The reliable gate is the DLL timestamp**, not `IsCompiling`: after editing, wait until the built assembly is newer than the source before running anything in-editor —
-  `until [ "Library/ScriptAssemblies/Assembly-CSharp.dll" -nt "<edited source>" ]; do sleep 3; done` (use `Assembly-CSharp-Editor.dll` for editor code). Corollary: **a green `dotnet build` + a stale DLL means the Unity compile FAILED** — check `Assets`-relative `error CS` lines in the Editor console/log.
+- **Compile Command:** With the Editor running, run `unity recompile --format json`. It compiles **every** assembly (runtime + editor) inside the Editor, including `.cs` files created seconds ago, and returns Unity's own `error CS…` lines with file and line (exit `0` clean, `6` compile errors, `7` no Editor reachable). **It returns when compilation ends, before the domain reload**: an `eval` or menu item sent straight after fails with a network error. Before running anything in-editor, wait until the new code is live —
+  `until unity command editor_status --result-only | grep -q '"status": "ready"'; do sleep 1; done`.
+- **Without a running Editor**, fall back to `dotnet build "Assembly-CSharp.csproj"`, plus `dotnet build "Assembly-CSharp-Editor.csproj"` when the change touches `Assets/Editor/` (editor code lives in a separate assembly the runtime project does not compile). The Rider MCP pair `build_solution_start` → `build_solution_state` builds both in one call. **Newly-created `.cs` files are invisible to either** until Unity regenerates the `.csproj`: `dotnet build` then reports phantom `CS0103` for the new type **and a false green for the new file itself**, whose errors are never compiled. Only `unity recompile` (or an Editor import) covers a new file.
+- **A failed Unity compile leaves the previous assemblies loaded.** Until `unity recompile` is clean, `eval` / menu items run the old code and can report errors that contradict your source ("does not contain a definition for X") — stale-assembly symptoms, not real code errors.
 - **Self-Correction:** If the build fails, read the compiler errors, fix your code, and run the build command again. Do not ask the user to test broken code.
 - **Doc Sync:** When a change alters behavior described in a `Documentation/Architecture/`, `Design/`, or `Guides/` doc — or ships a feature drafted in a Design doc — use the `docs-sync` skill to update the matching doc in the same commit. Skip for refactors, bug fixes that preserve documented behavior, and test-only changes.
 
@@ -169,48 +166,39 @@ Trust CodeGraph for structural queries — don't re-verify with Grep unless you 
 
 For task-specific workflows, see the `voxel-debugging`, `refactor-safely`, and `review-changes` skills under `.agents/skills/`.
 
-<!-- Unity MCP tools -->
+<!-- Unity Editor via the Unity CLI -->
 
-## MCP Tools: unity-mcp (Live Unity Editor)
+## Live Unity Editor: the Unity CLI
 
-The Unity Editor exposes live tools via the `unity-mcp` MCP server. These provide capabilities that file reads cannot — inspecting runtime state, reading `[SerializeField]` values from scene objects, querying the profiler, and executing arbitrary C# in the editor context.
+The running Editor is driven from the shell with the **Unity CLI** (`unity`), which talks to the `com.unity.pipeline` package inside the Editor. It provides what file reads cannot: running C# in the Editor, inspecting runtime state, reading `[SerializeField]` values from scene objects, compiling, reading the console, running menu items, captures, and profiler data. `.claude/settings.json` sets `UNITY_PROJECT_PATH` so every call skips the ~1 s Editor scan; from anywhere but the repo root, pass `--project-path`.
 
-### Tool Reference
+### Command Reference
 
-| Tool                           | Use when                                                                                            |
-|--------------------------------|-----------------------------------------------------------------------------------------------------|
-| `Unity_RunCommand`             | Execute arbitrary C# in the editor — inspect runtime state, run validation, query ScriptableObjects |
-| `Unity_ReadConsole`            | Read console logs with filtering by type/text/timestamp — essential for debugging                   |
-| `Unity_ManageScene`            | Get active scene, scene hierarchy (depth-limited), build settings                                   |
-| `Unity_ManageGameObject`       | Find GameObjects, read components + `[SerializeField]` values, inspect transforms                   |
-| `Unity_ManageMenuItem`         | Execute editor menu items programmatically (e.g. `Minecraft Clone/Generate Block IDs`)              |
-| `Unity_ManageAsset`            | Search assets, get GUIDs, read asset metadata                                                       |
-| `Unity_ManageEditor`           | Play/Pause/Stop, get editor state, manage tags/layers, get selection                                |
-| `Unity_Camera_Capture`         | Capture rendered output from a camera — visual verification of scenes/UI                            |
-| `Unity_ValidateScript`         | Unity-aware script validation — catches GC allocations in hot paths                                 |
-| `Unity_PackageManager_GetData` | Check installed package versions (Burst, Collections, etc.)                                         |
-| `Unity_FindInFile`             | Regex search with SHA256 verification — confirms file hasn't changed since Unity loaded it          |
-| **Profiler tools (10)**        | Query GC allocations, frame timing, bottom-up analysis — only work with profiling data              |
+| Command                                                          | Use when                                                                                  |
+|------------------------------------------------------------------|-------------------------------------------------------------------------------------------|
+| `unity recompile --format json`                                  | Does it compile in Unity? File/line errors from the Editor itself (see Execution Protocol) |
+| `unity command eval "<C#>" --result-only`                        | Run C# in the Editor — runtime state, ScriptableObjects, reflection, `Undo`                |
+| `unity command run_script --file <path> --entry <Type.Method> --args '[...]'` | Run a C# file with arguments, compiled in memory (no domain reload)          |
+| `unity command console --level error --tail 20 --result-only`    | Read the console; follow with the returned `cursor` + `session`                           |
+| `unity command menu --path "<menu path>"`                        | Run a menu item (code generation, validation suites, dev tools)                           |
+| `… --detach` then `unity job wait <jobId>`                       | Anything that can take longer than the 30 s default timeout                               |
+| `unity command editor_status --result-only`                      | Editor state: `ready` / compiling / domain reload / play mode                             |
+| `get_scene_hierarchy`, `find_gameobjects`, `get_serialized_fields` | Scene objects and their serialized fields (incl. private)                              |
+| `find_assets`, `package_list`                                    | Asset paths/GUIDs, installed package versions                                             |
+| `capture_scene_view` / `capture_game_view`                       | Visual verification — save to `Assets/AgentCaptures~/`, then read the PNG                  |
+| `run_script` on `Tools/UnityCli/Profiler/ProfilerQueries.cs`     | Profiler analysis of live or saved captures                                               |
 
-### When to use unity-mcp vs file reads
-
-- **Reading `[SerializeField]` values from scene objects:** Use `Unity_ManageGameObject` — binary `.unity` files are not human-readable.
-- **Checking if the project compiles in Unity:** Use `Unity_ManageEditor` → `GetState` to check for compilation errors after `dotnet build`.
-- **Running code generation:** Use `Unity_ManageMenuItem` instead of asking the user to click menus.
-- **Debugging runtime state:** Use `Unity_RunCommand` to execute C# queries in the editor context.
-- **Visual verification:** Use `Unity_Camera_Capture` to see what a camera actually renders.
-- **Profiling performance:** Use the Profiler tools after the user runs the game with profiling enabled.
+`unity command --query <term> --detail full --format json` returns any command's parameter schema from the live Editor — look parameters up there rather than guessing.
 
 ### Rules
 
-- `Unity_RunCommand` is powerful but runs in the editor process — do not execute long-running or blocking code that could freeze the editor.
-- **Anything over ~3 minutes must NOT go through `Unity_RunCommand`.** It wedges the MCP bridge in a command loop that only a full Editor restart clears, and the harness backgrounds the call so it merely looks slow. Drive those through `Unity_ManageMenuItem` instead — `Validate All` is the standard case — then read the outcome from the console or `Logs/Editor.log`. Single suites are short and stay fine on `Unity_RunCommand`.
-- **Never edit a `.cs` file while a `Unity_RunCommand` is executing.** The domain reload tears down the running script's context, so the call never returns and burns its full timeout.
+- **Long operations run detached.** `--detach` returns a job id; `unity job wait <id>` returns the result. `Validate All` is the standard case.
+- **A call during a domain reload fails fast** with a network error. Retry it once the Editor is `ready`; it is not a hang.
+- **Captures go to `Assets/AgentCaptures~/` only.** Save paths are confined to `Assets/`, and any other folder there is imported with a `.meta`. The `~` folder is gitignored and never imported.
+- **Play/Pause/Stop affect the user's Editor** — always confirm with the user before `editor_play`, `editor_pause` or `editor_stop`.
 - `AssetDatabase.ImportAsset(..., ForceUpdate)` bumps a source file's **mtime without recompiling** (Unity compiles on content hash), so the DLL looks stale against its source and the validation runner's STALE-CODE warning fires falsely. Confirm the real state by resolving the type (`Type.GetType("Ns.Type, Assembly-CSharp")`) rather than trusting timestamps.
-- Profiler tools return no data unless a profiling session is active (play mode with profiler recording). Check with `Unity_ManageEditor` → `GetState` first.
-- `Unity_ManageEditor` Play/Pause/Stop controls affect the editor's play state — always confirm with the user before entering play mode.
 
-For full parameter schemas, example calls, recipes, and profiler tool details, see the `unity-mcp` skill under `.agents/skills/`.
+For recipes, argument shapes and the full gotcha list, use the `unity-editor` skill under `.agents/skills/`.
 
 ## MCP Tools: Rider (JetBrains IDE)
 
@@ -232,7 +220,7 @@ The `rider` MCP server exposes Rider's inspection, refactoring, and build engine
 
 - Requires Rider to be running with the solution open — if calls fail, fall back to the file-based workflow and mention it.
 - Rider refactorings do NOT handle Unity-side concerns: `.meta` sibling renames, `[FormerlySerializedAs]`, prefab/scene GUID references. The `refactor-safely` and `unity-file-ops` guardrails still apply on top of any Rider-applied refactoring.
-- A Rider build is MSBuild against Unity-generated `.csproj` files — the "new `.cs` file not yet in the project" and stale-DLL gotchas from the Execution Protocol apply to it exactly as they do to `dotnet build`.
+- A Rider build is MSBuild against Unity-generated `.csproj` files — the "new `.cs` file not yet in the project" gotcha from the Execution Protocol applies to it exactly as it does to `dotnet build`.
 
 ## System Environment & Capabilities
 
