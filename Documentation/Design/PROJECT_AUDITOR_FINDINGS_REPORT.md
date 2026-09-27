@@ -1,6 +1,6 @@
 # Project Auditor Findings Report
 
-**Version:** 1.2  
+**Version:** 1.3  
 **Date:** 2026-09-17  
 **Status:** **Open backlog.** Items are removed (archived) when implemented and verified.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
@@ -19,7 +19,9 @@ parsed in full rather than skimmed in the window. Every item's "What exists toda
 against current code, assets and the live editor** — import settings via `AudioImporter`, project
 settings via `PlayerSettings`/`EditorSettings` over Unity MCP, font wiring by resolving `.meta`
 GUIDs, and the two flagged `Update` call sites by reading them. Where the auditor's own claim did
-not survive that check, it is recorded in §3 as a non-finding rather than silently dropped.
+not survive that check, it is recorded in §3 as a non-finding rather than silently dropped.  
+**Amended:** 2026-09-27 — §3.4: `com.unity.ai.assistant` was removed (the Unity CLI replaced its MCP
+bridge), so its advisories are moot; `com.unity.pipeline` will be flagged as preview instead.
 
 ⚠️ **The counts here are a local point-in-time snapshot.** `_REFERENCES/` is git-excluded
 (`.git/info/exclude`), so the `.projectauditor` file every number derives from does **not** travel
@@ -489,12 +491,15 @@ the sound engine's own listening passes raise something.
 
 ### 3.4 Package advisories that contradict deliberate pins
 
-`PAP0002`/`PAP0001` flag `com.unity.ai.assistant` 2.6.0-pre.1 as preview and updatable to
-2.9.0-pre.2 — that pin is load-bearing (the patched build is what keeps `Unity_RunCommand`
-working, and later versions gate the MCP bridge behind entitlements). `PAP0003` suggests
+`PAP0002`/`PAP0001` flagged `com.unity.ai.assistant` 2.6.0-pre.1 as preview and updatable to
+2.9.0-pre.2. That pin was load-bearing at the time of this run (the patched build kept the old
+`unity-mcp` bridge working). **Since 2026-09-27 the package is removed**: the Unity CLI replaced
+the bridge (see [`UNITY_MCP_TO_CLI_MIGRATION.md`](UNITY_MCP_TO_CLI_MIGRATION.md)), so these two
+advisories no longer appear. The next run will instead flag `com.unity.pipeline` (an
+`-exp` version) as preview. That is deliberate too: it is the package the CLI talks to. `PAP0003` suggests
 *downgrading* `com.unity.ide.rider` (3.1.0 → 3.0.40) and `com.unity.project-auditor-rules`
 (2.0.0 → 1.0.3) to Unity's "recommended" versions, both of which are older than what is installed
-on purpose. Ignore all four.
+on purpose. Ignore all of them.
 
 ### 3.5 The 64 MB block atlas is deliberate
 
@@ -540,6 +545,8 @@ tightly-packed atlas would bleed between tiles. Not a finding.
 
 ## Document History
 
+* **v1.3** - §3.4 (2026-09-27): `com.unity.ai.assistant` removed by the MCP → CLI migration; its
+  advisories are moot and `com.unity.pipeline`'s expected preview advisory is pre-recorded.
 * **v1.2** - Post-review corrections (2026-09-17). The `AU-2` reason tally was wrong (said 9 immutable,
   summing to 89) and is now a grep-derived table; `// reset in DomainReset` was **inaccurate in 15 files**
   whose reset method is named otherwise, and every comment now names the real method; four
@@ -556,6 +563,6 @@ tightly-packed atlas would bleed between tiles. Not a finding.
 
 ---
 
-**Last Updated:** 2026-09-17  
+**Last Updated:** 2026-09-27  
 **Next Review:** on the next Project Auditor run, or if *Enter Play Mode → Reload Domain* is disabled
 (which makes `AU-2`'s annotations load-bearing and demands the fast-enter-playmode gate)

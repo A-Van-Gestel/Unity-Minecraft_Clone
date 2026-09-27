@@ -1,8 +1,8 @@
 # Unity MCP → Unity CLI Migration Design
 
-**Version:** 1.5  
+**Version:** 1.6  
 **Date:** 2026-09-27  
-**Status:** Proposed design — not implemented.  
+**Status:** Implemented (Stable) — all four UC phases shipped 2026-09-27; promotion to `Architecture/` is pending (`docs-sync`).  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > Replaces the agent ↔ Editor bridge — the embedded, 19-patch `com.unity.ai.assistant`
@@ -26,12 +26,14 @@ the embedded package itself.
 **Amended:** 2026-09-27 — UC-1 shipped; the profiler carrier changed from `eval_file` to `run_script` (§3.3).  
 **Amended:** 2026-09-27 — UC-4 protocol-level results and coexistence confirmed (§3.1); revoke cause found (§2.1).  
 **Amended:** 2026-09-27 — UC-4 complete: `unity mcp` rejected, hybrid rejected (§3.1, §3.5).  
-**Amended:** 2026-09-27 — UC-2 complete: compile gate corrected to `recompile` → `ready` (§4.2); gotchas 16–19.
+**Amended:** 2026-09-27 — UC-2 complete: compile gate corrected to `recompile` → `ready` (§4.2); gotchas 16–19.  
+**Amended:** 2026-09-27 — UC-3 complete: bridge backed up + removed, `unitywebrequest` pruned, §4.4 measured, gotcha 20; arc done.
 
 **Relationship to other documents:**
 
-- [`../Guides/UNITY_MCP_RUNCOMMAND_PATCH_GUIDE.md`](../Guides/UNITY_MCP_RUNCOMMAND_PATCH_GUIDE.md)
-  — the 19-patch embed this design retires; deleted at UC-3 after the §4.5 backup.
+- `Documentation/Guides/UNITY_MCP_RUNCOMMAND_PATCH_GUIDE.md` — the guide to the 19-patch embed
+  this design retires. Deleted at UC-3; a copy is in the §4.5 backup, and git history holds it
+  up to commit `61480be4`.
 - [`PROJECT_AUDITOR_FINDINGS_REPORT.md`](PROJECT_AUDITOR_FINDINGS_REPORT.md) — the Pipeline
   package's `audit` command runs Project Auditor headlessly, a new way to re-run that report.
 - [`VALIDATION_SUITE_COVERAGE_ROADMAP.md`](VALIDATION_SUITE_COVERAGE_ROADMAP.md) — `Validate All`
@@ -320,14 +322,38 @@ unfocused Editor ticking), `batch` (transactional multi-command), `simulate_key`
 19. **Never call `Undo.PerformUndo()` blind.** In UC-2 a verification undo ran after a failed create
     and reverted the group on top of the stack. That group was the agent's own log-only probe;
     it could as well have been the user's work. Check `Undo.GetCurrentGroupName()` first.
+20. **A modal dialog blocks every command, but cleanly.** Found by accident in UC-3:
+    `PlayerBuildInterface.CompilePlayerScripts` raised a modal *"Creating directory"* error because
+    it does not create a missing parent folder. While the dialog was up, each call (including
+    `editor_status`) failed at its `--timeout` with *"Pipeline command … timed out after 30000ms"*.
+    Nothing wedged, and once the dialog closed the Editor finished its work and answered normally.
+    A still-waiting `unity job wait` can queue follow-up work behind the dialog, so stop the waiting
+    shell before closing it. Diagnose a silent Editor by listing its visible window titles.
 
 ### 4.4 Build-footprint note
 
 `Unity.Pipeline` (runtime) carries `defineConstraints: UNITY_EDITOR || ENABLE_PROFILER ||
 ENABLE_RUNTIME_PIPELINE` and bundles Roslyn (`UnityPipeline.Microsoft.CodeAnalysis*.dll`), so it
 compiles into **Development** player builds (profiler enabled), not Release ones. The runtime
-server stays off (`get_runtime_pipeline_settings` → `enableInBuilds: false`). UC-3 verifies the
-Release IL2CPP footprint and records the Development-build size delta.
+server stays off (`get_runtime_pipeline_settings` → `enableInBuilds: false`).
+
+**Measured in UC-3** with `PlayerBuildInterface.CompilePlayerScripts` for StandaloneWindows64
+(assemblies only, no full build):
+
+| Player build | Pipeline assemblies compiled in                                    | `Unity.AI.*` assemblies |
+|--------------|--------------------------------------------------------------------|-------------------------|
+| Release      | `Unity.Pipeline.Attributes` only (34 assemblies total)             | none                    |
+| Development  | + `Unity.Pipeline`, `Unity.Pipeline.IlInterpreter` (36 total)      | none                    |
+
+The five bundled Roslyn plugin DLLs (~9.1 MB; the two `CodeAnalysis` ones read: enabled for
+Win64/Linux64/macOS players, auto-referenced, no define constraint) are precompiled, so this
+compile does not show them. In Release nothing references them, and the IL2CPP linker strips
+unreferenced assemblies. The precedent is the last release build (RC 93, 2026-09-22): the old
+package's `Unity.AI.MCP.Runtime` / `Unity.AI.Tracing` compiled into that player, yet **none** of its
+69 post-strip managed DLLs and **no** entry in its `global-metadata.dat` is a `Unity.AI.*` one.  
+**Open, by precedent only:** confirm on the next release build that `global-metadata.dat` holds no
+`UnityPipeline` / `CodeAnalysis` names. Development builds carry `Unity.Pipeline` plus Roslyn by
+design; their size delta was not measured.
 
 ### 4.5 Rollback backup (first step of UC-3)
 
@@ -403,7 +429,7 @@ reload**; approval is only evaluated when a client connects (§2.1).
 | **UC-1 — Profiler scripts**             | `Tools/UnityCli/Profiler/ProfilerQueries.cs` run by `run_script`: overall GC, frame top-time, frame self-time, frame-range summary, plus status/load/clear/threads (§3.3). Verified on two real 2000-frame captures (IL2CPP + Mono) from `ProfilerCaptures/`; `OverallGc`'s total cross-checked against an independent root-level sum (58033.8 KB, exact). Live play-mode recording not exercised — same `ProfilerDriver` frames. |   🟡   | UC-0       | ✅ 2026-09-27 |
 | **UC-4 — `unity mcp` evaluation**       | **Coexistence first (§3.1):** restore the old bridge's approval and confirm a `Unity_*` call works as a baseline. Then `unity mcp configure claude --dry-run`, and register it under a new server name beside `unity-mcp`. Re-run the §2.2 matrix through it (detached long op, reload mid-call, console cursor, reflection in `eval`, unfocused Editor), plus inline image captures and the tool-list context cost. Throughout, and after each domain reload, check that both servers still answer, and that neither the relay log nor `Logs/Editor.log` shows approval, port or connection errors. Record the verdict in §3.1 (and §9 if rejected). **Extended:** a head-to-head of every old tool for a trimmed-bridge hybrid (§3.5). Verdict: reject `unity mcp` as standing config, no hybrid. |   🟢   | UC-0       | ✅ 2026-09-27 |
 | **UC-2 — Agent docs**                   | Rename + rewrite `unity-mcp` skill around the CLI (§3.4, §4.3), with the `unity mcp` snippet only as the no-shell fallback (§3.1); set `UNITY_PROJECT_PATH` in `.claude/settings.json` `env` (§4.3 gotcha 14); rewrite the MCP sections of `CLAUDE.md` + `AGENTS.md` (twins, by hand) per §4.2; sweep the §5 blast radius; `.gitignore` `Assets/AgentCaptures~/`; `.claude` permission rules. **Done:** skill renamed to `unity-editor` and rewritten (every documented command and recipe run once; the asset-mutating cave scripts compile-checked only); gotchas 16–19 found while verifying. Historical/closed-arc mentions left as written. |   🟡   | UC-1, UC-4 | ✅ 2026-09-27 |
-| **UC-3 — Cutover**                      | **§4.5 backup first, verified.** Then remove ai.assistant from the manifest + delete the embed; delete `Tools/Apply-AiAssistantMcpPatch.ps1`, the patch guide and `McpEval*`; drop `unity-mcp` from `.mcp*.json`, `.claude/settings.local.json` and the `mcp__unity-mcp__*` allow rule in `.claude/settings.json`; remove the embed's `.gitignore` block; rewrite `PROJECT_AUDITOR_FINDINGS_REPORT.md` §3.4 (the pin it defends is gone); package-set check (§5); §4.4 build check; `recompile` + `Validate All` green. |   🟢   | UC-2       | —            |
+| **UC-3 — Cutover**                      | **§4.5 backup first, verified.** Then remove ai.assistant from the manifest + delete the embed; delete `Tools/Apply-AiAssistantMcpPatch.ps1`, the patch guide and `McpEval*`; drop `unity-mcp` from `.mcp*.json`, `.claude/settings.local.json` and the `mcp__unity-mcp__*` allow rule in `.claude/settings.json`; remove the embed's `.gitignore` block; rewrite `PROJECT_AUDITOR_FINDINGS_REPORT.md` §3.4 (the pin it defends is gone); package-set check (§5); §4.4 build check; `recompile` + `Validate All` green. **Done:** backup `_backups/ai.assistant 2.6.0-pre.1 MCP bridge [2026-09-27].7z` (358 MB, 6,023 files, `7z t` clean, checksums verified after extraction, byte-identical to the live embed + relay; restore rehearsal: pristine tarball (registry SHA-1 matched) + backed-up script → identical code, 3,145/3,145 GUIDs). Removed the package, which also dropped `serialization` + `cloud.gltfast`, then `com.unity.modules.unitywebrequest` (no project use; not re-added by the resolver). `2d.sprite` kept (hand-used Sprite Editor). §4.4 measured. `Validate All` 753/753 across 30 suites, 0 errors. |   🟢   | UC-2       | ✅ 2026-09-27 |
 
 **Order of work:** UC-0 → UC-1 and UC-4 (independent, either order) → UC-2 → UC-3. UC-4 keeps its
 number although it runs before UC-2, because its verdict decides whether UC-2 documents one
@@ -424,9 +450,7 @@ longer exist. The regression gate for every phase is `unity recompile` clean plu
 
 ## 8. Open questions
 
-1. **Modal dialogs** — a modal blocks the main thread; untested whether commands queue, time out
-   cleanly at `--timeout`, or wedge. Resolve with one deliberate probe during UC-2 and record the
-   answer in §4.3.
+None remain. The last one, modal dialogs, was answered during UC-3 (§4.3 gotcha 20).
 
 ---
 
@@ -445,6 +469,9 @@ longer exist. The regression gate for every phase is `unity recompile` clean plu
 
 ## Document History
 
+* **v1.6** - UC-3 complete: verified backup, package + `unitywebrequest` removed, §4.4 player-assembly
+  footprint measured (Roslyn stripping confirmed only by precedent), modal-dialog question answered
+  (§4.3 gotcha 20, §8 now empty). All phases shipped; promotion to Architecture pending.
 * **v1.5** - UC-2 complete: `unity-editor` skill, CLAUDE/AGENTS, 15 skill files, living docs and config
   moved to the CLI. `recompile` measured to return before the domain reload, so the gate is
   `recompile` → `editor_status` `ready` (§4.2); §4.3 gotchas 16–19; UC-3 scope extended.
@@ -464,4 +491,4 @@ longer exist. The regression gate for every phase is `unity recompile` clean plu
 ---
 
 **Last Updated:** 2026-09-27  
-**Next Review:** when UC-1 or UC-4 starts
+**Next Review:** on promotion to `Architecture/` (due now), or on the next release build (§4.4 check)

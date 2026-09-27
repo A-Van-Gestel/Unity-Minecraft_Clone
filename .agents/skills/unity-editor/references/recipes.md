@@ -122,5 +122,11 @@ images, never to a saved file.
 12. **Never call `Undo.PerformUndo()` blind.** If the edit before it failed, it reverts whatever
     group is on top, which may be the user's work. Check `Undo.GetCurrentGroupName()` equals the
     group you opened first.
+13. **A modal dialog blocks every command** — each call times out at `--timeout`; nothing wedges.
+    If the Editor stops answering, list its visible window titles (PowerShell `EnumWindows` for the
+    Unity PID) to spot the dialog. Stop any shell still in `unity job wait` first, so follow-up
+    work doesn't queue behind it. Only dismiss a dialog your own command raised; anything else
+    is the user's call. `PlayerBuildInterface.CompilePlayerScripts` raises one when its output
+    folder's parent does not exist, so create it first.
 
 </gotchas>
