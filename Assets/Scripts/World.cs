@@ -538,6 +538,17 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// </summary>
     private bool _isWorldLoaded;
 
+    /// <summary>
+    /// Initial-load requests issued by <see cref="StartWorld"/> that have not yet finished; the startup
+    /// coroutine waits for it to reach zero instead of yielding once per request (ES-1).
+    /// </summary>
+    private int _startupLoadsPending;
+
+    /// <summary>
+    /// Upper bound on the startup coroutine's wait for its initial loads. The completion counter can stall
+    /// if a load continuation never runs, which the old one-yield-per-request loop could not.
+    /// </summary>
+    private const float STARTUP_LOAD_TIMEOUT_SECONDS = 60f;
 
     /// <summary>
     /// Public accessor for world load state. True once <see cref="StartWorld"/> has fully completed.
@@ -1049,19 +1060,32 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         }
 
         // Trigger loading for all chunks (including buffer)
-        List<Awaitable> loadTasks = new List<Awaitable>();
+        _startupLoadsPending = 0;
         foreach (ChunkCoord chunkCoord in allChunksToGenerate)
         {
             // Create placeholder if missing (integer origin — exact past ±2²⁴, Bug 19 class)
             Vector2Int placeholderOrigin = chunkCoord.ToVoxelOrigin();
             worldData.GetOrCreatePlaceholder(placeholderOrigin);
 
-            // Start the Load/Gen process
-            loadTasks.Add(LoadOrGenerateChunk(chunkCoord));
+            // Start the Load/Gen process. Count before the call: a synchronous completion decrements at once.
+            _startupLoadsPending++;
+            _ = LoadOrGenerateStartupChunk(chunkCoord);
         }
 
-        // Wait for all to finish (Data Ready)
-        foreach (Awaitable task in loadTasks) yield return task;
+        // Wait for all to finish (Data Ready) by completion, not one frame per request.
+        float loadWaitStart = Time.realtimeSinceStartup;
+        while (_startupLoadsPending > 0 &&
+               Time.realtimeSinceStartup - loadWaitStart < STARTUP_LOAD_TIMEOUT_SECONDS)
+        {
+            yield return null;
+        }
+
+        Debug.Assert(_startupLoadsPending >= 0, "Startup load counter went negative — a load decremented twice.");
+        if (_startupLoadsPending > 0)
+        {
+            Debug.LogError($"Initial chunk loads timed out after {STARTUP_LOAD_TIMEOUT_SECONDS} s with " +
+                           $"{_startupLoadsPending} of {loadedChunks} still pending. Continuing startup.");
+        }
 
         // 2. Force complete ONLY the data-related jobs (generation and lighting).
         //    Now, instead of a blocking call, we yield to (wait for) another coroutine.
@@ -1179,6 +1203,24 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
             if (admitted != null && worldData.TryGetChunk(chunkVoxelPos, out ChunkData current)
                                  && current == admitted && admitted.LifecycleEpoch == admittedEpoch)
                 admitted.IsLoading = false;
+        }
+    }
+
+    /// <summary>
+    /// <see cref="LoadOrGenerateChunk"/> for one of <see cref="StartWorld"/>'s initial chunks: releases its
+    /// slot in <see cref="_startupLoadsPending"/> however the load ends (success, the swallowed fault arm,
+    /// or a rethrown cancellation).
+    /// </summary>
+    /// <param name="chunkCoord">The initial-load chunk to load from disk or schedule for generation.</param>
+    private async Awaitable LoadOrGenerateStartupChunk(ChunkCoord chunkCoord)
+    {
+        try
+        {
+            await LoadOrGenerateChunk(chunkCoord);
+        }
+        finally
+        {
+            _startupLoadsPending--;
         }
     }
 

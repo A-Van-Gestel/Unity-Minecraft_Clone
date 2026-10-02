@@ -492,7 +492,7 @@ constants + migration change. Prerequisites: ES-13, ES-18, ES-19.
 | Phase | Scope | Effort | Depends on | Status |
 |---|---|:---:|---|---|
 | **ES-0 — Measure** | Spike-visible capture, drain stamp, crossing slots, GC.Alloc capture | 🟢 | — | — |
-| **ES-1 — No frame-paced load** | Completion counter at `World.cs:1064` — execution packet §7.1 | 🟢 | — | — |
+| **ES-1 — No frame-paced load** | Completion counter at `World.cs:1064` — execution packet §7.1 | 🟢 | — | ✅ 2026-10-02 (in-game) |
 | **ES-2 — Calibration** | Robust OM-1 lighting probe — execution packet §7.1 | 🟢 | — | — |
 | **ES-3 — Loading mode** | SU-1 + SU-2, pooled/banded/shared startup snapshots | 🟡 | ES-0 | — |
 | **ES-4 — First-Update burst** | Pool prewarm, lazy borders, async scene load | 🟢 | — | — |
@@ -594,6 +594,29 @@ startup coroutine.
 
 **Not doing.** Overlapping Phase 1 with the loads (rejected above); the in-flight cap and
 loading-mode budgets (ES-3); anything in `CheckViewDistance`.
+
+**Executed.** As planned: `_startupLoadsPending` + `LoadOrGenerateStartupChunk` + the bounded wait
+(`STARTUP_LOAD_TIMEOUT_SECONDS = 60`). The prove-red in step 4 needed one correction. The seam is armed with
+`ChunkStorageManager.InjectLoadFaults(1)` from the main menu in play mode, because its count resets on
+play-mode entry. **Moving the decrement out of the `finally` is a no-op under that seam:** the CP-3 wrapper
+swallows the injected fault, so the await returns normally and a decrement after it still runs (the
+`finally` is load-bearing only for the rethrown cancellation). Measured in the Editor at an initial radius
+of 3 (81 chunks): seam armed → fault logged on one chunk, startup completes, no timeout; the planned
+mutation → the same; dropping the decrement → `timed out after 60 s with 81 of 81 still pending`, startup
+continues to completion.
+
+**In-game gate (Editor/Mono, seed 0, 1 089 chunks, initial radius 15).** The load wait (total − startup
+coroutine) fell from 5 132 → 482 ms on a settled existing world (one run each) and from a mean 5 833 →
+1 048 ms on a new one (two runs each), i.e. from ≈5 ms to <1 ms per chunk — the frame pacing assumed in
+§2.1 is confirmed and the I/O-bound assumption refuted. Totals: existing 6 455 → 1 993 ms, new mean
+18 251 → 15 563 ms.  
+**Open finding — the new-world coroutine got slower, reproducibly:** mean 12 418 → 14 515 ms (+2.1 s, both
+runs), mostly lighting completion (7 435 → 9 004 ms); the existing world moved 1 323 → 1 511 ms. Mechanism
+not attributed. Leading candidate: GC debt from generation, which the old ~1 000 near-idle frames let the
+incremental collector absorb, now lands inside Phase 2's long frames (consistent with new ≫ existing, and
+with H-1's ~142 KB per generated chunk). Editor asynchronous Burst compilation is a weaker candidate, since
+compiled jobs are cached across play sessions. ES-0's per-frame GC capture is the instrument that
+settles it.
 
 #### ES-2 — robust OM-1 lighting calibration
 
