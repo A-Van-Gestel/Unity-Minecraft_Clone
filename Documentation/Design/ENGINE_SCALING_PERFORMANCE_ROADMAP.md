@@ -735,6 +735,17 @@ missing-wake bug, so it has to earn that risk with a measured cost.
 **Not doing.** Any change before step 1's number exists; the disk-load path (its scan would just move into
 the unbudgeted SL-2 continuation); the rest of ES-6 (spreading activations, `DT-3`).
 
+**Correction to step 1 (re-verified at `491747ee`, not yet executed).** `ActiveVoxelScanBenchmark`'s
+`T_bitmask` is **not** today's scan. It walks the full flat map, while `OnDataPopulated` (`Chunk.cs:236–239`)
+skips null and empty sections; and it inserts into a managed `HashSet<Vector3Int>`, while the shipped path
+calls `ChunkData.AddActiveVoxel(pos, id)` — `ClassifyFamily` (a `World.Instance.BlockTypes` read), a
+cross-bucket remove and a lazily created native bucket (TG-4). It also runs only two shapes, Land and
+Flooded; there is no cave-heavy scenario. Price on a new `T_current` leg in the benchmark (editor code only)
+that replays the shipped loop over a sectioned `ChunkData` (`PopulateFromFlattened`) with a stubbed
+`World.Instance` (the `BehaviorTestWorld` pattern), keeping `T_bitmask` for continuity. The benchmark runs in
+the Editor (Mono), so it can only clear the IL2CPP bar one way: a number below 0.5 ms per crossing is a safe
+"not material", one above it does not show IL2CPP crosses it.
+
 ---
 
 ## 8. Verification checklist and open questions
