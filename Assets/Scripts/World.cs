@@ -140,7 +140,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// <summary>
     /// Precomputed flat lookup of <see cref="BlockType.isActive"/> indexed by block id, built once in
     /// <see cref="PrepareGlobalJobData"/>. Lets the fallback active-voxel scan
-    /// (<see cref="Chunk.OnDataPopulated"/>) avoid dereferencing managed <see cref="BlockType"/> objects.
+    /// (<see cref="ChunkData.RescanActiveVoxels"/>) avoid dereferencing managed <see cref="BlockType"/> objects.
     /// </summary>
     [NonSerialized]
     public bool[] IsActiveById;
@@ -1408,6 +1408,8 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                 data.PopulateFromSave(loaded);
                 ChunkPool.ReturnChunkData(
                     loaded); // Recycle the outer shell of the loaded data now that we've extracted its contents.
+                // Data-only loads stay unregistered (NeedsActiveVoxelRescan) and are scanned by Chunk.Reset on
+                // attach — scanning here would move the cost into this unbudgeted continuation.
                 data.Chunk?.OnDataPopulated();
 
                 // FP-1 stage stamp: terrain data is available. The disk-load arm of "populated" — the
@@ -1418,10 +1420,6 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                 // parked light work now instead of waiting for the fail-safe scan (MT-2). The chunk's own
                 // flags fire the staging callback from PopulateFromSave, so this is for the neighbors.
                 _lightWork.PromoteNeighborhood(chunkVoxelPos);
-
-                // The behavior tick's equivalent: neighbors whose seam voxels quiesced against this coord while
-                // it was an unpopulated placeholder have no other path back into their active buckets.
-                WakeSeamBehaviorNeighborhood(chunkVoxelPos);
 
                 // Apply Pending Mods (Trees, etc. that spilled over)
                 if (ModManager.TryGetModsForChunk(chunkCoord, out List<VoxelMod> pendingMods))
@@ -1439,6 +1437,11 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                         data.ModifyVoxel(localVoxelPos, mod);
                     }
                 }
+
+                // The behavior tick's equivalent: neighbors whose seam voxels quiesced against this coord while
+                // it was an unpopulated placeholder have no other path back into their active buckets. After the
+                // pending-mod replay, so the gate reads the final facing slab (the generation arm's order too).
+                WakeSeamBehaviorNeighborhood(chunkVoxelPos);
 
                 // Restore lighting queues
                 if (LightingStateManager.TryGetAndRemove(chunkCoord, out HashSet<Vector2Int> localCols))
@@ -3137,7 +3140,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// has no readiness gate — it ticks any chunk with a non-empty active bucket — so correctness depends on
     /// voxels that quiesced against this chunk while it was still an unpopulated placeholder being re-registered
     /// now. Nothing else does it: population registers only the new chunk's own voxels
-    /// (<see cref="Chunk.RegisterActiveVoxelsFromJob"/> / <see cref="Chunk.OnDataPopulated"/>), and
+    /// (<see cref="ChunkData.RegisterActiveVoxelsFromJob"/> / <see cref="ChunkData.RescanActiveVoxels"/>), and
     /// <see cref="ApplyModifications"/>'s cross-chunk wake needs an applied mod next to the sleeping cell.
     /// <para>The newly populated chunk's own side needs nothing — its full scan registers every active voxel it
     /// has, and those evaluate against real neighbor data. Only the already-populated side was asleep. Called
@@ -3161,6 +3164,33 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                 continue;
 
             SeamWakeDecision.WakeSeamSlab(neighbor, populated, direction, IsActiveById, IsSolidById);
+        }
+    }
+
+    /// <summary>
+    /// Re-registers every active-behavior voxel 6-adjacent to a modified cell, so a voxel that quiesced
+    /// re-evaluates against the change. A modification applied with neither this nor the seam wake
+    /// (<see cref="WakeSeamBehaviorNeighborhood"/>) covering its neighbors leaves such a voxel asleep for good.
+    /// </summary>
+    /// <remarks>
+    /// Registers on the neighbor's <see cref="ChunkData"/>, never its visual <see cref="Chunk"/>: a data-only
+    /// neighbor keeps its buckets across a visual detach, and registered data is never rescanned
+    /// (<see cref="ChunkData.NeedsActiveVoxelRescan"/>), so a wake dropped here would never be replayed.
+    /// </remarks>
+    /// <param name="voxelCell">The modified voxel-space cell.</param>
+    public void WakeActiveNeighbors(Vector3Int voxelCell)
+    {
+        for (int i = 0; i < VoxelData.FaceChecks.Length; i++)
+        {
+            Vector3Int neighborCell = voxelCell + VoxelData.FaceChecks[i];
+
+            // TryGetVoxel resolves populated chunks only, so a placeholder neighbor is never woken.
+            if (!worldData.TryGetVoxel(neighborCell.x, neighborCell.y, neighborCell.z, out VoxelState neighborState) ||
+                !neighborState.Properties.isActive)
+                continue;
+
+            if (worldData.TryGetChunk(ChunkCoord.FromVoxelPosition(neighborCell).ToVoxelOrigin(), out ChunkData neighborData))
+                neighborData.AddActiveVoxel(worldData.GetLocalVoxelPositionInChunk(neighborCell), neighborState.ID);
         }
     }
 
@@ -3483,24 +3513,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
 
             // --- 4. Neighbor Activation ---
             // After any modification, the World is now responsible for waking up all 6 neighbors.
-            for (int i = 0; i < 6; i++)
-            {
-                // Get the global position of the neighbor.
-                Vector3Int neighborPos = v.GlobalPosition + VoxelData.FaceChecks[i];
-
-                // If the neighbor exists and has behavior, ensure it's active.
-                if (worldData.TryGetVoxel(neighborPos.x, neighborPos.y, neighborPos.z, out VoxelState neighborState) &&
-                    neighborState.Properties.isActive)
-                {
-                    Chunk neighborChunk = GetChunkFromVector3(neighborPos);
-                    if (neighborChunk != null)
-                    {
-                        Vector3Int localPosInNeighbor =
-                            neighborChunk.GetVoxelPositionInChunkFromGlobalVector3(neighborPos);
-                        neighborChunk.AddActiveVoxel(localPosInNeighbor);
-                    }
-                }
-            }
+            WakeActiveNeighbors(v.GlobalPosition);
         }
 
         _applyingModifications = false;

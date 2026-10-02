@@ -259,7 +259,7 @@ namespace Editor.Validation
         /// <summary>
         /// Pins both defensive clamps as the deliberate contract they are documented to be: an out-of-range Y
         /// packs to the nearest valid row rather than throwing, and an out-of-range index decodes to an
-        /// in-chunk position rather than one <c>Chunk.AddActiveVoxel</c> would register and later evaluate
+        /// in-chunk position rather than one <c>ChunkData.AddActiveVoxel</c> would register and later evaluate
         /// against a non-existent voxel. Pinned as-is — this scenario records the behavior, it does not
         /// endorse relying on it.
         /// </summary>

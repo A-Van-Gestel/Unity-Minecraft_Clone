@@ -18,12 +18,12 @@ namespace Jobs
     /// <see cref="VoxelData.ChunkWidth"/>² × <see cref="VoxelData.ChunkHeight"/> times per chunk.
     /// The emitted indices use the <see cref="ChunkMath.GetFlattenedIndexInChunk"/> convention and
     /// are unpacked back to local positions on the main thread by
-    /// <see cref="Chunk.RegisterActiveVoxelsFromJob"/>.
+    /// <see cref="Data.ChunkData.RegisterActiveVoxelsFromJob"/>.
     /// <para><b>Parity invariant:</b> this Burst job (fresh-gen path) and the managed
-    /// <see cref="Chunk.OnDataPopulated"/> bitmask scan (load-from-save / pool-recycle path) are two
+    /// <see cref="Data.ChunkData.RescanActiveVoxels"/> bitmask scan (load-from-save / visual re-attach path) are two
     /// implementations of the same "which voxels are active" decision and MUST agree on both (1) the active
     /// criterion and (2) the flat-index/section convention. The criterion is drift-proof by construction —
-    /// this job's <see cref="BlockTypeJobData.IsActive"/> and OnDataPopulated's <see cref="World.IsActiveById"/>
+    /// this job's <see cref="BlockTypeJobData.IsActive"/> and the rescan's <see cref="World.IsActiveById"/>
     /// are built in one loop from <c>BlockType.isActive</c> in <c>World</c> init. If you change either the
     /// criterion or the index convention, change both paths.</para>
     /// </remarks>

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 using Data;
+using Data.JobData;
 using Editor.Validation.Framework;
 using Helpers;
 using Jobs;
@@ -84,6 +85,7 @@ namespace Editor.Validation.Behavior.Framework
         private readonly BlockType _inert;
 
         private NativeArray<BlockTypeJobData> _blockTypesJob; // built from the palette for the FluidBurstHaloBand driver
+        private JobDataManager _jobDataManager; // opt-in (EnableModifyVoxel); owns its own palette copy
 
         // The REAL production runner — the FluidBurstHaloBand driver drives this (not a hand-copy) so BH-D1[L|HB]
         // exercises the shipped snapshot/halo/job/ModsPerSource path, not a twin that could drift from it.
@@ -343,6 +345,38 @@ namespace Editor.Validation.Behavior.Framework
                     _activeVoxels.Add(pos);
             }
         }
+
+        /// <summary>
+        /// Lets scenarios drive the production <see cref="ChunkData.ModifyVoxel"/> on their own chunk data: gives the
+        /// stub world the <see cref="World.JobDataManager"/> palette that its heightmap step reads (the harness's
+        /// own apply path uses <c>SetVoxel</c> and never needs it). Built from the test palette; disposed with the
+        /// harness. Idempotent.
+        /// </summary>
+        public void EnableModifyVoxel()
+        {
+            if (_jobDataManager != null) return;
+
+            NativeArray<BlockTypeJobData> blockTypes = new NativeArray<BlockTypeJobData>(_palette.Length, Allocator.Persistent);
+            for (int i = 0; i < _palette.Length; i++)
+                blockTypes[i] = new BlockTypeJobData(_palette[i]);
+
+            // ModifyVoxel reads only the block palette; the custom-mesh arrays satisfy the manager's contract.
+            _jobDataManager = new JobDataManager(
+                blockTypes,
+                new NativeArray<CustomMeshData>(0, Allocator.Persistent),
+                new NativeArray<CustomFaceData>(0, Allocator.Persistent),
+                new NativeArray<CustomVertData>(0, Allocator.Persistent),
+                new NativeArray<int>(0, Allocator.Persistent));
+            _world.JobDataManager = _jobDataManager;
+        }
+
+        /// <summary>
+        /// Drives the production <see cref="World.WakeActiveNeighbors"/> for a voxel-space cell against this
+        /// harness's stub chunk store. No visual <see cref="Chunk"/> exists here, so
+        /// every chunk it reaches is data-only — the case the wake must still cover.
+        /// </summary>
+        /// <param name="voxelCell">The modified voxel-space cell whose 6 neighbors are woken.</param>
+        public void WakeActiveNeighbors(Vector3Int voxelCell) => _world.WakeActiveNeighbors(voxelCell);
 
         /// <summary>Returns the neighbor chunk at a voxel origin, creating + registering it in the stub store on first use.</summary>
         private ChunkData GetOrCreateNeighbor(Vector2Int origin)
@@ -723,6 +757,7 @@ namespace Editor.Validation.Behavior.Framework
             foreach (ChunkData neighbor in _neighbors.Values)
                 neighbor.Dispose();
             if (_blockTypesJob.IsCreated) _blockTypesJob.Dispose();
+            _jobDataManager?.Dispose();
             if (_worldGo != null) Object.DestroyImmediate(_worldGo);
             if (_stubDatabase != null) Object.DestroyImmediate(_stubDatabase);
         }

@@ -85,9 +85,9 @@ namespace Data.JobData
             NativeArray<BlockTypeJobData> blockTypesJobData =
                 new NativeArray<BlockTypeJobData>(blockDatabase.blockTypes.Length, Allocator.Persistent);
 
-            // Precomputed flat isActive lookup for the fallback active-voxel scan (load / pool-replay paths).
+            // Precomputed flat isActive lookup for the fallback active-voxel scan (load / visual re-attach paths).
             // Co-built in the loop below from the same BlockType.isActive source as blockTypesJobData[i].IsActive,
-            // so the two active-voxel scan paths (Chunk.OnDataPopulated vs Jobs.ActiveVoxelScanJob) cannot
+            // so the two active-voxel scan paths (ChunkData.RescanActiveVoxels vs Jobs.ActiveVoxelScanJob) cannot
             // disagree on the active criterion — keep them built together.
             bool[] isActiveById = new bool[blockDatabase.blockTypes.Length];
 

@@ -57,6 +57,7 @@ Baselines B115–B119 guard the mapping.
 | `NeedsEdgeCheck`              | `LightingWork` bit (get-only) | `FlagEdgeCheck()` (disk-load-stable), `FlagNeighborEdgeCheck()` (neighbor propagation), or `SpendEdgeCheckRound(rearm: true)` (post-stabilization re-arm)                    | `OnLightingJobScheduled()` — read **twice** first (the job's `PerformEdgeCheck` and LI-2's band derivation), then cleared with `HasLightChangesToProcess`                                                                                                                             | Border voxels need validation against neighbors                                                                                |
 | `RemainingEdgeCheckRounds`    | int  | Initialized to 2 on `ChunkData`; reset to 2 by `Reset()`; re-granted to 1 by `ModifyVoxel` via `RegrantBorderEditEdgeRound()` on a border-column opacity edit (Bug 05)      | Decremented by `SpendEdgeCheckRound()`, applied from `EdgeCheckCascadeDecision.Apply()` — spent on a stable pass, and (P9-2) spent **without** re-arming when the pass changed nothing                                                | Iterative edge-check rounds still to re-arm after a stable lighting pass (cross-seam convergence). `[NonSerialized]`.          |
 | `LifecycleEpoch`              | int  | **Bumped** (never zeroed) by every `Reset()` — its reset IS the increment; monotonic across recycles                                                                        | Never — deliberately monotonic (B34 exempts it from the fresh-instance sweep and asserts the bump instead)                                                                                                                                                                          | Pool-ABA detection: async code captures instance + epoch and re-checks both after an await (CP-3 load arm). `[NonSerialized]`. |
+| `_activeVoxelsRegistered` (private; read as `NeedsActiveVoxelRescan` = `IsPopulated && !flag`) | bool | The **last** statement of `RegisterActiveVoxelsFromJob()` (generation arm, visual or not) and `RescanActiveVoxels()` (via `Chunk.OnDataPopulated` — disk/legacy arms with a visual, and `Chunk.Reset`) | `Reset()` (pool recycle), beside the bucket clears                                                                                                                                                                                                                                  | Active-voxel buckets are complete for this data, so `Chunk.Reset` skips the rescan on visual re-attach (ES-6.1). `[NonSerialized]`. |
 
 ### Flag Lifecycle Diagram
 
@@ -195,11 +196,13 @@ Dropping either check reintroduces Fluid Bug 18 (archived in `_FIXED_BUGS.md` �
 
 #### The seam wake — population's behavior-tick counterpart
 
-The invariant above has a corollary: because a void read satisfies no spread test, a voxel whose only flow-receptive direction was a not-yet-loaded neighbor evaluates **inactive** and leaves its bucket on the first tick. Population alone does not bring it back — `RegisterActiveVoxelsFromJob` / `OnDataPopulated` register only the **newly populated chunk's own** voxels, and the sole cross-chunk wake (`ApplyModifications` step 4) needs an applied mod 6-adjacent to the sleeping cell.
+The invariant above has a corollary: because a void read satisfies no spread test, a voxel whose only flow-receptive direction was a not-yet-loaded neighbor evaluates **inactive** and leaves its bucket on the first tick. Population alone does not bring it back — `RegisterActiveVoxelsFromJob` / `RescanActiveVoxels` register only the **newly populated chunk's own** voxels, and the sole cross-chunk wake (`ApplyModifications` step 4, `World.WakeActiveNeighbors`) needs an applied mod 6-adjacent to the sleeping cell.
 
 `World.WakeSeamBehaviorNeighborhood` closes that loop. It is the behavior-tick sibling of
 `PromoteLightWorkNeighborhood` and fires from the same two population sites — `ProcessGenerationJobs`'
-completed-job sweep and the load-from-save path in `LoadOrGenerateChunkInner`:
+completed-job sweep and the load-from-save path in `LoadOrGenerateChunkInner`. Both run it **after** replaying
+the chunk's pending mods, so the gate reads the final facing slab — a replayed mod that opens a border cell
+(e.g. `/setblock … air` into an unloaded chunk) still wakes the neighbor resting against it:
 
 | Property  | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 |-----------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -211,6 +214,18 @@ completed-job sweep and the load-from-save path in `LoadOrGenerateChunkInner`:
 | Safety    | A woken voxel that is still stable simply re-evaluates inactive next tick — the wake cannot accumulate. Runs on the main thread in a different `Update` phase than `TickChunksParallel`, which completes every fluid handle before returning, so it cannot race an in-flight job.                                                                                                                                                                                                                                                                                                                                                                                                                                        |
 
 Guarded by baseline **BH-B10** (`Validate Behavior`), whose prove-red is an early return from the method.
+
+#### Visual re-attach — the rescan runs only for unregistered data
+
+`Chunk.Reset` scans the re-linked data (`Chunk.OnDataPopulated` → `ChunkData.RescanActiveVoxels`) only when
+`ChunkData.NeedsActiveVoxelRescan`, i.e. no full registration has filled the buckets since the data was populated.
+Generated chunks register from the job's list at population whether or not they have a visual, so they enter view
+with valid buckets; disk loads and legacy generators register only if a visual is already linked, otherwise the
+scan runs at attach. Data that keeps its buckets across a visual detach (the LoadDistance > viewDistance ring) is
+**not** rescanned on re-entry, so every wake path must register on `ChunkData`, never through the visual `Chunk`:
+`ModifyVoxel`, the seam wake, and `World.WakeActiveNeighbors` (step 4) all do. A wake that skipped data-only chunks
+would leave a quiesced voxel asleep for good. Guarded by baseline **BH-B13** (`Validate Behavior`) and Lighting
+**B34** (the flag's reset).
 
 ---
 
@@ -405,7 +420,7 @@ flowchart TD
         C1 --> D1["job.Handle.Complete()"]
         D1 --> DDISC{"Persistence on AND chunk now<br/>beyond unload boundary? (P-4 §3.2)"}
         DDISC -- Yes --> DDISC2["Clear IsLoading + ReleaseGenerationJobData()<br/>discard, no populate/save<br/>(UnloadChunks reclaims; return-to-range re-enqueues)"]
-        DDISC -- No --> D2["chunkData.Populate(map, heightMap)"]
+        DDISC -- No --> D2["chunkData.Populate(map, heightMap)<br/>+ RegisterActiveVoxelsFromJob()<br/>(no visual needed, ES-6.1)"]
         D2 --> D3["Apply flora mods (trees)"]
         D3 --> D4["Apply pending mods from disk"]
         D4 --> D5["Restore pending lighting columns"]

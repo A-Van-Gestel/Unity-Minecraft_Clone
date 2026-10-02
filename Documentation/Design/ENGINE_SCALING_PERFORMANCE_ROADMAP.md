@@ -1,8 +1,8 @@
 # Engine Scaling Performance Roadmap
 
-**Version:** 1.2  
+**Version:** 1.3  
 **Date:** 2026-10-02  
-**Status:** In progress — `ES-1` and `ES-2` shipped (2026-10-02); the rest is a near-to-far horizon, not
+**Status:** In progress — `ES-1`, `ES-2` and `ES-6.1` shipped (2026-10-02); the rest is a near-to-far horizon, not
 scheduled. Tier 1 items are execution-sized; Tier 2/3
 items each need their own design or implementation plan. Re-verify the anchors named per item before
 starting (§8).  
@@ -498,7 +498,7 @@ constants + migration change. Prerequisites: ES-13, ES-18, ES-19.
 | **ES-3 — Loading mode** | SU-1 + SU-2, pooled/banded/shared startup snapshots | 🟡 | ES-0 | — |
 | **ES-4 — First-Update burst** | Pool prewarm, lazy borders, async scene load | 🟢 | — | — |
 | **ES-5 — PSO warmup** | Shader state prewarm | 🟢 | — | — |
-| **ES-6 — Crossing frame** | `OnDataPopulated` skip (price first — packet §7.1), spread activations, DT-3 | 🟡 | ES-0 | ES-6.1 priced: GO (2026-10-02) |
+| **ES-6 — Crossing frame** | `OnDataPopulated` skip (price first — packet §7.1), spread activations, DT-3 | 🟡 | ES-0 | ES-6.1 ✅ 2026-10-02 (in-game); rest open |
 | **ES-7 — Lighting cuts** | Slab fill, counts, band-clamped merge, remesh gating | 🟢 | ES-0 | — |
 | **ES-8 — Budgets** | `ApplyModifications`, SL-2 pump, merge ceiling | 🟡 | ES-0 | — |
 | **ES-9 — I/O path** | Offset-table probe, SL-1, section-ownership save, OM-3 | 🟡 | ES-0 | — |
@@ -537,7 +537,7 @@ suite plus in-game visual confirmation, since no suite executes the GPU.
 | **v2** | Closed-loop frame-time budget replacing `cap × 60` (P-9's extension roadmap) once ES-18 removes the main-thread item cost |
 | **v3+** | Cubic chunks (Tier C) on ES-18's 3D-keyed sections — own design doc |
 
-### 7.1 Execution packets — ES-1, ES-2, ES-6.1 (planned 2026-10-02; ES-1 and ES-2 shipped 2026-10-02; ES-6.1 priced GO, steps 2–3 open)
+### 7.1 Execution packets — ES-1, ES-2, ES-6.1 (planned 2026-10-02; ES-1 and ES-2 shipped 2026-10-02; ES-6.1 priced GO and shipped 2026-10-02)
 
 Written with the `create-implementation-plan` protocol (fact sweep → draft → adversarial review →
 decision menu, settled 2026-10-02) so a future session can execute them directly. **Re-verify
@@ -755,12 +755,54 @@ the Editor (Mono), so it can only clear the IL2CPP bar one way: a number below 0
 **Step 1 executed — GO for steps 2–3 (2026-10-02).** The `T_current` legs time the shipped
 `Chunk.OnDataPopulated` itself (an uninitialized `Chunk` plus a stub `World.Instance` carrying the real block
 database), with a bucket-count parity check against the job's list; the cave-heavy shape was deliberately
-skipped (owner decision — Land and Flooded already span the scan's two cost drivers). Per vd-32 crossing:
+skipped (Land and Flooded already span the scan's two cost drivers). Per vd-32 crossing:
 Land **1.56 ms** first view / **1.76 ms** re-entry, Flooded **42.8 / 20.1 ms** — above the 0.5 ms bar on every
-leg, in the Editor. The water-heavy case would need an 85× / 40× backend speedup to fall under it, so the owner
-took GO without an IL2CPP confirmation. Report:
+leg, in the Editor. The water-heavy case would need an 85× / 40× backend speedup to fall under it, so GO was
+taken without an IL2CPP confirmation. Report:
 [`CHUNK_LIFECYCLE_ES6_1_RESCAN_PRICE_2026-10-02_BENCHMARK.md`](../Performance/CHUNK_LIFECYCLE_ES6_1_RESCAN_PRICE_2026-10-02_BENCHMARK.md).
 Step 3 (1a + 1b, BH-B13, the re-entry soak, docs) is next, in its own session.
+
+**Step 3 executed and in-game confirmed (2026-10-02).** Re-verified at `19d7f998`: the packet's Chunk.cs and
+`WorldJobManager.cs:1168,1170` anchors held; the disk arm had moved to `World.cs:1411` (ES-1) and the tick
+snapshot to `~:2503`. Shipped as planned, with two additions:
+- **1a + 1b.** `_activeVoxelsRegistered` / `NeedsActiveVoxelRescan` on `ChunkData`, cleared in `Reset`;
+  `Chunk.Reset` tests it. The generation arm calls `ChunkData.RegisterActiveVoxelsFromJob` unconditionally;
+  the disk and legacy arms keep `Chunk?.` and their rescan at attach. **Addition:** the scan moved onto
+  `ChunkData` as `RescanActiveVoxels` (`Chunk.OnDataPopulated` delegates), so only the two registration
+  methods can set the flag, each as its last statement — a public setter would let any runtime code mark the
+  buckets valid.
+- **Addition — the step-4 wake, folded in because 1a is what exposes it.** Planning found that `ApplyModifications` step 4 woke
+  neighbors through `GetChunkFromVector3` — the **visual** `Chunk` — so it skipped data-only neighbors. The
+  re-entry rescan had masked that; with 1a it would leave a quiesced seam voxel asleep after re-entry. Step 4 is
+  now `World.WakeActiveNeighbors`, which registers on the neighbor's `ChunkData`; `Chunk.AddActiveVoxel` lost
+  its only caller and was deleted.
+- **Validation.** Lighting B34 picks the flag up through its reflection sweep (prove-red: dropping the reset
+  line reds it, naming `_activeVoxelsRegistered`). New **BH-B13** (six legs, parity against an independent
+  full-walk replica, the real `ActiveVoxelScanJob` for the job list, production `ModifyVoxel` via an opt-in
+  `JobDataManager` on `BehaviorTestWorld`): each of four prove-reds reds the leg it targets — drop
+  `ModifyVoxel`'s bucket add, skip the job-list flag write, restore the visual lookup in step 4, omit the
+  `Reset` clear. One spill-over: the job-list mutation also reds leg 3's "edits do not re-arm" check, which
+  inherits the flag.
+- **Review follow-up — the disk-load seam wake.** The load-from-save arm ran `WakeSeamBehaviorNeighborhood`
+  *before* replaying the chunk's pending mods, so a replayed mod that opened a border cell (`/setblock … air`
+  into an unloaded chunk) never woke the neighbor resting against it — a gap the old re-entry rescan had hidden
+  for data-only neighbors. It now runs after the replay, the generation arm's order. Accepted on code reading and
+  the suites (no suite reaches the disk-load sequence); not reproduced in game.
+
+**In-game soak passed (2026-10-02, Editor play mode) — no regression seen.** Two checks: (1) a water source on a
+tree top, flown away from past the **load** distance and back — the water spread normally (this exercises the
+unload → reload path, which keeps its rescan, not the 1a skip); (2) water flowing at the edge of the render
+distance kept flowing, where chunks cross the view boundary while their data stays resident — the 1a skip and
+the step-4 data-only wake; (3) a targeted pass for the skip path — flowing water left just outside the view
+distance (data still resident) for a few seconds, then re-entered — kept flowing correctly. BH-B13 is the
+deterministic guard. The extra generation-pass bucket
+insertion is **unmeasured**. `ChunkGenerationBenchmark` cannot see it: it times schedule → complete → release
+and never runs `ProcessGenerationJobs` (an A/B with and without this change on 2026-10-02 differed by −0.3 to
++0.6 % total, mixed-sign noise). `ActiveVoxelScanBenchmark`'s `T_register` is a managed-`HashSet` replica, not
+the shipped `ChunkData.RegisterActiveVoxelsFromJob`, so the flooded-chunk cost is bounded only loosely, between
+that replica (~390 µs) and the full first-view rescan (~658 µs, Editor). A shipped-path register leg is the
+instrument that would price it. `ActiveVoxelScanBenchmark` times `OnDataPopulated` directly and cannot show the 1a skip; the
+saving is inferred from step 1's re-entry leg, not re-measured.
 
 ---
 
@@ -831,6 +873,11 @@ Step 3 (1a + 1b, BH-B13, the re-entry soak, docs) is next, in its own session.
 
 ## Document History
 
+* **v1.3** - `ES-6.1` step 3 executed and in-game confirmed (2026-10-02): the registration flag (1a), job-list
+  registration for data-only chunks (1b), the scan moved onto `ChunkData`, and the step-4 wake moved off the
+  visual `Chunk` (a gap the skip would have exposed); BH-B13 + B34 prove-reds; soak evidence recorded in §7.1;
+  review follow-up: the disk-load seam wake now runs after the pending-mod replay.
+  Status line, ES-6 row (ES-6.1 ✅, rest open) and §7.1 header updated.
 * **v1.2** - `ES-6.1` step 1 executed (2026-10-02): the shipped rescan priced in the Editor at 1.56–1.76 ms per
   vd-32 crossing on land and 20–43 ms on flooded chunks, above the 0.5 ms bar on every leg — GO for steps 2–3,
   cave-heavy shape skipped by decision. ES-6 row and §7.1 header updated.

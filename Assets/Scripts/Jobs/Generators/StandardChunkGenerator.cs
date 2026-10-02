@@ -471,7 +471,7 @@ namespace Jobs.Generators
             // --- Active-Voxel Emission (final pass) ---
             // Single-threaded Burst scan of the finalized voxel map. Emits flat indices of voxels
             // with active behavior so the main thread copies a short list instead of dereferencing
-            // managed BlockType objects up to ChunkVolume times in Chunk.OnDataPopulated.
+            // managed BlockType objects up to ChunkVolume times in ChunkData.RescanActiveVoxels.
             // Pre-size for water-heavy chunks (oceans/lakes register thousands of active source
             // voxels) to avoid repeated Persistent realloc+copy growth inside the scan job.
             // TG-6: rent from the pool on the production path (returned at the STAGE-1 consume site in

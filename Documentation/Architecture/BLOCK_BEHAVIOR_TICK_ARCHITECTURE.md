@@ -87,7 +87,8 @@ World.Update() (after all chunks ticked)
 The active set lives on **`ChunkData`** — the data it describes — not on the visual `Chunk`. `ChunkData` owns
 `_activeGrass` and `_activeFluids` (`NativeHashSet<int>` of flat chunk indices, `[NonSerialized]`) plus
 `AddActiveVoxel` / `RemoveActiveVoxel` / `ClassifyFamily` / `GetActiveVoxelCount` / `IsVoxelActive` /
-`ActiveVoxels` / `Dispose`. `Chunk` keeps only the **tick orchestration** (`DrainTick`/`TickFamily`/
+`ActiveVoxels` / `Dispose`, and the two full-registration paths `RegisterActiveVoxelsFromJob` /
+`RescanActiveVoxels`. `Chunk` keeps only the **tick orchestration** (`DrainTick`/`TickFamily`/
 `ReplayFluids`, reading `ChunkData.ActiveGrassBucket`/`ActiveFluidsBucket`) plus thin delegations.
 
 Sets, not lists: the registration sinks re-add already-active voxels (Step-4 re-activation, `ModifyVoxel`) and
@@ -98,8 +99,16 @@ chunk allocates one set), `Clear()`ed in `ChunkData.Reset`, and `Dispose()`d via
 Because the buckets live on `ChunkData`, `ChunkData.ModifyVoxel` maintains them **directly on `this`**; there
 is no `if (Chunk != null) Chunk.AddActiveVoxel(...)` back-call into the visual layer, and therefore no worldgen
 registration gap. All **five** registration sinks (`ActiveVoxelScanJob`, `RegisterActiveVoxelsFromJob`,
-`OnDataPopulated`, `AddActiveVoxel`/`RemoveActiveVoxel`, and `Helpers/SeamWakeDecision.WakeSeamSlab`) route
+`RescanActiveVoxels`, `AddActiveVoxel`/`RemoveActiveVoxel`, and `Helpers/SeamWakeDecision.WakeSeamSlab`) route
 through `ClassifyFamily`.
+
+**Buckets are registered once per data lifecycle (ES-6.1).** A full registration — the generation job's list, or
+the rescan for disk/legacy data — ends by setting a `[NonSerialized]` flag that `Reset` clears;
+`NeedsActiveVoxelRescan` (`IsPopulated && !flag`) is what `Chunk.Reset` tests before rescanning. The generation
+arm registers whether or not a visual is linked, so after the first registration nothing rescans the buckets
+again: they must stay exact through `ModifyVoxel` and the wakes alone, including while the chunk has no visual
+and does not tick. That is why the step-4 wake (`World.WakeActiveNeighbors`) registers on the neighbor's
+`ChunkData` rather than its visual `Chunk`. Guarded by `BH-B13`.
 
 > [!IMPORTANT]
 > ### The tick has no readiness gate — registration is the whole contract

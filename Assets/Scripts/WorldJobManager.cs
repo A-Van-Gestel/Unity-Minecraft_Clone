@@ -1163,11 +1163,11 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                     // Contract: IsCreated ⟺ the scan pass ran. An empty *created* list means genuinely zero
                     // active voxels (NOT a signal to fall back) — a generator that allocates ActiveVoxels must
                     // run ActiveVoxelScanJob to fill it. Both branches register the same active set; see the
-                    // parity invariant on ActiveVoxelScanJob / Chunk.OnDataPopulated.
+                    // parity invariant on ActiveVoxelScanJob / ChunkData.RescanActiveVoxels.
                     if (jobEntry.Value.ActiveVoxels.IsCreated)
-                        chunkData.Chunk?.RegisterActiveVoxelsFromJob(jobEntry.Value.ActiveVoxels);
+                        chunkData.RegisterActiveVoxelsFromJob(jobEntry.Value.ActiveVoxels); // no visual needed: data-only chunks enter view registered
                     else
-                        chunkData.Chunk?.OnDataPopulated();
+                        chunkData.Chunk?.OnDataPopulated(); // without a visual, Chunk.Reset rescans on attach
 
                     // FP-1 stage stamp: terrain data is available (generation arm; the disk-load arm is
                     // stamped in World.LoadOrGenerateChunkInner). Inside the `if` so a job re-entering an

@@ -199,6 +199,9 @@ T11
             scenarios.Add(new Scenario("BH-B11: the seam wake covers grass (up-diagonal dirt target)", Bh11_SeamWakeCoversGrass));
             scenarios.Add(new Scenario("BH-B12: cross-chunk reads resolve the right voxel in the far lands", Bh12_FarCoordinateSeamReadResolves));
 
+            // ES-6.1 registration contract — see BehaviorValidationSuite.Baseline.ActiveRegistration.cs.
+            scenarios.Add(new Scenario("BH-B13: active-voxel buckets stay exact once registered (job list, edits, Reset, step-4 wake)", Bh13_ActiveRegistrationFlag));
+
             // BH-D1 old-vs-new differential (comparator self-test + driver-pair fixtures) — see BehaviorValidationSuite.Differential.cs.
             AddDifferentialScenarios(scenarios);
         }

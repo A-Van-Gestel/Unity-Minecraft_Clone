@@ -70,6 +70,12 @@ namespace Data
         [NonSerialized]
         private NativeHashSet<int> _activeFluids;
 
+        // True once a full registration (job list or rescan) has filled the buckets for the current data. From then
+        // on ModifyVoxel and the wakes keep them current, so a visual re-attaching to this data can skip the rescan.
+        // Set only as the LAST step of a registration, so a mid-scan exception leaves it false. Cleared in Reset.
+        [NonSerialized]
+        private bool _activeVoxelsRegistered;
+
         /// <summary>Cold-start capacity hint for the per-family active buckets; they grow and retain capacity, self-tuning.</summary>
         private const int ACTIVE_BUCKET_INITIAL_CAPACITY = 64;
 
@@ -320,6 +326,7 @@ namespace Data
             // Clear active-voxel buckets (retains native capacity; no-op until first registration allocates them).
             if (_activeGrass.IsCreated) _activeGrass.Clear();
             if (_activeFluids.IsCreated) _activeFluids.Clear();
+            _activeVoxelsRegistered = false;
 
             // Clear Heightmap (retains array)
             Array.Clear(heightMap, 0, heightMap.Length);
@@ -646,6 +653,79 @@ namespace Data
         }
 
         #region Active Voxel Behavior Buckets
+
+        /// <summary>
+        /// Whether this populated chunk still needs a full active-voxel registration — true until
+        /// <see cref="RegisterActiveVoxelsFromJob"/> or <see cref="RescanActiveVoxels"/> completes for the current
+        /// data. Once false, the buckets are kept exact incrementally, so attaching a visual must not rescan them.
+        /// </summary>
+        public bool NeedsActiveVoxelRescan => IsPopulated && !_activeVoxelsRegistered;
+
+        /// <summary>
+        /// Registers the active voxels emitted by the generation job's <see cref="Jobs.ActiveVoxelScanJob"/>,
+        /// unpacking each flat chunk index back into a local position. Equivalent to <see cref="RescanActiveVoxels"/>
+        /// for a freshly generated map — the job has already done the per-voxel scan, so this only copies a short
+        /// list. Needs no linked visual.
+        /// </summary>
+        /// <param name="packedIndices">Flat chunk indices (<see cref="ChunkMath.GetFlattenedIndexInChunk"/> convention) of active voxels.</param>
+        public void RegisterActiveVoxelsFromJob(NativeList<int> packedIndices)
+        {
+            foreach (int i in packedIndices)
+            {
+                ChunkMath.GetLocalPositionFromFlattenedIndex(i, out int x, out int y, out int z);
+                AddActiveVoxel(new Vector3Int(x, y, z));
+            }
+
+            _activeVoxelsRegistered = true; // last, so a throw above leaves the rescan armed
+        }
+
+        /// <summary>
+        /// Scans the populated chunk data for voxels that possess active behaviors (e.g., grass spreading) and
+        /// registers them in the active buckets for continuous tick processing.
+        /// </summary>
+        /// <remarks>
+        /// The scan for data with no generation-job list (loaded from disk, or from a generator without the scan
+        /// pass), since active voxels are not persisted; a job list registers through
+        /// <see cref="RegisterActiveVoxelsFromJob"/> instead. Reads the precomputed flat
+        /// <see cref="World.IsActiveById"/> table instead of dereferencing managed <c>BlockType</c> objects.
+        /// <para><b>Parity invariant:</b> this managed scan and the Burst <see cref="Jobs.ActiveVoxelScanJob"/>
+        /// must register the same active set — they MUST agree on both the active criterion
+        /// (<see cref="World.IsActiveById"/> here vs <c>BlockTypeJobData.IsActive</c> there, co-built in one loop
+        /// in <c>World</c> init, so drift-proof) and the section/index convention. Change one path's criterion or
+        /// convention and you must change the other.</para>
+        /// </remarks>
+        public void RescanActiveVoxels()
+        {
+            bool[] isActiveById = World.Instance.IsActiveById;
+
+            // Iterate through sections first to skip empty ones.
+            for (int s = 0; s < sections.Length; s++)
+            {
+                ChunkSection section = sections[s];
+                if (section == null || section.IsEmpty) continue;
+
+                int startY = s * ChunkMath.SECTION_SIZE;
+
+                // Iterate only within this non-empty section
+                for (int i = 0; i < section.voxels.Length; i++)
+                {
+                    uint packedData = section.voxels[i];
+                    ushort id = BurstVoxelDataBitMapping.GetId(packedData);
+
+                    if (isActiveById[id])
+                    {
+                        // Convert section index back to 3D position
+                        int x = i % ChunkMath.SECTION_SIZE;
+                        int yOffset = i / ChunkMath.SECTION_SIZE % ChunkMath.SECTION_SIZE;
+                        int z = i / (ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE);
+
+                        AddActiveVoxel(new Vector3Int(x, startY + yOffset, z), id);
+                    }
+                }
+            }
+
+            _activeVoxelsRegistered = true; // last, so a throw above leaves the rescan armed
+        }
 
         /// <summary>
         /// Classifies a block id into its behavior family, mirroring the dispatch order in

@@ -369,7 +369,7 @@ JSON file at save folder root containing world metadata and player state.
    Represent in-progress BFS propagation. Saving these allow lighting calculations to resume exactly where they left off. Queue nodes contain the voxel position, the *old* skylight level, and the *old* RGB blocklight channels (needed for removal propagation).
 
 3. **Active Voxels Not Saved:**  
-   Fluids, grass, and other "active" blocks are recalculated via `Chunk.OnDataPopulated()` on load. This reduces save file size by ~10% and ensures behavior updates apply retroactively.
+   Fluids, grass, and other "active" blocks are recalculated via `ChunkData.RescanActiveVoxels()` on load (immediately when a visual is linked, else when the chunk enters view). This reduces save file size by ~10% and ensures behavior updates apply retroactively.
 
 4. **Strict version check:**  
    The live serializer only reads `CURRENT_CHUNK_VERSION`. Older versions are upgraded offline by the AOT Migration Manager before the world opens; encountering an old version byte at runtime throws (world is corrupt or bypassed migration).

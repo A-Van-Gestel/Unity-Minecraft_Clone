@@ -452,7 +452,7 @@ namespace Helpers
         {
             // Defensive clamp mirroring GetFlattenedIndexInChunk's Y-clamp: a malformed (out-of-range) index
             // decodes to an in-chunk coordinate rather than an out-of-bounds local position that
-            // Chunk.AddActiveVoxel would register and TickUpdate later evaluate against a non-existent voxel.
+            // ChunkData.AddActiveVoxel would register and the tick later evaluate against a non-existent voxel.
             index = math.clamp(index, 0, CHUNK_VOLUME - 1);
 
             // Mirror of the section-aware packing in GetFlattenedIndexInChunk / GetFlattenedIndexInSection.

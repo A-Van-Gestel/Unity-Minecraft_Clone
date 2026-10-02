@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using Data;
 using Helpers;
 using Jobs;
-using Jobs.BurstData;
 using Unity.Collections;
 using Unity.Mathematics;
 using Unity.Profiling;
@@ -148,7 +147,10 @@ public class Chunk
         if (ChunkData != null)
         {
             ChunkData.Chunk = this;
-            if (ChunkData.IsPopulated)
+
+            // Only data whose buckets were never fully registered needs the scan: job-registered data and data
+            // that kept its buckets from an earlier visual are kept current by ModifyVoxel and the wakes.
+            if (ChunkData.NeedsActiveVoxelRescan)
             {
                 OnDataPopulated();
             }
@@ -212,68 +214,11 @@ public class Chunk
     #endregion
 
     /// <summary>
-    /// Scans the newly populated chunk data for voxels that possess active behaviors (e.g., grass spreading)
-    /// and registers them to the active voxel list for continuous tick processing.
+    /// Runs the full active-voxel registration scan over this chunk's populated data — a delegation to
+    /// <see cref="Data.ChunkData.RescanActiveVoxels"/>, which owns the scan and its parity invariant with
+    /// <see cref="Jobs.ActiveVoxelScanJob"/>.
     /// </summary>
-    /// <remarks>
-    /// Fallback scan used by the load-from-save (<see cref="World"/>) and pool-recycle replay
-    /// (<see cref="Reset"/>) paths, where no generation job runs and active voxels are not persisted.
-    /// The freshly-generated path instead consumes <see cref="RegisterActiveVoxelsFromJob"/>, which is
-    /// emitted by <see cref="Jobs.ActiveVoxelScanJob"/>. This scan reads the precomputed flat
-    /// <see cref="World.IsActiveById"/> table instead of dereferencing managed <c>BlockType</c> objects.
-    /// <para><b>Parity invariant:</b> this managed scan and the Burst <see cref="Jobs.ActiveVoxelScanJob"/>
-    /// must register the same active set — they MUST agree on both the active criterion
-    /// (<see cref="World.IsActiveById"/> here vs <c>BlockTypeJobData.IsActive</c> there, co-built in one loop
-    /// in <c>World</c> init, so drift-proof) and the section/index convention. Change one path's criterion or
-    /// convention and you must change the other.</para>
-    /// </remarks>
-    public void OnDataPopulated()
-    {
-        bool[] isActiveById = World.Instance.IsActiveById;
-
-        // Now that the data is here, we can scan for active voxels.
-        // Optimization: Iterate through sections first to skip empty ones.
-        for (int s = 0; s < ChunkData.sections.Length; s++)
-        {
-            ChunkSection section = ChunkData.sections[s];
-            if (section == null || section.IsEmpty) continue;
-
-            int startY = s * ChunkMath.SECTION_SIZE;
-
-            // Iterate only within this non-empty section
-            for (int i = 0; i < section.voxels.Length; i++)
-            {
-                uint packedData = section.voxels[i];
-                ushort id = BurstVoxelDataBitMapping.GetId(packedData);
-
-                if (isActiveById[id])
-                {
-                    // Convert section index back to 3D position
-                    int x = i % ChunkMath.SECTION_SIZE;
-                    int yOffset = i / ChunkMath.SECTION_SIZE % ChunkMath.SECTION_SIZE;
-                    int z = i / (ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE);
-
-                    ChunkData.AddActiveVoxel(new Vector3Int(x, startY + yOffset, z), id);
-                }
-            }
-        }
-    }
-
-    /// <summary>
-    /// Registers the active voxels emitted by the generation job's <see cref="Jobs.ActiveVoxelScanJob"/>,
-    /// unpacking each flat chunk index back into a local position. Used on the freshly-generated path
-    /// in place of <see cref="OnDataPopulated"/> — the job has already done the per-voxel scan, so the
-    /// main thread only copies a short list.
-    /// </summary>
-    /// <param name="packedIndices">Flat chunk indices (<see cref="ChunkMath.GetFlattenedIndexInChunk"/> convention) of active voxels.</param>
-    public void RegisterActiveVoxelsFromJob(NativeList<int> packedIndices)
-    {
-        foreach (int i in packedIndices)
-        {
-            ChunkMath.GetLocalPositionFromFlattenedIndex(i, out int x, out int y, out int z);
-            ChunkData.AddActiveVoxel(new Vector3Int(x, y, z));
-        }
-    }
+    public void OnDataPopulated() => ChunkData.RescanActiveVoxels();
 
     #region Block Behavior Methods
 
@@ -399,19 +344,6 @@ public class Chunk
 
             ListPool<int>.Release(toRemove);
         }
-    }
-
-    /// <summary>
-    /// Registers a voxel as active (delegates to <see cref="ChunkData"/>, which owns the per-family buckets). Used
-    /// by the World's cross-chunk neighbor re-activation, which holds the neighbor <see cref="Chunk"/>.
-    /// </summary>
-    /// <param name="pos">The local position of the voxel within this chunk.</param>
-    public void AddActiveVoxel(Vector3Int pos)
-    {
-        // Null-guarded like the sibling delegations (DrainTick/GetActiveVoxelCount/IsVoxelActive/ActiveVoxels):
-        // World's cross-chunk re-activation reaches here holding only the neighbor Chunk, whose ChunkData may be
-        // unlinked mid-recycle. The old local-HashSet add could never NRE; preserve that.
-        ChunkData?.AddActiveVoxel(pos);
     }
 
     /// <summary>

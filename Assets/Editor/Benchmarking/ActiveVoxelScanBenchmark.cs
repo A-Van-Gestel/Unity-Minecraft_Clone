@@ -30,7 +30,7 @@ namespace Editor.Benchmarking
     /// <list type="bullet">
     /// <item><b>T_old</b> — the original full managed scan (<c>World.BlockTypes[id].isActive</c> deref per voxel).</item>
     /// <item><b>T_bitmask</b> — the TG-2-era flat-map copy of <see cref="Chunk.OnDataPopulated"/> (flat <c>bool[]</c> read per voxel into a managed set), kept for continuity; old↔this isolates the Part B (load/replay) win.</item>
-    /// <item><b>T_register</b> — <see cref="Chunk.RegisterActiveVoxelsFromJob"/> (unpack the job's short list); old↔this isolates the Part A (generation main-thread) win.</item>
+    /// <item><b>T_register</b> — <see cref="Data.ChunkData.RegisterActiveVoxelsFromJob"/> (unpack the job's short list); old↔this isolates the Part A (generation main-thread) win.</item>
     /// <item><b>T_job</b> — <see cref="ActiveVoxelScanJob"/> Burst execution; the work that now overlaps generation off the main thread.</item>
     /// <item><b>T_current first / re-entry</b> — the shipped <see cref="Chunk.OnDataPopulated"/> itself (section skip,
     /// <see cref="ChunkData.AddActiveVoxel(Vector3Int, ushort)"/> into the native buckets) on a populated
