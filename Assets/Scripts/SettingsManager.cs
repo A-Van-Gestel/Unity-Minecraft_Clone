@@ -1095,12 +1095,13 @@ public static class SettingsManager
     /// desktop defaults onto them with no automatic retry.</para>
     /// <para>On a calibration-version upgrade of an already-calibrated file, each field keeps the higher
     /// of its stored and probed value (<see cref="DeviceCalibration.MergeForRecalibration"/>), so a
-    /// hand-raised budget survives the re-probe.</para>
+    /// hand-raised budget survives the re-probe. An explicit recalibration always takes the probe.</para>
     /// </summary>
     /// <param name="settings">The settings instance to seed in place.</param>
+    /// <param name="explicitRecalibration">True when the user asked to recalibrate (<see cref="RecalibrateDevice"/>).</param>
     /// <returns><c>true</c> only if calibration succeeded (the caller should persist); <c>false</c> if it
     /// was skipped (edit-mode) or failed (defaults kept, will retry next launch).</returns>
-    private static bool ApplyCalibration(Settings settings)
+    private static bool ApplyCalibration(Settings settings, bool explicitRecalibration = false)
     {
         if (!Application.isPlaying) return false; // edit-mode settings load — defer to play/first launch
 
@@ -1111,7 +1112,7 @@ public static class SettingsManager
                 settings.maxInFlightMeshJobs, settings.maxInFlightGenerationJobs,
                 settings.maxLightJobsPerFrame, settings.maxMeshRebuildsPerFrame);
             CalibrationResult result = DeviceCalibration.MergeForRecalibration(settings.calibrationVersion,
-                DeviceCalibration.CalibrationVersion, stored, probed);
+                DeviceCalibration.CalibrationVersion, stored, probed, explicitRecalibration);
 
             settings.maxMeshRebuildsPerFrame = result.MaxMeshRebuildsPerFrame;
             settings.maxLightJobsPerFrame = result.MaxLightJobsPerFrame;
@@ -1154,7 +1155,7 @@ public static class SettingsManager
     public static bool RecalibrateDevice()
     {
         Settings settings = LoadSettings();
-        if (!ApplyCalibration(settings)) return false;
+        if (!ApplyCalibration(settings, explicitRecalibration: true)) return false;
 
         SaveSettings(settings);
         NotifySettingChanged(nameof(Settings.maxLightJobsPerFrame));

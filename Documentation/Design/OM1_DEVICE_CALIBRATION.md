@@ -260,8 +260,8 @@ multi-point by construction (a function, not an anchor), so they need no baselin
   - *Upgrade merge (as built, `ES-2`):* a version-bump re-probe of an already-calibrated file
     (`calibrationVersion` ≥ 1) keeps, per field, the higher of the stored and probed value
     (`DeviceCalibration.MergeForRecalibration`), since a stored value above the probe may be a hand-tuned
-    budget. A never-calibrated file (version 0) and an explicit same-version recalibration take the probe
-    as-is. The `Device-calibrated budgets (OM-1)` log line always prints the raw probe result.
+    budget. A never-calibrated file (version 0) and an explicit recalibration (`RecalibrateDevice`, at any
+    stored version) take the probe as-is. The `Device-calibrated budgets (OM-1)` log line always prints the raw probe result.
   - *Apply semantics (as built):* the per-frame budgets and the in-flight mesh cap are re-read from
     settings each frame and take effect immediately, but `chunkJobArrayPoolRetention` is captured once at
     `ChunkJobArrayPool` construction (`WorldJobManager` init), so a changed retention **applies on the

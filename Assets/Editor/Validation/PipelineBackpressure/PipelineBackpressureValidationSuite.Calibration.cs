@@ -12,7 +12,8 @@ namespace Editor.Validation.PipelineBackpressure
     /// on the pooled median instead of the minimum of the batch medians reds B23's warmup-tail fixture (the
     /// slow 1.308 ms value returns and maps to 15); returning <c>probed</c> unconditionally from
     /// <see cref="DeviceCalibration.MergeForRecalibration"/> reds B24's upgrade assertions; swapping two fields
-    /// in its merge reds the distinct-per-field assertion.</para>
+    /// in its merge reds the distinct-per-field assertion; dropping its <c>explicitRecalibration</c> check reds
+    /// the older-version explicit-recalibration assertion.</para>
     /// </summary>
     public static partial class PipelineBackpressureValidationSuite
     {
@@ -149,7 +150,11 @@ namespace Editor.Validation.PipelineBackpressure
             ok &= Check("never-calibrated file (version 0) takes the probe even below stored defaults",
                 DeviceCalibration.MergeForRecalibration(0, currentVersion, storedHigh, probedLow).MaxLightJobsPerFrame == 15);
             ok &= Check("explicit recalibration at the current version takes the probe",
-                DeviceCalibration.MergeForRecalibration(currentVersion, currentVersion, storedHigh, probedLow).MaxLightJobsPerFrame == 15);
+                DeviceCalibration.MergeForRecalibration(currentVersion, currentVersion, storedHigh, probedLow,
+                    explicitRecalibration: true).MaxLightJobsPerFrame == 15);
+            ok &= Check("explicit recalibration of a file still at an older version takes the probe, not keep-higher",
+                DeviceCalibration.MergeForRecalibration(storedVersion, currentVersion, storedHigh, probedLow,
+                    explicitRecalibration: true).MaxLightJobsPerFrame == 15);
             return ok;
         }
 

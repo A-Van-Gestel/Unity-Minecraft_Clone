@@ -250,18 +250,20 @@ namespace Config
         /// that was calibrated before (<paramref name="storedVersion"/> ≥ 1), each field keeps the higher of
         /// its stored and probed value: a stored value above the probe may be a hand-tuned budget, which the
         /// re-probe cannot tell apart from an earlier calibration. A fresh or never-calibrated file
-        /// (version 0) and an explicit recalibration at the current version take the probe as-is.
+        /// (version 0) and an explicit recalibration — at any stored version — take the probe as-is.
         /// </summary>
         /// <param name="storedVersion">The settings file's <c>calibrationVersion</c> before this probe.</param>
         /// <param name="currentVersion">The formula version being applied (normally <see cref="CalibrationVersion"/>).</param>
         /// <param name="stored">The budgets currently in the settings file.</param>
         /// <param name="probed">The budgets this probe resolved.</param>
+        /// <param name="explicitRecalibration">True for a user-requested recalibration, whose purpose is to
+        /// replace the stored budgets (e.g. after an over-tweak).</param>
         /// <returns>The budgets to write.</returns>
         public static CalibrationResult MergeForRecalibration(int storedVersion, int currentVersion,
-            CalibrationResult stored, CalibrationResult probed)
+            CalibrationResult stored, CalibrationResult probed, bool explicitRecalibration = false)
         {
             bool upgradeOfCalibratedFile = storedVersion >= 1 && storedVersion < currentVersion;
-            if (!upgradeOfCalibratedFile) return probed;
+            if (explicitRecalibration || !upgradeOfCalibratedFile) return probed;
 
             return new CalibrationResult(
                 Math.Max(stored.JobArrayPoolRetention, probed.JobArrayPoolRetention),
