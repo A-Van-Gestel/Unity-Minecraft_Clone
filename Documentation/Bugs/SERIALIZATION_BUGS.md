@@ -7,7 +7,7 @@ This document outlines **open** bugs related to saving, loading, Region files, a
 > **Numbering note:** `§02`, `§03`, `§06` and `§10` are **retired, not free** — all four are archived in
 > [`_FIXED_BUGS.md`](./_FIXED_BUGS.md), and `§03` is still cited by name from
 > `CompressionFactory.cs`, `LIBRARY_BUGS.md` and
-> `INFINITE_WORLD_STORAGE_AND_SERIALIZATION_ARCHITECTURE.md`. New entries continue from `§14`.
+> `INFINITE_WORLD_STORAGE_AND_SERIALIZATION_ARCHITECTURE.md`. New entries continue from `§16`.
 
 ---
 
@@ -297,3 +297,46 @@ already invariant-identical — so this needs no save-version bump and no migrat
 **Found by:** a code review of the NS-5 `G3` region-filename pins (August 2026); the ICU premise was checked
 against the runtime and did not reproduce, and the entry was kept on the user's call that the latent risk is
 worth recording.
+
+---
+
+## 15. Async quit saves may never stage their failure: "Save & Quit" can lose edits CP-6 promises to keep
+
+**Severity:** Suspected data loss (player edits) on two quit paths  
+**Confidence:** Mechanism read in code, **not reproduced** — static audit only (2026-10-02, `AC-9`)  
+**Files:** `UI/PauseMenuController.cs` - `FadeOutAndQuit`; `World.cs` - `OnApplicationQuit`, `SaveWorldData`, `OnDestroy`; `Serialization/ChunkStorageManager.cs` - `SaveChunkAsync`, `Dispose`
+
+**Save & Quit to Desktop.** `FadeOutAndQuit` (`PauseMenuController.cs:222`) calls `SaveWorldData()`, which
+clears `ModifiedChunks` up front and fires `SaveChunkAsync` for every chunk, then calls `Application.Quit`.
+`World.OnApplicationQuit` (`World.cs:707`) then cancels the shutdown token, sleeps 100 ms and runs the
+synchronous flush — but `ModifiedChunks` is already empty, so everything rests on the async saves.
+`SaveChunkAsync` does `await Task.Run(...)` from the main thread **without `ConfigureAwait(false)`**, so under
+Unity's synchronization context its continuation — the `finally` buffer return and the `StageFailedSave`
+hand-off for a Canceled/Failed result — runs on the **main thread on a later frame**. The main thread is asleep
+and then blocked inside `OnApplicationQuit`, so those continuations never run before teardown. A save whose
+worker observed the cancel before writing therefore never reaches the CP-6 retry registry, and the edit is
+lost. CP-6's own contract assumes the 100 ms sleep covers "a continuation that hasn't staged"
+(`CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md` CP-6) — on this reading it cannot. The comment at
+`ChunkStorageManager.cs:21`, which says the continuation resumes on a ThreadPool thread, is likely wrong.
+
+**Save & Quit to Main Menu.** Same `SaveWorldData()`, then `LoadScene`. Nothing cancels the shutdown token on
+this path; `World.OnDestroy` nulls `Instance` (`:756`) before `StorageManager.Dispose()` (`:782`), and
+`ReleaseRegistryOnDispose` drops pending retries when `worldAlive == false` — so saves still in flight race the
+teardown, and a late writer can re-open a region through `GetRegion`'s `GetOrAdd` after `_regions.Clear()`
+while its continuation meets a null `World.Instance` (inferred).
+
+**Repro to try (not yet attempted):** edit blocks in several chunks, arm the dev-only save-fault seam
+(`ChunkStorageManager.InjectSaveFaults`) or throttle the writer so saves are in flight, choose "Save & Quit to
+Desktop", reload and check the edits. Repeat for "Save & Quit to Main Menu". A CP-6 durability-suite scenario
+cannot reach it directly: the defect is in continuation scheduling against a blocked main thread.
+
+**Fix directions (from the audit, none chosen):** on desktop quit, drop the async pre-save and let
+`OnApplicationQuit`'s synchronous path save everything; stage canceled saves from the worker thread (the
+staging queue is already thread-safe) and check the token inside the task body, which also retires the
+`Thread.Sleep(100)`; on the main-menu path, yield until the fired/completed/failed counters reconcile and
+cancel the token before `Dispose`. Never block-wait on these tasks from the main thread — their continuations
+need it, so that would deadlock. All of it must keep CP-6's locked decisions (retained-snapshot registry,
+freshness-sequence supersede, quit-flush ordering).
+
+**Found by:** the `AC-9` quit/save static audit (`Design/PERFORMANCE_IMPROVEMENTS_REPORT.md` § Audit coverage
+gaps), 2026-10-02.
