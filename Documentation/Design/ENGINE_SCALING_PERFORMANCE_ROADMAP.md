@@ -1,8 +1,9 @@
 # Engine Scaling Performance Roadmap
 
-**Version:** 1.0  
+**Version:** 1.1  
 **Date:** 2026-10-02  
-**Status:** Draft — near-to-far horizon, not scheduled. Tier 1 items are execution-sized; Tier 2/3
+**Status:** In progress — `ES-1` and `ES-2` shipped (2026-10-02); the rest is a near-to-far horizon, not
+scheduled. Tier 1 items are execution-sized; Tier 2/3
 items each need their own design or implementation plan. Re-verify the anchors named per item before
 starting (§8).  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
@@ -493,7 +494,7 @@ constants + migration change. Prerequisites: ES-13, ES-18, ES-19.
 |---|---|:---:|---|---|
 | **ES-0 — Measure** | Spike-visible capture, drain stamp, crossing slots, GC.Alloc capture | 🟢 | — | — |
 | **ES-1 — No frame-paced load** | Completion counter at `World.cs:1064` — execution packet §7.1 | 🟢 | — | ✅ 2026-10-02 (in-game) |
-| **ES-2 — Calibration** | Robust OM-1 lighting probe — execution packet §7.1 | 🟢 | — | ✅ Implemented (awaiting in-game) |
+| **ES-2 — Calibration** | Robust OM-1 lighting probe — execution packet §7.1 | 🟢 | — | ✅ 2026-10-02 (in-game) |
 | **ES-3 — Loading mode** | SU-1 + SU-2, pooled/banded/shared startup snapshots | 🟡 | ES-0 | — |
 | **ES-4 — First-Update burst** | Pool prewarm, lazy borders, async scene load | 🟢 | — | — |
 | **ES-5 — PSO warmup** | Shader state prewarm | 🟢 | — | — |
@@ -536,7 +537,7 @@ suite plus in-game visual confirmation, since no suite executes the GPU.
 | **v2** | Closed-loop frame-time budget replacing `cap × 60` (P-9's extension roadmap) once ES-18 removes the main-thread item cost |
 | **v3+** | Cubic chunks (Tier C) on ES-18's 3D-keyed sections — own design doc |
 
-### 7.1 Execution packets — ES-1, ES-2, ES-6.1 (planned 2026-10-02, not executed)
+### 7.1 Execution packets — ES-1, ES-2, ES-6.1 (planned 2026-10-02; ES-1 and ES-2 shipped 2026-10-02, ES-6.1 open)
 
 Written with the `create-implementation-plan` protocol (fact sweep → draft → adversarial review →
 decision menu, settled 2026-10-02) so a future session can execute them directly. **Re-verify
@@ -690,6 +691,11 @@ this machine maps back to exactly 10 / 32; versus the stale state, every device'
 and its mesh budget falls ~10 % — OM-1's June relative mapping restored, not a new rate. The new statistic
 still earned its place: it discarded two contended mesh batches (1.46–1.49 ms) in that capture.
 
+**In-game gate passed (2026-10-02).** On the re-anchored IL2CPP Master build, fresh cold launches resolved
+**32 light / 10 mesh** every time; the four launches whose `Player.log` survived read light anchors
+1.304–1.322 ms and mesh anchors 0.854–0.869 ms (light rounds down to 31 only above ≈1.331 ms), and the fresh
+`settings.json` was stamped `calibrationVersion 2` with the probe values unchanged.
+
 #### ES-6.1 — price the redundant `OnDataPopulated` rescan before touching it
 
 **Goal.** Decide with numbers whether skipping the rescan on visual re-attach is worth removing the safety
@@ -815,6 +821,11 @@ the Editor (Mono), so it can only clear the IL2CPP bar one way: a number below 0
 
 ## Document History
 
+* **v1.1** - `ES-1` and `ES-2` executed and in-game confirmed (2026-10-02). ES-1: the startup load wait falls
+  from ≈5 to <1 ms per chunk, with an open finding that the new-world coroutine got ≈2 s slower (attribution
+  owed to ES-0). ES-2: the packet's warm-up-tail premise refuted — the 15 light jobs came from a stale OM-1
+  reference — and the references re-anchored; the cold-launch gate resolves 32 / 10. ES-6.1's benchmark
+  found not to replicate today's scan (correction in its packet). §8 item 7 updated.
 * **v1.0** - Initial draft: six-area code sweep (startup, generation/storage, lighting, frame loop + GC,
   meshing/rendering, external research incl. the Incandescent Games pipeline), `ES-0`…`ES-25` in four
   tiers, two-track architecture decision (native chunk store + GPU-driven renderer), hypothesis H-1
