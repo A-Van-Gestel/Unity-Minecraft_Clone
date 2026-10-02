@@ -1,8 +1,9 @@
 # Performance Improvements Report
 
-**Version:** 1.8  
-**Date:** 2026-08-15  
-**Status:** **Open backlog.** 31 items open, 30 complete, 1 deferred (⏸️). Completed items keep their ✅
+**Version:** 1.9  
+**Date:** 2026-10-02  
+**Status:** **Open backlog.** 31 items open, 30 complete, 1 deferred (⏸️), plus 10 not-yet-audited systems
+listed as `AC-*` audit tasks (§ Audit coverage gaps). Completed items keep their ✅
 row in the master summary table; their detail sections live in
 [`../Archived/PERFORMANCE_IMPROVEMENTS_COMPLETED.md`](../Archived/PERFORMANCE_IMPROVEMENTS_COMPLETED.md).
 A **⏸️** row is analyzed but deliberately not implemented — its detail section **stays here** (it is not
@@ -77,6 +78,10 @@ plus the standalone test files (`VoxelMetadataUtilityTests`, `FastNoiseLiteTests
 **Relationship to other documents:**
 
 - `CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md` — deep-dive analysis of the chunk generation → lighting → meshing *pipeline* (per-job copies, backpressure, edge-check cascade), including implementation and incident history. Its open items are **summarized in the master table below (IDs `P-*`)** but their full analysis stays in that document — read it before implementing any `P-*` item.
+- [`ENGINE_SCALING_PERFORMANCE_ROADMAP.md`](ENGINE_SCALING_PERFORMANCE_ROADMAP.md) (`ES-*`, 2026-10-02) —
+  orders this report's open items (`SU-*`, `SL-*`, `OM-2/3`, `WG-*`, `P-1/3/5/7`, `GS-5/6`, `MR-8`) against
+  three symptoms (load time, traversal spikes, height/view-distance scaling) and adds the native chunk
+  store + GPU-driven renderer tracks. Item detail stays here; the ordering lives there.
 - `CODEBASE_IMPROVEMENTS.md` — non-performance modernization backlog (API cleanups). All performance items formerly tracked there have been **absorbed into this report** (IDs noted per entry).
 - `Documentation/Archived/CODEBASE_IMPROVEMENTS_COMPLETED.md` — historical record of completed items.
 - `Guides/GENERAL_OPTIMIZATION_GUIDE.md` — the *techniques* reference (pooling, stackalloc, inlining). This report tracks *specific instances* in the codebase where those techniques are not yet applied.
@@ -358,6 +363,140 @@ Not candidates (verified — do not re-flag these as rollback levers): `enableFa
 `Clouds._useClassicPattern` are player-facing feature toggles; world-scaling `Precise64` is the
 unconditional default with Classic as the opt-in; the worldgen/HUD/diagnostic bools are intentional
 options.
+
+---
+
+## Audit coverage gaps — systems not yet audited (`AC-*`, eighth-pass candidates)
+
+The seven audit passes above ended on 2026-07-02. Everything shipped since then has never had a
+performance pass, and the 2026-10-02 engine-scaling sweeps
+([`ENGINE_SCALING_PERFORMANCE_ROADMAP.md`](ENGINE_SCALING_PERFORMANCE_ROADMAP.md)) deliberately covered
+only the chunk pipeline, rendering, the `World.Update` frame loop and instrumentation. This section is the
+**pickup list** for those remaining systems. Each `AC-*` row is an *audit task*, not a finding: its
+"known" column holds only facts verified in code on 2026-10-02, and no benefit is claimed for any of them.
+
+**How to pick one up:** run a dedicated analysis of that system (static review + measurement through the
+`perf-benchmark` skill, using the timing slots and counters the planned
+[`PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md`](PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md) adds — every
+system below has **zero** timing today); write the capture to `Documentation/Performance/` and file what
+it finds as new rows in this report (or the system's own design doc). Then mark the `AC-*` row ✅ with the
+date and a link — **the row stays**, like every other row here, so the ID keeps resolving.
+
+| ID | System | Main files | Known today (verified 2026-10-02) | Measure first | Constraints / do not re-propose | Status |
+|---|---|---|---|---|---|---|
+| **AC-1** | **Audio engine** (S0–S11) | `Audio/` (~4.8 k lines): `AmbienceResolution` 710, `AmbienceDirector` 694, `FluidEmitterDirector` 514, `SoundManager` 512, `MusicScheduler` 405, `MusicResolution` 386, `FluidEmitterResolution` 363, `FluidEmitterScanner` 265, `FootfallTracker` 185, `PlayerFootsteps` 160 | Five per-frame `Update()` loops (`AmbienceDirector.cs:262`, `FluidEmitterDirector.cs:154`, `MusicScheduler.cs:182`, `PlayerFootsteps.cs:52`, `SoundManager.cs:162`). The fluid-emitter scan is Burst, off-thread, on reused `Persistent` scratch (`FluidEmitterScanner.cs:246–261`), but its main-thread snapshot copies up to 48 sections × 16 KB (≈768 KB) per scan at a ~0.75 s cadence — `SOUND_ENGINE_DESIGN.md` §5.2 says cadence/radius are "tuned against the profiler", and no capture exists. 394 clips import as Decompress On Load, 6 stream | Per-director ms; scan snapshot ms and its periodic spike; live `AudioSource` count; clip memory (Memory Profiler) | `AU-5` music Vorbis quality is **declined** — do not re-propose. Audible behavior is verified by ear, not suites | Static pass ✅ 2026-10-02 (§ AC-1 below); measurement pending |
+| **AC-2** | **Clouds** | `Clouds.cs` (935) | `clouds.UpdateClouds()` runs inside **every** `CheckViewDistance` call (`World.cs:4063`), i.e. inside the chunk-crossing frame, the engine's worst frame. `MR-9` (legacy mesh API) ✅ and `GS-7` (shader) are the only prior perf items | Rebuild ms per crossing; mesh size; whether it can be deferred or amortized | Feature backlog lives in `CLOUD_RENDERING_IMPROVEMENTS_REPORT.md` (`CL-*`) | Static pass ✅ 2026-10-02 (§ AC-2 below) — the crossing-frame premise was refuted; measurement pending |
+| **AC-3** | **Underwater / submersion** | `World.cs` (`TryResolveEyeCell`, `MeasureHorizontalExtent` `:5249`), `Helpers/EyeSubmersion.cs`, `Rendering/UnderwaterOverlayRendererFeature`, `UnderwaterOverlay.shader` | The horizontal-extent voxel scan runs on every submersion query while the eye is under the surface (`World.cs:5158–5163` calls it "the expensive part of this query"); a fullscreen overlay pass runs after transparents and reads the depth copy | CPU ms per query while swimming; overlay GPU ms | `VX-5` is the named replacement for the extent box (`UNDERWATER_AND_SUBMERSION_RENDERING.md`); `UW-5` is paused — never rebuild the screen-space band | — |
+| **AC-4** | **UI blur backdrop** | `UIBandCompositeRendererFeature`, `UIBlurBlit.shader`, `MaskedUIBlur.shader` | Multi-pass Kawase blur whenever a blurred panel or HUD band is visible; `UI_BUGS.md` #08 (shared material across iterations) still open | GPU ms with menus/HUD bands up; blur render-target memory | `Architecture/UI_BLUR_BACKDROP_SYSTEM.md` is the source of truth; stencil masks cannot clip in the band pass | — |
+| **AC-5** | **Fluid-entity physics + player physics** | `Physics/VoxelRigidbody.cs`, `Physics/FluidContact.cs`, `Helpers/FluidSurfaceResolver.cs` | Fluid-entity physics shipped **after** the 2026-08-04 physics audit (`PH-1`/`PH-2`); `PhysicsQueryStats` counters exist only in the Instrumented build variant; physics time is otherwise buried in the FixedUpdate bucket | FixedUpdate share; fluid-contact queries per tick; cost per future entity (scales linearly with entity count) | Fluid physics has 8 locked decisions in its design history — read them before proposing changes | — |
+| **AC-6** | **Sky, sun, day/night, bloom** | `SkyboxShader.shader`, `Sky/`, the post-processing profile | Per-pixel skybox shader including the sun glare; per-frame global shader updates from the day/night cycle; Bloom active in the post profile | GPU ms of the skybox and bloom at 1440p; per-frame CPU cost of the global updates | Sun glare belongs to the **skybox shader**, never URP bloom (`SN-*`); bloom gates post-processing and its render-pass event | — |
+| **AC-7** | **Contact shadows + foliage sway** | `MeshGenerationJob.cs:874–922` (sub-quads), the block shaders' sway path | Sub-quad tessellation costs 1.4–1.7× world vertices at N = 2 (`SILHOUETTE_CONTACT_SHADOWS.md` §8) — the shared-vertex fix is already filed as roadmap `ES-25` item 4. The sway vertex-shader cost has never been measured | Vertex count/frame with contact shadows on vs off; vertex-shader GPU ms with sway | `SS-3` ships default-OFF; no per-voxel sway de-sync (`FL-*`) | — |
+| **AC-8** | **Asset and GPU memory** | URP asset, render targets, block atlas, audio clips, shader variants, section meshes | Render targets: HDR 32-bit, MSAA 2×, plus opaque texture and depth copy (`VoxelEngine-URP-Asset.asset:22–28`); 416 Decompress On Load one-shot clips (19.3 MB PCM once all have played, § AC-1); per-resident-chunk mesh memory at 32 B/vertex — none of it ever measured as a budget | A Memory Profiler snapshot (`com.unity.memoryprofiler` 1.1.12 is installed) at vd 10 and vd 32, broken down by category | `AU-4` font atlases and `AU-5` music quality are **declined** — do not re-propose | — |
+| **AC-9** | **Quit / save path** | `World.cs` `SaveAllModifiedChunks` (`:5653`, called on quit at `:726`), `ChunkStorageManager` | `ChunkData.Populate` marks every generated chunk modified (`ChunkData.cs:395`), so quit saves every generated chunk still resident or pending (5 333 observed at one quit) through the synchronous flush | Quit latency against session length and view distance | Depends on roadmap `ES-10`'s open decision (keep saving unmodified terrain as a cache, or not); CP-6's durability contract must hold | Static pass ✅ 2026-10-02 (§ AC-9 below) — found suspected data-loss bug `SERIALIZATION_BUGS.md` §15; measurement pending |
+| **AC-10** | **Cold UI, tooling and minor per-frame services** | Command console, toast notifications, `Input/TouchControls.cs` (598), `UI/SettingsUIGenerator.cs`, `UI/WorldSelectMenu.cs`, `DebugScreen.cs`; `BiomeTracker.Tick`, `AdvanceWorldTime`, `UpdateTeleportHold` | Event-driven or O(1) per frame by reading; `DebugScreen`'s own allocation leftovers are already `DT-4`; `ChunkLoadAnimation` is off by default | Only if PM-3's slots show any of them in a frame | — | — |
+
+### AC-1 — Audio engine: static pass (2026-10-02)
+
+Static reading only; every cost is an estimate until measured. **No steady-state GC allocation exists in
+`Audio/`** (every `foreach` is over arrays, no LINQ/lambdas/strings on per-frame or per-event paths), and
+nothing scales with view distance or chunk count — the emitter scan has a fixed radius and a 48-section
+cap and scales only with *sounding* fluid nearby (lava in every state, water only when level ≠ 0).
+Steady-state cost is ~150–250 native property calls per frame (~5–15 µs IL2CPP, inferred). Hypotheses,
+ranked by spike risk:
+
+1. **First-play decode hitch on one-shots.** All 416 one-shot clips are Decompress On Load with
+   `preloadAudioData: 0` and `loadInBackground: 0` (`BlockAudioImportPostprocessor.cs:111–113`), so the
+   first `Play()` of each clip likely reads and decodes on the main thread — ~0.1–0.5 ms for a median clip,
+   ~1–3 ms for the 4.7 s `Water_Jump_Big_*` splashes. Random variant picks keep first plays landing all
+   session. **Fix candidate:** `LoadAudioData()` on every `BlockSoundDatabase` clip during the loading
+   screen (≤ 19.3 MB, reached over a session anyway). **Confirm:** a cold-play counter
+   (`clip.loadState != Loaded` before `Play()` at `SoundManager.cs:314`) plus a marker around `Play()`.
+2. **Scan sync point.** `FluidEmitterDirector.cs:163` always `Complete()`s the previous scan, and
+   `FluidEmitterScanner.Begin` never calls `JobHandle.ScheduleBatchedJobs()` (`:115`) — under streaming
+   load the main thread may run the job itself (~0.2–0.4 ms). **Fix candidate:** batch-schedule, and
+   complete only once `IsCompleted` (fallback after N frames).
+3. **Scan snapshot.** Up to 48 × 16 KB = 768 KB managed → native every 0.75 s (~50–150 µs); worst case a
+   lava cave, because still lava counts. The palette is also copied every scan (`:249`). Shrinking it is
+   only worth doing if measured; the structural lever ("lava sounds in every state") is a design call.
+4. **One-off recount** after a palette rebind (`RecalculateEmitterFluidCount`, `:186`) — up to ~512 k
+   managed voxel reads in one scan (~1–2 ms).
+5. **Micro:** `ResolveBedMix` recomputed every frame though its inputs change every 0.25 s; bed spread and
+   min/max distance rewritten every frame (`AmbienceDirector.cs:574–576`); 7 `category + "Volume"`
+   strings built per volume-slider change (`AudioVolumes.cs:25`).
+
+Also recorded: 36 `AudioSource`s against 32 real voices with **no priorities set**, so a one-shot burst can
+virtualize music or a bed (a correctness-under-load item, not CPU); the audio system adds two
+`IsEmitterFluid` checks to every `ChunkData.SetVoxel` world-wide (`:965–969`) and one per non-air voxel in
+`RecalculateCounts` (ns each). Clip memory: one-shots 19.3 MB PCM once all have played (never unloaded),
+emitter loops 14.8 MB compressed-in-memory, music correctly streams (would be 445 MB decompressed).
+`AU-5` (music quality) stays declined.
+
+### AC-2 — Clouds: static pass (2026-10-02)
+
+**The premise of the AC-2 row is refuted by reading the code.** The `UpdateClouds()` call inside
+`CheckViewDistance` (`World.cs:4063`) is almost always a no-op sweep: cloud-tile edges sit at
+`64k + floorDrift`, so they move with the wind rather than with chunk crossings, and `Clouds.Update`
+already owns re-keying. That call allocates nothing and costs ~242 unchanged transform writes at vd 10
+(~0.03–0.1 ms IL2CPP, inferred) — removable, but small. Grid: `radiusTiles = ceil(max(vd,4)/2)` →
+(2r+1)² tiles per layer (242 renderers at vd 10, 2 178 at vd 32); all 64 pattern meshes per layer are
+built at `Initialize` (~750 k vertices total, ~18 MB, CPU copy likely kept). Where the cost actually is:
+
+1. **Closing the settings menu always rebuilds every cloud** — `OnSettingsChanged` → `Reinitialize()`
+   (`World.cs:3919–3926`, called from `PauseMenuController.OnSettingsClosed` whether or not anything
+   changed): 2 × 512² `CloudPatternJob` with a blocking `Complete()`, two 262 k-cell main-thread loops, 128
+   mesh builds through growing `List`s (~90 MB of garbage, inferred). **Fix candidate:** rebuild only when
+   the cloud style or seed changed.
+2. **About a third of the grid draws fully faded** — square grid, circular fade (≈35 % of tile area at
+   r = 5), and the shader has no `clip`, so invisible fragments are still shaded, blended and **write
+   depth**. **Fix candidate:** circle-cull tiles past the fade radius.
+3. **The cloud root moves every frame** (`PositionRoot`), invalidating every child renderer's matrix and
+   bounds (and SRP Batcher per-draw data) for 242–2 178 renderers. **Fix candidate:** feed the fractional
+   drift to the shader and move the root only on sweeps (🟡: fade and depth order use world position).
+4. **Drift wrap** every ~853 s / ~569 s releases and re-acquires 88–264 tiles per layer with no visible
+   change — shift dictionary keys instead.
+5. Mesh build lists unsized/unpooled; meshes left readable. Future `CL-3`/`CL-4` (infinite or evolving
+   patterns) would move mesh builds onto crossing frames, making a jobified build a requirement.
+
+Side finding (correctness, inferred, not perf): fully faded cloud fragments write depth before
+transparents draw, so from above the layer they could hide distant water — check against the `CL-*`
+backlog before filing.
+
+### AC-9 — Quit / save path: static pass (2026-10-02)
+
+Static reading plus one read-only scan of existing region headers; timings are inferred.
+
+- **Quit is a single frozen main-thread block.** `OnApplicationQuit` (`World.cs:707`) cancels the shutdown
+  token, sleeps 100 ms, then `SaveAllModifiedChunks(true)`: CP-6's failed-save flush first, then per chunk a
+  live (no-snapshot) serialize into one reused 256 KB buffer, LZ4 on the main thread, and a region write under
+  that file's lock (no per-chunk fsync); then `level.dat` (JSON) and the pending files rewritten in place
+  (`FileMode.Create`, no temp-and-rename), then one fsync per region on `Dispose`. Existing saves average
+  ~4–5 KB per chunk, so bytes are trivial and the cost is CPU: ~0.2–0.45 ms per chunk → **~1.3–2.8 s frozen
+  for 5 333 chunks**, linear in resident generated chunks (the unload saves keep the set bounded, so it does
+  not grow with session length).
+- **No autosave exists** (the `SaveAllModifiedChunks` docstring's "Auto-Save" describes nothing). Crash
+  durability is unload saves only; `level.dat` and the pending files are written only on manual save or quit.
+  A manual save is a one-frame burst: per chunk a full snapshot (~144 KB section rents) plus a 256 KB
+  `SerializationBufferPool` buffer taken *before* the await, so N in-flight saves check out up to ~1.3 GB of
+  buffers (unbounded `ConcurrentBag`, retained for the session).
+- **Correctness (filed, not perf):** the "Save & Quit" paths may lose edits CP-6 promises to keep — async-save
+  continuations need the blocked main thread, so canceled saves never stage. `SERIALIZATION_BUGS.md` §15.
+- **Saving unmodified terrain has no recorded rationale** — `ModifiedChunks.Add` in `Populate` dates from
+  2024 tutorial-era commits; three docs/comments (`World.cs:3825–3829`, `CHUNK_LIFECYCLE_PIPELINE.md`,
+  `CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md`) wrongly say unmodified chunks "regenerate from seed", when the
+  only unmodified chunks at unload are disk-loaded ones that reload from their earlier save.
+- **The main risk of saving only edits (ES-10):** structure blocks that spill into an unloaded neighbor go to
+  `pending_mods` and are applied over that neighbor's *saved* state on load (`World.cs:1349`, `:1385`); a
+  regenerated chunk would re-emit its spill over neighbors that already carry player edits (e.g. regrowing
+  removed leaves). Today's policy hides it because a chunk is generated exactly once.
+
+**Hypotheses / candidates (all must keep CP-6's locked decisions):** desktop quit through the synchronous path
+only (also closes §15's desktop half); stage canceled saves from the worker and retire the sleep; parallel
+quit serialization with one writer per region file (no SL-4 change); incremental autosave on the OM-3 bounded
+queue with temp-and-rename for the small files; a "generated-clean" flag (cache on unload, skip at quit) once
+the spill semantics are verified; buffer-pool rent-inside-worker, cap and size-to-need (avg payload ~5 KB vs a
+256 KB buffer). **ES-10 decision inputs:** keeping the cache preserves fast revisits, frozen terrain against
+worldgen changes and ES-11's value but keeps quit/unload cost ∝ resident chunks and feeds H-1; saving only
+edits halves unload I/O but needs the spill hazard solved first and shows worldgen changes as seams.
 
 ---
 
@@ -1348,6 +1487,16 @@ inherit a one-click `Validate All` that also flags stale-code runs automatically
 project's Document History convention, so they record what the commits changed rather than
 contemporaneous notes.*
 
+* **v1.9** - **Audit coverage gaps recorded as `AC-1`…`AC-10`** (2026-10-02). Every system shipped
+  after the seventh audit pass (2026-07-02) — audio, clouds, underwater, UI blur, fluid-entity physics,
+  sky/bloom, contact shadows + sway, asset/GPU memory, the quit/save path, and the cold UI/tooling tail —
+  is listed as an audit *task* with only code-verified facts and no claimed benefit, so a future session
+  can take one for a dedicated analysis and capture. The engine-scaling roadmap (`ES-*`), which covered
+  the chunk pipeline and rendering, was cross-linked in the relationship list. Same day, static passes
+  ran for **AC-1** (audio: no steady-state GC; top hypothesis = first-play decode hitches on 416
+  non-preloaded one-shots) and **AC-2** (clouds: the crossing-frame premise refuted; real costs are a full
+  rebuild on every settings close, ~35 % fully-faded tiles, and a per-frame root move) — both recorded as
+  detail sections, measurement still pending.
 * **v1.8** - **`GS-3` analyzed and ⏸️ deferred; `GS-7` filed** (2026-08-15). A full implementation
   analysis was run and the item was **not** implemented — the owner's call, on the grounds that no
   GPU-side bottleneck has been observed on ordinary non-fluid terrain, so a guaranteed visual change
@@ -1428,7 +1577,7 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-09-06 (rollback-flag census emptied — the three P-4 flags and P9-2's `enableConvergentEdgeCheckCascade` retired; the P-4 harness retargeted onto a frame-cap axis rather than collapsed, and the prefab-reserialize gotcha recorded; 2026-08-15: `GS-3` analyzed + ⏸️ deferred, `GS-7` filed; 2026-08-15: `VS-4` filed, `GS-4` verified + archived; 2026-08-12: `GS-4` corrections + locked decisions; 2026-08-09: `MR-8` VX-8 / `SS-*` interlocks; 2026-07-26: header completed, completed
+**Last Updated:** 2026-10-02 (`AC-1`…`AC-10` audit-coverage pickup list added; `ENGINE_SCALING_PERFORMANCE_ROADMAP.md` cross-linked; 2026-09-06: rollback-flag census emptied — the three P-4 flags and P9-2's `enableConvergentEdgeCheckCascade` retired; the P-4 harness retargeted onto a frame-cap axis rather than collapsed, and the prefab-reserialize gotcha recorded; 2026-08-15: `GS-3` analyzed + ⏸️ deferred, `GS-7` filed; 2026-08-15: `VS-4` filed, `GS-4` verified + archived; 2026-08-12: `GS-4` corrections + locked decisions; 2026-08-09: `MR-8` VX-8 / `SS-*` interlocks; 2026-07-26: header completed, completed
 items archived, 2,100 → 1,126 lines)  
 **Next Review:** the **GPU & Shaders** group is the live front: `GS-1` (pre-baked liquid noise) is the
 largest single GPU win available, `GS-2` (opaque-texture toggle) was deliberately left out of `GS-4`'s
@@ -1438,4 +1587,6 @@ the mobile wave alongside GS-1/GS-2. Note `GS-4` closed with
 its *predicted* benefits refuted — variant stripping measured at zero and MSAA offered no bandwidth
 saving — so treat the remaining GPU rows' benefit estimates as unmeasured until a capture says otherwise.
 On the next implementation wave, move each newly-finished item's detail section to the archive and leave
-its ✅ row behind. A fresh audit pass is also due: the last one was 2026-07-02.
+its ✅ row behind. A fresh audit pass is also due: the last one was 2026-07-02 — its scope is now the
+`AC-1`…`AC-10` pickup list (§ Audit coverage gaps), best run once the `PM-*` monitor gives those
+systems timing slots.

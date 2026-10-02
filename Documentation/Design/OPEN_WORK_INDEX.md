@@ -1,6 +1,6 @@
 # Open Work Index
 
-**Version:** 1.8  
+**Version:** 1.9  
 **Date:** 2026-09-17  
 **Status:** **Open backlog.** A pointer map, not a tracker — rows are added and removed as docs
 gain or lose open work, never as individual items move.  
@@ -64,7 +64,7 @@ would put the same item on the map twice and mis-sort the doc.
 
 | Area | Owning document | ID space | Open work |
 |---|---|---|---|
-| **Performance (master backlog)** | [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](PERFORMANCE_IMPROVEMENTS_REPORT.md) | `MR-` `LI-` `TG-` `P-` `GS-` … | 31 items open, 30 complete, 1 deferred ⏸️. Completed detail is archived; rows stay in the master table |
+| **Performance (master backlog)** | [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](PERFORMANCE_IMPROVEMENTS_REPORT.md) | `MR-` `LI-` `TG-` `P-` `GS-` … | 31 items open, 30 complete, 1 deferred ⏸️, plus `AC-1`…`AC-10` — systems not yet audited, listed as pickup tasks. Completed detail is archived; rows stay in the master table |
 | **World generation features** | [`WORLDGEN_FEATURE_IMPROVEMENTS_REPORT.md`](WORLDGEN_FEATURE_IMPROVEMENTS_REPORT.md) | `TF-` | Open backlog; the combined ranked TF/RF roadmap is at the end of that doc |
 | **Lighting & rendering features** | [`LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md`](LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md) | `RF-` | Open backlog. Performance counterparts (`LI-`, `GS-`) live in the performance report |
 | **Volumetric & ray-traced effects** | [`VOLUMETRIC_AND_RAYTRACED_EFFECTS_REPORT.md`](VOLUMETRIC_AND_RAYTRACED_EFFECTS_REPORT.md) | `VX-` | Open backlog. `VX-3` on `VX-5` is the named replacement for the submersion box |
@@ -77,6 +77,9 @@ would put the same item on the map twice and mis-sort the doc.
 | **Validation coverage** | [`VALIDATION_SUITE_COVERAGE_ROADMAP.md`](VALIDATION_SUITE_COVERAGE_ROADMAP.md) | `NS-` | Living backlog; `NS-4`, `NS-5`, `NS-7`, `NS-7b` complete |
 | **Lighting async bugs & harness** | [`LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md`](LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md) | `AS-` `HF-` | In progress; `AS-1` closed, `HF-1`…`HF-3` done |
 | **Lighting pipeline state** | [`LIGHTING_PIPELINE_STATE_REFACTOR.md`](LIGHTING_PIPELINE_STATE_REFACTOR.md) | `LP-` | `LP-1`…`LP-7` shipped; **`LP-8` remains** |
+| **Engine scaling (load time, spikes, height, view distance)** | [`ENGINE_SCALING_PERFORMANCE_ROADMAP.md`](ENGINE_SCALING_PERFORMANCE_ROADMAP.md) | `ES-` | Draft, unscheduled: `ES-0`…`ES-25`. Orders the master backlog's open items against the three symptoms and adds the native-store + GPU-renderer tracks |
+| **Performance monitor & logging** | [`PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md`](PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md) | `PM-` | Proposed, not implemented: `PM-0`…`PM-7`; PM-0 is a Master-build API verification probe |
+| **DOTS / ECS adoption** | [`DOTS_ECS_ADOPTION_ANALYSIS.md`](DOTS_ECS_ADOPTION_ANALYSIS.md) | `EC-` | Decision record; terrain verdicts settled, **`EC-6` (dynamic entities) deferred** behind its reopen triggers |
 | **Chunk pipeline performance** | [`CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md`](CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md) | §-numbered | §1.1 and the §3 backpressure family shipped; **§2 and §4 remain open** |
 | **Visibility culling** | [`VISIBILITY_CULLING_ARCHITECTURE.md`](VISIBILITY_CULLING_ARCHITECTURE.md) | Phases 0–3 | Phases 0 and 0.5 complete; **the culler itself (Phases 1–3) is unbuilt** |
 | **Voxel occlusion / AO** | [`VOXEL_OCCLUSION_REFACTOR.md`](VOXEL_OCCLUSION_REFACTOR.md) | `VO-` | `VO-0`…`VO-6`, `VO-8`, `VO-9a`, `VO-9b` done; **`VO-9` not started**, premise revised |
@@ -136,6 +139,10 @@ doc, not to grow an item row here.
 
 ## Document History
 
+* **v1.9** - `ES-*`, `PM-*` and `EC-*` rows added (2026-10-02): `ENGINE_SCALING_PERFORMANCE_ROADMAP.md`
+  owns the load-time / traversal-spike / scaling roadmap, `PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md`
+  the opt-in monitor and logger, and `DOTS_ECS_ADOPTION_ANALYSIS.md` the deferred ECS fit. The master
+  backlog's row gained its `AC-*` audit-coverage tasks.
 * **v1.8** - `UC-*` row repointed (2026-09-27): the migration design was promoted to
   `Architecture/UNITY_CLI_EDITOR_BRIDGE.md` and deleted; its unbuilt work lives in
   `UNITY_CLI_EXTENSIONS_ROADMAP.md`.
@@ -183,5 +190,5 @@ doc, not to grow an item row here.
 
 ---
 
-**Last Updated:** 2026-09-27  
+**Last Updated:** 2026-10-02  
 **Next Review:** when a document starts or stops owning open work
