@@ -13,6 +13,10 @@ not re-checked** and still carry their original 2.0 evidence.
 > the external `FPSCounter` reference plugin, and the `DebugScreen` members this overhaul *removed*. They
 > are historical rationale, not current-state claims.
 
+> **Planned successor layer:** [`../Design/PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md`](../Design/PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md)
+> (`PM-*`, proposed) keeps this always-on monitor as-is and adds opt-in per-frame, per-system, GC/GPU and
+> logging tiers on top of it. Nothing in this document changes until a PM phase ships.
+
 ## 1. Executive Summary
 
 The Voxel Engine previously relied on `ProfilerRecorder` and `1f / Time.unscaledDeltaTime` to measure performance in `DebugScreen.cs`. This approach had significant flaws:
