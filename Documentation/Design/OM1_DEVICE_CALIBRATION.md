@@ -1,13 +1,14 @@
 # OM-1 — Device Calibration of Throughput & Memory Budgets
 
-**Version:** 1.1  
+**Version:** 1.2  
 **Date:** 2026-06-27  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > **Status: Implemented (2026-06-27); player-build verified + reference re-anchored (2026-06-28) —
 > stays in `Design/` pending its final calibration pass.** A
-> first-launch IL2CPP run calibrated and wrote `settings.json` correctly, and `REFERENCE_*_MS` were
-> re-anchored from a 99-sample player-build capture (§3.2). **The one deliberate residual: the
+> first-launch IL2CPP run calibrated and wrote `settings.json` correctly, and the reference constants were
+> re-anchored from a player-build capture (§3.2) — again on 2026-10-02 (`ES-2`), with a robust probe
+> statistic. **The one deliberate residual: the
 > known-good budget column (§3.2, §3.3, §11) is still open** — each non-anchor device has to be
 > *playtested* to find its smooth budget before the implied-slice check can run and the
 > single-anchor-linear vs piecewise-linear question can be settled. The medians half of every future
@@ -137,26 +138,32 @@ today's constants. Exact breakpoints are tuning-only and live in one table in `D
 
 ### 3.2 Throughput budgets (benchmarked, first launch — reference-anchored)
 
-A first-launch micro-benchmark times the **real** mesh and lighting jobs (median ms/chunk) and maps
+A first-launch micro-benchmark times the **real** mesh and lighting jobs (an anchor in ms/chunk, §5) and maps
 that to a per-frame budget by **anchoring against a reference device**:
 
 ```
-maxMeshRebuildsPerFrame = clamp( round(DEFAULT_MESH_BUDGET  * REFERENCE_MESH_MS  / medianMeshMs),  FLOOR, fieldRangeMax )
-maxLightJobsPerFrame    = clamp( round(DEFAULT_LIGHT_BUDGET * REFERENCE_LIGHT_MS / medianLightMs), FLOOR, fieldRangeMax )
+maxMeshRebuildsPerFrame = clamp( round(DefaultMeshBudget  * ReferenceMeshMs  / anchorMeshMs),  FLOOR, fieldRangeMax )
+maxLightJobsPerFrame    = clamp( round(DefaultLightBudget * ReferenceLightMs / anchorLightMs), FLOOR, fieldRangeMax )
 ```
 
 - A device whose per-chunk time **equals the reference reproduces today's default budget exactly**
-  (`DEFAULT_MESH_BUDGET = 10`, `DEFAULT_LIGHT_BUDGET = 32`); slower devices scale down, faster devices up.
+  (`DefaultMeshBudget = 10`, `DefaultLightBudget = 32`); slower devices scale down, faster devices up.
 - The `clamp` upper bound is the field's **own** `[Range]` max — not a new restriction (§2 non-goal).
-- `REFERENCE_*_MS` are **where the irreducible hand-tuning lives** — centralized in `DeviceCalibration`.
+- `Reference*Ms` are **where the irreducible hand-tuning lives** — centralized in `DeviceCalibration`.
   They were chosen over an absolute "ms-per-frame time slice" model because the historical defaults are
   *count*-based, not time-budgeted (10 mesh × ~1.2 ms ≈ 12 ms/frame is not a real per-frame slice), so a
   time-slice model regressed the desktop. Anchoring guarantees the "desktop unchanged" goal by construction.
-- **Anchor values are player-build (IL2CPP) measured** on an i9-9900K (16 logical cores) / 64 GB / RTX
-  4070 Ti, 99-sample median (`BASELINE_CALIBRATION`, std ≈ 0.03 ms): `REFERENCE_MESH_MS = 0.952`,
-  `REFERENCE_LIGHT_MS = 0.604`. On that box this reproduces today's 10 / 32 exactly *in the player*. (The
-  initial editor-measured anchor of 1.233 / 1.110 was ~1.5–1.8× generous — every device's budget was
-  inflated by the editor-vs-player speed ratio; the player re-anchor removes that systematic bias.)
+- **Anchor values are player-build (IL2CPP Master) measured** on an i9-9900K (16 logical cores) / 64 GB /
+  RTX 4070 Ti: `ReferenceMeshMs = 0.855`, `ReferenceLightMs = 1.310`, the median of 75 `BASELINE_CALIBRATION`
+  anchors over 5 cold launches (2026-10-02; light spread ±0.5 %). On that box this reproduces today's
+  10 / 32 exactly *in the player*. History: the initial editor-measured 1.233 / 1.110 was ~1.5–1.8×
+  generous (editor-vs-player bias); the 2026-06-28 player anchor 0.952 / 0.604 then went stale as the
+  lighting job grew (the Bug 13–18 fixes, LI-2 band plumbing, VO-3/VO-4 per-face occlusion), until the
+  reference machine itself calibrated to 15 light jobs.
+- **A reference is only valid against the job code it was measured on.** A change that makes the lighting
+  or mesh job heavier on every device leaves budgets unchanged in intent but lowers them all through a
+  stale reference, and nothing detects it. Re-anchor (§5.1) after any change to either job's cost, and
+  bump `CalibrationVersion` so calibrated files re-probe.
 - This **single-anchor, inverse-proportional** model (`budget ∝ 1/medianMs`) is a v1 simplification. It
   assumes the right budget scales *linearly* with raw job throughput across the whole device spectrum —
   unverified. §3.3 plans a multi-baseline generalization that **validates or replaces** that assumption.
@@ -210,6 +217,10 @@ Captured player-build medians (2026-06-28, `BASELINE_CALIBRATION` 99-sample), so
 > The **Lenovo Legion 5** capture was taken with the *pre-re-anchor* constants (1.233 / 1.110), so its logged
 > 13 / 50 is stale; medians are anchor-independent and under the re-anchored model it resolves to 10 / 27.
 
+> **All four rows predate the 2026-10-02 re-anchor:** they were taken on the June job code with the old
+> median statistic, so they are not comparable against `ReferenceMeshMs` / `ReferenceLightMs` (the anchor
+> device's own light time rose 2.17× since). Re-capture a device before using its row as a baseline.
+
 **Linearity self-check — the diagnostic the multi-baseline buys for free.** Each baseline implies an
 effective per-frame "slice" `S_i = knownGoodBudget_i × medianMs_i`. Under the single-anchor model every
 `S_i` is identical by construction. Compare the captured ones:
@@ -246,6 +257,11 @@ multi-point by construction (a function, not an anchor), so they need no baselin
 - **Recalibration:** auto-run on `calibrationVersion` bump, plus an explicit **"Recalibrate
   Performance"** action (Dev menu and/or Settings tab) that clears the calibrated fields and re-runs —
   covers hardware swaps and lets a user reset after over-tweaking.
+  - *Upgrade merge (as built, `ES-2`):* a version-bump re-probe of an already-calibrated file
+    (`calibrationVersion` ≥ 1) keeps, per field, the higher of the stored and probed value
+    (`DeviceCalibration.MergeForRecalibration`), since a stored value above the probe may be a hand-tuned
+    budget. A never-calibrated file (version 0) and an explicit same-version recalibration take the probe
+    as-is. The `Device-calibrated budgets (OM-1)` log line always prints the raw probe result.
   - *Apply semantics (as built):* the per-frame budgets and the in-flight mesh cap are re-read from
     settings each frame and take effect immediately, but `chunkJobArrayPoolRetention` is captured once at
     `ChunkJobArrayPool` construction (`WorldJobManager` init), so a changed retention **applies on the
@@ -258,10 +274,13 @@ multi-point by construction (a function, not an anchor), so they need no baselin
 
 `StartupCalibrationProbe` — headless (not a scene `MonoBehaviour`), short, run-once:
 
-1. **Warmup iteration (discarded)** absorbs first-run Burst compilation of the two jobs.
-2. **Median over K iterations** of one representative mesh job + one lighting job on a **fixed**
-   (deterministic, not random) voxel pattern.
-3. Returns `medianMeshMs`, `medianLightMs`.
+1. **Warmup (discarded)**, alternating the two legs, until each has run ≥ 8 iterations and ≥ 20 ms — absorbs
+   first-run Burst compilation and other one-time costs.
+2. **3 batches × 11 samples per leg, legs alternating batch by batch**, of one representative mesh job + one
+   lighting job on a **fixed** (deterministic, not random) voxel pattern.
+3. Each leg's **anchor = minimum of its batch medians**: a batch median rejects isolated spikes, and the
+   fastest batch rejects a contention window that covered a whole batch. Returns the two anchors, and logs one
+   line per leg (anchor, batch medians, min / median / max / mean / std) in every build.
 
 **Reuse — `IsolatedJobProbe` (mesh shared; lighting self-contained — as built).** The mesh leg goes
 through a shared `IsolatedJobProbe.ScheduleMesh` that owns the `MeshGenerationJob` field wiring and takes
@@ -281,21 +300,22 @@ duplication of job-field wiring on the lighting side, in exchange for leaving th
 > calibrator must also pass *editor* job-safety, so `MeshProbeInput` carries optional light maps: the
 > benchmark leaves them `default` (unchanged behavior), the calibrator supplies zero-filled maps.
 
-**Determinism mitigations & limits.** Warmup + median + fixed pattern stabilize the result (measured
-variance < 0.01 ms across runs on the reference desktop — well within the ±1 budget acceptance gate, §8).
+**Determinism mitigations & limits.** Warmup + min-of-batch-medians + fixed pattern stabilize the result
+(light anchor 1.310–1.317 ms across 5 cold launches on the reference desktop, 2026-10-02 — well within the ±1
+budget acceptance gate, §8; the statistic discarded two contended mesh batches in that capture).
 A short first-launch run cannot capture sustained thermal throttling — accepted, and the reason
 "Recalibrate" exists (`SettingsManager.RecalibrateDevice()`).
 
 ### 5.1 Precision-capture mode & on-device output (`BASELINE_CALIBRATION`)
 
-Re-anchoring `REFERENCE_*_MS` (§3.2) and harvesting §3.3 multi-baseline rows both need a *clean*
+Re-anchoring `Reference*Ms` (§3.2) and harvesting §3.3 multi-baseline rows both need a *clean*
 per-device measurement. `StartupCalibrationProbe.BASELINE_CALIBRATION` (a compile-time `const bool`, off
 for shipping) is the opt-in precision mode:
 
-- Raises the iteration counts (8 warmup + 99 measured vs 2 + 7) to drive down the median's noise floor;
-  the counts fold at compile time (`const ? :`), so the shipping path keeps zero runtime branch.
-- Logs each leg's full distribution (`min / median / max / mean / std`) so the noise floor is *visible* —
-  a tight `std` means the median is a trustworthy anchor.
+- Repeats the whole shipping measurement 15 times after one warmup and anchors on the **median of the
+  repetition anchors** — the typical value of the *same statistic* a shipping launch computes, which is the
+  only kind of value a reference may hold. The count folds at compile time (`const ? :`).
+- The capture file lists every repetition's distribution; repetition 1 is what a shipping launch measures.
 - **Persists a self-contained capture file** (device specs + per-leg distribution + reference constants +
   resolved budgets) via `DeviceCalibration.WriteBaselineReport` → the shared
   `BenchmarkEnvironment.WriteReportToDisk`, so the data can be harvested off devices whose logs are
@@ -434,7 +454,7 @@ OM-1 needs a third caller (the calibrator), so unify into one **runtime** factor
   defaults exactly (10 / 32) and memory caps == `512` / `20`. *In-editor* the same box now resolves
   *lower* (editor Burst is ~1.5–1.8× slower than the player it is anchored to) — expected, not a regression,
   since the shipped path is the player build.
-- **Forced low-spec:** debug override feeding the calibrator a high `medianMeshMs` / low
+- **Forced low-spec:** debug override feeding the calibrator a high mesh anchor / low
   `systemMemorySize` → confirm small budgets propagate into `World`, the pool, and `settings.json`.
   Doubles as the report's "test on a memory-capped device" stand-in without hardware.
 - **Determinism:** repeat the probe N times; assert budget variance ≤ ±1. If noisy, raise K / warmup.
@@ -479,6 +499,11 @@ the calibration.
 project's Document History convention, so they record what the commits changed rather than
 contemporaneous notes.*
 
+* **v1.2** - `ES-2` (2026-10-02): probe anchor changed from a 7-sample median to the minimum of 3 alternating
+  batch medians (warmup ≥ 8 iterations and ≥ 20 ms); `BASELINE_CALIBRATION` repeats that statistic; references
+  re-anchored to 0.855 / 1.310 after the capture showed the June values stale against today's lighting job
+  (the reference machine had calibrated to 15 light jobs); `CalibrationVersion` 1 → 2 with a keep-higher
+  upgrade merge; §3.3 rows flagged as pre-re-anchor.
 * **v1.1** - Mandatory header completed (2026-07-26): `Version`/`Date`/`Target` added, and the status
   line corrected to state the outstanding work explicitly — it previously read as fully closed, while
   §3.2/§3.3/§11 record that the **known-good budget column is still open** pending a manual per-device

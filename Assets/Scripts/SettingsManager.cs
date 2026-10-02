@@ -1093,6 +1093,9 @@ public static class SettingsManager
     /// the next launch retries. This is deliberate: the probe is most likely to fail (e.g. low-memory OOM)
     /// on exactly the constrained devices OM-1 must scale down, and stamping on failure would latch the
     /// desktop defaults onto them with no automatic retry.</para>
+    /// <para>On a calibration-version upgrade of an already-calibrated file, each field keeps the higher
+    /// of its stored and probed value (<see cref="DeviceCalibration.MergeForRecalibration"/>), so a
+    /// hand-raised budget survives the re-probe.</para>
     /// </summary>
     /// <param name="settings">The settings instance to seed in place.</param>
     /// <returns><c>true</c> only if calibration succeeded (the caller should persist); <c>false</c> if it
@@ -1103,14 +1106,25 @@ public static class SettingsManager
 
         try
         {
-            CalibrationResult result = DeviceCalibration.Resolve();
+            CalibrationResult probed = DeviceCalibration.Resolve();
+            CalibrationResult stored = new CalibrationResult(settings.chunkJobArrayPoolRetention,
+                settings.maxInFlightMeshJobs, settings.maxInFlightGenerationJobs,
+                settings.maxLightJobsPerFrame, settings.maxMeshRebuildsPerFrame);
+            CalibrationResult result = DeviceCalibration.MergeForRecalibration(settings.calibrationVersion,
+                DeviceCalibration.CalibrationVersion, stored, probed);
+
             settings.maxMeshRebuildsPerFrame = result.MaxMeshRebuildsPerFrame;
             settings.maxLightJobsPerFrame = result.MaxLightJobsPerFrame;
             settings.maxInFlightMeshJobs = result.MaxInFlightMeshJobs;
             settings.maxInFlightGenerationJobs = result.MaxInFlightGenerationJobs;
             settings.chunkJobArrayPoolRetention = result.JobArrayPoolRetention;
             settings.calibrationVersion = DeviceCalibration.CalibrationVersion;
-            Debug.Log($"[SettingsManager] Device-calibrated budgets (OM-1): {result}");
+
+            // The probe's own result is always logged, before any keep-higher merge, so a launch can be judged
+            // by what this device measured rather than by what the file already held.
+            Debug.Log($"[SettingsManager] Device-calibrated budgets (OM-1): {probed}");
+            if (!result.Equals(probed))
+                Debug.Log($"[SettingsManager] Kept higher stored budgets on calibration upgrade: {result}");
             return true;
         }
         catch (Exception e)

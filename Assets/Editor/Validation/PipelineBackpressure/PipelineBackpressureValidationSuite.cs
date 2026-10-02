@@ -39,7 +39,7 @@ namespace Editor.Validation.PipelineBackpressure
     /// and removing the
     /// <see cref="PipelineRegimeVerdict.MinOrderingTerminalTraces"/> floor reds the small-sample pair.</para>
     /// </summary>
-    public static class PipelineBackpressureValidationSuite
+    public static partial class PipelineBackpressureValidationSuite
     {
         // Representative thresholds; the gate only compares them, exact values are arbitrary.
         private const int CLOSE_AT = 256;
@@ -83,6 +83,8 @@ namespace Editor.Validation.PipelineBackpressure
                 new Scenario("B20 Work amplification: pre-delivery / post-delivery / wasted never cross (P9-0 §10 q1)", RunB20Amplification),
                 new Scenario("B21 Parked-time accumulation: idempotent park, multi-cycle sum, open interval at delivery (P9-0 §10 q4)", RunB21ParkedTime),
                 new Scenario("B22 Pass-cost attribution: phases stay disjoint, and unmeasured never renders as 0.0 ms (P9-0)", RunB22PassCostAttribution),
+                new Scenario("B23 OM-1 probe anchor: min of batch medians, reference identity (ES-2)", RunB23CalibrationAnchor),
+                new Scenario("B24 OM-1 budget map clamps + keep-higher calibration upgrade (ES-2)", RunB24CalibrationMapAndUpgrade),
             };
             return ValidationSuiteRunner.Execute("Pipeline Backpressure", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }

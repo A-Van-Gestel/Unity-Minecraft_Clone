@@ -67,7 +67,7 @@ namespace Config
         /// Bumped when the calibration formula changes; a persisted settings file with an older version
         /// is re-calibrated on next launch (without discarding unrelated user edits).
         /// </summary>
-        public const int CalibrationVersion = 1;
+        public const int CalibrationVersion = 2;
 
         // --- Memory tuning: retention = clamp(systemMemoryMb / MB_PER_RETAINED_BUFFER, floor, ceiling). ---
         // 16 GB -> 512 (today's constant), 8 GB -> 256, 4 GB -> 128, <3 GB -> floor.
@@ -89,16 +89,31 @@ namespace Config
         private const int INFLIGHT_GEN_FLOOR = 8;
 
         // --- Throughput tuning: reference-anchored scaling. ---
-        // budget = clamp(round(DEFAULT_BUDGET * REFERENCE_MS / medianJobMs), floor, ceiling).
-        // A device whose per-chunk job time equals the reference reproduces today's hand-tuned default
-        // budget exactly; slower devices scale down, faster devices up to the field's own [Range] max
-        // (never a new restriction). REFERENCE_*_MS are the one intentional hand-tuned knob — anchored on
-        // a player build (IL2CPP) on an i9-9900K (16 logical cores) / 64 GB / RTX 4070 Ti, 99-sample median
-        // (BASELINE_CALIBRATION capture, std ≈ 0.03 ms). On that box this reproduces today's 10 / 32.
-        private const int DEFAULT_MESH_BUDGET = 10; // today's Settings.maxMeshRebuildsPerFrame
-        private const int DEFAULT_LIGHT_BUDGET = 32; // today's Settings.maxLightJobsPerFrame
-        private const double REFERENCE_MESH_MS = 0.952;
-        private const double REFERENCE_LIGHT_MS = 0.604;
+        // budget = clamp(round(DefaultBudget * ReferenceMs / anchorMs), floor, ceiling): a device at the reference
+        // anchor gets the default exactly; slower devices scale down, faster ones up to the field's own [Range]
+        // max (never a new restriction).
+
+        /// <summary>The mesh budget a device at the reference anchor resolves to (today's
+        /// <c>Settings.maxMeshRebuildsPerFrame</c> default).</summary>
+        public const int DefaultMeshBudget = 10;
+
+        /// <summary>The light budget a device at the reference anchor resolves to (today's
+        /// <c>Settings.maxLightJobsPerFrame</c> default).</summary>
+        public const int DefaultLightBudget = 32;
+
+        /// <summary>
+        /// The reference machine's mesh-leg anchor (ms) — the model's one hand-tuned knob. Measured in an IL2CPP
+        /// Master player on an i9-9900K (16 logical cores) / 64 GB / RTX 4070 Ti: the median of 75
+        /// <c>BASELINE_CALIBRATION</c> anchors over 5 cold launches (2026-10-02). Valid only for the probe statistic
+        /// and job code it was measured with: a job that gets heavier on every device lowers every budget through
+        /// a stale reference, so re-anchor after any change to either job's cost.
+        /// </summary>
+        public const double ReferenceMeshMs = 0.855;
+
+        /// <summary>The reference machine's lighting-leg anchor (ms); same capture and validity as
+        /// <see cref="ReferenceMeshMs"/>.</summary>
+        public const double ReferenceLightMs = 1.310;
+
         private const int MESH_BUDGET_FLOOR = 2;
         private const int MESH_BUDGET_CEILING = 50; // Settings.maxMeshRebuildsPerFrame [Range(1,50)]
         private const int LIGHT_BUDGET_FLOOR = 4;
@@ -136,14 +151,13 @@ namespace Config
             double meshMs = probe.MeshMs;
             double lightMs = probe.LightMs;
 
-            // Raw probe times — the input to the reference-anchored model. Logged so the REFERENCE_*_MS
-            // constants can be re-anchored from a real player-build capture (they are currently editor-
-            // measured; the player build runs faster). See OM1_DEVICE_CALIBRATION.md §3.2.
-            Debug.Log($"[DeviceCalibration] Probe raw times: mesh={meshMs:F3} ms, light={lightMs:F3} ms " +
-                      $"(reference: mesh={REFERENCE_MESH_MS:F3} ms, light={REFERENCE_LIGHT_MS:F3} ms).");
+            // Probe anchors — the input to the reference-anchored model, beside the references they are
+            // compared against (player-build anchored; see OM1_DEVICE_CALIBRATION.md §3.2).
+            Debug.Log($"[DeviceCalibration] Probe anchors: mesh={meshMs:F3} ms, light={lightMs:F3} ms " +
+                      $"(reference: mesh={ReferenceMeshMs:F3} ms, light={ReferenceLightMs:F3} ms).");
 
-            int meshBudget = MapThroughputBudget(meshMs, DEFAULT_MESH_BUDGET, REFERENCE_MESH_MS, MESH_BUDGET_FLOOR, MESH_BUDGET_CEILING);
-            int lightBudget = MapThroughputBudget(lightMs, DEFAULT_LIGHT_BUDGET, REFERENCE_LIGHT_MS, LIGHT_BUDGET_FLOOR, LIGHT_BUDGET_CEILING);
+            int meshBudget = MapMeshBudget(meshMs);
+            int lightBudget = MapLightBudget(lightMs);
 
             CalibrationResult result = new CalibrationResult(retention, inFlightMesh, inFlightGen, lightBudget, meshBudget);
 
@@ -199,11 +213,62 @@ namespace Config
                 Mathf.RoundToInt(INFLIGHT_GEN_CEILING * (retention / (float)POOL_RETENTION_CEILING)),
                 INFLIGHT_GEN_FLOOR, INFLIGHT_GEN_CEILING);
 
-        private static int MapThroughputBudget(double medianMs, int defaultBudget, double referenceMs, int floor, int ceiling)
+        /// <summary>Maps a mesh-leg anchor to the per-frame mesh-rebuild budget.</summary>
+        /// <param name="anchorMs">The probe's mesh-leg anchor in milliseconds.</param>
+        /// <returns>The budget, clamped to the mesh floor and the field's range maximum.</returns>
+        public static int MapMeshBudget(double anchorMs) =>
+            MapThroughputBudget(anchorMs, DefaultMeshBudget, ReferenceMeshMs, MESH_BUDGET_FLOOR, MESH_BUDGET_CEILING);
+
+        /// <summary>Maps a lighting-leg anchor to the per-frame lighting-job budget.</summary>
+        /// <param name="anchorMs">The probe's lighting-leg anchor in milliseconds.</param>
+        /// <returns>The budget, clamped to the light floor and the field's range maximum.</returns>
+        public static int MapLightBudget(double anchorMs) =>
+            MapThroughputBudget(anchorMs, DefaultLightBudget, ReferenceLightMs, LIGHT_BUDGET_FLOOR, LIGHT_BUDGET_CEILING);
+
+        /// <summary>
+        /// The reference-anchored throughput model: <c>clamp(round(defaultBudget × referenceMs / anchorMs))</c>,
+        /// with a non-positive anchor (immeasurably fast) mapped to <paramref name="ceiling"/>.
+        /// </summary>
+        /// <param name="anchorMs">The device's probe anchor in milliseconds.</param>
+        /// <param name="defaultBudget">The budget a device at the reference resolves to.</param>
+        /// <param name="referenceMs">The reference machine's anchor in milliseconds.</param>
+        /// <param name="floor">The lowest budget returned.</param>
+        /// <param name="ceiling">The highest budget returned.</param>
+        /// <returns>The clamped budget.</returns>
+        public static int MapThroughputBudget(double anchorMs, int defaultBudget, double referenceMs, int floor, int ceiling)
         {
-            if (medianMs <= 0) return ceiling; // immeasurably fast — give it the field's max
-            int budget = (int)Math.Round(defaultBudget * (referenceMs / medianMs));
-            return Mathf.Clamp(budget, floor, ceiling);
+            if (anchorMs <= 0) return ceiling; // immeasurably fast — give it the field's max
+
+            // Clamp before the int cast: a tiny anchor's ratio exceeds int range, and the cast would wrap it
+            // negative and land it on the floor instead of the ceiling.
+            double budget = Math.Round(defaultBudget * (referenceMs / anchorMs));
+            return (int)Math.Min(Math.Max(budget, floor), ceiling);
+        }
+
+        /// <summary>
+        /// Combines a re-probe with the budgets already stored. On a calibration-version upgrade of a file
+        /// that was calibrated before (<paramref name="storedVersion"/> ≥ 1), each field keeps the higher of
+        /// its stored and probed value: a stored value above the probe may be a hand-tuned budget, which the
+        /// re-probe cannot tell apart from an earlier calibration. A fresh or never-calibrated file
+        /// (version 0) and an explicit recalibration at the current version take the probe as-is.
+        /// </summary>
+        /// <param name="storedVersion">The settings file's <c>calibrationVersion</c> before this probe.</param>
+        /// <param name="currentVersion">The formula version being applied (normally <see cref="CalibrationVersion"/>).</param>
+        /// <param name="stored">The budgets currently in the settings file.</param>
+        /// <param name="probed">The budgets this probe resolved.</param>
+        /// <returns>The budgets to write.</returns>
+        public static CalibrationResult MergeForRecalibration(int storedVersion, int currentVersion,
+            CalibrationResult stored, CalibrationResult probed)
+        {
+            bool upgradeOfCalibratedFile = storedVersion >= 1 && storedVersion < currentVersion;
+            if (!upgradeOfCalibratedFile) return probed;
+
+            return new CalibrationResult(
+                Math.Max(stored.JobArrayPoolRetention, probed.JobArrayPoolRetention),
+                Math.Max(stored.MaxInFlightMeshJobs, probed.MaxInFlightMeshJobs),
+                Math.Max(stored.MaxInFlightGenerationJobs, probed.MaxInFlightGenerationJobs),
+                Math.Max(stored.MaxLightJobsPerFrame, probed.MaxLightJobsPerFrame),
+                Math.Max(stored.MaxMeshRebuildsPerFrame, probed.MaxMeshRebuildsPerFrame));
         }
 
         /// <summary>
@@ -212,7 +277,7 @@ namespace Config
         /// <c>persistentDataPath/Benchmarks/</c>. Used only in precision-capture mode to harvest a
         /// re-anchor / multi-baseline data point off a device — notably Android, where the player log is
         /// awkward to read; the file is reachable via <c>adb pull</c> with no storage permissions. The
-        /// median ms here, paired with a playtested known-good budget, is one OM1 §3.3 baseline row.
+        /// anchor ms here, paired with a playtested known-good budget, is one OM1 §3.3 baseline row.
         /// </summary>
         /// <param name="probe">The probe's per-leg timing distributions.</param>
         /// <param name="result">The budgets this device resolved to.</param>
@@ -224,26 +289,34 @@ namespace Config
             sb.AppendLine($"CalibrationVer:   {CalibrationVersion}");
             sb.AppendLine();
             // Shared system/build description — crucially records Backend (IL2CPP/Mono) and Editor-vs-Player,
-            // the config that determines whether a capture is comparable to the REFERENCE_*_MS anchor (§3.2).
+            // the config that determines whether a capture is comparable to the Reference*Ms anchors (§3.2).
             sb.Append(BenchmarkEnvironment.DescribeSystem());
             sb.AppendLine();
             sb.AppendLine("=== Device (extra) ===");
             sb.AppendLine($"Model:          {SystemInfo.deviceModel}");
             sb.AppendLine($"GPU:            {SystemInfo.graphicsDeviceName}");
             sb.AppendLine();
-            sb.AppendLine("-- Probe distribution (median is the throughput anchor) --");
-            sb.AppendLine($"Mesh:   {probe.Mesh}");
-            sb.AppendLine($"Light:  {probe.Light}");
+            sb.AppendLine("-- Probe anchors (median of the per-repetition min-of-batch-medians) --");
+            sb.AppendLine($"Mesh anchor:   {probe.MeshMs:F3} ms over {probe.MeshRepetitions.Length} repetitions");
+            sb.AppendLine($"Light anchor:  {probe.LightMs:F3} ms over {probe.LightRepetitions.Length} repetitions");
             sb.AppendLine();
-            sb.AppendLine("-- Reference constants used (editor-anchored; see OM1 §3.2) --");
-            sb.AppendLine($"REFERENCE_MESH_MS:  {REFERENCE_MESH_MS:F3} ms  (default budget {DEFAULT_MESH_BUDGET})");
-            sb.AppendLine($"REFERENCE_LIGHT_MS: {REFERENCE_LIGHT_MS:F3} ms  (default budget {DEFAULT_LIGHT_BUDGET})");
+            sb.AppendLine("-- Per-repetition distributions (repetition 1 is what a shipping launch measures) --");
+            for (int r = 0; r < probe.MeshRepetitions.Length; r++)
+            {
+                sb.AppendLine($"#{r + 1,-2} Mesh:  {probe.MeshRepetitions[r]}");
+                sb.AppendLine($"    Light: {probe.LightRepetitions[r]}");
+            }
+
+            sb.AppendLine();
+            sb.AppendLine("-- Reference constants used (player-build anchored; see OM1 §3.2) --");
+            sb.AppendLine($"ReferenceMeshMs:  {ReferenceMeshMs:F3} ms  (default budget {DefaultMeshBudget})");
+            sb.AppendLine($"ReferenceLightMs: {ReferenceLightMs:F3} ms  (default budget {DefaultLightBudget})");
             sb.AppendLine();
             sb.AppendLine("-- Resolved budgets (this device) --");
             sb.AppendLine($"  {result}");
             sb.AppendLine();
-            sb.AppendLine("To re-anchor REFERENCE_*_MS: use the mesh/light medians above.");
-            sb.AppendLine("To add an OM1 §3.3 baseline row: pair those medians with the known-good budget");
+            sb.AppendLine("To re-anchor Reference*Ms: use the mesh/light anchors above (same statistic as shipping).");
+            sb.AppendLine("To add an OM1 §3.3 baseline row: pair those anchors with the known-good budget");
             sb.AppendLine("found by playtesting on this device.");
 
             // WriteReportToDisk routes to public Downloads on Android (MediaStore) and the Benchmarks

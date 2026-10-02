@@ -493,7 +493,7 @@ constants + migration change. Prerequisites: ES-13, ES-18, ES-19.
 |---|---|:---:|---|---|
 | **ES-0 — Measure** | Spike-visible capture, drain stamp, crossing slots, GC.Alloc capture | 🟢 | — | — |
 | **ES-1 — No frame-paced load** | Completion counter at `World.cs:1064` — execution packet §7.1 | 🟢 | — | ✅ 2026-10-02 (in-game) |
-| **ES-2 — Calibration** | Robust OM-1 lighting probe — execution packet §7.1 | 🟢 | — | — |
+| **ES-2 — Calibration** | Robust OM-1 lighting probe — execution packet §7.1 | 🟢 | — | ✅ Implemented (awaiting in-game) |
 | **ES-3 — Loading mode** | SU-1 + SU-2, pooled/banded/shared startup snapshots | 🟡 | ES-0 | — |
 | **ES-4 — First-Update burst** | Pool prewarm, lazy borders, async scene load | 🟢 | — | — |
 | **ES-5 — PSO warmup** | Shader state prewarm | 🟢 | — | — |
@@ -674,6 +674,22 @@ set higher by hand**, because a hand-tuned budget is intent the re-probe cannot 
 a desktop floor (only if step 5's cold-launch gate still fails), a re-probe at world handoff, or a settings
 button for the unused `RecalibrateDevice()`.
 
+**Executed — and the first assumption was refuted.** Steps 1–5 as planned, with three deviations: the
+helpers are `public static` (the suites compile into `Assembly-CSharp-Editor`, with no
+`InternalsVisibleTo`); the keep-higher merge applies only to files calibrated before (version ≥ 1), so a
+never-calibrated file still takes the probe; and `MapThroughputBudget` now clamps before its `int` cast
+(B24 found a tiny positive anchor wrapping to the floor). B23/B24 live in `Validate Pipeline Backpressure`;
+each of three prove-red mutations (pooled-median anchor, unconditional probe in the merge, a swapped merge
+field) reds only its own assertion.  
+The step-3 capture (IL2CPP Master, 5 cold launches × 15 repetitions) put the light anchor at
+**1.310–1.317 ms in every launch** (±0.5 %), the old 7-sample median (1.308) included — **there was no
+warm-up tail.** The June reference (0.604 ms) was stale: the lighting job grew ~2.17× on this machine since
+it was measured (Bug 13–18 fixes, LI-2 band plumbing, VO-3/VO-4), while meshing got ~10 % faster
+(0.952 → 0.855 ms). The references were re-anchored to **0.855 / 1.310 ms** (median of the 75 anchors), so
+this machine maps back to exactly 10 / 32; versus the stale state, every device's light budget rises ~2.17×
+and its mesh budget falls ~10 % — OM-1's June relative mapping restored, not a new rate. The new statistic
+still earned its place: it discarded two contended mesh batches (1.46–1.49 ms) in that capture.
+
 #### ES-6.1 — price the redundant `OnDataPopulated` rescan before touching it
 
 **Goal.** Decide with numbers whether skipping the rescan on visual re-attach is worth removing the safety
@@ -753,8 +769,11 @@ the unbudgeted SL-2 continuation); the rest of ES-6 (spreading activations, `DT-
    - `ChunkStorageManager.cs:21` says the save continuation resumes on a ThreadPool thread; under
      Unity's synchronization context it resumes on the main thread (`SERIALIZATION_BUGS.md` §15).
    - `World.cs` `SaveAllModifiedChunks` docstring mentions an "Auto-Save" that does not exist (AC-9).
-   - `DeviceCalibration.cs:139–141` calls the reference constants "editor-measured"; `:95–97` says IL2CPP
-     player, 99-sample median (ES-2 packet).
+   - ~~`DeviceCalibration.cs:139–141` calls the reference constants "editor-measured"; `:95–97` says IL2CPP
+     player, 99-sample median (ES-2 packet).~~ Fixed by ES-2.
+   - `CHUNK_PIPELINE_SCHEDULE_QUOTA_THROUGHPUT.md` §7.1 says a `CalibrationVersion` bump clobbers hand-edited
+     caps; since ES-2 a bump of an already-calibrated file only raises a field (keep-higher), so a
+     hand-*lowered* cap is the one that gets overwritten.
    - `World.cs:1185, 1190, 3471` describe the CP-1/LP-1/MP-1 probes as "dev/editor builds only"; they are
      gated on `UNITY_INCLUDE_INSTRUMENTATION`, so Development builds (Release code variant) compile them
      out — the DebugScreen "(dev)" rows read 0 there and the save-diagnostics toggle is shown but inert
