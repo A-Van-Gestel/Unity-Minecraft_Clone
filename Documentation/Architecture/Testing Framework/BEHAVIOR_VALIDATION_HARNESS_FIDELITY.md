@@ -379,6 +379,36 @@ driving production code that looks chunks up by coord inherits this requirement.
 the baseline reds). A scenario written alongside its fix and never observed red proves nothing — here it would
 have shipped two guards that guarded nothing.
 
+### BH-9 — Harness hygiene and coverage gaps found during ES-6.1 · **OPEN (filed 2026-10-02)** · not yet fixed
+
+Found while building **BH-B13** (the active-voxel registration contract,
+`BehaviorValidationSuite.Baseline.ActiveRegistration.cs`), which also added two affordances:
+`EnableModifyVoxel` (an opt-in `JobDataManager` built from the test palette, so a scenario can drive the
+production `ChunkData.ModifyVoxel`) and `WakeActiveNeighbors` (drives the production step-4 wake). Four open
+items:
+
+1. **The center `ChunkData` is never disposed** (found by reading the code; no leak warning seen in the console).
+   `BehaviorTestWorld.Dispose` disposes every neighbor but not `ChunkData`. `SyncFluidBucketToActives` registers
+   into the center's buckets (`Allocator.Persistent` `NativeHashSet`s) on every Burst-driver tick, so each such
+   scenario looks like it leaks up to two native sets. Fix: `ChunkData.Dispose()` in `Dispose`, then confirm with
+   native leak detection on. BH-B13 sidesteps it by building and disposing its own subjects.
+2. **BH-B13 checks registration, not routing to the right family bucket.** Its parity reads the public surface
+   (`IsVoxelActive`, `ActiveVoxels`, `GetActiveVoxelCount`), which treats grass and fluid buckets as one set.
+   Observed during its prove-red: with `ModifyVoxel`'s bucket add removed, the water → grass leg **stayed green**
+   (the voxel stayed in the fluid bucket), and other legs caught the mutation instead. Fix: assert the family per
+   voxel against `ChunkData.ClassifyFamily`, reading the `internal` buckets by reflection
+   (`ActiveVoxelScanBenchmark`'s `BucketCount` precedent).
+3. **§4's planned IDs collide with the suite's shipped ones.** The table below plans **BH-B9** (support cascade)
+   and **BH-B10** (`CanReplace` gate) as GATED and retires **BH-B8**. The suite instead shipped BH-B8 / BH-B9
+   (placeholder reads, Burst / managed), BH-B10 (the seam wake), and BH-B11–B13, none of which appear in §4.
+   IDs are never recycled, so a reader following "BH-B10" from a commit message lands on the wrong scenario.
+   Fix: renumber the two GATED rows to fresh IDs (marked as renumbered, not deleted) and add rows for the
+   shipped BH-B8–B13. The **Status** header's "8 baselines green" is stale in the same way: `Validate Behavior`
+   reported 18 on 2026-10-02.
+4. **§3 BH-3's apply-path table describes the 2026-06-20 code** (e.g. the `Chunk.AddActiveVoxel` row; that method
+   was deleted in ES-6.1). It is a dated audit record, so per the freeze rule it is **not** to be edited. Listed
+   here only so the next reader does not "fix" it.
+
 ---
 
 ## 4. Baseline scenarios (proposed BH-series)
