@@ -7,7 +7,7 @@ Versioned performance numbers, captured against a specific commit on a specific 
 | Kind | Suffix | What it is | Count |
 |------|--------|------------|-------|
 | **Baseline** | `*_BASELINE.md` | A "before" number for a system, captured so a later refactor can be shown not to regress it. Has a regression budget. | 5 |
-| **Benchmark / A-B capture** | `*_BENCHMARK.md` | A measurement taken to answer a question — usually "is this change worth shipping?" — ending in an explicit **GO / NO-GO** verdict, or in a **regime verdict** for instrumentation captures that ship no behavior change. | 24 |
+| **Benchmark / A-B capture** | `*_BENCHMARK.md` | A measurement taken to answer a question — usually "is this change worth shipping?" — ending in an explicit **GO / NO-GO** verdict, or in a **regime verdict** for instrumentation captures that ship no behavior change. | 25 |
 
 Baselines came first and the folder was originally named for them; A/B captures are now the large majority. The protocol below covers both, and the `perf-benchmark` skill owns the workflow.
 
@@ -84,6 +84,12 @@ Newest first within each arc. **Superseded** means a later capture withdrew or c
 | [`BEHAVIOR_TG4_FULLWORLD_FLUID_2026_06_23`](BEHAVIOR_TG4_FULLWORLD_FLUID_2026_06_23_BENCHMARK.md) | 2026-06-23 | Attribution gate — mesh-rebuild dominance **refuted**; the behavior tick owns the spike. |
 | [`BEHAVIOR_TG4_FLUID_TICK_2026_06_23`](BEHAVIOR_TG4_FLUID_TICK_2026_06_23_BENCHMARK.md) | 2026-06-23 | Profile gate — resolves toward TG-4's parallel direction for fluid. |
 | [`SEAM_WAKE_FLUID19_2026-07-27`](SEAM_WAKE_FLUID19_2026-07-27_BENCHMARK.md) | 2026-07-27 | **GO (screening)** for the pair-walk gate; ocean seam cost recorded, **not** gated — needs an IL2CPP fill-load capture. |
+
+### Chunk lifecycle — ES-\* engine scaling
+
+| Capture | Date | Status |
+|---------|------|--------|
+| [`CHUNK_LIFECYCLE_ES6_1_RESCAN_PRICE_2026-10-02`](CHUNK_LIFECYCLE_ES6_1_RESCAN_PRICE_2026-10-02_BENCHMARK.md) | 2026-10-02 | **GO (screening)** for ES-6.1 steps 2–3 — the shipped `OnDataPopulated` rescan costs 1.56 / 1.76 ms per vd-32 crossing on land (first view / re-entry) and 42.8 / 20.1 ms on flooded chunks in the Editor, above the 0.5 ms bar on every leg. |
 
 ### Meshing — MR-\*
 

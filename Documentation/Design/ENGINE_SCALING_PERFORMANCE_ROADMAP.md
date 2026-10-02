@@ -1,6 +1,6 @@
 # Engine Scaling Performance Roadmap
 
-**Version:** 1.1  
+**Version:** 1.2  
 **Date:** 2026-10-02  
 **Status:** In progress — `ES-1` and `ES-2` shipped (2026-10-02); the rest is a near-to-far horizon, not
 scheduled. Tier 1 items are execution-sized; Tier 2/3
@@ -498,7 +498,7 @@ constants + migration change. Prerequisites: ES-13, ES-18, ES-19.
 | **ES-3 — Loading mode** | SU-1 + SU-2, pooled/banded/shared startup snapshots | 🟡 | ES-0 | — |
 | **ES-4 — First-Update burst** | Pool prewarm, lazy borders, async scene load | 🟢 | — | — |
 | **ES-5 — PSO warmup** | Shader state prewarm | 🟢 | — | — |
-| **ES-6 — Crossing frame** | `OnDataPopulated` skip (price first — packet §7.1), spread activations, DT-3 | 🟡 | ES-0 | — |
+| **ES-6 — Crossing frame** | `OnDataPopulated` skip (price first — packet §7.1), spread activations, DT-3 | 🟡 | ES-0 | ES-6.1 priced: GO (2026-10-02) |
 | **ES-7 — Lighting cuts** | Slab fill, counts, band-clamped merge, remesh gating | 🟢 | ES-0 | — |
 | **ES-8 — Budgets** | `ApplyModifications`, SL-2 pump, merge ceiling | 🟡 | ES-0 | — |
 | **ES-9 — I/O path** | Offset-table probe, SL-1, section-ownership save, OM-3 | 🟡 | ES-0 | — |
@@ -537,7 +537,7 @@ suite plus in-game visual confirmation, since no suite executes the GPU.
 | **v2** | Closed-loop frame-time budget replacing `cap × 60` (P-9's extension roadmap) once ES-18 removes the main-thread item cost |
 | **v3+** | Cubic chunks (Tier C) on ES-18's 3D-keyed sections — own design doc |
 
-### 7.1 Execution packets — ES-1, ES-2, ES-6.1 (planned 2026-10-02; ES-1 and ES-2 shipped 2026-10-02, ES-6.1 open)
+### 7.1 Execution packets — ES-1, ES-2, ES-6.1 (planned 2026-10-02; ES-1 and ES-2 shipped 2026-10-02; ES-6.1 priced GO, steps 2–3 open)
 
 Written with the `create-implementation-plan` protocol (fact sweep → draft → adversarial review →
 decision menu, settled 2026-10-02) so a future session can execute them directly. **Re-verify
@@ -752,6 +752,16 @@ that replays the shipped loop over a sectioned `ChunkData` (`PopulateFromFlatten
 the Editor (Mono), so it can only clear the IL2CPP bar one way: a number below 0.5 ms per crossing is a safe
 "not material", one above it does not show IL2CPP crosses it.
 
+**Step 1 executed — GO for steps 2–3 (2026-10-02).** The `T_current` legs time the shipped
+`Chunk.OnDataPopulated` itself (an uninitialized `Chunk` plus a stub `World.Instance` carrying the real block
+database), with a bucket-count parity check against the job's list; the cave-heavy shape was deliberately
+skipped (owner decision — Land and Flooded already span the scan's two cost drivers). Per vd-32 crossing:
+Land **1.56 ms** first view / **1.76 ms** re-entry, Flooded **42.8 / 20.1 ms** — above the 0.5 ms bar on every
+leg, in the Editor. The water-heavy case would need an 85× / 40× backend speedup to fall under it, so the owner
+took GO without an IL2CPP confirmation. Report:
+[`CHUNK_LIFECYCLE_ES6_1_RESCAN_PRICE_2026-10-02_BENCHMARK.md`](../Performance/CHUNK_LIFECYCLE_ES6_1_RESCAN_PRICE_2026-10-02_BENCHMARK.md).
+Step 3 (1a + 1b, BH-B13, the re-entry soak, docs) is next, in its own session.
+
 ---
 
 ## 8. Verification checklist and open questions
@@ -821,6 +831,9 @@ the Editor (Mono), so it can only clear the IL2CPP bar one way: a number below 0
 
 ## Document History
 
+* **v1.2** - `ES-6.1` step 1 executed (2026-10-02): the shipped rescan priced in the Editor at 1.56–1.76 ms per
+  vd-32 crossing on land and 20–43 ms on flooded chunks, above the 0.5 ms bar on every leg — GO for steps 2–3,
+  cave-heavy shape skipped by decision. ES-6 row and §7.1 header updated.
 * **v1.1** - `ES-1` and `ES-2` executed and in-game confirmed (2026-10-02). ES-1: the startup load wait falls
   from ≈5 to <1 ms per chunk, with an open finding that the new-world coroutine got ≈2 s slower (attribution
   owed to ES-0). ES-2: the packet's warm-up-tail premise refuted — the 15 light jobs came from a stale OM-1
