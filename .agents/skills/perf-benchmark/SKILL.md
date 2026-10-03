@@ -1,6 +1,6 @@
 ---
 name: perf-benchmark
-description: Measure-and-verdict protocol for performance work — capture drift-corrected baselines, run the benchmark harnesses (runtime Assets/Scripts/Benchmarks for IL2CPP captures, editor Assets/Editor/Benchmarking micro A/Bs), write append-only Documentation/Performance reports with an explicit GO/NO-GO verdict, and gate shipping on frame-level wins. Use when the user asks to benchmark a change, capture a baseline, run a profile gate, re-measure after an optimization, write a benchmark report, or asks "did it actually get faster?". The burst-optimization skill owns making code fast; this skill owns proving the change paid off.
+description: Measure-and-verdict protocol for performance work — capture drift-corrected baselines, run the benchmark harnesses (runtime Assets/Scripts/Benchmarks for IL2CPP captures, editor Assets/Editor/Benchmarking micro A/Bs), write append-only Documentation/Performance reports with an explicit GO/NO-GO verdict, and gate shipping on frame-level wins. Use when the user asks to benchmark a change, capture a baseline, run a profile gate, re-measure after an optimization, write a benchmark report, run the benchmark unattended in a built IL2CPP / Master player, capture a Profiler or GC.Alloc profile from a player build, or asks "did it actually get faster?". The burst-optimization skill owns making code fast; this skill owns proving the change paid off.
 ---
 
 # Performance Benchmark & Profile-Gate Protocol
@@ -43,6 +43,9 @@ scene) and refuse to run against a live game world — follow `FluidTickBenchmar
 tick cadence with zero interference.
 
 ## Unattended runs (command line)
+
+The full player workflow — build, launch, attach the Profiler for a GC.Alloc capture, read the result,
+clean up — is [references/player-capture.md](references/player-capture.md). The options themselves:
 
 Any player build — Master included — starts a harness from the command line and exits when it is done:
 

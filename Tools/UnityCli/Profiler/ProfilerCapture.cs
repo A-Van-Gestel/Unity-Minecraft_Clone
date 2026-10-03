@@ -47,6 +47,32 @@ namespace UnityCli
         private static string s_token;
 
         /// <summary>
+        /// Points the Profiler at the first discovered connection whose identifier contains
+        /// <paramref name="identifierPart"/> — e.g. <c>WindowsPlayer</c> for a running development player. A
+        /// player takes a few seconds to appear after launch, so call this until it reports <c>connected</c>.
+        /// </summary>
+        /// <param name="identifierPart">Case-insensitive part of the connection identifier.</param>
+        /// <returns><c>connected …</c>, or <c>not found</c> with the identifiers currently listed.</returns>
+        public static string ConnectToPlayer(string identifierPart)
+        {
+            var seen = new List<string>();
+            foreach (int id in ProfilerDriver.GetAvailableProfilers())
+            {
+                string identifier = ProfilerDriver.GetConnectionIdentifier(id);
+                if (identifier.IndexOf(identifierPart, StringComparison.OrdinalIgnoreCase) < 0)
+                {
+                    seen.Add(identifier);
+                    continue;
+                }
+
+                ProfilerDriver.connectedProfiler = id;
+                return "connected " + ProfilerDriver.GetConnectionIdentifier(ProfilerDriver.connectedProfiler);
+            }
+
+            return "not found: '" + identifierPart + "' (listed: " + string.Join(", ", seen) + ")";
+        }
+
+        /// <summary>
         /// Clears all frames, turns on GC.Alloc call stacks and starts recording. The call-stack mode in force before
         /// the first arm is remembered and restored by the save or by <see cref="Disarm"/>.
         /// </summary>

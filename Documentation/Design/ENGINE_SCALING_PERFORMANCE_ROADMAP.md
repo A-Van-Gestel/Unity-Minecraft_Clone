@@ -315,7 +315,8 @@ PM-6; the bullets below are what ES needs from it.
 - One Development-build (not deep-profiling) Profiler capture of a 200 m/s generation flight with
   GC.Alloc callstacks, to attribute the ~142 KB/chunk. ✅ 2026-10-03 — 127.4 KB per generated chunk, 77 % one
   span copy in the save serializer (§2.2.1, ES-26). Re-run with `ProfilerCapture.ArmAutoStop` +
-  `ProfilerQueries.GcCallstacks` (`unity-editor` skill, `references/profiler.md`) to score ES-26/ES-27/ES-9.
+  `ProfilerQueries.GcCallstacks` (`unity-editor` skill, `references/profiler.md`) to score ES-26/ES-27/ES-9 —
+  end to end, no clicks, via the `perf-benchmark` skill's `references/player-capture.md` (Flow B).
 - Must report in Master IL2CPP (not dev-gated). Every other verdict here is scored against it.
 
 ### Tier 1a — startup quick wins

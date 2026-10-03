@@ -32,15 +32,18 @@ large capture can take longer than 30 s: add `--timeout_ms 240000 --timeout 260`
 
 | Entry         | `--args`                                                  | Does                                                                                   |
 |---------------|-----------------------------------------------------------|----------------------------------------------------------------------------------------|
+| `ConnectToPlayer` | `["WindowsPlayer"]`                                   | Points the Profiler at the first discovered connection matching the text (`connected …` / `not found …`) |
 | `ArmAutoStop` | `["marker", graceFrames, "ProfilerCaptures/<name>.data"]` | `Arm`, then an `EditorApplication.update` hook stops recording and saves `graceFrames` after the marker's last frame |
 | `Poll`        | `["", 0, ""]`                                             | Progress (`waiting …` / `SAVED …`); **reinstalls the hook** when a domain reload dropped it |
 | `Disarm`      | `[]`                                                      | Abandons an armed capture: removes the hook, stops recording, restores the call-stack mode |
 | `Arm`         | `[]`                                                      | Clears frames, sets GC.Alloc call stacks (`ProfilerDriver.memoryRecordMode`), starts recording — no auto-stop |
 
-**Capturing one benchmark phase:**
+**Capturing one benchmark phase** (in a built player, the end-to-end recipe — build, launch, connect, read the
+report — is the `perf-benchmark` skill's `references/player-capture.md`):
 
 1. Target: Play mode is `ProfilerDriver.connectedProfiler = -1`. A Development player (no autoconnect) needs
-   `ProfilerDriver.DirectIPConnect("127.0.0.1")` once it is running; it must be a real Development build.
+   `ConnectToPlayer ["WindowsPlayer"]` once it is running, repeated until `connected`; it must be a real
+   Development build.
 2. `ArmAutoStop` with the phase marker (e.g. `Benchmark.Generation.200mps`) — before or after entering Play mode.
 3. Start the run **muted** — a player with `-mc-mute` (`perf-benchmark` "Unattended runs"), Play mode with
    `unity command eval "Launch.LaunchSession.MuteForSession(); return 0;"` once playing — and keep a background shell loop polling (`until … grep -q SAVED; do sleep 5; done`). The poll
