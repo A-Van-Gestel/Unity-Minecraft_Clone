@@ -7,7 +7,7 @@ Versioned performance numbers, captured against a specific commit on a specific 
 | Kind | Suffix | What it is | Count |
 |------|--------|------------|-------|
 | **Baseline** | `*_BASELINE.md` | A "before" number for a system, captured so a later refactor can be shown not to regress it. Has a regression budget. | 5 |
-| **Benchmark / A-B capture** | `*_BENCHMARK.md` | A measurement taken to answer a question — usually "is this change worth shipping?" — ending in an explicit **GO / NO-GO** verdict, or in a **regime verdict** for instrumentation captures that ship no behavior change. | 25 |
+| **Benchmark / A-B capture** | `*_BENCHMARK.md` | A measurement taken to answer a question — usually "is this change worth shipping?" — ending in an explicit **GO / NO-GO** verdict, or in a **regime verdict** for instrumentation captures that ship no behavior change. | 26 |
 
 Baselines came first and the folder was originally named for them; A/B captures are now the large majority. The protocol below covers both, and the `perf-benchmark` skill owns the workflow.
 
@@ -89,6 +89,7 @@ Newest first within each arc. **Superseded** means a later capture withdrew or c
 
 | Capture | Date | Status |
 |---------|------|--------|
+| [`ENGINE_SCALING_ES0_GC_ATTRIBUTION_IL2CPP_2026-10-03`](ENGINE_SCALING_ES0_GC_ATTRIBUTION_IL2CPP_2026-10-03_BENCHMARK.md) | 2026-10-03 | **Current — attribution capture, no behavior change.** GC.Alloc call stacks over the 200 m/s phase in an IL2CPP Development (Master) player: 127.4 KB per generated chunk, 100 % attributed; 77 % is `BinaryWriter.Write(ReadOnlySpan<byte>)` copying section arrays in `ChunkSerializer.WriteSection` (ES-26), 82 % the unload save path, 80 % on ThreadPool threads. The baseline ES-26/ES-27/ES-9 are scored against. |
 | [`CHUNK_LIFECYCLE_ES6_1_RESCAN_PRICE_2026-10-02`](CHUNK_LIFECYCLE_ES6_1_RESCAN_PRICE_2026-10-02_BENCHMARK.md) | 2026-10-02 | **GO (screening)** for ES-6.1 steps 2–3 — the shipped `OnDataPopulated` rescan costs 1.56 / 1.76 ms per vd-32 crossing on land (first view / re-entry) and 42.8 / 20.1 ms on flooded chunks in the Editor, above the 0.5 ms bar on every leg. |
 
 ### Meshing — MR-\*

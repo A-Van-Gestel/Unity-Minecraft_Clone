@@ -1,8 +1,9 @@
 # Engine Scaling Performance Roadmap
 
-**Version:** 1.5  
+**Version:** 1.6  
 **Date:** 2026-10-02  
-**Status:** In progress — `ES-1`, `ES-2` and `ES-6.1` shipped (2026-10-02); the rest is a near-to-far horizon, not
+**Status:** In progress — `ES-1`, `ES-2` and `ES-6.1` shipped (2026-10-02); ES-0's GC.Alloc attribution captured
+(2026-10-03, §2.2.1 — added `ES-26`/`ES-27`); the rest is a near-to-far horizon, not
 scheduled. Tier 1 items are execution-sized; Tier 2/3
 items each need their own design or implementation plan. Re-verify the anchors named per item before
 starting (§8).  
@@ -122,14 +123,15 @@ No shader warmup exists (`GraphicsSettings.asset:41–45` `m_PreloadedShaders: [
 | **The benchmark cannot see a spike.** CPU/wall = 30-frame moving average; GC/frame = 60-frame moving average of positive `GC.GetTotalMemory` deltas — a frame where a collection ran records **0**; samples every 50 ms. No worst-frame, p99 or collection-count column exists | `PerformanceMonitor.cs:30–31, 87, 314–346` | verified |
 | Crossing work (`CheckViewDistance`, `UnloadChunks`) runs **outside every `WorldFrameProfiler` region** | `World.cs:2571–2575` | verified |
 | Generated chunks allocate **~142 KB managed per started chunk** at 200 m/s (47 MB/s); loaded chunks ~13 KB. Only ~1–3 KB/chunk is attributed in code — **the rest is unattributed** | `BenchmarkRun_2026-08-25` (IL2CPP Master, vd 10) | measured / inferred |
+| **Attributed 2026-10-03 (§2.2.1):** 127.4 KB of GC.Alloc per generated chunk at 200 m/s, 100 % resolved by call stack; **79.7 % on ThreadPool threads**. **77.3 % is one pattern** — `ChunkSerializer.WriteSection` passes each section array as `ReadOnlySpan<byte>` to `BinaryWriter.Write`, which copies it with `ToArray()` (ES-26); the unload save path as a whole is 81.8 % | [`ENGINE_SCALING_ES0_GC_ATTRIBUTION_IL2CPP_2026-10-03_BENCHMARK.md`](../Performance/ENGINE_SCALING_ES0_GC_ATTRIBUTION_IL2CPP_2026-10-03_BENCHMARK.md) | measured |
 | 200 m/s generation phase: avg GC 375.9 KB/frame, peak 1.2 MB, peak CPU 48.3 ms (smoothed), min FPS 20.4 | same | measured |
 | Managed heap 165–230 MB at vd 10 (512 MB peak), **~1.95 GB at vd 32**; roughly half is voxel arrays (24 KB per `ChunkSection`) | FP-4, FP-10 F6; `ChunkSection.cs:57–62` | measured / verified |
 | `Chunk.Reset` runs a full managed `OnDataPopulated` voxel scan for **every chunk entering view whose data is already populated** — the common case when LoadDistance > viewDistance — redundant, since the active buckets live on `ChunkData` | `Chunk.cs:151–154`, `:230–260` | verified |
 | Chunk borders created on every visual activation even when hidden (4 225 live at vd 32) | `World.cs:4171` | verified |
 | Unbudgeted main-thread passes: `ApplyModifications` (whole queue), lighting merge (2.705 ms/frame at 200 m/s), disk-hit populate continuation (`SL-2`), unload row + save snapshots (`SL-3`, `OM-3`) | `World.cs:3322`, `WorldJobManager.cs:1543`, `World.cs:1336`, `:3689` | verified / measured |
 | Every generated chunk is added to `ModifiedChunks`, so every generated chunk is serialized + saved on unload (5 333 chunks at quit) | `ChunkData.cs:395` | verified |
-| I/O path garbage: `Task.Run` closure + state machine per disk probe — **including misses on fresh terrain**, which also pay ≥1 frame of latency before generation is scheduled; `byte[]` payloads, stream wrappers, `ReadBytes(512)`, `ContinueWith` closure, `BitConverter.GetBytes`, padding `byte[]` | `ChunkStorageManager.cs:194`, `RegionFile.cs:137,167,246–266`, `ChunkSerializer.cs:102–112,233`, `World.cs:3839` | verified |
-| Smaller sources: `ExpandStructure` `yield` iterator per structure; `new List<VoxelMod>` per spill target; `new SpiralLoop()` per crossing; `_chunksToUpdateVisualization` grows unbounded while the visualizer is off (`DT-3`); ungated `[LIGHTING RESCUE]` log per unloaded chunk; `ProjectSettings` captures a script stack trace for `Debug.Log` | `StandardChunkGenerator.cs:867`, `ModificationManager.cs:38`, `World.cs:4201,3813`, `ProjectSettings.asset:57` | verified |
+| I/O path garbage: `Task.Run` closure + state machine per disk probe — **including misses on fresh terrain**, which also pay ≥1 frame of latency before generation is scheduled; `byte[]` payloads, stream wrappers, `ReadBytes(512)`, `ContinueWith` closure, `BitConverter.GetBytes`, padding `byte[]`. *Measured 2026-10-03:* the async/`Task` part ~5 KB per generated chunk, `RegionFile.SaveChunkData` 1.95 KB | `ChunkStorageManager.cs:194`, `RegionFile.cs:137,167,246–266`, `ChunkSerializer.cs:102–112,233`, `World.cs:3839` | verified |
+| Smaller sources: `ExpandStructure` `yield` iterator per structure; `new List<VoxelMod>` per spill target; `new SpiralLoop()` per crossing; `_chunksToUpdateVisualization` grows unbounded while the visualizer is off (`DT-3`); ungated `[LIGHTING RESCUE]` log per unloaded chunk; `ProjectSettings` captures a script stack trace for `Debug.Log`. *Measured 2026-10-03:* `ExpandStructure` is the **second-largest** site, 8.0 KB per generated chunk (one ~208 B iterator per structure marker, ~39 per chunk); the `[LIGHTING RESCUE]` log did not allocate in the IL2CPP window | `StandardChunkGenerator.cs:867`, `ModificationManager.cs:38`, `World.cs:4201,3813`, `ProjectSettings.asset:57` | verified |
 | Incremental GC is on (`gcIncremental: 1`); no `GC.Collect`/`UnloadUnusedAssets` anywhere; Standalone = IL2CPP Master | `ProjectSettings.asset:714,719,748` | verified |
 
 #### 2.2.1 Hypothesis H-1 — the unattributed ~142 KB per generated chunk is `ChunkSection` pool misses
@@ -184,6 +186,27 @@ generated chunk is still unattributed and lies elsewhere.** ES-0's per-frame GC 
 fallback, since PM-0 found no live allocation counter in Master — and a GC.Alloc callstack capture are the next
 instruments. ES-9 and ES-10 lose H-1 as their GC justification; their own cases (save ownership, persistence
 policy) stand or fall separately.
+
+**Attribution — 2026-10-03, ES-0 call-stack capture.** An IL2CPP Development (Master configuration) player, GC.Alloc
+call stacks on, the 200 m/s phase alone (`BenchmarkRun_2026-10-03_16-20-22`: 825 frames, 8 831 chunks generated).
+The run reproduces the problem — 131.4 KB per generated chunk by the same heap-delta method, +1 % on the Master runs —
+and GC.Alloc accounts for 96.9 % of that heap delta. **127.4 KB of GC.Alloc per generated chunk, every byte resolved
+to a call site:**
+
+| Call site | KB / generated chunk | Share | Owner |
+|---|---:|---:|---|
+| `ChunkSerializer.WriteSection` → `BinaryWriter.Write(ReadOnlySpan<byte>)` → `ReadOnlySpan<T>.ToArray()` (ThreadPool save) | **98.0** | **76.9 %** | **ES-26** (new) |
+| `StandardChunkGenerator.ExpandStructure` — one iterator per structure marker | 8.0 | 6.3 % | ES-9 |
+| `ChunkData.AddToSkylightQueue` / `AddToBlocklightQueue` — `Queue<T>` regrowth (merge, `ApplyModifications`) | 8.9 | 7.0 % | **ES-27** (new) |
+| `ChunkSection` constructor — section-pool misses, all in 16 frames | 3.1 | 2.4 % | — (pool growth bursts) |
+| Async I/O: `LoadChunkAsync` / `SaveChunkAsync` state machines, `Task.Run`, `UnloadChunks`' `ContinueWith`, `GetRegion`, `Serialize` | 4.7 | 3.7 % | ES-9 |
+| `RegionFile.SaveChunkData` | 1.95 | 1.5 % | ES-9 |
+| 34 further sites (rest of the save path, lighting-merge `List`/`HashSet` growth, per-frame UI/render) | 2.7 | 2.2 % | — |
+
+The **unload save path is 81.8 %** (104.2 KB per chunk) and 79.7 % of all bytes are allocated on ThreadPool threads —
+which is why every main-thread instrument missed it. The Editor (Mono) pass ranks the sites identically (138.7 KB per
+chunk, `WriteSection` 76.4 %). Full table, method and acceptance checks:
+[`ENGINE_SCALING_ES0_GC_ATTRIBUTION_IL2CPP_2026-10-03_BENCHMARK.md`](../Performance/ENGINE_SCALING_ES0_GC_ATTRIBUTION_IL2CPP_2026-10-03_BENCHMARK.md).
 
 ### 2.3 Per-item pipeline costs
 
@@ -290,7 +313,9 @@ PM-6; the bullets below are what ES needs from it.
 - A once-per-launch **drain stamp** (P-4's tail-inclusive drain predicate): ms to `_isWorldLoaded`, to
   drained, to frame time within 1.25× median for 2 s — splits the 30 s into before/after handoff.
 - One Development-build (not deep-profiling) Profiler capture of a 200 m/s generation flight with
-  GC.Alloc callstacks, to attribute the ~142 KB/chunk.
+  GC.Alloc callstacks, to attribute the ~142 KB/chunk. ✅ 2026-10-03 — 127.4 KB per generated chunk, 77 % one
+  span copy in the save serializer (§2.2.1, ES-26). Re-run with `ProfilerCapture.ArmAutoStop` +
+  `ProfilerQueries.GcCallstacks` (`unity-editor` skill, `references/profiler.md`) to score ES-26/ES-27/ES-9.
 - Must report in Master IL2CPP (not dev-gated). Every other verdict here is scored against it.
 
 ### Tier 1a — startup quick wins
@@ -363,12 +388,19 @@ pump, and move its `RecalculateCounts` to the deserialize thread via a flat opac
 - `ExpandStructure` iterator → pooled list fill; `ListPool` for pending-mod lists; gate the
   `[LIGHTING RESCUE]` log on `enableDiagnosticLogs`; confirm the shipping build profile's `Debug.Log`
   stack-trace setting (`ProjectSettings` says ScriptOnly; the 2026-08-15 lean build used MethodOnly).
+- *Measured 2026-10-03 (§2.2.1):* the sites this item owns total ~15 KB per generated chunk — `ExpandStructure`
+  8.0 KB, async/`Task` I/O 4.7 KB, `RegionFile.SaveChunkData` 1.95 KB. The section-ownership save is worth
+  0.45 KB of `Queue` growth in `CreateSerializationSnapshot` as garbage; its case is copying, not GC. The dominant
+  save-path cost is ES-26's, not this item's.
 
 **ES-10 — Decide what to persist (open decision).** 🟢 / 🟡. `ChunkData.Populate` marks every generated
 chunk modified (`ChunkData.cs:395`), so all generated terrain is serialized and written. Keeping it is a
 disk cache (re-entry skips generation and re-lighting); dropping it halves unload I/O and allocation and
 regenerates on return (~1.5 ms worker time + lighting). Also fixes the comment drift at
 `World.cs:3825–3829`, which assumes unmodified chunks exist on the persist-light-pending arm.
+*GC, measured 2026-10-03:* the unload save path is 104.2 KB of the 127.4 KB per generated chunk at 200 m/s, so
+dropping unmodified saves would remove ~82 % of traversal garbage — but ES-26 removes ~77 % without the persistence
+trade-off. Decide this item after ES-26, on disk I/O and re-entry cost.
 
 **ES-11 — Skip lighting on stable disk loads.** → `P-5` (⚠️ format bump + AOT step). 🟡 / 🟡.
 
@@ -387,6 +419,24 @@ SetPass, vertices/frame, GPU ms, and the shaders' "SRP Batcher: compatible" line
    reorders indices). Turns SS-3's 1.4–1.7× into ≈1.2–1.4× *(inferred)*.
 5. A **DepthOnly pass** on the block shaders — the prerequisite for any depth prepass, SSAO or GPU
    occlusion; do not enable depth priming unless a capture shows the frame fragment-bound.
+
+**ES-26 — Stop copying section arrays in the save serializer.** 🟢 / 🟢. Added 2026-10-03 from the ES-0 capture
+(§2.2.1). `ChunkSerializer.WriteSection` (and one site in `WriteChunkInternal`) hands each voxel/light array to
+`BinaryWriter.Write(MemoryMarshal.AsBytes(span))`; in Unity's class libraries that overload copies the span with
+`ToArray()` — 20 480 B allocated per 16 KB write in an isolated Editor test, against 0 B for `Write(byte[], int, int)`.
+**98.5 KB of the 127.4 KB per generated chunk (77.3 %)**, all on ThreadPool save threads. Write the same bytes without
+the copy (e.g. through a reused per-thread scratch `byte[]` and the `byte[]` overload); whether
+`BaseStream.Write(ReadOnlySpan<byte>)` on the LZ4/GZip streams is allocation-free is unverified. The bytes on disk
+must not change: gate on the serialization round-trip and deserialization-robustness suites, then re-run the ES-0
+capture.
+
+**ES-27 — Stop the lighting BFS queues regrowing.** 🟢 / 🟢. Added 2026-10-03 from the ES-0 capture (§2.2.1).
+`ChunkData`'s managed `Queue<LightQueueNode>` skylight/blocklight queues grow through `Queue<T>.SetCapacity` ~5 700
+times in a 30 s 200 m/s window — 8.9 KB per generated chunk (7.0 %), from `ApplyCrossChunkLightMod` in the lighting
+merge and `ModifyVoxel` in `ApplyModifications`. `Reset` only `Clear()`s them (capacity kept) and the `ChunkData` pool
+had 0 misses, so the regrowth is pooled instances passing their own high-water mark *(inferred, not instrumented)*.
+Candidates: an initial capacity sized to the observed peak, or moving the queues native (ES-18a territory). The
+lighting-merge `List`/`HashSet` growth (0.5 KB per chunk) rides along.
 
 ### Tier 2 — pipeline work on today's data model
 
@@ -481,7 +531,7 @@ constants + migration change. Prerequisites: ES-13, ES-18, ES-19.
 | Symptom | Biggest levers (in order) |
 |---|---|
 | Time-to-stable | ES-0 (attribute) → ES-1, ES-2, ES-3 → ES-4, ES-11, ES-13 |
-| Traversal spikes | ES-0 (see them; H-1 §2.2.1 **refuted 2026-10-03** — attribute the ~130 KB/chunk anew) → ES-6, ES-8, ES-7, ES-25 → ES-18a (heap); ES-9 + ES-10 no longer carry a GC case |
+| Traversal spikes | ES-0 (see them; H-1 §2.2.1 refuted, **garbage attributed 2026-10-03**) → **ES-26** (77 % of per-chunk garbage), ES-27, ES-9 (~12 %) → ES-6, ES-8, ES-7, ES-25 → ES-18a (heap); ES-10 after ES-26 |
 | Height / vd 32 | ES-13 (200 k cap), ES-25, ES-19, ES-18, ES-20 + ES-21 + ES-23, ES-24 |
 
 ---
@@ -517,7 +567,7 @@ constants + migration change. Prerequisites: ES-13, ES-18, ES-19.
 
 | Phase | Scope | Effort | Depends on | Status |
 |---|---|:---:|---|---|
-| **ES-0 — Measure** | Spike-visible capture, drain stamp, crossing slots, GC.Alloc capture | 🟢 | — | — |
+| **ES-0 — Measure** | Spike-visible capture, drain stamp, crossing slots, GC.Alloc capture | 🟢 | — | GC.Alloc capture ✅ 2026-10-03 (§2.2.1); rest via PM-1…PM-3 + PM-6 |
 | **ES-1 — No frame-paced load** | Completion counter at `World.cs:1064` — execution packet §7.1 | 🟢 | — | ✅ 2026-10-02 (in-game) |
 | **ES-2 — Calibration** | Robust OM-1 lighting probe — execution packet §7.1 | 🟢 | — | ✅ 2026-10-02 (in-game) |
 | **ES-3 — Loading mode** | SU-1 + SU-2, pooled/banded/shared startup snapshots | 🟡 | ES-0 | — |
@@ -530,6 +580,8 @@ constants + migration change. Prerequisites: ES-13, ES-18, ES-19.
 | **ES-10 — Persistence policy** | Open decision: keep saving unmodified terrain, or only edits | 🟢 | — | — |
 | **ES-11 — Stable-load bit** | P-5 (⚠️ format) | 🟡 | ES-0 | — |
 | **ES-25 — Upload/vertex cuts** | Rendering baseline, 16-bit indices, buffer capacity, per-section dirty upload, shared sub-quad grids, DepthOnly pass | 🟡 | ES-0 | — |
+| **ES-26 — Serializer span copy** | Write section arrays without `ReadOnlySpan<T>.ToArray()` — byte-identical output | 🟢 | — | — |
+| **ES-27 — BFS queue regrowth** | Presize or nativize `ChunkData`'s lighting BFS queues | 🟢 | — | — |
 | **ES-12 — Jobified merge** | P-3 | 🟡 | ES-7 | — |
 | **ES-13 — Sky from heightmap** | Frontier-seeded initial lighting | 🟡 | ES-12 | — |
 | **ES-14 — Gen critical path** | Worm cache, WG-1, WG-2 | 🟡 | ES-0 | — |
@@ -643,6 +695,10 @@ incremental collector absorb, now lands inside Phase 2's long frames (consistent
 with H-1's ~142 KB per generated chunk). Editor asynchronous Burst compilation is a weaker candidate, since
 compiled jobs are cached across play sessions. ES-0's per-frame GC capture is the instrument that
 settles it.
+*2026-10-03, ES-0 attribution (§2.2.1):* the GC-debt lead is weaker than assumed. 81.8 % of the per-chunk garbage is
+the unload save path, and no runtime save caller (`UnloadChunks`, quit, pause-menu save, the save key, benchmark end)
+runs during the initial-load coroutine; the generation-side remainder is ~20 KB per chunk, ~11 MB over 529 chunks
+*(inferred — startup was not captured)*. Still unattributed; a startup capture with the same tooling settles it.
 
 #### ES-2 — robust OM-1 lighting calibration
 
@@ -903,6 +959,11 @@ saving is inferred from step 1's re-entry leg, not re-measured.
 
 ## Document History
 
+* **v1.6** - **ES-0 GC attribution** (2026-10-03, IL2CPP Development/Master player, GC.Alloc call stacks, 200 m/s
+  phase): 127.4 KB per generated chunk, fully attributed — 77 % one span copy in `ChunkSerializer.WriteSection`,
+  82 % the unload save path, 80 % on ThreadPool threads. §2.2 rows and §2.2.1 attribution table; new `ES-26`
+  (serializer span copy) and `ES-27` (BFS queue regrowth); ES-9/ES-10 re-ranked; §4.1 traversal row; ES-0 row;
+  ES-1 open-finding note. Report: `Performance/ENGINE_SCALING_ES0_GC_ATTRIBUTION_IL2CPP_2026-10-03_BENCHMARK.md`.
 * **v1.5** - **H-1 refuted** (2026-10-03, IL2CPP Master benchmark with the PM-0 pool-miss counters): 0 section
   misses per generated chunk at 200 m/s against ~129 KB of garbage per chunk, so the per-chunk garbage is still
   unattributed. §2.2.1 carries the verdict table, and the §4.1 traversal row drops ES-9/ES-10's GC rationale.
@@ -931,4 +992,4 @@ saving is inferred from step 1's re-entry leg, not re-measured.
 ---
 
 **Last Updated:** 2026-10-03  
-**Next Review:** when ES-0's first capture or ES-25's rendering baseline lands, or before any ES phase starts
+**Next Review:** when ES-26 is scored against the ES-0 capture or ES-25's rendering baseline lands, or before any ES phase starts
