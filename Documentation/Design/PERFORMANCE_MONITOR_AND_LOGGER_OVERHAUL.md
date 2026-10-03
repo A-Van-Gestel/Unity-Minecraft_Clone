@@ -507,7 +507,8 @@ collections and 0 KB heap growth, where a 16 B-per-call control triggers a colle
 Editor Play-mode smoke (fresh world, `/tp` to stream terrain, driven through the console's `CommandEngine`): `/perf
 stats` reported worst ≥ p99 ≥ p50 at Basic and all ten slots at Systems; six back-to-back `/perf tier` switches (slot
 columns freed and reallocated each time) logged nothing; a 855-frame GC.Alloc call-stack capture attributed 651.7 KB on
-the main thread, none of it to `PerfStore`, `PerformanceMonitor` or the facade;
+the main thread, none of it to `PerfStore`, `PerformanceMonitor` or the facade (98.8 % was the UI band composite's
+pass recording, filed as `ES-28` in the scaling roadmap); leaving Play mode ran the shutdown hook
 (ring freed) with no native-collection leak warning. `PerformanceMonitor` lives in the World scene only, so the main menu
 records no frames; the tier is applied when the World scene's monitor is enabled.
 

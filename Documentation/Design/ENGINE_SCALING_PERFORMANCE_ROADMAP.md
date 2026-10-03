@@ -1,9 +1,9 @@
 # Engine Scaling Performance Roadmap
 
-**Version:** 1.7  
+**Version:** 1.8  
 **Date:** 2026-10-02  
 **Status:** In progress — `ES-1`, `ES-2` and `ES-6.1` shipped (2026-10-02); ES-0's GC.Alloc attribution captured
-(2026-10-03, §2.2.1 — added `ES-26`/`ES-27`); the rest is a near-to-far horizon, not
+(2026-10-03, §2.2.1 — added `ES-26`/`ES-27`; PM-1's smoke capture added the `ES-28` quick win); the rest is a near-to-far horizon, not
 scheduled. Tier 1 items are execution-sized; Tier 2/3
 items each need their own design or implementation plan. Re-verify the anchors named per item before
 starting (§8).  
@@ -441,6 +441,23 @@ had 0 misses, so the regrowth is pooled instances passing their own high-water m
 Candidates: an initial capacity sized to the observed peak, or moving the queues native (ES-18a territory). The
 lighting-merge `List`/`HashSet` growth (0.5 KB per chunk) rides along.
 
+**ES-28 — Stop the UI band/blur passes allocating every frame.** 🟢 / 🟢. Added 2026-10-03 from the PM-1 Play-mode
+smoke capture (Editor, 855 frames, GC.Alloc call stacks, a streaming world with the HUD up): **643.8 KB of the
+651.7 KB main-thread allocation (98.8 %, ≈ 0.75 KB/frame — ≈ 180 KB/s at 240 fps) is the UI band composite recording
+its Render Graph passes**, every frame, whether or not anything changed:
+- `UIBlurChain.Record` / `PublishGlobal` (253.5 + 55.0 KB) build pass names by concatenation —
+  `passLabel + " Iter " + i`, `passLabel + " Set Global"`.
+- `UIBandCompositeRendererFeature` (70.1 + 45.0 KB) builds `"UI Band " + band` (enum boxing + concat) and
+  `label + " Draw"` per band.
+- `UIBandLayers.SortingValueOf` (220.2 KB, ~6 calls/frame) scans `SortingLayer.layers`, which returns a fresh array,
+  and reads each `layer.name`, a marshalled string.
+
+Fix: cache the pass names per band and iteration count (rebuilt only when the blur settings change) and the sorting
+values (resolved once; sorting layers change only in the Editor). Gate on the UI Band Layers and UI Blur Render
+suites, then a repeat GC.Alloc capture showing none of these sites. Recorded in Editor Play mode with one camera
+blurring per frame (`PublishGlobal` 854 calls in 855 frames); the same code runs in players, but the per-frame figure
+there is unmeasured.
+
 ### Tier 2 — pipeline work on today's data model
 
 **ES-12 — Jobified lighting merge.** → `P-3`. 🟡 / 🟡. After ES-7 shrinks it, measure the internal split
@@ -534,7 +551,7 @@ constants + migration change. Prerequisites: ES-13, ES-18, ES-19.
 | Symptom | Biggest levers (in order) |
 |---|---|
 | Time-to-stable | ES-0 (attribute) → ES-1, ES-2, ES-3 → ES-4, ES-11, ES-13 |
-| Traversal spikes | ES-0 (see them; H-1 §2.2.1 refuted, **garbage attributed 2026-10-03**) → **ES-26** (77 % of per-chunk garbage), ES-27, ES-9 (~12 %) → ES-6, ES-8, ES-7, ES-25 → ES-18a (heap); ES-10 after ES-26 |
+| Traversal spikes | ES-0 (see them; H-1 §2.2.1 refuted, **garbage attributed 2026-10-03**) → **ES-26** (77 % of per-chunk garbage), ES-27, ES-9 (~12 %) → ES-6, ES-8, ES-7, ES-25 → ES-18a (heap); ES-10 after ES-26; ES-28 (steady-state UI garbage, every frame) |
 | Height / vd 32 | ES-13 (200 k cap), ES-25, ES-19, ES-18, ES-20 + ES-21 + ES-23, ES-24 |
 
 ---
@@ -585,6 +602,7 @@ constants + migration change. Prerequisites: ES-13, ES-18, ES-19.
 | **ES-25 — Upload/vertex cuts** | Rendering baseline, 16-bit indices, buffer capacity, per-section dirty upload, shared sub-quad grids, DepthOnly pass | 🟡 | ES-0 | — |
 | **ES-26 — Serializer span copy** | Write section arrays without `ReadOnlySpan<T>.ToArray()` — byte-identical output | 🟢 | — | — |
 | **ES-27 — BFS queue regrowth** | Presize or nativize `ChunkData`'s lighting BFS queues | 🟢 | — | — |
+| **ES-28 — UI pass garbage** | Cache the UI band/blur Render Graph pass names and sorting values — ≈ 0.75 KB/frame of steady-state garbage | 🟢 | — | — |
 | **ES-12 — Jobified merge** | P-3 | 🟡 | ES-7 | — |
 | **ES-13 — Sky from heightmap** | Frontier-seeded initial lighting | 🟡 | ES-12 | — |
 | **ES-14 — Gen critical path** | Worm cache, WG-1, WG-2 | 🟡 | ES-0 | — |
@@ -962,6 +980,8 @@ saving is inferred from step 1's re-entry leg, not re-measured.
 
 ## Document History
 
+* **v1.8** - New `ES-28` (2026-10-03): the UI band/blur Render Graph passes allocate ≈ 0.75 KB every frame (98.8 % of
+  main-thread garbage in the PM-1 Play-mode smoke capture); Tier 1b entry, plan row, §4.1 traversal row, status line.
 * **v1.7** - ES-0 bullet + plan row: PM-1's store landed (2026-10-03) — raw per-frame ring with exact worst/p99
   (`/perf stats`); the rest of ES-0 rides PM-2, PM-3 and PM-6.
 * **v1.6** - **ES-0 GC attribution** (2026-10-03, IL2CPP Development/Master player, GC.Alloc call stacks, 200 m/s
