@@ -51,7 +51,7 @@ Standard inventory, in registry run/report order, which is also the display-name
 **Lighting Engine · Meshing · Behavior · Placement · Physics Solver · Voxel Occlusion · Mesh Build
 Queue · Light Work Scheduler · Chunk Math · Chunk Unload Decision · Pool Prune Decision · Pipeline
 Backpressure · Chunk Pipeline · Save Durability · Deserialization Robustness · Serialization
-Round-Trip · Migration Chain · Spawn · Command Console · World Clock · Sky & Celestial · Sky Render ·
+Round-Trip · Migration Chain · Spawn · Command Console · Launch Arguments · World Clock · Sky & Celestial · Sky Render ·
 UI Band Layers · UI Blur Render · Underwater Render · Cloud Render · Worm Carver · Biome Selection ·
 Sound Engine · Validation Framework**
 

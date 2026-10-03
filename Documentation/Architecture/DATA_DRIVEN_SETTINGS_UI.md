@@ -402,6 +402,13 @@ Because settings are applied immediately, the **"Done" button** simply:
 
 There is no "Cancel" or "Revert" — all changes are live. This matches Minecraft Java Edition's settings UX.
 
+**Session overrides stay off disk.** A field overridden for the session — with `-mc-set field=value` /
+`-mc-mute` on the command line, or by a harness such as fluid stress — goes through
+`LaunchSession.ApplySessionOverrides` (`Scripts/Launch/`), which raises `OnSettingChanged` per field exactly like a
+slider does. It is written with the value it replaced: `SaveSettings` serializes through
+`SettingsManager.SerializeForSave`, which restores the file values for the write and re-applies the overrides
+after it. A field edited in the menu since the override keeps the edit and is saved normally.
+
 ---
 
 ## 7. Prefab Library: `SettingsUIPrefabLibrary.asset`

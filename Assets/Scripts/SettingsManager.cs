@@ -3,6 +3,7 @@ using System.IO;
 using Config;
 using Data;
 using Data.Enums;
+using Launch;
 using MyBox;
 using Serialization;
 using Sky;
@@ -1178,14 +1179,7 @@ public static class SettingsManager
 
         try
         {
-            string jsonExport = JsonUtility.ToJson(settings, true);
-
-            // Inject Dev settings only in Editor or Development builds
-            if (Debug.isDebugBuild)
-            {
-                jsonExport = InjectHiddenSection(jsonExport, KEY_DEV, settings.Dev);
-            }
-
+            string jsonExport = SerializeForSave(settings, LaunchSession.Overrides);
             File.WriteAllText(s_settingsFilePath, jsonExport);
 
             // Per User Requirement: Force AssetDatabase refresh after settings generation in Editor
@@ -1196,6 +1190,35 @@ public static class SettingsManager
         catch (Exception e)
         {
             Debug.LogError($"[SettingsManager] Failed to save settings: {e.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Serializes <paramref name="settings"/> as the settings file stores it: fields overridden for this session
+    /// (<see cref="LaunchSession.ApplySessionOverrides"/>) are written with the values they replaced, and the dev
+    /// section is included in development builds only.
+    /// </summary>
+    /// <param name="settings">The settings to serialize; left exactly as it was on return.</param>
+    /// <param name="overrides">The session's launch overrides, or <c>null</c> when there are none.</param>
+    /// <returns>The JSON text to write.</returns>
+    public static string SerializeForSave(Settings settings, LaunchSettingsOverrides overrides)
+    {
+        overrides?.RestoreFileValues(settings);
+        try
+        {
+            string jsonExport = JsonUtility.ToJson(settings, true);
+
+            // Inject Dev settings only in Editor or Development builds
+            if (Debug.isDebugBuild)
+            {
+                jsonExport = InjectHiddenSection(jsonExport, KEY_DEV, settings.Dev);
+            }
+
+            return jsonExport;
+        }
+        finally
+        {
+            overrides?.Reapply(settings);
         }
     }
 

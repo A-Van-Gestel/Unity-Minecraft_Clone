@@ -8,6 +8,7 @@ using Editor.Validation.CloudRender;
 using Editor.Validation.Commands;
 using Editor.Validation.DeserializationRobustness;
 using Editor.Validation.Generation;
+using Editor.Validation.LaunchArgs;
 using Editor.Validation.Lighting;
 using Editor.Validation.LightScheduler;
 using Editor.Validation.Meshing;
@@ -64,7 +65,7 @@ namespace Editor.Validation.Framework
     public static class ValidationSuiteRegistry
     {
         /// <summary>The number of standard suites expected on the list — a floor the aggregate runner asserts against.</summary>
-        public const int ExpectedSuiteCount = 30;
+        public const int ExpectedSuiteCount = 31;
 
         /// <summary>The registered suites, in run/report order.</summary>
         public static readonly IReadOnlyList<RegisteredSuite> Suites = new[]
@@ -88,6 +89,7 @@ namespace Editor.Validation.Framework
             new RegisteredSuite("Migration Chain", MigrationChainValidationSuite.Execute),
             new RegisteredSuite("Spawn", SpawnValidationSuite.Execute),
             new RegisteredSuite("Command Console", CommandConsoleValidationSuite.Execute),
+            new RegisteredSuite("Launch Arguments", LaunchArgumentsValidationSuite.Execute),
             new RegisteredSuite("World Clock", WorldClockValidationSuite.Execute),
             new RegisteredSuite("Sky & Celestial", SkyValidationSuite.Execute),
             new RegisteredSuite("Sky Render", SkyRenderValidationSuite.Execute),

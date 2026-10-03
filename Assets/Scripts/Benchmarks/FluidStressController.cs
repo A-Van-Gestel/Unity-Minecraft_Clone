@@ -1,8 +1,10 @@
 using System.Collections;
 using System.Collections.Generic;
+using System.Globalization;
 using Data;
 using Data.Enums;
 using Helpers;
+using Launch;
 using UnityEngine;
 
 namespace Benchmarks
@@ -77,13 +79,13 @@ namespace Benchmarks
             while (World.Instance == null || !World.Instance.IsWorldLoaded)
                 yield return null;
 
-            // Deterministic capture conditions: render-distance-5 ocean scale, lighting on (so the displacement
-            // work is measured), VSync off / FPS uncapped (clean CPU timing).
-            if (World.Instance.settings != null)
+            // Deterministic capture conditions: render-distance-5 ocean scale, lighting on (so the displacement work
+            // is measured), VSync off / FPS uncapped (clean CPU timing). Session overrides: a save keeps the file values.
+            LaunchSession.ApplySessionOverrides(new[]
             {
-                World.Instance.settings.viewDistance = VIEW_DISTANCE;
-                World.Instance.settings.enableLighting = true;
-            }
+                new KeyValuePair<string, string>(nameof(Settings.viewDistance), VIEW_DISTANCE.ToString(CultureInfo.InvariantCulture)),
+                new KeyValuePair<string, string>(nameof(Settings.enableLighting), bool.TrueString),
+            }, "fluid stress");
 
             _savedVSyncCount = QualitySettings.vSyncCount;
             _savedTargetFrameRate = Application.targetFrameRate;
@@ -141,6 +143,10 @@ namespace Benchmarks
 
             BenchmarkReportResult result = FluidStressReportGenerator.GenerateAndWrite(collector, REGION_CHUNKS);
             Debug.Log($"[FluidStress] Complete. Report written to: {result.LogFilePath ?? "(disk write failed — see console log above)"}");
+
+            if (LaunchSession.TryQuitAfterRun(
+                    result.LogFilePath != null ? LaunchSession.ExitSuccess : LaunchSession.ExitRunFailed, result.LogFilePath))
+                yield break;
 
             // Show the shared post-run results overlay (report + Open Log Folder / Return to Main Menu), and free the
             // cursor so its buttons are clickable. The Return button reverts the runtime mode and loads the menu scene.

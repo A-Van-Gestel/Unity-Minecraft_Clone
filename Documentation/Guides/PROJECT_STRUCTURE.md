@@ -62,6 +62,13 @@ This is the heart of the project, containing all C# source code. It is organized
 -   **Examples:**
     -   `EngineApiProbe.cs`: The capability probe behind `/perf probe` — checks which profiling APIs (recorders, frame timing, GC counters, Burst timestamps) work in the running build and writes a report.
 
+#### `Scripts/Launch/`
+
+-   **Purpose:** The engine's command-line layer (namespace `Launch`): `-mc-run <action>`, `-mc-set field=value`, `-mc-mute` and `-mc-quit`, read once from the main menu. Works in every player configuration, Master included. A new harness adds an `ILaunchAction` and one line in `LaunchActionInstaller`; any `Settings` field can be overridden without launch-side code.
+-   **Examples:**
+    -   `LaunchSession.cs`: Applies the arguments, starts the action, and exits with a status code when the run reports back. Its `ApplySessionOverrides` is also how a harness sets fixed capture conditions without them being saved.
+    -   `AutomatedRunLauncher.cs`: Starts the benchmark and fluid-stress runs — shared by the main-menu buttons and the launch actions.
+
 #### `Scripts/Helpers/`
 
 -   **Purpose:** Contains `static` utility classes that provide reusable functions. These classes typically do not hold any state. They are the "verbs" or tools of the project.

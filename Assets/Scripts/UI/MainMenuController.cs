@@ -76,6 +76,12 @@ namespace UI
             new GameObject("Toasts").AddComponent<ToastManager>();
         }
 
+        /// <summary>Acts on the <c>-mc-*</c> command-line options, once per process (see <see cref="LaunchSession"/>).</summary>
+        public void Start()
+        {
+            LaunchSession.RunPendingOnce();
+        }
+
         public void StartGame()
         {
             mainMenuObject.SetActive(false);

@@ -5,6 +5,7 @@ using System.Globalization;
 using Data;
 using Data.Enums;
 using Helpers;
+using Launch;
 using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -191,6 +192,9 @@ namespace Benchmarks
             if (_generationWaypoints.Count < 2)
             {
                 Debug.LogError("[Benchmark] Insufficient waypoints generated. Ending benchmark.");
+                if (LaunchSession.TryQuitAfterRun(LaunchSession.ExitRunFailed, null))
+                    yield break;
+
                 Cursor.lockState = CursorLockMode.None;
                 Cursor.visible = true;
                 ReturnToMainMenu();
@@ -824,7 +828,8 @@ namespace Benchmarks
 
         /// <summary>
         /// Saves world data, hides the HUD, unlocks the cursor, and shows the results screen.
-        /// Does NOT transition to the main menu — the results screen's "Return" button does that.
+        /// Does NOT transition to the main menu — the results screen's "Return" button does that. A run launched with
+        /// <c>-mc-quit</c> exits the process after the save instead (<see cref="LaunchSession.TryQuitAfterRun"/>).
         /// </summary>
         /// <param name="reportResult">The generated report text and file path.</param>
         private void ShowResults(BenchmarkReportResult reportResult)
@@ -835,6 +840,11 @@ namespace Benchmarks
 
             if (World.Instance != null)
                 World.Instance.SaveWorldData();
+
+            if (LaunchSession.TryQuitAfterRun(
+                    reportResult.LogFilePath != null ? LaunchSession.ExitSuccess : LaunchSession.ExitRunFailed,
+                    reportResult.LogFilePath))
+                return;
 
             if (_hud != null)
                 _hud.gameObject.SetActive(false);

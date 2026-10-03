@@ -42,7 +42,8 @@ large capture can take longer than 30 s: add `--timeout_ms 240000 --timeout 260`
 1. Target: Play mode is `ProfilerDriver.connectedProfiler = -1`. A Development player (no autoconnect) needs
    `ProfilerDriver.DirectIPConnect("127.0.0.1")` once it is running; it must be a real Development build.
 2. `ArmAutoStop` with the phase marker (e.g. `Benchmark.Generation.200mps`) — before or after entering Play mode.
-3. Start the run, and keep a background shell loop polling (`until … grep -q SAVED; do sleep 5; done`). The poll
+3. Start the run **muted** — a player with `-mc-mute` (`perf-benchmark` "Unattended runs"), Play mode with
+   `unity command eval "Launch.LaunchSession.MuteForSession(); return 0;"` once playing — and keep a background shell loop polling (`until … grep -q SAVED; do sleep 5; done`). The poll
    does not stop the capture — the hook does, within a few frames, because a player rendering hundreds of fps
    after the phase overruns the 2000-frame buffer between two 5 s polls. Entering Play mode reloads the domain and
    drops the hook; the next `Poll` reinstalls it, so the loop must be running.

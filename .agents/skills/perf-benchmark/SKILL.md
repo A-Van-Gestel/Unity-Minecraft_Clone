@@ -42,6 +42,29 @@ scene) and refuse to run against a live game world — follow `FluidTickBenchmar
 (`CreateInertWorld` + `RegisterSyntheticChunk`) when writing a new one, so the harness controls
 tick cadence with zero interference.
 
+## Unattended runs (command line)
+
+Any player build — Master included — starts a harness from the command line and exits when it is done:
+
+```
+"Minecraft Clone.exe" -force-d3d11 -mc-run benchmark -mc-set benchmarkGenerationSpeeds=200 -mc-mute -mc-quit
+```
+
+- `-mc-run benchmark | fluidstress` — the actions in `Scripts/Launch/LaunchActionInstaller.cs`.
+- `-mc-set field=value` (repeatable) — overrides any `Settings` field for this session only; `dev.<field>`
+  targets `DevSettings` and is rejected outside development builds. The run otherwise inherits the build's
+  `settings.json`, exactly like a menu launch. Overrides are never written back to the file.
+- `-mc-mute` — `masterVolume=0` for the session. **An agent running a harness always passes it.** In an Editor
+  Play-mode run, the same mute is `Launch.LaunchSession.MuteForSession()` through `unity command eval` once Play
+  mode is on (the domain reload on entering Play mode would drop it if applied earlier).
+- `-mc-quit` — exit when the run has written its report: exit code `0` = report written, `1` = run aborted or no
+  report, `2` = invalid arguments (nothing ran). `Player.log` records `[Launch] Run finished: report <path>, exit code <n>`.
+- Unity's own flags pass through; an unknown `-mc-` option is an error, never ignored.
+- **Always wait with a timeout and kill on expiry** (e.g. PowerShell `$p.WaitForExit(ms)` then `Stop-Process`). A
+  player occasionally freezes after `Application.Quit` — window frozen, process alive, `Player.log` ending at
+  `CodeReloadManager destroyed`. It predates the launch arguments, shows up more after many launches without a
+  reboot, and is not a defect of the change under test.
+
 ## Step 1 — Baseline BEFORE the change
 
 Follow `Documentation/Performance/README.md` (the authoritative protocol — read it, don't trust
