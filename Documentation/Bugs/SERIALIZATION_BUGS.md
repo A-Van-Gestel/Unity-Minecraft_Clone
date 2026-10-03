@@ -325,6 +325,11 @@ this path; `World.OnDestroy` nulls `Instance` (`:756`) before `StorageManager.Di
 teardown, and a late writer can re-open a region through `GetRegion`'s `GetOrAdd` after `_regions.Clear()`
 while its continuation meets a null `World.Instance` (inferred).
 
+**Unattended benchmark quit (`-mc-quit`).** `BenchmarkController.ShowResults` runs the same sequence as Save & Quit
+to Desktop — `SaveWorldData()`, then `LaunchSession.TryQuitAfterRun` → `Application.Quit` — so a fix should cover
+it too. No player data is at stake on that path: every harness run saves into a fresh `Benchmark_Saves` world. The
+fluid stress quit does not call `SaveWorldData()` and takes `OnApplicationQuit`'s synchronous flush instead.
+
 **Repro to try (not yet attempted):** edit blocks in several chunks, arm the dev-only save-fault seam
 (`ChunkStorageManager.InjectSaveFaults`) or throttle the writer so saves are in flight, choose "Save & Quit to
 Desktop", reload and check the edits. Repeat for "Save & Quit to Main Menu". A CP-6 durability-suite scenario
