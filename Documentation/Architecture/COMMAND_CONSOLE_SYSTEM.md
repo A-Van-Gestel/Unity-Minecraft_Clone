@@ -598,12 +598,14 @@ that `ShowInternal` silently dropped.
 
 The console seat of the performance monitor
 ([`../Design/PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md`](../Design/PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md)),
-alias `/profiler`. Future monitor controls (tier, hitches, export) are meant to become sub-commands here.
+alias `/profiler`. Future monitor controls (hitches, export) are meant to become sub-commands here.
 
-| Form          | Behavior                                                                                     |
-|---------------|----------------------------------------------------------------------------------------------|
-| `/perf`       | Reports whether the capability probe is running, else the last probe's summary and report path |
-| `/perf probe` | Starts `Diagnostics.EngineApiProbe` (~120 frames, one deliberate `GC.Collect`)                 |
+| Form                 | Behavior                                                                                     |
+|----------------------|----------------------------------------------------------------------------------------------|
+| `/perf`              | Reports whether the capability probe is running, else the last probe's summary and report path |
+| `/perf probe`        | Starts `Diagnostics.EngineApiProbe` (~120 frames, one deliberate `GC.Collect`)                 |
+| `/perf stats`        | Worst, p99, p50 and mean wall/CPU frame time over `PerfStore`'s ring; at the Systems tier, every slot's avg/p99/worst, costliest first |
+| `/perf tier [name]`  | Reads the monitor tier, or sets `Settings.perfMonitorTier` and raises `OnSettingChanged` — the same live-apply path as the Settings dropdown |
 
 **Result arrives asynchronously.** A command returns synchronously, so the probe raises a toast on
 completion and its summary is read back with `/perf`; no posting path from a command into the console
@@ -611,11 +613,15 @@ output exists, and none was added. The probe refuses to start during an automate
 (`WorldLaunchState.IsAutomatedMode`) or while one is already running. Its menu twin is the Settings →
 Benchmark tab's **Run Engine API Probe** action, which also works from the main menu.
 
-**Registration.** `InstalledCommandCount` 18 → **19** (B32 count-floor); tab completion offers `probe`.
+**Registration.** `InstalledCommandCount` 18 → **19** (B32 count-floor); tab completion offers `probe`, `stats` and
+`tier` for the first argument and the tier names for the second.
 
 ---
 
 ## Document History
+
+* **v1.18** - §8.6: `/perf stats` and `/perf tier` (PM-1's store readout and tier control); no new command, so
+  `InstalledCommandCount` stays 19; Command Console suite 57/57.
 
 * **v1.17** - New §8.6 for `/perf` (alias `/profiler`), the performance monitor's console entry point;
   `/perf probe` runs the engine API capability probe. `InstalledCommandCount` 18→19; Command Console

@@ -1,9 +1,9 @@
 # Performance Monitor & Logger Overhaul Design
 
-**Version:** 1.0  
+**Version:** 1.3  
 **Date:** 2026-10-02  
-**Status:** Proposed design — PM-0 ✅ complete (2026-10-03, Master answers in §8); PM-1…PM-7 not started. PM-0 is a zero-behavior-change verification probe that must run first; its answers may reshape
-PM-2/PM-4 (§8).  
+**Status:** In progress — PM-0 ✅ complete (2026-10-03, Master answers in §8); PM-1 ✅ code landed (2026-10-03, §7.2;
+in-game check pending); PM-2…PM-7 not started. PM-0's answers reshaped PM-2/PM-4 (§8).  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > An opt-in, settings-driven in-game performance monitor and diagnostic logger that covers **every
@@ -116,8 +116,12 @@ read-only `unity command eval`. Unity 6000.6 APIs (`ProfilerRecorder`, `Profiler
 
 The pattern `WorldFrameProfiler` already proves in Master builds: begin/end timestamps into
 pre-allocated per-slot accumulators. Recorders are used **only as optional enrichment** for counters
-PM-0 proves valid in the target build (memory, render stats), and each probe *also* emits a
-`ProfilerMarker` under `ENABLE_PROFILER`, so Unity Profiler captures keep their names.
+PM-0 proves valid in the target build (memory, render stats), and a probe opened with its slot
+(`Begin(PerfSlot)`) *also* emits a `ProfilerMarker` under `ENABLE_PROFILER`, so Unity Profiler captures keep their
+names. *PM-1 (2026-10-03):* the slot-less `Begin()` this section originally specified cannot emit one —
+`ProfilerMarker` has only `Begin()`/`End()`, so a marker must be opened by name before the region runs. The slot-less
+pair survives only as the `WorldFrameProfiler` facade's path (no marker); `World.cs`'s ten facade probes move to the
+slotted API when PM-3 re-touches those lines.
 
 ### 3.2 Opt-in model
 
@@ -138,7 +142,10 @@ PM-0 proves valid in the target build (memory, render stats), and each probe *al
 The tier is a `Settings` enum on the **DebugScreen** tab, applied live through `OnSettingChanged`.
 Benchmark harnesses set it explicitly (as they already force `WorldFrameProfiler.Enabled`) and the
 field is added to `OverlayBenchmarkSettingsFromDisk`, so captures stay comparable on cold and menu
-launches alike. Logging levels (§4.6) are independent of the tier.
+launches alike. Logging levels (§4.6) are independent of the tier. *PM-1 (2026-10-03):* `Settings.perfMonitorTier`
+("Monitor Detail") ships all four values, contiguous from 0, because the Settings dropdown maps option index to enum
+value and the JSON stores the integer — a tier inserted later would shift saved values. Until PM-2/PM-6 land, Frame
+records the same as Basic and Capture the same as Systems; the tooltip says so. `/perf tier` sets it from the console.
 
 ### 3.3 Relationship to the existing instruments
 
@@ -164,10 +171,10 @@ and the benchmark report produce identical numbers (pinned by a baseline before/
 /// <summary>Every timed region in the engine; values index fixed per-slot arrays.</summary>
 public enum PerfSlot : byte
 {
-    // World.Update (existing WorldFrameProfiler phases map onto these first, same order)
-    GenerationProcess, Apply, LightMerge, LightStagingDrain, LightFailSafeScan, LightSchedule,
-    MeshProcess, MeshSchedule, Tick, LightQueueProbe,
-    // World.Update regions untimed today
+    // World.Update (existing WorldFrameProfiler phases map onto these first, same order — shipped in PM-1)
+    Tick, Apply, LightMerge, LightStagingDrain, LightFailSafeScan, LightSchedule,
+    MeshProcess, MeshSchedule, GenerationProcess, LightQueueProbe,
+    // World.Update regions untimed today (PM-3 appends these with their probes)
     WorldTime, BiomeTracker, OriginShift, TeleportHold, ViewDistance, Unload, BorderToggle,
     Visualization, GenerationAdmission, SaveRetryDrain, ChunkPoolPrune, DiskLoadApply,
     // Systems outside World.Update
@@ -191,23 +198,32 @@ public struct PerfFrame
   `PerfFrame` ring, so a frame row is `PerfFrame` + its slot column — no per-frame allocation, one
   contiguous block (≈ 2 048 frames × (36 + 32 × 4) B ≈ 340 KB at Systems tier, allocated only when the
   tier is entered and disposed when it is left).
+  *PM-1 (2026-10-03):* `PerfFrame` ships with only the fields PM-1 fills (`FrameIndex`, `WallMs`, `CpuMs` —
+  12 B/frame); PM-2 adds the GPU and GC fields and PM-3 `UnattributedMs`. The frame rows are allocated on the first
+  committed frame at every tier (24 KB); the slot block (10 slots × 4 B × 2 048 ≈ 80 KB today) only at Systems and up.
 - **Counters** (`PerfCounter` enum: queue depths, in-flight jobs per type, resident chunks, pool
   in-use/peak per pool, I/O ops/bytes, ThreadPool depth) are gauges sampled once per frame into a
   second column set, plus `Interlocked`-updated cumulative counters for worker-thread producers.
-- **Statistics** per slot/metric use fixed log-scale histograms (e.g. 64 buckets from 1 µs to 1 s) over
-  a sliding window — percentiles without sorting or allocation.
+  *Moved to PM-3 (2026-10-03),* which brings their first producers; PM-1 built no counter storage.
+- **Statistics** are exact: nearest-rank percentiles (p50, p99), mean and worst frame, computed on read by
+  in-place selection over a scratch copy of the ring (O(n), no sorting, no allocation) — `PerfWindowStats`.
+  *PM-1 (2026-10-03):* this replaces the log-scale histograms first specified here, whose bucket width (±5–12 %)
+  would add error on top of run-to-run noise in cross-run comparisons. Statistics over spans longer than the
+  ring (a whole benchmark phase) need a phase-wide aggregate — PM-6's concern.
 
 ### 4.2 Probes
 
 ```csharp
-long t = PerfStore.Begin();          // returns 0 and does nothing below the slot's tier
+long t = PerfStore.Begin(PerfSlot.ViewDistance);   // returns 0 and does nothing below the slot's tier
 ...
-PerfStore.End(PerfSlot.ViewDistance, t);
+PerfStore.End(PerfSlot.ViewDistance, t);           // a start of 0 is a no-op
 ```
 
-`Begin` is one static tier read + `Stopwatch.GetTimestamp()`; `End` accumulates into the slot's current
+`Begin` is one static bool read + `Stopwatch.GetTimestamp()`; `End` accumulates into the slot's current
 frame cell (several calls per frame sum). Under `ENABLE_PROFILER` the same call pair also emits the
-slot's static `ProfilerMarker`. No strings, no delegates, no `IDisposable` scopes on hot paths. Coverage
+slot's static `ProfilerMarker` (`PerfStore.<slot>`). The frame boundary is `PerfStore.CommitFrame`, called from
+`PerformanceMonitor`'s end-of-frame coroutine: it stores the row and zeroes every accumulator, so a frame in which a
+region never ran records 0 rather than repeating the last frame that did. No strings, no delegates, no `IDisposable` scopes on hot paths. Coverage
 follows §2's gap list: every untimed `World.Update` region, `DiskLoadApply` around the async
 `LoadOrGenerateChunkInner` continuation, and one probe per non-World system's `Update`/`LateUpdate`.
 
@@ -311,7 +327,9 @@ public enum LogLevel : byte { Off, Error, Warning, Info, Verbose }
   timestamp source exists, and that `FrameTimingManager` reports GPU time once enabled.
 - **Comparability:** `WorldFrameProfiler`'s facade must keep `PipelineTelemetry.PassMsTotals` identical —
   pinned by a `Validate Pipeline Backpressure` baseline before PM-1 lands (that suite indexes the slot
-  array by `PhaseCount`).
+  array by `PhaseCount`). *PM-1 (2026-10-03):* that baseline already existed as **B22**, but asserts thresholds
+  (≥ 8 ms, == 0), not identity; `Validate Performance Monitor` **B9** adds the exact check — every phase's
+  `LastFrameMs` equals `ticks × (1000.0 / Stopwatch.Frequency)`.
 - **Instrumentation variant:** decide whether `Windows - Development` should use the Instrumented
   variant; fix the "dev/editor builds only" comments; hide HUD rows and toggles whose code is compiled out.
 - **No backlog IDs in UI** — tier/level labels and tooltips are plain language.
@@ -337,12 +355,12 @@ public enum LogLevel : byte { Off, Error, Warning, Info, Verbose }
 | Phase | Scope | Effort | Depends on | Status |
 |---|---|:---:|---|---|
 | **PM-0 — Verify** | Execution packet §7.1. Master-build probe: dump `ProfilerRecorderHandle.GetAvailable` + `Valid`; `FrameTimingManager` with frame-timing stats on; `GC.GetAllocatedBytesForCurrentThread` under IL2CPP; Burst timestamp source; probe cost (QPC ns) | 🟢 | — | ✅ 2026-10-03 — §8 q1–q4 answered in two Master builds |
-| **PM-1 — Core store** | `PerfStore`, `PerfSlot`/`PerfCounter`, raw per-frame ring, histograms, tier setting + live apply, `WorldFrameProfiler` facade (identical `PassMsTotals`) | 🟡 | PM-0 | — |
+| **PM-1 — Core store** | `PerfStore`, `PerfSlot`, raw per-frame ring, exact window statistics, tier setting + live apply, `WorldFrameProfiler` facade (identical `PassMsTotals`), `/perf stats` + `/perf tier` | 🟡 | PM-0 | ✅ 2026-10-03 — code + suite (§7.2); in-game check pending |
 | **PM-2 — Frame tier** | Per-frame GC + collection flag, `FrameTiming` GPU/render/present-wait, hitch detector + snapshots | 🟡 | PM-1 | — |
-| **PM-3 — Coverage** | Slots for every untimed `World.Update` region + unattributed remainder; non-World systems; gauges for queues, in-flight jobs, pools, resident chunks | 🟡 | PM-1 | — |
+| **PM-3 — Coverage** | Slots for every untimed `World.Update` region + unattributed remainder; non-World systems; `PerfCounter` + counter columns, with gauges for queues, in-flight jobs, pools, resident chunks (moved from PM-1); `World.cs`'s facade probes to the slotted API; the Master IL2CPP overhead A/B (moved from PM-1) | 🟡 | PM-1 | — |
 | **PM-4 — Workers & I/O** | Job schedule→complete latency, in-job execute time, worker utilization; disk latency/bytes/compression; ThreadPool depth | 🟡 | PM-0, PM-1 | — |
 | **PM-5 — HUD** | Systems panel, hitch list, GPU/CPU split, raw-max graph overlay; `DT-4` | 🟡 | PM-2, PM-3 | — |
-| **PM-6 — Export** | Session CSV + hitch dumps on a background writer; benchmark reports read the store; benchmark mode forces Capture | 🟡 | PM-2 | — |
+| **PM-6 — Export** | Session CSV + hitch dumps on a background writer; benchmark reports read the store, with phase-wide percentiles (an aggregate spanning more than the ring — moved from PM-1); benchmark mode forces Capture | 🟡 | PM-2 | — |
 | **PM-7 — Logger** | `EngineLog` categories/levels/rate limits/tags, migration of the 3 diagnostic flags and the 327 call sites (by category, in passes), stack-trace policy per build profile, variant-drift fix | 🟡 | — | — |
 
 **Minimal set with standalone value:** PM-0 + PM-1 + PM-2 — worst-frame, p99, hitch snapshots with GC
@@ -350,11 +368,13 @@ and GPU attribution — answers the roadmap's "is the traversal spike GC?" quest
 independent and can run in parallel.
 
 **Validation is built alongside, not after:** a new `Validate Performance Monitor` suite pins the pure
-parts — histogram percentile math, the hitch-detector truth table and window freeze, ring wrap-around,
-tier gating (below-tier probes write nothing), the facade's slot mapping, and CSV formatting — and the
-B34-style reset sweep covers the new statics. Timing *values* are not suite-testable (wall clock), so the
-overhead budget (Off: one static read per probe; Systems: ≤ 50 µs/frame) is verified by a Master
-IL2CPP A/B through the `perf-benchmark` skill.
+parts — percentile math, the hitch-detector truth table and window freeze, ring wrap-around,
+tier gating (below-tier probes write nothing), the facade's slot mapping, and CSV formatting — and its own
+scenario invokes `PerfStore.DomainReset` to cover the new statics (no generic statics sweep exists; "B34" named a
+Lighting `Reset()` baseline). Timing *values* are not suite-testable (wall clock), so the overhead budget (Off: one
+static read per probe; Systems: ≤ 50 µs/frame) is measured in the Editor first (`Minecraft Clone/Benchmarks/PerfStore
+Overhead`), and by a Master IL2CPP A/B through the `perf-benchmark` skill only once PM-3's probes make the cost
+large enough to resolve above benchmark noise.
 
 ### 7.1 Execution packet — PM-0 + the H-1 counters (planned 2026-10-02, not executed)
 
@@ -453,6 +473,48 @@ The probe always finishes: a check that throws is reported as `THREW <type>: <me
 about the build — and the remaining checks still run; recorders are released even when the run is cut short.
 Proven in Play mode by two injected throws (one per check kind) and a mid-run `DestroyImmediate`.
 
+### 7.2 PM-1 execution record (2026-10-03; in-game check pending)
+
+**Shipped** (`Assets/Scripts/Diagnostics/`, namespace `Diagnostics`): `PerfTier`, `PerfSlot` (the ten
+`WorldFrameProfiler` phases, same values and names), `PerfFrame`, `PerfFrameRing` (2 048 frames, `Allocator.Persistent`;
+slot columns allocated at Systems and up, freed below), `PerfWindowSummary` + `PerfWindowStats` (exact nearest-rank
+selection), and `PerfStore` (static; one `DomainReset`; native memory freed on `Application.quitting` and before an
+Editor assembly reload, after which commits are ignored rather than reallocating). `WorldFrameProfiler` is a facade:
+`Enabled` is `PerfStore.ForceSlots`, OR'ed with the tier, so a harness clearing it never disables a tier the player
+chose. `PerformanceMonitor` commits each frame's raw wall/CPU ticks and applies `Settings.perfMonitorTier` in
+`OnEnable` (which also runs after a Play-mode script reload) and live through `OnSettingChanged`; the tier is in `OverlayBenchmarkSettingsFromDisk`. `/perf stats` prints worst,
+p99, p50 and mean wall/CPU time over the ring, plus per-slot avg/p99/worst at Systems; `/perf tier` reads or sets the
+tier through the setting.
+
+**Decisions taken at plan review:**
+1. **Slot-taking probe API with marker mirroring** (§3.1, §4.2) — the slot-less `Begin()` stays only for the facade.
+2. **`PerfCounter` → PM-3**, where its producers land; no producer-less storage built.
+3. **Operability → dropdown and console**: all four tiers in the Settings dropdown (interim Frame/Capture behavior
+   stated in the tooltip; acceptable because PM-2…PM-7 are planned before the next player build), plus
+   `/perf stats` / `/perf tier`.
+4. **Exact percentiles** over the ring instead of histograms (§4.1); phase-wide percentiles → PM-6.
+5. **Overhead measured in the Editor**; the Master A/B → PM-3.
+
+**Verification.** `Validate Performance Monitor` (new, registered — `ExpectedSuiteCount` 31 → 32) 10/10, with B6
+(frame boundary) and B9 (facade bit-identity) proven red by mutation — dropping the commit-time clear, and publishing
+through a `float` — and green again on restore. Pipeline Backpressure 25/25 (B22 included; it now pins the Basic tier,
+since a Systems+ tier keeps the facade's probes recording with `Enabled` off — red at a leftover Systems tier before
+that, green after), Command Console 57/57.
+Editor micro-benchmark (Mono, three runs): probe pair 2.8 ns inactive, ≈ 46 ns active (≈ 65 ns with the marker,
+which Master compiles out); `CommitFrame` ≈ 35–40 ns at Basic, ≈ 160–210 ns at Systems — ≈ 1.2 µs/frame at Systems
+with today's ten probe sites, against the 50 µs budget. Allocation-free: every case ran 10⁶ calls with 0 GC
+collections and 0 KB heap growth, where a 16 B-per-call control triggers a collection.
+Editor Play-mode smoke (fresh world, `/tp` to stream terrain, driven through the console's `CommandEngine`): `/perf
+stats` reported worst ≥ p99 ≥ p50 at Basic and all ten slots at Systems; six back-to-back `/perf tier` switches (slot
+columns freed and reallocated each time) logged nothing; a 855-frame GC.Alloc call-stack capture attributed 651.7 KB on
+the main thread, none of it to `PerfStore`, `PerformanceMonitor` or the facade;
+(ring freed) with no native-collection leak warning. `PerformanceMonitor` lives in the World scene only, so the main menu
+records no frames; the tier is applied when the World scene's monitor is enabled.
+
+**Corrections found while planning:** §4.1's slot list was not in the facade's order (`Tick` = 0, not
+`GenerationProcess`); §4.2's slot-less `Begin()` could not emit a marker; §5's "pin before PM-1" baseline already
+existed as B22 but tested thresholds; §7's "B34-style reset sweep" named no existing mechanism.
+
 ### Extension roadmap
 
 | Version | Extension |
@@ -514,11 +576,17 @@ Answers 1–4 come from `EngineApiProbe_2026-10-03_13-52-20.log`: a `Windows - P
 | Replacing `WorldFrameProfiler` outright | Breaks comparability of every FP/P-9/P-4 capture (§3.3) | 2026-10-02 |
 | `IDisposable` scope structs / delegates on hot-path probes | Avoidable overhead and allocation risk; explicit begin/end matches the proven `WorldFrameProfiler` pattern | 2026-10-02 |
 | Uploading telemetry | Out of scope; output stays local | 2026-10-02 |
+| Log-scale histograms for the ring's window percentiles | Bucket width (±5–12 %) adds error on top of run-to-run noise; exact selection over the ring costs nothing per frame (§4.1) | 2026-10-03 |
 
 ---
 
 ## Document History
 
+* **v1.3** - **PM-1 code landed** (2026-10-03, §7.2; in-game check pending): `PerfStore` + ring + exact window
+  statistics, `WorldFrameProfiler` facade (bit-identical, pinned by the new suite's B9), Monitor Detail setting,
+  `/perf stats` / `/perf tier`. Plan-review decisions recorded in place: slot-taking probes with marker mirroring
+  (§3.1/§4.2), `PerfCounter` and the Master overhead A/B moved to PM-3, exact percentiles replace histograms with
+  phase-wide percentiles moved to PM-6 (§4.1), all four tiers exposed (§3.2). §4.1's slot order corrected.
 * **v1.2** - **PM-0 complete** (2026-10-03, two Master player builds): §8 q1–q4 answered — 49 counters valid in
   Master, but no `GC Allocated In Frame`; the per-thread GC counter is not live under IL2CPP, so §4.3's fallback
   applies; `ProfilerUnsafeUtility.Timestamp` is Burst-callable at 11.4 ns; with the project setting off, frame
@@ -535,4 +603,4 @@ Answers 1–4 come from `EngineApiProbe_2026-10-03_13-52-20.log`: a `Windows - P
 ---
 
 **Last Updated:** 2026-10-02  
-**Next Review:** when PM-1 starts (PM-0 complete 2026-10-03)
+**Next Review:** when PM-2 or PM-3 starts (PM-1 code landed 2026-10-03)

@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Diagnostics;
+using Diagnostics;
 using Helpers;
 using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
@@ -18,6 +19,11 @@ using UnityEngine.Profiling;
 /// <para>
 /// This replaces the previous <c>ProfilerRecorder</c>-based approach, which returned
 /// invalid data in non-Development Release builds.
+/// </para>
+/// <para>
+/// Every frame's raw wall and CPU ticks are also committed to <see cref="PerfStore"/>, which keeps the
+/// unsmoothed per-frame history this class's moving averages cannot; this class also applies the
+/// <see cref="Settings.perfMonitorTier"/> setting to it on enable and live on change.
 /// </para>
 /// </summary>
 /// <remarks>
@@ -215,9 +221,30 @@ public class PerformanceMonitor : MonoBehaviour
         gameObject.AddComponent<PerformanceMonitorLateHook>();
     }
 
+    private void OnEnable()
+    {
+        // Applied here rather than in Awake: OnEnable also runs after a script reload in Play mode,
+        // which resets the store's statics.
+        PerfStore.SetTier(SettingsManager.LoadSettings().perfMonitorTier);
+        SettingsManager.OnSettingChanged += HandleSettingChanged;
+    }
+
+    private void OnDisable()
+    {
+        SettingsManager.OnSettingChanged -= HandleSettingChanged;
+    }
+
     private void Start()
     {
         StartCoroutine(FramePhaseCoroutine());
+    }
+
+    /// <summary>Applies a changed performance-monitor tier to <see cref="PerfStore"/> as soon as it is set.</summary>
+    /// <param name="fieldName">The name of the settings field that changed.</param>
+    private static void HandleSettingChanged(string fieldName)
+    {
+        if (fieldName == nameof(Settings.perfMonitorTier))
+            PerfStore.SetTier(SettingsManager.LoadSettings().perfMonitorTier);
     }
 
     private void OnDestroy()
@@ -303,12 +330,18 @@ public class PerformanceMonitor : MonoBehaviour
             _phaseStopwatch.Reset();
 
             // Store true active CPU time (sum of all measured phases).
-            CpuFrameTime.Sample(_currentFrameCpuTicks);
+            long cpuTicks = _currentFrameCpuTicks;
+            CpuFrameTime.Sample(cpuTicks);
             _currentFrameCpuTicks = 0;
 
             // Store actual wall-clock time (includes VSync/GPU waits).
-            WallFrameTime.Sample(_frameStopwatch.ElapsedTicks);
+            long wallTicks = _frameStopwatch.ElapsedTicks;
+            WallFrameTime.Sample(wallTicks);
             _frameStopwatch.Restart();
+
+            // The raw, unsmoothed frame; the end of the frame is after every probed region has run.
+            if (Instance == this)
+                PerfStore.CommitFrame(wallTicks, cpuTicks, Time.frameCount);
 
             // Track Managed GC Allocations per frame.
             long currentGcMemory = GC.GetTotalMemory(false);

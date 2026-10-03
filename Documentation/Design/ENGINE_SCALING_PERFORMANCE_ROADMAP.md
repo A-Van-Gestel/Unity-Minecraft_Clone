@@ -1,6 +1,6 @@
 # Engine Scaling Performance Roadmap
 
-**Version:** 1.6  
+**Version:** 1.7  
 **Date:** 2026-10-02  
 **Status:** In progress — `ES-1`, `ES-2` and `ES-6.1` shipped (2026-10-02); ES-0's GC.Alloc attribution captured
 (2026-10-03, §2.2.1 — added `ES-26`/`ES-27`); the rest is a near-to-far horizon, not
@@ -307,7 +307,9 @@ PM-6; the bullets below are what ES needs from it.
   per-frame collection flags per benchmark phase — alongside, not instead of, `PerformanceMonitor`'s
   smoothed history (always-on by design). (PM-0, 2026-10-03: `ProfilerRecorder`'s "GC Allocated In Frame"
   does not exist in Master players, and `GC.GetAllocatedBytesForCurrentThread` is not live under IL2CPP — the
-  per-frame figure comes from the heap-delta method plus a collection flag.)
+  per-frame figure comes from the heap-delta method plus a collection flag.) (PM-1, 2026-10-03: the raw per-frame
+  wall/CPU ring and exact worst/p99 over its last 2 048 frames exist — read with `/perf stats`; per-phase benchmark
+  columns arrive with PM-6.)
 - Slots for `CheckViewDistance`, `UnloadChunks`, `ApplyModifications`, the disk-hit populate
   continuation and every other untimed `World.Update` region, plus an unattributed remainder.
 - A once-per-launch **drain stamp** (P-4's tail-inclusive drain predicate): ms to `_isWorldLoaded`, to
@@ -568,7 +570,7 @@ constants + migration change. Prerequisites: ES-13, ES-18, ES-19.
 
 | Phase | Scope | Effort | Depends on | Status |
 |---|---|:---:|---|---|
-| **ES-0 — Measure** | Spike-visible capture, drain stamp, crossing slots, GC.Alloc capture | 🟢 | — | GC.Alloc capture ✅ 2026-10-03 (§2.2.1); rest via PM-1…PM-3 + PM-6 |
+| **ES-0 — Measure** | Spike-visible capture, drain stamp, crossing slots, GC.Alloc capture | 🟢 | — | GC.Alloc capture ✅ 2026-10-03 (§2.2.1); PM-1 store ✅ 2026-10-03; rest via PM-2, PM-3 + PM-6 |
 | **ES-1 — No frame-paced load** | Completion counter at `World.cs:1064` — execution packet §7.1 | 🟢 | — | ✅ 2026-10-02 (in-game) |
 | **ES-2 — Calibration** | Robust OM-1 lighting probe — execution packet §7.1 | 🟢 | — | ✅ 2026-10-02 (in-game) |
 | **ES-3 — Loading mode** | SU-1 + SU-2, pooled/banded/shared startup snapshots | 🟡 | ES-0 | — |
@@ -960,6 +962,8 @@ saving is inferred from step 1's re-entry leg, not re-measured.
 
 ## Document History
 
+* **v1.7** - ES-0 bullet + plan row: PM-1's store landed (2026-10-03) — raw per-frame ring with exact worst/p99
+  (`/perf stats`); the rest of ES-0 rides PM-2, PM-3 and PM-6.
 * **v1.6** - **ES-0 GC attribution** (2026-10-03, IL2CPP Development/Master player, GC.Alloc call stacks, 200 m/s
   phase): 127.4 KB per generated chunk, fully attributed — 77 % one span copy in `ChunkSerializer.WriteSection`,
   82 % the unload save path, 80 % on ThreadPool threads. §2.2 rows and §2.2.1 attribution table; new `ES-26`

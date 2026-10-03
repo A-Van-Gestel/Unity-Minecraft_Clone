@@ -3,6 +3,7 @@ using System.IO;
 using Config;
 using Data;
 using Data.Enums;
+using Diagnostics;
 using Launch;
 using MyBox;
 using Serialization;
@@ -897,6 +898,25 @@ public class Settings
     [Tooltip("Shows the debug-visualization mode line and visualizer pool count.")]
     public bool debugHudShowVisualization = true;
 
+    /// <summary>
+    /// How much the performance monitor records. Applied live; each tier includes everything below it.
+    /// <para>Listed in <c>SettingsManager.OverlayBenchmarkSettingsFromDisk</c> so a benchmark can be captured at
+    /// a chosen tier on both the cold and the menu-launched path.</para>
+    /// </summary>
+    [SubHeader("Performance Monitor")]
+    [SettingField(SettingsTab.DebugScreen, Label = "Monitor Detail", Order = 12)]
+    [Tooltip("How much the performance monitor records. Read the results with /perf stats.\n\n" +
+             TooltipTags.BulletOptionStart + "Basic" + TooltipTags.BulletOptionEnd +
+             "Raw time of every frame, for worst-frame and percentile readouts (default).\n" +
+             TooltipTags.BulletOptionStart + "Frame" + TooltipTags.BulletOptionEnd +
+             "Currently records the same as Basic.\n" +
+             TooltipTags.BulletOptionStart + "Systems" + TooltipTags.BulletOptionEnd +
+             "Adds the time each world system takes every frame.\n" +
+             TooltipTags.BulletOptionStart + "Capture" + TooltipTags.BulletOptionEnd +
+             "Currently records the same as Systems.\n\n" +
+             TooltipTags.Performance + "Systems and above time the world update in detail, at a small per-frame cost.")]
+    public PerfTier perfMonitorTier = PerfTier.Basic;
+
     #endregion
 
     #region Internal (Non-UI) Fields
@@ -1333,6 +1353,9 @@ public static class SettingsManager
             // here because the re-test it is retained for needs to switch legs without a rebuild — a
             // rebuilt leg would not be the same build, which is the whole point of running one.
             defaults.scalePanicGateThresholdsWithResidency = saved.scalePanicGateThresholdsWithResidency;
+
+            // The monitor's tier changes what a capture costs, so an overhead A/B must be able to choose it.
+            defaults.perfMonitorTier = saved.perfMonitorTier;
         }
         catch (Exception)
         {
