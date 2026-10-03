@@ -85,6 +85,7 @@ namespace Editor.Validation.PipelineBackpressure
                 new Scenario("B22 Pass-cost attribution: phases stay disjoint, and unmeasured never renders as 0.0 ms (P9-0)", RunB22PassCostAttribution),
                 new Scenario("B23 OM-1 probe anchor: min of batch medians, reference identity (ES-2)", RunB23CalibrationAnchor),
                 new Scenario("B24 OM-1 budget map clamps + keep-higher calibration upgrade (ES-2)", RunB24CalibrationMapAndUpgrade),
+                new Scenario("B25 Pool-miss inputs: generated/loaded tally ignores tracing, no world renders unread (H-1)", RunB25PoolMissInputs),
             };
             return ValidationSuiteRunner.Execute("Pipeline Backpressure", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }
@@ -2105,6 +2106,57 @@ namespace Editor.Validation.PipelineBackpressure
                 PipelineTelemetry.BeginRun();
                 PipelineTelemetry.Enabled = wasEnabled;
                 WorldFrameProfiler.Enabled = profilerWasEnabled;
+            }
+        }
+
+        /// <summary>
+        /// B25 — the H-1 inputs: the generated/loaded tally counts every populate inside a phase, traced or
+        /// not, and a phase with no world renders its pool rows as unread rather than as zeros.
+        /// </summary>
+        /// <returns>True when every assertion holds.</returns>
+        private static bool RunB25PoolMissInputs()
+        {
+            bool wasEnabled = PipelineTelemetry.Enabled;
+            try
+            {
+                bool ok = Check("precondition: no world is loaded (edit-mode suite)", World.Instance == null);
+
+                PipelineTelemetry.BeginRun();
+                PipelineTelemetry.Enabled = true;
+                PipelineTelemetry.BeginPhase("populate", "H-1", 4096);
+
+                // One traced chunk per arm, plus one untraced generated chunk: the tally must not depend on
+                // the trace table, or saturation would silently shrink the H-1 denominator.
+                PipelineTelemetry.StampRequested(new ChunkCoord(1, 1));
+                PipelineTelemetry.StampPopulated(new ChunkCoord(1, 1), generated: true);
+                PipelineTelemetry.StampRequested(new ChunkCoord(2, 2));
+                PipelineTelemetry.StampPopulated(new ChunkCoord(2, 2), generated: false);
+                PipelineTelemetry.StampPopulated(new ChunkCoord(3, 3), generated: true);
+                PipelineTelemetry.EndPhase();
+
+                PipelinePhaseMetrics phase = PipelineTelemetry.CompletedPhases[0];
+                ok &= Check($"2 generated (incl. the untraced one), got {phase.ChunksGenerated}",
+                    phase.ChunksGenerated == 2);
+                ok &= Check($"1 loaded from disk, got {phase.ChunksLoaded}", phase.ChunksLoaded == 1);
+                ok &= Check("no world at the phase boundaries -> pool misses flagged unmeasured",
+                    !phase.PoolMissesMeasured && phase.SectionPoolMisses == 0);
+
+                StringBuilder sb = new StringBuilder();
+                PipelineReportSection.Append(sb, PipelineTelemetry.CompletedPhases);
+                string text = sb.ToString();
+                ok &= Check("the report renders the unread line instead of a table of zero misses",
+                    text.Contains("POOL COUNTERS UNREAD") && !text.Contains("ChunkSection (24 KB)"));
+
+                // Outside a phase the tally must not move (it is phase-scoped like every other count).
+                PipelineTelemetry.StampPopulated(new ChunkCoord(4, 4), generated: true);
+                ok &= Check("a populate outside any phase is not counted", phase.ChunksGenerated == 2);
+
+                return ok;
+            }
+            finally
+            {
+                PipelineTelemetry.BeginRun();
+                PipelineTelemetry.Enabled = wasEnabled;
             }
         }
     }

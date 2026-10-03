@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using Data;
 using Helpers;
+using Serialization;
 using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
@@ -308,6 +309,34 @@ namespace Benchmarks
 
         #endregion
 
+        #region Pool misses (ES roadmap H-1)
+
+        /// <summary>
+        /// Chunks populated by the generation arm during the phase. Counted at the populate stamp, not from
+        /// traces, so trace-table saturation cannot truncate it.
+        /// </summary>
+        public int ChunksGenerated;
+
+        /// <summary>Chunks populated from disk during the phase; see <see cref="ChunksGenerated"/>.</summary>
+        public int ChunksLoaded;
+
+        /// <summary>
+        /// False when no world was loaded at the phase boundaries, so the miss deltas below were never read.
+        /// The report then prints an "unread" line rather than zeros, which would read as "the pools never missed".
+        /// </summary>
+        public bool PoolMissesMeasured;
+
+        /// <summary><c>ChunkSection</c> pool misses (24 KB of managed arrays each) during the phase.</summary>
+        public long SectionPoolMisses;
+
+        /// <summary><c>ChunkData</c> pool misses during the phase.</summary>
+        public long DataPoolMisses;
+
+        /// <summary>Save-buffer pool misses (256 KB each) during the phase.</summary>
+        public long SaveBufferPoolMisses;
+
+        #endregion
+
         /// <summary>
         /// True when the trace table hit its capacity and later chunks went untraced. Every number derived
         /// from traces is then a prefix of the phase, and the report must say so rather than imply totality.
@@ -458,6 +487,17 @@ namespace Benchmarks
         [NoAutoStaticsCleanup] // reset in DomainReset
         private static AdmissionSample s_pendingFrame;
 
+        // Cumulative pool-miss readings taken at BeginPhase; EndPhase stores the deltas on the phase. The pool
+        // they came from is kept only for the phase (cleared in EndPhase), so it never pins a finished world's pool.
+        [NoAutoStaticsCleanup] // reset in DomainReset
+        private static ChunkPoolManager s_poolAtStart;
+        [NoAutoStaticsCleanup] // reset in DomainReset
+        private static long s_sectionMissesAtStart;
+        [NoAutoStaticsCleanup] // reset in DomainReset
+        private static long s_dataMissesAtStart;
+        [NoAutoStaticsCleanup] // reset in DomainReset
+        private static long s_saveBufferMissesAtStart;
+
         /// <summary>Completed phase records, in capture order.</summary>
         public static IReadOnlyList<PipelinePhaseMetrics> CompletedPhases => s_completedPhases;
 
@@ -512,6 +552,10 @@ namespace Benchmarks
             s_traceCapacity = MIN_TRACE_CAPACITY;
             s_frameWindowCursor = 0;
             s_pendingFrame = default;
+            s_poolAtStart = null;
+            s_sectionMissesAtStart = 0;
+            s_dataMissesAtStart = 0;
+            s_saveBufferMissesAtStart = 0;
 
 #if UNITY_INCLUDE_INSTRUMENTATION
             // Re-arm the diagnostic latches: a divergence already reported in a previous run must be
@@ -597,7 +641,25 @@ namespace Benchmarks
             s_activePhase.RequestToMeshAppliedTicks.Capacity = INITIAL_SAMPLE_CAPACITY;
             s_activePhase.ParkedTicksSamples.Capacity = INITIAL_SAMPLE_CAPACITY;
 
+            s_poolAtStart = ReadPoolMisses(out s_sectionMissesAtStart, out s_dataMissesAtStart,
+                out s_saveBufferMissesAtStart);
+
             s_phaseStartTime = Time.realtimeSinceStartup;
+        }
+
+        /// <summary>Reads the cumulative pool-miss counters the H-1 rows are differenced from.</summary>
+        /// <param name="sectionMisses">Receives the <c>ChunkSection</c> pool's miss count.</param>
+        /// <param name="dataMisses">Receives the <c>ChunkData</c> pool's miss count.</param>
+        /// <param name="saveBufferMisses">Receives the save-buffer pool's miss count.</param>
+        /// <returns>The chunk pool read from, or null when no world (and therefore no chunk pool) exists.</returns>
+        private static ChunkPoolManager ReadPoolMisses(out long sectionMisses, out long dataMisses,
+            out long saveBufferMisses)
+        {
+            ChunkPoolManager pool = World.Instance != null ? World.Instance.ChunkPool : null;
+            sectionMisses = pool?.CreatedSections ?? 0;
+            dataMisses = pool?.CreatedData ?? 0;
+            saveBufferMisses = SerializationBufferPool.TotalCreated;
+            return pool;
         }
 
         /// <summary>
@@ -619,6 +681,19 @@ namespace Benchmarks
             }
 
             s_traces.Clear();
+
+            // Both readings must come from the SAME pool: a world swapped mid-phase would otherwise difference
+            // two unrelated counters, so that phase reports its pool misses as unread instead.
+            ChunkPoolManager poolAtEnd = ReadPoolMisses(out long sections, out long data, out long buffers);
+            if (s_poolAtStart != null && poolAtEnd == s_poolAtStart)
+            {
+                s_activePhase.PoolMissesMeasured = true;
+                s_activePhase.SectionPoolMisses = sections - s_sectionMissesAtStart;
+                s_activePhase.DataPoolMisses = data - s_dataMissesAtStart;
+                s_activePhase.SaveBufferPoolMisses = buffers - s_saveBufferMissesAtStart;
+            }
+
+            s_poolAtStart = null;
 
             s_activePhase.DurationSeconds = Time.realtimeSinceStartup - s_phaseStartTime;
             s_completedPhases.Add(s_activePhase);
@@ -693,16 +768,22 @@ namespace Benchmarks
 
         /// <summary>Stamps terrain data becoming available (generated or deserialized).</summary>
         /// <param name="coord">The populated chunk.</param>
+        /// <param name="generated">True on the generation arm, false on the disk-load arm.</param>
         /// <remarks>
         /// FP-11a's tour-coverage marking runs <i>above</i> the <see cref="Enabled"/> guard on purpose:
         /// coverage must accrue across the whole run, including the gaps between phases, whereas the trace
-        /// table only records inside an active phase.
+        /// table only records inside an active phase. The generated/loaded tally runs above the trace lookup
+        /// for the same reason: it must count untraced chunks too.
         /// </remarks>
-        public static void StampPopulated(ChunkCoord coord)
+        public static void StampPopulated(ChunkCoord coord, bool generated)
         {
             BenchmarkTourCoverage.MarkPopulated(coord);
 
             if (!Enabled || s_activePhase == null) return;
+
+            if (generated) s_activePhase.ChunksGenerated++;
+            else s_activePhase.ChunksLoaded++;
+
             if (!s_traces.TryGetValue(coord, out ChunkTrace trace)) return;
 
             trace.PopulatedTicks = Stopwatch.GetTimestamp();

@@ -1169,7 +1169,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                     // FP-1 stage stamp: terrain data is available (generation arm; the disk-load arm is
                     // stamped in World.LoadOrGenerateChunkInner). Inside the `if` so a job re-entering an
                     // already-populated chunk cannot re-stamp and reset the hop.
-                    PipelineTelemetry.StampPopulated(jobEntry.Key);
+                    PipelineTelemetry.StampPopulated(jobEntry.Key, generated: true);
                 }
 
                 bool jobFullyProcessed = true;

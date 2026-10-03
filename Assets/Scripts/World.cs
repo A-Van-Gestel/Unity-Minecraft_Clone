@@ -1414,7 +1414,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
 
                 // FP-1 stage stamp: terrain data is available. The disk-load arm of "populated" — the
                 // generation arm is stamped in WorldJobManager.ProcessGenerationJobs.
-                PipelineTelemetry.StampPopulated(chunkCoord);
+                PipelineTelemetry.StampPopulated(chunkCoord, generated: false);
 
                 // Becoming populated is what flips AreNeighborsDataReady for the 8 neighbors — wake any
                 // parked light work now instead of waiting for the fail-safe scan (MT-2). The chunk's own

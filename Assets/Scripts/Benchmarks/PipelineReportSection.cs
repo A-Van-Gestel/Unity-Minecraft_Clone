@@ -81,6 +81,7 @@ namespace Benchmarks
             AppendQuotaUtilisation(sb, phase);
             AppendAmplification(sb, phase);
             AppendParkedTime(sb, phase);
+            AppendPoolMisses(sb, phase);
             AppendVerdict(sb, phase);
 
             sb.AppendLine();
@@ -218,6 +219,41 @@ namespace Benchmarks
             // running culture's decimal separator, so a literal would print a period among commas.
             table.AddRow("-- traces started --", started.ToString("N0"),
                 started > 0 ? $"{100.0:F1}%" : "-", "");
+            table.AppendTo(sb);
+        }
+
+        /// <summary>
+        /// Renders the phase's pool misses beside its generated/loaded chunk counts — the input to the ES
+        /// roadmap's hypothesis H-1 (unattributed per-chunk garbage = <c>ChunkSection</c> pool misses).
+        /// </summary>
+        /// <param name="sb">The report builder.</param>
+        /// <param name="phase">The phase being rendered.</param>
+        /// <remarks>
+        /// The per-chunk ratio divides phase-wide misses by chunks generated in the phase, so it is an
+        /// aggregate, not an attribution: an unload snapshot can rent sections for a chunk generated in an
+        /// earlier phase. It is printed beside the raw counts so the reader can discount it.
+        /// </remarks>
+        private static void AppendPoolMisses(StringBuilder sb, PipelinePhaseMetrics phase)
+        {
+            sb.AppendLine();
+            sb.AppendLine("  Pool misses — allocations because a pool was empty (H-1 input):");
+            sb.AppendLine($"    Chunks populated:   {phase.ChunksGenerated:N0} generated | {phase.ChunksLoaded:N0} loaded from disk");
+
+            if (!phase.PoolMissesMeasured)
+            {
+                // Not "NOT MEASURED": that phrase is the pass-cost banner, and B22 asserts the whole section is free of it.
+                sb.AppendLine("    POOL COUNTERS UNREAD — no world was loaded at a phase boundary, so these are not zeros.");
+                return;
+            }
+
+            int generated = phase.ChunksGenerated;
+            var table = new ReportTable("Pool", "misses", "per generated chunk");
+            table.AddRow("ChunkSection (24 KB)", phase.SectionPoolMisses.ToString("N0"),
+                generated > 0 ? $"{(double)phase.SectionPoolMisses / generated:F2}" : "-");
+            table.AddRow("ChunkData", phase.DataPoolMisses.ToString("N0"),
+                generated > 0 ? $"{(double)phase.DataPoolMisses / generated:F2}" : "-");
+            table.AddRow("Save buffer (256 KB)", phase.SaveBufferPoolMisses.ToString("N0"),
+                generated > 0 ? $"{(double)phase.SaveBufferPoolMisses / generated:F2}" : "-");
             table.AppendTo(sb);
         }
 
