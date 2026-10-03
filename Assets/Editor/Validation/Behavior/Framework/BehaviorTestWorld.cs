@@ -754,6 +754,7 @@ namespace Editor.Validation.Behavior.Framework
             ValidationReflection.SetStaticProperty(typeof(World), nameof(World.Instance), _previousInstance);
 
             _fluidTicker.Dispose();
+            ChunkData?.Dispose();
             foreach (ChunkData neighbor in _neighbors.Values)
                 neighbor.Dispose();
             if (_blockTypesJob.IsCreated) _blockTypesJob.Dispose();

@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using Data;
 using Editor.Validation.Behavior.Framework;
+using Editor.Validation.Framework;
 using Helpers;
 using Jobs;
 using Jobs.BurstData;
@@ -33,6 +34,9 @@ namespace Editor.Validation.Behavior
 
         private const int BH13_SEAM_WAKE_Y = 20;
         private const int BH13_SEAM_WAKE_Z = 6;
+
+        private const string GRASS_BUCKET_FIELD = "_activeGrass";
+        private const string FLUIDS_BUCKET_FIELD = "_activeFluids";
 
         // Fixture geometry: a stone floor in section 0 with the surface blocks one row above it, and a water column
         // inside section 2 (y 32–47) so section 1 stays null between them.
@@ -106,10 +110,13 @@ namespace Editor.Validation.Behavior
             return expected;
         }
 
-        /// <summary>Asserts the chunk's buckets hold exactly the replica set — no missing and no extra voxel.</summary>
+        /// <summary>
+        /// Asserts the chunk's buckets hold exactly the replica set — no missing and no extra voxel — and that each
+        /// voxel sits in its own family's bucket.
+        /// </summary>
         /// <param name="label">The assertion label.</param>
         /// <param name="data">The chunk whose buckets are checked.</param>
-        /// <returns>True when the sets are equal.</returns>
+        /// <returns>True when the sets are equal and every voxel is in its family's bucket.</returns>
         private static bool CheckBucketsMatchReplica(string label, ChunkData data)
         {
             HashSet<Vector3Int> expected = ReplicaActiveSet(data);
@@ -118,6 +125,8 @@ namespace Editor.Validation.Behavior
             foreach (Vector3Int pos in expected)
                 if (!data.IsVoxelActive(pos))
                     diffs.Add($"missing {pos.ToString()}");
+                else if (!IsInReplicaFamilyBucket(data, pos))
+                    diffs.Add($"wrong family bucket {pos.ToString()}");
 
             foreach (Vector3Int pos in data.ActiveVoxels)
                 if (!expected.Contains(pos))
@@ -126,6 +135,26 @@ namespace Editor.Validation.Behavior
             return Check(label, diffs.Count == 0 && data.GetActiveVoxelCount() == expected.Count,
                 $"buckets hold {data.GetActiveVoxelCount().ToString()}, replica {expected.Count.ToString()}: " +
                 string.Join(", ", diffs));
+        }
+
+        /// <summary>
+        /// Whether a voxel is registered in the bucket its family belongs in. The family is derived from the palette
+        /// here rather than through <see cref="ChunkData.ClassifyFamily"/>, which is part of the routing under test;
+        /// the buckets are internal, so they are read by reflection.
+        /// </summary>
+        /// <param name="data">The chunk whose buckets are read.</param>
+        /// <param name="localPos">An active voxel's chunk-local cell.</param>
+        /// <returns>True when the voxel is in its family's bucket, or when its block has no family.</returns>
+        private static bool IsInReplicaFamilyBucket(ChunkData data, Vector3Int localPos)
+        {
+            ushort id = BurstVoxelDataBitMapping.GetId(data.GetVoxel(localPos.x, localPos.y, localPos.z));
+            string bucketField;
+            if (id == BlockIDs.Grass) bucketField = GRASS_BUCKET_FIELD;
+            else if (World.Instance.BlockTypes[id].fluidType != FluidType.None) bucketField = FLUIDS_BUCKET_FIELD;
+            else return true; // no family: the membership check already reports it as missing
+
+            NativeHashSet<int> bucket = (NativeHashSet<int>)ValidationReflection.GetInstanceField(data, bucketField);
+            return bucket.IsCreated && bucket.Contains(ChunkMath.GetFlattenedIndexInChunk(localPos.x, localPos.y, localPos.z));
         }
 
         /// <summary>Applies one mod through the production <see cref="ChunkData.ModifyVoxel"/>.</summary>

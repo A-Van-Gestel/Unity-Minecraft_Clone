@@ -19,7 +19,8 @@ added **parallel-vs-serial determinism gates** (`FluidParallelDeterminismValidat
 **`Minecraft Clone/Dev/Validate Fluid Parallel Determinism`** + **`… (Cross-Chunk Halo)`** + **`… (Cross-Chunk Halo,
 Y-band)`**) — N concurrent pooled tickers byte-identical to the serial baseline + run-to-run, interior and over a 3×3
 distinct-chunk grid. **BH-4 (Tier-2 cross-chunk) is CLOSED** (2026-06-24); the **Y-band is SHIPPED** (2026-06-27) with
-its `BH-4-SPLIT-Y` (vertically-split) + `BH-4-BAND-EDGE` (section-boundary) fixtures.  
+its `BH-4-SPLIT-Y` (vertically-split) + `BH-4-BAND-EDGE` (section-boundary) fixtures. **As of 2026-10-03,
+`Validate Behavior` runs 18 scenarios:** the eight above, BH-B8–B13 (§4) and the four BH-D1 differentials.  
 **Created:** 2026-06-20 (as a Design draft) · **Promoted:** 2026-06-21 · **BH-D1 + parallel gates built:** 2026-06-23/24  
 **Author intent:** the parity guard that lets the **TG-4** (per-behavior native collections) and **TG-5**
 (Burst function-pointer dispatch) optimizations in
@@ -379,7 +380,7 @@ driving production code that looks chunks up by coord inherits this requirement.
 the baseline reds). A scenario written alongside its fix and never observed red proves nothing — here it would
 have shipped two guards that guarded nothing.
 
-### BH-9 — Harness hygiene and coverage gaps found during ES-6.1 · **OPEN (filed 2026-10-02)** · not yet fixed
+### BH-9 — Harness hygiene and coverage gaps found during ES-6.1 · **CLOSED (2026-10-03)** · items 1–3 fixed, item 4 is a standing note
 
 Found while building **BH-B13** (the active-voxel registration contract,
 `BehaviorValidationSuite.Baseline.ActiveRegistration.cs`), which also added two affordances:
@@ -391,20 +392,29 @@ items:
    `BehaviorTestWorld.Dispose` disposes every neighbor but not `ChunkData`. `SyncFluidBucketToActives` registers
    into the center's buckets (`Allocator.Persistent` `NativeHashSet`s) on every Burst-driver tick, so each such
    scenario looks like it leaks up to two native sets. Fix: `ChunkData.Dispose()` in `Dispose`, then confirm with
-   native leak detection on. BH-B13 sidesteps it by building and disposing its own subjects.
+   native leak detection on. BH-B13 sidesteps it by building and disposing its own subjects.  
+   **Fixed 2026-10-03:** `Dispose` now calls `ChunkData?.Dispose()` (the `PhysicsTestWorld`/`PlacementTestWorld`
+   pattern). Confirmed with a reflection probe rather than the leak detector: after one Burst tick over a water
+   source and `Dispose`, the center's `_activeFluids.IsCreated` read `true` before the fix and `false` after.
 2. **BH-B13 checks registration, not routing to the right family bucket.** Its parity reads the public surface
    (`IsVoxelActive`, `ActiveVoxels`, `GetActiveVoxelCount`), which treats grass and fluid buckets as one set.
    Observed during its prove-red: with `ModifyVoxel`'s bucket add removed, the water → grass leg **stayed green**
    (the voxel stayed in the fluid bucket), and other legs caught the mutation instead. Fix: assert the family per
    voxel against `ChunkData.ClassifyFamily`, reading the `internal` buckets by reflection
-   (`ActiveVoxelScanBenchmark`'s `BucketCount` precedent).
+   (`ActiveVoxelScanBenchmark`'s `BucketCount` precedent).  
+   **Fixed 2026-10-03:** every BH-B13 parity check now also asserts each voxel sits in its family's bucket. The
+   replica derives the family from the palette itself rather than calling `ClassifyFamily`, which is part of the
+   routing under test. Prove-red: routing grass into the fluid bucket reds only the new family assertions (bucket
+   counts still match), and dropping `ModifyVoxel`'s bucket add now reds the water → grass leg on the family check.
 3. **§4's planned IDs collide with the suite's shipped ones.** The table below plans **BH-B9** (support cascade)
    and **BH-B10** (`CanReplace` gate) as GATED and retires **BH-B8**. The suite instead shipped BH-B8 / BH-B9
    (placeholder reads, Burst / managed), BH-B10 (the seam wake), and BH-B11–B13, none of which appear in §4.
    IDs are never recycled, so a reader following "BH-B10" from a commit message lands on the wrong scenario.
    Fix: renumber the two GATED rows to fresh IDs (marked as renumbered, not deleted) and add rows for the
    shipped BH-B8–B13. The **Status** header's "8 baselines green" is stale in the same way: `Validate Behavior`
-   reported 18 on 2026-10-02.
+   reported 18 on 2026-10-02.  
+   **Fixed 2026-10-03:** §4 has rows for BH-B8–B13; the two gated rows are now **BH-B14** / **BH-B15**, each marked
+   with its former planned ID; the retired row is unnumbered. The Status header carries the current count.
 4. **§3 BH-3's apply-path table describes the 2026-06-20 code** (e.g. the `Chunk.AddActiveVoxel` row; that method
    was deleted in ES-6.1). It is a dated audit record, so per the freeze rule it is **not** to be edited. Listed
    here only so the next reader does not "fix" it.
@@ -426,9 +436,15 @@ B8/B9 pattern — e.g. prove the snapshot is non-empty and that a deliberately a
 | **BH-B5** ✅   | Lava (low `spreadChance`) in a walled 1-D channel, **11 ticks** → viscosity staggering (source skip,skip,spread; x8 skip×4,spread) → full channel (level 3) → quiesces (3 mods, terminates; in-game confirmed before freeze)                                       | golden-master + determinism + progression + staggering + termination | TG-3 per-tick reseed (staggering *progresses*, not freezes) — **shipped 2026-06-21**          |
 | **BH-B6** ✅   | Grass flanked by two convertible-dirt cells, **6 ticks** → idles 4 ticks (fails the 2% roll) then spreads to the reservoir-chosen right cell (x=9 over x=7, so candidate-scan order is frozen); position picked so the seed fires early (1 mod; in-game confirmed) | golden-master + determinism + non-vacuity + chosen-candidate         | grass reservoir-sampling + spread roll (seeded RNG) — **shipped 2026-06-21**                  |
 | **BH-B7** ✅   | Grass capped by a solid block, **2 ticks** → emits one Dirt mod onto itself, drops from the active set, terminates. Deterministic — the solid-on-top branch returns before any RNG use; frozen after a code-trace match (1 mod)                                    | golden-master + determinism + termination + became-dirt              | grass→dirt branch (no RNG gate) — **shipped 2026-06-21**                                      |
-| ~~**BH-B8**~~ | ~~contract over all fixtures~~ — **retired** (BH-5 retracted; determinism is per-scenario via BH-6)                                                                                                                                                                | —                                                                    | —                                                                                             |
-| **BH-B9**     | **GATED** (BH-7 unreachable via `Behave`) — `REQUIRES_SUPPORT` on a draining support → cascade; revisit via direct `ApplyMod` test                                                                                                                                 | golden-master + positive control                                     | apply-path support cascade (**BH-7**)                                                         |
-| **BH-B10**    | **GATED** (BH-7 unreachable via `Behave`) — mod a `CanReplace`-rejected block; revisit via direct `ApplyMod` test                                                                                                                                                  | golden-master + positive control                                     | apply-path `CanReplace` gate (**BH-7**); needs per-fixture tags                               |
+| *(unnumbered)* | ~~contract over all fixtures~~ — **retired** before it shipped (BH-5 retracted; determinism is per-scenario via BH-6). It was planned as BH-B8; that ID now names the shipped row below                                                                          | —                                                                    | —                                                                                             |
+| **BH-B8** ✅   | Water source on the −X seam beside an **unpopulated placeholder** neighbor, Burst path → no fluid mod flows into the placeholder                                                                                                                                   | non-vacuity + no-cross-seam-mod                                      | placeholder reads resolve to void (`_FIXED_BUGS` Fluid §18) — **shipped 2026-07-27**          |
+| **BH-B9** ✅   | The BH-B8 assertion on the managed path (`TickDriver.Legacy`)                                                                                                                                                                                                      | non-vacuity + no-cross-seam-mod                                      | the same contract on the managed reader — **shipped 2026-07-27**                              |
+| **BH-B10** ✅  | A seam source quiesced against a placeholder → the neighbor populates → the seam wake re-registers it and water flows across                                                                                                                                     | quiesce + wake + flows-into-neighbor                                 | seam wake for fluids (`_FIXED_BUGS` Fluid §19) — **shipped 2026-07-27**                       |
+| **BH-B11** ✅  | Grass quiesced against a placeholder (its up-diagonal dirt target is across the seam) → the seam wake re-registers it                                                                                                                                             | quiesce + wake                                                       | seam wake covers grass — **shipped 2026-07-27**                                               |
+| **BH-B12** ✅  | Grass on the −X seam whose only spread target is across it, at the origin and in the **far lands** → active from the real neighbor voxel; inactive with the neighbor absent                                                                                       | control + far-coordinate + non-vacuity                               | cross-chunk reads resolve the right voxel at far coordinates — **shipped 2026-08-17**         |
+| **BH-B13** ✅  | Six legs over `ChunkData.NeedsActiveVoxelRescan`: job-list registration, `ModifyVoxel` edits, `Reset`, the rescan, the step-4 wake into a data-only neighbor; buckets checked for exact membership **and** family routing against an independent replica         | parity + family routing + flag lifecycle                             | the registration contract behind the re-entry rescan skip (ES-6.1) — **shipped 2026-10-02**   |
+| **BH-B14**    | **GATED** (BH-7 unreachable via `Behave`) — `REQUIRES_SUPPORT` on a draining support → cascade; revisit via direct `ApplyMod` test. *Planned as BH-B9 until 2026-10-03.*                                                                                          | golden-master + positive control                                     | apply-path support cascade (**BH-7**)                                                         |
+| **BH-B15**    | **GATED** (BH-7 unreachable via `Behave`) — mod a `CanReplace`-rejected block; revisit via direct `ApplyMod` test. *Planned as BH-B10 until 2026-10-03.*                                                                                                          | golden-master + positive control                                     | apply-path `CanReplace` gate (**BH-7**); needs per-fixture tags                               |
 | **BH-D1**     | **Differential:** every BH-B# scenario run through old `switch` vs new TG-4/TG-5 dispatch → identical snapshots                                                                                                                                                    | A/B                                                                  | **the load-bearing TG-4/TG-5 parity guard**                                                   |
 
 BH-D1 is added **in the TG-4/TG-5 PR itself** (it needs both code paths to exist), exactly as MR-5's
