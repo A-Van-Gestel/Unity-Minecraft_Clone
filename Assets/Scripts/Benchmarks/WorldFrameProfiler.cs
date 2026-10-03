@@ -1,6 +1,5 @@
 using System.Diagnostics;
-using Unity.Scripting.LifecycleManagement;
-using UnityEngine;
+using Diagnostics;
 
 namespace Benchmarks
 {
@@ -24,17 +23,18 @@ namespace Benchmarks
     /// remain available as the sums, so consumers wanting the old granularity are unaffected.
     /// </para>
     /// <para>
-    /// <b>Stopwatch, not <c>ProfilerRecorder</c>:</b> per <c>PERFORMANCE_PROFILER_OVERHAUL.md</c>,
-    /// <c>ProfilerRecorder</c> returns invalid data in non-Development/IL2CPP builds — the same reason
-    /// <see cref="PerformanceMonitor"/> is Stopwatch-based. The existing <c>Chunk.TickUpdate</c> /
-    /// <c>World.ApplyModifications</c> <c>ProfilerMarker</c>s only feed the Profiler window under deep profiling,
-    /// so they cannot drive an IL2CPP capture. This profiler can.
+    /// <b>A facade over <see cref="PerfStore"/>.</b> Each <see cref="Phase"/> is the <see cref="PerfSlot"/> of
+    /// the same value and name, and a published value is exactly <c>ticks × (1000 / Stopwatch.Frequency)</c> as a
+    /// <c>double</c>, so every capture recorded through this API is comparable with every other. Being
+    /// <see cref="Stopwatch"/>-based, it reports in Master IL2CPP players, where <c>ProfilerMarker</c> timings
+    /// cannot be read.
     /// </para>
     /// <para>
-    /// <b>Zero cost when disabled:</b> <see cref="Begin"/> returns <c>0</c> after a single bool read (no
-    /// timestamp), and <see cref="Add"/> early-returns; no allocation on any path. Distinct from
-    /// <see cref="PerformanceMonitor"/>, which times the whole-frame Unity lifecycle phases — this times the
-    /// <c>World.Update</c> interior.
+    /// <b>Zero cost when inactive:</b> the probes record only while <see cref="PerfStore.SlotsActive"/> — when
+    /// <see cref="Enabled"/> is set, or the performance monitor's tier records slots on its own.
+    /// <see cref="Begin"/> then returns <c>0</c> after a single bool read (no timestamp), and <see cref="Add"/>
+    /// ignores a <c>0</c> start; no allocation on any path. Distinct from <see cref="PerformanceMonitor"/>, which
+    /// times the whole-frame Unity lifecycle phases — this times the <c>World.Update</c> interior.
     /// </para>
     /// </summary>
     public static class WorldFrameProfiler
@@ -106,20 +106,15 @@ namespace Benchmarks
         public const int PhaseCount = 10;
 
         /// <summary>
-        /// When <c>false</c> (default) every method is a no-op guarded by a single bool read, so production
-        /// frames pay nothing. Flipped on for the duration of a capture by the full-world fluid stress pass
-        /// and by the flight capture; both clear it again on teardown.
+        /// Forces the probes to record for the duration of a capture, whatever the performance monitor's tier
+        /// (<see cref="PerfStore.ForceSlots"/>). Clearing it never stops a tier that records slots on its own.
+        /// Reset to <c>false</c> on play-mode entry by <see cref="PerfStore"/>.
         /// </summary>
-        [NoAutoStaticsCleanup] // reset in DomainReset
-        public static bool Enabled;
-
-        private static readonly double s_tickToMs = 1000.0 / Stopwatch.Frequency;
-
-        /// <summary>Per-frame accumulated stopwatch ticks, one slot per <see cref="Phase"/> (reset each <see cref="BeginFrame"/>).</summary>
-        private static readonly long[] s_frameTicks = new long[PhaseCount];
-
-        /// <summary>Published per-phase milliseconds for the frame most recently closed by <see cref="EndFrame"/>.</summary>
-        private static readonly double[] s_lastFrameMs = new double[PhaseCount];
+        public static bool Enabled
+        {
+            get => PerfStore.ForceSlots;
+            set => PerfStore.ForceSlots = value;
+        }
 
         /// <summary>
         /// Milliseconds spent in one phase during the frame most recently closed by <see cref="EndFrame"/>.
@@ -128,34 +123,34 @@ namespace Benchmarks
         /// </summary>
         /// <param name="phase">The phase to read.</param>
         /// <returns>That phase's milliseconds in the last closed frame (0 while disabled).</returns>
-        public static double LastFrameMs(Phase phase) => s_lastFrameMs[(int)phase];
+        public static double LastFrameMs(Phase phase) => PerfStore.PublishedMs((PerfSlot)phase);
 
         /// <summary>Milliseconds spent in <see cref="Phase.Tick"/> during the frame most recently closed by <see cref="EndFrame"/>.</summary>
-        public static double LastFrameTickMs => s_lastFrameMs[(int)Phase.Tick];
+        public static double LastFrameTickMs => LastFrameMs(Phase.Tick);
 
         /// <summary>Milliseconds spent in <see cref="Phase.Apply"/> during the frame most recently closed by <see cref="EndFrame"/>.</summary>
-        public static double LastFrameApplyMs => s_lastFrameMs[(int)Phase.Apply];
+        public static double LastFrameApplyMs => LastFrameMs(Phase.Apply);
 
         /// <summary>Milliseconds spent in <see cref="Phase.LightMerge"/> during the frame most recently closed by <see cref="EndFrame"/>.</summary>
-        public static double LastFrameLightMergeMs => s_lastFrameMs[(int)Phase.LightMerge];
+        public static double LastFrameLightMergeMs => LastFrameMs(Phase.LightMerge);
 
         /// <summary>Milliseconds spent in <see cref="Phase.LightStagingDrain"/> during the frame most recently closed by <see cref="EndFrame"/>.</summary>
-        public static double LastFrameLightStagingDrainMs => s_lastFrameMs[(int)Phase.LightStagingDrain];
+        public static double LastFrameLightStagingDrainMs => LastFrameMs(Phase.LightStagingDrain);
 
         /// <summary>Milliseconds spent in <see cref="Phase.LightFailSafeScan"/> during the frame most recently closed by <see cref="EndFrame"/>.</summary>
-        public static double LastFrameLightFailSafeScanMs => s_lastFrameMs[(int)Phase.LightFailSafeScan];
+        public static double LastFrameLightFailSafeScanMs => LastFrameMs(Phase.LightFailSafeScan);
 
         /// <summary>Milliseconds spent in <see cref="Phase.LightSchedule"/> during the frame most recently closed by <see cref="EndFrame"/>.</summary>
-        public static double LastFrameLightScheduleMs => s_lastFrameMs[(int)Phase.LightSchedule];
+        public static double LastFrameLightScheduleMs => LastFrameMs(Phase.LightSchedule);
 
         /// <summary>Milliseconds spent in <see cref="Phase.MeshProcess"/> during the frame most recently closed by <see cref="EndFrame"/>.</summary>
-        public static double LastFrameMeshProcessMs => s_lastFrameMs[(int)Phase.MeshProcess];
+        public static double LastFrameMeshProcessMs => LastFrameMs(Phase.MeshProcess);
 
         /// <summary>Milliseconds spent in <see cref="Phase.MeshSchedule"/> during the frame most recently closed by <see cref="EndFrame"/>.</summary>
-        public static double LastFrameMeshScheduleMs => s_lastFrameMs[(int)Phase.MeshSchedule];
+        public static double LastFrameMeshScheduleMs => LastFrameMs(Phase.MeshSchedule);
 
         /// <summary>Milliseconds spent in <see cref="Phase.GenerationProcess"/> during the frame most recently closed by <see cref="EndFrame"/>.</summary>
-        public static double LastFrameGenerationProcessMs => s_lastFrameMs[(int)Phase.GenerationProcess];
+        public static double LastFrameGenerationProcessMs => LastFrameMs(Phase.GenerationProcess);
 
         /// <summary>
         /// Total main-thread mesh milliseconds — <see cref="Phase.MeshProcess"/> + <see cref="Phase.MeshSchedule"/>
@@ -179,68 +174,43 @@ namespace Benchmarks
                                   + LastFrameLightFailSafeScanMs + LastFrameLightScheduleMs;
 
         /// <summary>
-        /// Clears all static state on play-mode entry so a profiler left <see cref="Enabled"/> (or holding stale
-        /// per-frame values) by a previous session never leaks into the next when domain reload is disabled.
-        /// Mirrors the <c>DomainReset</c> convention used by <see cref="PerformanceMonitor"/> and
-        /// <c>WorldLaunchState</c>.
-        /// </summary>
-        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
-        private static void DomainReset()
-        {
-            Enabled = false;
-
-            for (int i = 0; i < PhaseCount; i++)
-            {
-                s_frameTicks[i] = 0;
-                s_lastFrameMs[i] = 0;
-            }
-        }
-
-        /// <summary>
-        /// Resets the per-frame accumulators. Called once at the top of the <c>World.Update</c> body, before any
-        /// timed region. No-op when <see cref="Enabled"/> is <c>false</c>.
+        /// Resets the per-frame accumulators of every phase. Called once at the top of the <c>World.Update</c>
+        /// body, before any timed region. No-op while the probes are inactive.
         /// </summary>
         public static void BeginFrame()
         {
-            if (!Enabled) return;
+            if (!PerfStore.SlotsActive) return;
 
-            for (int i = 0; i < PhaseCount; i++)
-                s_frameTicks[i] = 0;
+            PerfStore.ClearSlots(0, PhaseCount);
         }
 
         /// <summary>
         /// Publishes the per-frame accumulators into the <c>LastFrame*Ms</c> properties for the collector to read.
-        /// Called once at the end of <c>World.Update</c>, after every timed region. No-op when
-        /// <see cref="Enabled"/> is <c>false</c>.
+        /// Called once at the end of <c>World.Update</c>, after every timed region. No-op while the probes are
+        /// inactive, so the last published values stay readable.
         /// </summary>
         public static void EndFrame()
         {
-            if (!Enabled) return;
+            if (!PerfStore.SlotsActive) return;
 
-            for (int i = 0; i < PhaseCount; i++)
-                s_lastFrameMs[i] = s_frameTicks[i] * s_tickToMs;
+            PerfStore.PublishSlots(0, PhaseCount);
         }
 
         /// <summary>
         /// Opens a timed section: returns a start timestamp to hand back to <see cref="Add"/>. Returns <c>0</c>
-        /// (no <see cref="Stopwatch"/> read) when <see cref="Enabled"/> is <c>false</c>. Used as a two-line pair
-        /// around an existing <c>World.Update</c> region so the region's control flow is never re-bracketed or
-        /// reordered (a hard invariant of the deadlock-prone chunk pipeline).
+        /// (no <see cref="Stopwatch"/> read) while the probes are inactive. Used as a two-line pair around an
+        /// existing <c>World.Update</c> region so the region's control flow is never re-bracketed or reordered
+        /// (a hard invariant of the deadlock-prone chunk pipeline).
         /// </summary>
-        /// <returns>The stopwatch start timestamp, or <c>0</c> when disabled.</returns>
-        public static long Begin() => Enabled ? Stopwatch.GetTimestamp() : 0L;
+        /// <returns>The stopwatch start timestamp, or <c>0</c> when inactive.</returns>
+        public static long Begin() => PerfStore.Begin();
 
         /// <summary>
         /// Closes a timed section opened by <see cref="Begin"/>, adding its elapsed ticks to the given phase's
-        /// per-frame accumulator. No-op when <see cref="Enabled"/> is <c>false</c>.
+        /// per-frame accumulator. A start of <c>0</c> (an inactive <see cref="Begin"/>) is a no-op.
         /// </summary>
         /// <param name="phase">The cost center the elapsed time is attributed to.</param>
         /// <param name="startTimestamp">The value returned by the paired <see cref="Begin"/> call.</param>
-        public static void Add(Phase phase, long startTimestamp)
-        {
-            if (!Enabled) return;
-
-            s_frameTicks[(int)phase] += Stopwatch.GetTimestamp() - startTimestamp;
-        }
+        public static void Add(Phase phase, long startTimestamp) => PerfStore.Accumulate((PerfSlot)phase, startTimestamp);
     }
 }

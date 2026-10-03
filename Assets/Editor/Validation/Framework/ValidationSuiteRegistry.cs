@@ -15,6 +15,7 @@ using Editor.Validation.Meshing;
 using Editor.Validation.MeshQueue;
 using Editor.Validation.MigrationChain;
 using Editor.Validation.Occlusion;
+using Editor.Validation.PerfMonitoring;
 using Editor.Validation.Placement;
 using Editor.Validation.PhysicsSolver;
 using Editor.Validation.PipelineBackpressure;
@@ -65,7 +66,7 @@ namespace Editor.Validation.Framework
     public static class ValidationSuiteRegistry
     {
         /// <summary>The number of standard suites expected on the list — a floor the aggregate runner asserts against.</summary>
-        public const int ExpectedSuiteCount = 31;
+        public const int ExpectedSuiteCount = 32;
 
         /// <summary>The registered suites, in run/report order.</summary>
         public static readonly IReadOnlyList<RegisteredSuite> Suites = new[]
@@ -100,6 +101,7 @@ namespace Editor.Validation.Framework
             new RegisteredSuite("Worm Carver", WormCarverValidationSuite.Execute),
             new RegisteredSuite("Biome Selection", BiomeSelectionValidationSuite.Execute),
             new RegisteredSuite("Sound Engine", SoundEngineValidationSuite.Execute),
+            new RegisteredSuite("Performance Monitor", PerfMonitorValidationSuite.Execute),
             new RegisteredSuite("Validation Framework", ValidationFrameworkSelfTest.Execute),
         };
     }

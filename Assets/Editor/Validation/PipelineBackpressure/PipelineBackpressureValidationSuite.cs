@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Text;
 using Benchmarks;
 using Data;
+using Diagnostics;
 using Editor.Dev;
 using Editor.Validation.Framework;
 using Helpers;
@@ -1943,8 +1944,12 @@ namespace Editor.Validation.PipelineBackpressure
         {
             bool wasEnabled = PipelineTelemetry.Enabled;
             bool profilerWasEnabled = WorldFrameProfiler.Enabled;
+            PerfTier tierWas = PerfStore.Tier;
             try
             {
+                // A Systems+ tier keeps the probes recording with Enabled off; pin Basic so "disabled" means off.
+                PerfStore.SetTier(PerfTier.Basic);
+
                 // --- Disjointness: time charged to one phase appears in no other. ---
                 WorldFrameProfiler.Enabled = true;
                 WorldFrameProfiler.BeginFrame();
@@ -2106,6 +2111,7 @@ namespace Editor.Validation.PipelineBackpressure
                 PipelineTelemetry.BeginRun();
                 PipelineTelemetry.Enabled = wasEnabled;
                 WorldFrameProfiler.Enabled = profilerWasEnabled;
+                PerfStore.SetTier(tierWas);
             }
         }
 
