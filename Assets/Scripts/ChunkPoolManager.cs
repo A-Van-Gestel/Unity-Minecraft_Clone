@@ -39,6 +39,10 @@ public class ChunkPoolManager
     public long DestroyedBorders => _borderPool.TotalDestroyed;
     public long DestroyedVisualizers => _visualizerPool.TotalDestroyed;
 
+    // Cumulative pool misses (a Get that had to allocate) for the concurrent data pools.
+    public long CreatedData => _dataPool.TotalCreated;
+    public long CreatedSections => _sectionPool.TotalCreated;
+
     // --- Cleanup Settings ---
     private int _targetViewDistance;
 

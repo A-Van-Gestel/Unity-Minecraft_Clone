@@ -47,6 +47,12 @@ namespace Helpers
         /// <summary>Cumulative count of <see cref="Get"/> calls — the exact demand signal the CP-7 linger pruning reads.</summary>
         public long TotalGets => Interlocked.Read(ref _totalGets);
 
+        // Incremented inside the lock where the miss is decided; read lock-free.
+        private long _totalCreated;
+
+        /// <summary>Cumulative count of <see cref="Get"/> calls that found the pool empty and created a new instance (pool misses).</summary>
+        public long TotalCreated => Interlocked.Read(ref _totalCreated);
+
         // Pruning State
         private float _cleanupTimer = 0f;
         private const float CLEANUP_INTERVAL = 0.05f; // 20 checks/sec
@@ -74,6 +80,8 @@ namespace Helpers
                 {
                     return _pool.Pop();
                 }
+
+                _totalCreated++;
             }
 
             // Create OUTSIDE the lock to minimize contention/blocking time

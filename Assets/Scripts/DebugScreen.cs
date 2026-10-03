@@ -549,6 +549,9 @@ public class DebugScreen : MonoBehaviour
         _middleLeftBuilder.Append("Pool destroys — chunk: ").Append(_world.ChunkPool.DestroyedChunks)
             .Append(" | data: ").Append(_world.ChunkPool.DestroyedData)
             .Append(" | sect: ").Append(_world.ChunkPool.DestroyedSections).AppendLine();
+        _middleLeftBuilder.Append("Pool misses — data: ").Append(_world.ChunkPool.CreatedData)
+            .Append(" | sect: ").Append(_world.ChunkPool.CreatedSections)
+            .Append(" | save buffers: ").Append(SerializationBufferPool.TotalCreated).AppendLine();
 
         // --- P-4 §3.5 panic gate + backlog signals (threshold calibration + close/drain/reopen witness) ---
         _middleLeftBuilder.Append("Gen gate: ").Append(_world.GenerationGateOpen ? "OPEN" : "CLOSED")
