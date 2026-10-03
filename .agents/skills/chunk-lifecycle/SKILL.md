@@ -12,7 +12,7 @@ regression does not happen.
 
 - Modifying `World.cs`, `WorldJobManager.cs`, `ChunkPoolManager.cs`, or anything under `Assets/Scripts/Jobs/` that touches generation, lighting, or meshing jobs.
 - Changes to `ChunkData.cs` that add, remove, or re-purpose a state flag (`IsPopulated`, `IsLoading`) or a `LightingWork` bit (`NeedsInitialLighting`, `HasLightChangesToProcess`, `NeedsEdgeCheck`) — the lighting three are get-only bits of one byte, mutated only through `ChunkData`'s named transition methods.
-- Anything involving neighbor-readiness checks (`AreNeighborsDataReady`, `AreNeighborsReadyAndLit`).
+- Anything involving neighbor-readiness checks (`AreNeighborsDataReady`, `AreNeighborsReadyAndLit`, `AreNeighborsMeshReady`).
 - User reports: "chunks are stuck", "meshing won't run", "lighting never settles", "generation queue backed up", "deadlock".
 
 ## How to use it
@@ -22,13 +22,13 @@ regression does not happen.
 Before editing any pipeline code, read `@Documentation/Architecture/CHUNK_LIFECYCLE_PIPELINE.md`. Specifically:
 
 - Section 2 — State flags, who sets them, who clears them.
-- Section 3 — Readiness gates (`AreNeighborsDataReady` vs `AreNeighborsReadyAndLit`) — the distinction is load-bearing.
+- Section 3 — Readiness gates (`AreNeighborsDataReady`, `AreNeighborsReadyAndLit`, `AreNeighborsMeshReady`) — the distinctions are load-bearing.
 - The flag lifecycle diagram — every state transition must remain reachable from the diagram after your change.
 
 ### Step 2 — Invariants that must not break
 
 - **Flag pairing.** Every flag that is set somewhere must have exactly one corresponding clear site. If you add a new `NeedsX` flag, identify the set and the clear in the same commit.
-- **Gate ordering.** A chunk must not advance to meshing until it passes `AreNeighborsReadyAndLit`. Do not add a "fast path" that skips this gate — historical meshing deadlocks trace to exactly that pattern.
+- **Gate ordering.** A chunk must not advance to meshing until it passes `AreNeighborsMeshReady` (all 8 neighbors populated, their initial lighting pass done). Do not add a "fast path" that skips this gate — historical meshing deadlocks trace to exactly that pattern.
 - **Pool recycle.** `Reset()` must clear every transient flag. When you add a flag, add its clear to `Reset()` in the same change, or a recycled chunk from the pool will inherit stale state.
 - **Main-thread only mutations.** State flags are mutated on the main thread in `World.Update()`. Job code reads a snapshot. Do not mutate flags from inside a job.
 

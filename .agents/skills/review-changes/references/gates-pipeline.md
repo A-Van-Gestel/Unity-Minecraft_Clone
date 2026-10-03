@@ -29,11 +29,13 @@ or `ChunkData.cs` breaks one of the pipeline's ordering/ownership invariants:
 - **flag pairing** — a state flag set without its clear (or cleared without its
   set), so a chunk is left mid-transition and never advances
 - **gate ordering** — meshing or lighting scheduled before its precondition
-  (`AreNeighborsReadyAndLit` and friends) holds, so work runs on a half-built
-  neighbourhood
-- **conflated readiness gates** — `AreNeighborsDataReady` (neighbor terrain exists,
-  for initial lighting) swapped for `AreNeighborsReadyAndLit` (neighbors fully lit
-  and stable, for meshing), or vice versa. They are different gates
+  (`AreNeighborsMeshReady` and friends) holds, so work runs on a half-built
+  neighborhood
+- **conflated readiness gates** — one of the three swapped for another:
+  `AreNeighborsDataReady` (neighbor terrain exists; initial lighting and
+  light-change rescheduling), `AreNeighborsReadyAndLit` (neighbors lit and stable;
+  edge checks), `AreNeighborsMeshReady` (neighbors populated with their initial
+  lighting done; meshing). They are different gates
 - **off-main-thread flag mutation** — state flags are mutated only on the main
   thread in `World.Update()`; a job reads a snapshot. A job that writes a flag is
   a race
