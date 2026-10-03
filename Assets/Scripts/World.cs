@@ -787,6 +787,9 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         // 4. Dispose of FastNoiseLite unmanaged lookup tables.
         FastNoiseLite.ShutdownLookupTables();
 
+        // 5. On player quit, free the shared meshing lookup tables — only now that step 1 has completed every mesh job.
+        BurstVoxelData.ReleaseAfterQuit();
+
         // --- Save system ---
         // Ensure storage is flushed even if OnApplicationQuit didn't run
         if (StorageManager != null)

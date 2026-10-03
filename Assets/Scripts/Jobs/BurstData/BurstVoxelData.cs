@@ -2,6 +2,7 @@ using System.Runtime.CompilerServices;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Mathematics;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 #if UNITY_EDITOR
 using UnityEditor;
@@ -12,7 +13,9 @@ namespace Jobs.BurstData
     /// <summary>
     /// Serves as a globally accessible NativeArray storage container for standard voxel mesh generation primitive data.
     /// Used directly inside Burst-compiled Job contexts to prevent expensive data layout transitions from managed memory to unmanaged memory.
-    /// Automatically manages its own <see cref="UnityEngine.Application.quitting"/> and <see cref="UnityEditor.AssemblyReloadEvents"/> lifecycles.
+    /// In the Editor the arrays live until the next assembly reload (<see cref="UnityEditor.AssemblyReloadEvents"/>), so
+    /// edit-mode tools can mesh after a play session. In a player, <see cref="UnityEngine.Application.quitting"/> only marks
+    /// them for release; <see cref="ReleaseAfterQuit"/> frees them once the jobs that read them have completed.
     /// </summary>
     [BurstCompile]
     public class BurstVoxelData
@@ -67,6 +70,10 @@ namespace Jobs.BurstData
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static int OppositeFace(int faceIndex) => faceIndex ^ 1;
 
+        /// <summary>Set when a player begins quitting; <see cref="ReleaseAfterQuit"/> frees the arrays only then.</summary>
+        [NoAutoStaticsCleanup] // reset in Initialize
+        private static bool s_isQuitting;
+
         // These empty structs are just unique keys for the SharedStatic fields.
         private struct VoxelVertsKey
         {
@@ -100,6 +107,7 @@ namespace Jobs.BurstData
         public static void Initialize()
         {
             Dispose(); // Clean up any old data before initializing
+            s_isQuitting = false;
 
             // Allocate persistent memory for our arrays, as they will exist for the lifetime of the app.
             NativeArray<Vector3> voxelVerts = new NativeArray<Vector3>(VoxelData.VoxelVerts, Allocator.Persistent);
@@ -121,24 +129,40 @@ namespace Jobs.BurstData
             CornerOffsets.Data = cornerOffsets;
             CornerVertices.Data = cornerVertices;
 
-            // Subscribe our Dispose method to the Application.quitting event.
-            // This ensures our native memory is cleaned up when the game closes.
-            // We unsubscribe first to prevent duplicate subscriptions during editor domain reloads.
-            Application.quitting -= Dispose;
-            // Hook into the editor's assembly reload event to dispose data correctly.
 #if UNITY_EDITOR
+            // Edit-mode tools mesh with these arrays too, so the Editor frees them only before an assembly reload.
             AssemblyReloadEvents.beforeAssemblyReload += Dispose;
+#else
+            // Quit fires while mesh jobs may still be running, so it only marks the arrays for ReleaseAfterQuit.
+            // Unsubscribe first so a repeated Initialize never subscribes twice.
+            Application.quitting -= MarkQuitting;
+            Application.quitting += MarkQuitting;
 #endif
         }
 
+        /// <summary>
+        /// Frees the arrays if the player is quitting; a no-op otherwise, and always a no-op in the Editor.
+        /// Call only once every job that reads them has completed — the quit event itself fires before scene
+        /// teardown, while mesh jobs can still be in flight.
+        /// </summary>
+        public static void ReleaseAfterQuit()
+        {
+            if (s_isQuitting) Dispose();
+        }
+
+#if !UNITY_EDITOR
+        private static void MarkQuitting() => s_isQuitting = true;
+#endif
+
         // It's crucial to dispose of NativeArrays to prevent memory leaks.
-        // This method is called when the application closes or the editor recompiles.
+        // Called before an Editor assembly reload, and in a quitting player through ReleaseAfterQuit.
         private static void Dispose()
         {
-            // Unsubscribe from events to prevent memory leaks in the editor
-            Application.quitting -= Dispose;
+            // Unsubscribe, so the next Initialize subscribes exactly once.
 #if UNITY_EDITOR
             AssemblyReloadEvents.beforeAssemblyReload -= Dispose;
+#else
+            Application.quitting -= MarkQuitting;
 #endif
 
 
