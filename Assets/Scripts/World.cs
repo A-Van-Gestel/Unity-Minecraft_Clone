@@ -424,9 +424,9 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
 
     // --- CP-1 lifecycle observability probes ---
     // Always-on tallies (unload deferral reasons, per-pass unload count) surfaced on the debug HUD.
-    // The load-arm fault counter and stuck-IsLoading detector are dev/editor-only (see CountLoadFault / the
-    // fail-safe scan). None of these change behavior — they instrument the silent-by-construction failure
-    // modes catalogued in CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md §2.4 (F1/F5/F6) so CP-3/6/7 land on data.
+    // The load-arm fault counter and stuck-IsLoading detector exist only in instrumented builds
+    // (UNITY_INCLUDE_INSTRUMENTATION, so not a Release-variant Development build). None of these change behavior —
+    // they instrument the silent-by-construction failure modes cataloged in CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md §2.4.
     private long _unloadDeferJobRunning;
     private long _unloadDeferLightPending;
     private long _unloadDeferWouldStrand;
@@ -449,25 +449,25 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// <see cref="UnloadedLastPass"/> — the pinned-trail drain in action).</summary>
     public long UnloadedLightPersisted => _unloadedLightPersisted;
 
-    // Load-arm fault counter (F1). Dev/editor-only: incremented via CountLoadFault, compiled out in release.
+    // Load-arm fault counter (F1). Instrumented builds only: incremented via CountLoadFault, compiled out elsewhere.
     [NoAutoStaticsCleanup] // reset in DomainReset
     private static long s_loadArmFaults;
 
-    /// <summary>Cumulative faults escaping the load arm (dev/editor builds only; F1 — today's silent loss, until CP-3).</summary>
+    /// <summary>Cumulative faults escaping the load arm (instrumented builds only; F1).</summary>
     public static long LoadArmFaults => Interlocked.Read(ref s_loadArmFaults);
 
     // Stuck-IsLoading detector state (F1): coords seen IsLoading && !IsPopulated in the previous fail-safe scan,
-    // and the count that persisted across two consecutive scans (i.e. stuck >= ~1s). Dev/editor-only.
+    // and the count that persisted across two consecutive scans (i.e. stuck >= ~1s). Instrumented builds only.
     private readonly HashSet<Vector2Int> _prevScanLoadingChunks = new HashSet<Vector2Int>();
     private readonly HashSet<Vector2Int> _scanLoadingChunks = new HashSet<Vector2Int>();
     private int _stuckLoadingChunks;
 
-    /// <summary>Chunks stuck <c>IsLoading &amp;&amp; !IsPopulated</c> across two consecutive ~1s scans (dev/editor only; F1).</summary>
+    /// <summary>Chunks stuck <c>IsLoading &amp;&amp; !IsPopulated</c> across two consecutive ~1s scans (instrumented builds only; F1).</summary>
     public int StuckLoadingChunks => _stuckLoadingChunks;
 
     // --- LP-1 lighting-invariant probe ---
     // A convention-only invariant from LIGHTING_PIPELINE_STATE_REFACTOR.md §2.4, instrumented so LP-4 lands
-    // on observation rather than reasoning. Dev/editor-only (see ScanSkylightQueuePairing); instance fields,
+    // on observation rather than reasoning. Instrumented builds only (see ScanSkylightQueuePairing); instance fields,
     // so a fresh play session starts them at zero without a DomainReset line. The probe changes no behavior.
 
     // Probe 2 (F6): skylight-queue keys the fail-safe scan's predicate would skip. Gauge = this scan,
@@ -480,24 +480,24 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     private long _skylightQueueUnpopulatedTotal;
     private bool _skylightQueueProbeLogged;
 
-    /// <summary>Skylight-queue keys found unflagged in the most recent ~1s scan (dev/editor only; LP-1 probe 2, F6).</summary>
+    /// <summary>Skylight-queue keys found unflagged in the most recent ~1s scan (instrumented builds only; LP-1 probe 2, F6).</summary>
     public int SkylightQueueUnflagged => _skylightQueueUnflagged;
 
-    /// <summary>Cumulative unflagged skylight-queue observations across all scans (dev/editor only; LP-1 probe 2, F6).</summary>
+    /// <summary>Cumulative unflagged skylight-queue observations across all scans (instrumented builds only; LP-1 probe 2, F6).</summary>
     public long SkylightQueueUnflaggedTotal => _skylightQueueUnflaggedTotal;
 
     /// <summary>Skylight-queue keys with no resident owner in the most recent scan — minted by design when a
-    /// BFS spills across a border into unloaded territory, not a violation (dev/editor only; LP-1 probe 2, F6).</summary>
+    /// BFS spills across a border into unloaded territory, not a violation (instrumented builds only; LP-1 probe 2, F6).</summary>
     public int SkylightQueueOrphaned => _skylightQueueOrphaned;
 
     /// <summary>Skylight-queue keys whose owner is resident but not yet populated in the most recent scan —
-    /// the scan skips them and the state resolves on population, so not a violation (dev/editor only; LP-1
+    /// the scan skips them and the state resolves on population, so not a violation (instrumented builds only; LP-1
     /// probe 2, F6).</summary>
     public int SkylightQueueUnpopulated => _skylightQueueUnpopulated;
 
     /// <summary>Cumulative resident-but-unpopulated observations. The gauge above is near-useless on its own —
     /// the state resolves within a scan or two — so the total is what a soak can actually read
-    /// (dev/editor only; LP-1 probe 2, F6).</summary>
+    /// (instrumented builds only; LP-1 probe 2, F6).</summary>
     public long SkylightQueueUnpopulatedTotal => _skylightQueueUnpopulatedTotal;
 
     // --- LP-6 gate-walk probe (retained past its question — scheduled for removal) ---
@@ -507,7 +507,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     // pass, where the effect is 0.29% of it. A call count is deterministic, so the same route walked before
     // and after yields an exact ratio; the per-call cost comes from LightingGateWalkBenchmark instead.
     // Instance fields, so a fresh play session starts them at zero without a DomainReset line (the LP-1
-    // probe convention above). Increments are dev/editor-only.
+    // probe convention above). Increments are instrumented-build only.
     //
     // That question is CLOSED. These are kept only as the re-verification instrument, and are filed for
     // deletion in CODEBASE_IMPROVEMENTS.md §2.3 — which also names the editor benchmark that reads them.
@@ -516,19 +516,19 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     private long _gateCallsMeshReady;
     private long _neighborFactsGathered;
 
-    /// <summary>Cumulative <see cref="AreNeighborsDataReady"/> calls this session (dev/editor only; LP-6 probe).</summary>
+    /// <summary>Cumulative <see cref="AreNeighborsDataReady"/> calls this session (instrumented builds only; LP-6 probe).</summary>
     public long GateCallsDataReady => _gateCallsDataReady;
 
-    /// <summary>Cumulative <see cref="AreNeighborsReadyAndLit"/> calls this session (dev/editor only; LP-6 probe).</summary>
+    /// <summary>Cumulative <see cref="AreNeighborsReadyAndLit"/> calls this session (instrumented builds only; LP-6 probe).</summary>
     public long GateCallsReadyAndLit => _gateCallsReadyAndLit;
 
-    /// <summary>Cumulative <see cref="AreNeighborsMeshReady"/> calls this session (dev/editor only; LP-6 probe).</summary>
+    /// <summary>Cumulative <see cref="AreNeighborsMeshReady"/> calls this session (instrumented builds only; LP-6 probe).</summary>
     public long GateCallsMeshReady => _gateCallsMeshReady;
 
     /// <summary>
     /// Cumulative <c>GatherNeighborFacts</c> calls this session — one per neighbor actually examined, so it
     /// counts the gates' real work rather than assuming 8 per call (short-circuits and out-of-world
-    /// neighbors both cut it) (dev/editor only; LP-6 probe).
+    /// neighbors both cut it) (instrumented builds only; LP-6 probe).
     /// </summary>
     public long NeighborFactsGathered => _neighborFactsGathered;
 
@@ -1224,12 +1224,12 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         }
     }
 
-    /// <summary>Increments the CP-1 load-arm fault counter (dev/editor builds only; compiled out in release).</summary>
+    /// <summary>Increments the CP-1 load-arm fault counter (instrumented builds only; compiled out in release).</summary>
     [Conditional("UNITY_INCLUDE_INSTRUMENTATION")]
     private static void CountLoadFault() => Interlocked.Increment(ref s_loadArmFaults);
 
     /// <summary>
-    /// CP-1 stuck-<c>IsLoading</c> detector (F1), dev/editor only: records a chunk seen
+    /// CP-1 stuck-<c>IsLoading</c> detector (F1), instrumented builds only: records a chunk seen
     /// <c>IsLoading &amp;&amp; !IsPopulated</c> during the current fail-safe scan. Called per chunk from the
     /// scan walk; <see cref="FinalizeStuckLoadingScan"/> reconciles it against the previous scan.
     /// </summary>
@@ -1242,7 +1242,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     }
 
     /// <summary>
-    /// CP-1 (dev/editor only): finalizes a fail-safe scan. A chunk present in both this scan and the
+    /// CP-1 (instrumented builds only): finalizes a fail-safe scan. A chunk present in both this scan and the
     /// previous one has been <c>IsLoading &amp;&amp; !IsPopulated</c> for ≥ ~1s (the F1 stuck signal); that
     /// intersection count is reported via <see cref="StuckLoadingChunks"/>. The current set then becomes
     /// the previous for the next scan.
@@ -1262,7 +1262,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     }
 
     /// <summary>
-    /// CP-1 (dev/editor only): drives the stuck-<c>IsLoading</c> detector's ~1s walk when lighting is
+    /// CP-1 (instrumented builds only): drives the stuck-<c>IsLoading</c> detector's ~1s walk when lighting is
     /// disabled — the fail-safe lighting scan (its normal host) does not run in that config. Reuses
     /// <see cref="FULL_LIGHT_SCAN_SECONDS"/> cadence and the same per-chunk/finalize helpers.
     /// </summary>
@@ -1279,7 +1279,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     }
 
     /// <summary>
-    /// LP-1 probe 2 (F6), dev/editor only: checks the skylight-recalculation queue's "queued column ⇒ owner
+    /// LP-1 probe 2 (F6), instrumented builds only: checks the skylight-recalculation queue's "queued column ⇒ owner
     /// chunk flagged" pairing, which today is maintained by convention across three enqueue paths. A populated
     /// resident owner carrying none of the three work flags is the violation — the fail-safe scan's own
     /// predicate would skip it, so its columns sleep until unload persists them. Two non-violating states get
@@ -2193,8 +2193,9 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// Fails loudly if the player has drifted further from the Unity origin than a working floating origin ever
     /// allows (§4.3 step 4). This is WS-4's false-green guard: the failures it catches — a re-anchor that silently
     /// stopped firing, or a site holding a stale origin that pins the player out at the old anchor — otherwise show
-    /// up only as gradually worsening render jitter, which is easy to miss and hard to attribute. Editor/development
-    /// builds only, and latched, so a genuine breach reports once instead of every frame.
+    /// up only as gradually worsening render jitter, which is easy to miss and hard to attribute. Checked builds
+    /// only (UNITY_ENABLE_CHECKS: the Editor and the Debug/Checked code variants), and latched, so a genuine
+    /// breach reports once instead of every frame.
     /// </summary>
     [Conditional("UNITY_ENABLE_CHECKS")]
     private void AssertPlayerNearOrigin()
@@ -2682,7 +2683,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
 #if UNITY_INCLUDE_INSTRUMENTATION
         // CP-1: the stuck-IsLoading detector normally rides the fail-safe lighting scan below, which is
         // gated on enableLighting. When lighting is disabled that scan never runs, so drive the detector's
-        // own ~1s walk here instead (dev/editor only; single walk either way).
+        // own ~1s walk here instead (instrumented builds only; single walk either way).
         if (!settings.enableLighting) ScanStuckLoadingChunksUnlit();
 #endif
 
@@ -2718,7 +2719,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                         _lightWork.AddReady(cd.Position);
                     }
 
-                    // CP-1 stuck-IsLoading detector shares this ~1s full-chunk walk (dev/editor only).
+                    // CP-1 stuck-IsLoading detector shares this ~1s full-chunk walk (instrumented builds only).
                     TrackStuckLoadingChunk(cd);
                 }
 
@@ -3524,7 +3525,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     #region Benchmark / Test Substrate
 
 #if UNITY_INCLUDE_INSTRUMENTATION
-    // Compiled only in the Editor and Development builds (the only contexts the benchmark/stress harnesses run in),
+    // Compiled only in instrumented builds (the only builds the benchmark/stress harnesses run in),
     // so this generation-pipeline-bypassing surface never ships in a release player. See FluidTickBenchmark.
 
     /// <summary>
@@ -3577,7 +3578,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
 
     #region Mesh Orchestration Diagnostics (MP-1)
 
-    // Editor/dev-only observability for the meshing orchestration loop (MP-1). The probe here is
+    // Instrumented-build observability for the meshing orchestration loop (MP-1). The probe here is
     // read-only and main-thread (RequestChunkMeshRebuild touches the non-thread-safe _meshBuildQueue,
     // so it is already main-thread by invariant).
     // Counters accumulate over a play session as INSTANCE fields — a fresh World is created on each
@@ -3625,8 +3626,8 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// Formats the MP-1 mesh-orchestration diagnostic counters (this World plus its
     /// <see cref="WorldJobManager"/>) for the dev dump menu item.
     /// </summary>
-    /// <remarks>Editor/dev-only meaning: every counter is incremented behind a [Conditional] gate, so
-    /// all values read 0 in a non-development release build.</remarks>
+    /// <remarks>Instrumented builds only: every counter is incremented behind a [Conditional] gate, so
+    /// all values read 0 in any other build, a Release-variant Development build included.</remarks>
     /// <returns>A multi-line, human-readable summary of the MP-1 probe families with denominators.</returns>
     public string BuildMeshOrchestrationDiagnostics()
     {
@@ -3651,7 +3652,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// <param name="immediate">If true, rebuild the chunk as soon as possible</param>
     public void RequestChunkMeshRebuild([CanBeNull] Chunk chunk, bool immediate = false)
     {
-        CountMeshRequest(chunk); // MP-1/F8 (editor/dev-only, compiled out of release)
+        CountMeshRequest(chunk); // MP-1/F8 (instrumented builds only)
 
         // Validate chunk state before queuing.
         // 1. Don't queue null chunks.

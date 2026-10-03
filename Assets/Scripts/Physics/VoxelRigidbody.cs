@@ -884,7 +884,7 @@ namespace Physics
                 DrawBoundingBox(Color.yellow, 0f);
         }
 
-        // In development builds, we use LateUpdate to draw the debug lines continuously if toggled on
+        // In instrumented builds, we use LateUpdate to draw the debug lines continuously if toggled on
 #if UNITY_INCLUDE_INSTRUMENTATION
         private void LateUpdate()
         {

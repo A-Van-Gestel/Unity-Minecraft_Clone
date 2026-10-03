@@ -37,7 +37,7 @@ namespace Serialization
 
 #if UNITY_INCLUDE_INSTRUMENTATION
         // CP-6/CP-3 test seams: upcoming save write attempts that throw / serializations that return
-        // 0 bytes / chunk load reads that throw (dev-only fault injection).
+        // 0 bytes / chunk load reads that throw (instrumented-build fault injection).
         [NoAutoStaticsCleanup] // reset in ResetSaveProbeCounters
         private static int s_injectedSaveFaults;
         [NoAutoStaticsCleanup] // reset in ResetSaveProbeCounters
@@ -47,19 +47,19 @@ namespace Serialization
         [NoAutoStaticsCleanup] // reset in ResetSaveProbeCounters
         private static int s_injectedTooLargeSaves;
 
-        /// <summary>Arms the dev-only save fault injection: the next <paramref name="count"/> save write
+        /// <summary>Arms the instrumented-build save fault injection: the next <paramref name="count"/> save write
         /// attempts (initial, retry, or sync quit save — any thread) throw before touching disk. Used by
         /// the Validate Save Durability suite and manual F5 prove-red runs; compiled out of release builds.</summary>
         /// <param name="count">Number of consecutive attempts to fault (0 disarms).</param>
         public static void InjectSaveFaults(int count) => Interlocked.Exchange(ref s_injectedSaveFaults, count);
 
-        /// <summary>Arms the dev-only zero-length serialization injection: the next <paramref name="count"/>
+        /// <summary>Arms the instrumented-build zero-length serialization injection: the next <paramref name="count"/>
         /// chunk serializations report 0 bytes — the deterministic (non-retryable) failure shape that must
         /// take the <see cref="ChunkSaveResult.FailedPermanent"/> arm, never the retry loop.</summary>
         /// <param name="count">Number of consecutive serializations to zero out (0 disarms).</param>
         public static void InjectZeroLengthSerializes(int count) => Interlocked.Exchange(ref s_injectedZeroLengthSerializes, count);
 
-        /// <summary>Arms the dev-only load fault injection: the next <paramref name="count"/> chunk load
+        /// <summary>Arms the instrumented-build load fault injection: the next <paramref name="count"/> chunk load
         /// reads throw from the background thread before touching the region file — the transient-I/O
         /// shape the CP-3 load-arm failure contract converts into a retryable placeholder (fault ≠
         /// "not on disk"). Used by the Validate Deserialization Robustness suite and manual F1
@@ -67,7 +67,7 @@ namespace Serialization
         /// <param name="count">Number of consecutive load attempts to fault (0 disarms).</param>
         public static void InjectLoadFaults(int count) => Interlocked.Exchange(ref s_injectedLoadFaults, count);
 
-        /// <summary>Arms the dev-only too-large-save injection: the next <paramref name="count"/> save
+        /// <summary>Arms the instrumented-build too-large-save injection: the next <paramref name="count"/> save
         /// write attempts throw <see cref="ChunkTooLargeException"/> — the deterministic record-limit
         /// failure every save path must map to <see cref="ChunkSaveResult.FailedPermanent"/> (never the
         /// retry loop, never a false Written).</summary>
@@ -77,7 +77,7 @@ namespace Serialization
 
 #if UNITY_INCLUDE_INSTRUMENTATION
         /// <summary>Atomically consumes one armed injection from <paramref name="counter"/> — the single
-        /// decrement-and-clamp core shared by every dev-only seam. Clamps the disarmed counter back to 0
+        /// decrement-and-clamp core shared by every instrumented-build seam. Clamps the disarmed counter back to 0
         /// without racing a concurrent re-arm: only restores 0 if the value is still the negative this
         /// call produced (a fresh <c>Inject*(n)</c> wins otherwise).</summary>
         /// <param name="counter">The seam's armed-count field.</param>
@@ -91,7 +91,7 @@ namespace Serialization
         }
 #endif
 
-        /// <summary>Throws when the dev-only save fault injection is armed (no-op in release builds).</summary>
+        /// <summary>Throws when the instrumented-build save fault injection is armed (no-op in release builds).</summary>
         private static void ThrowIfInjectedSaveFault()
         {
 #if UNITY_INCLUDE_INSTRUMENTATION
@@ -100,7 +100,7 @@ namespace Serialization
 #endif
         }
 
-        /// <summary>Throws <see cref="ChunkTooLargeException"/> when the dev-only too-large-save
+        /// <summary>Throws <see cref="ChunkTooLargeException"/> when the instrumented-build too-large-save
         /// injection is armed (no-op in release builds).</summary>
         private static void ThrowIfInjectedTooLargeSave()
         {
@@ -110,7 +110,7 @@ namespace Serialization
 #endif
         }
 
-        /// <summary>Throws when the dev-only load fault injection is armed (no-op in release builds).</summary>
+        /// <summary>Throws when the instrumented-build load fault injection is armed (no-op in release builds).</summary>
         private static void ThrowIfInjectedLoadFault()
         {
 #if UNITY_INCLUDE_INSTRUMENTATION
@@ -119,7 +119,7 @@ namespace Serialization
 #endif
         }
 
-        /// <summary>Serializes a chunk into <paramref name="buffer"/>, honoring the dev-only zero-length
+        /// <summary>Serializes a chunk into <paramref name="buffer"/>, honoring the instrumented-build zero-length
         /// injection seam (release builds compile to a plain <see cref="ChunkSerializer.Serialize"/> call).</summary>
         /// <param name="source">The chunk (live data or snapshot) to serialize.</param>
         /// <param name="buffer">The pooled destination buffer.</param>
@@ -193,7 +193,7 @@ namespace Serialization
             // Run I/O on background thread
             return await Task.Run(() =>
             {
-                // CP-3 dev-only fault seam — a thrown load fault must surface as a FAULTED task (retry),
+                // CP-3 instrumented-build fault seam — a thrown load fault must surface as a FAULTED task (retry),
                 // never as the null "not on disk" result (which would regenerate over saved data).
                 ThrowIfInjectedLoadFault();
 
@@ -772,7 +772,7 @@ namespace Serialization
         }
 
         /// <summary>Resolves the chunk's region address and writes the serialized payload — the single
-        /// write core shared by the sync, async, and retry save paths (and the one site the dev-only
+        /// write core shared by the sync, async, and retry save paths (and the one site the instrumented-build
         /// fault seam hooks, so every path is injectable).</summary>
         /// <param name="chunkVoxelPos">The chunk's voxel-space world origin.</param>
         /// <param name="buffer">The serialized payload buffer.</param>

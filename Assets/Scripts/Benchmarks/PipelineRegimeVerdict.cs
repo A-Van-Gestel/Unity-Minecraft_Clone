@@ -133,7 +133,7 @@ namespace Benchmarks
         /// structure-mods quota (FP-7b), and only <see cref="PipelinePass.MeshProcess"/> is genuinely
         /// ceiling-only. A hand-written capability claim is exactly what went stale before, so
         /// <see cref="CanEmit"/> is asserted against reality at every
-        /// <see cref="PipelineTelemetry.RecordPassStop"/> in development builds.
+        /// <see cref="PipelineTelemetry.RecordPassStop"/> in instrumented builds.
         /// </para>
         /// </summary>
         /// <param name="pass">The pass to test.</param>

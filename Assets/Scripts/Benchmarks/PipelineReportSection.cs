@@ -93,7 +93,7 @@ namespace Benchmarks
         /// <param name="sb">The report builder.</param>
         /// <param name="phase">The phase being rendered.</param>
         /// <remarks>
-        /// Deliberately checked <b>here</b> and not only by the development-build asserts in
+        /// Deliberately checked <b>here</b> and not only by the instrumented-build asserts in
         /// <see cref="PipelineTelemetry.RecordPassStop"/>: those are compiled out of a Release player, which
         /// is the build a capture should be taken in (the P-4 budgets are frame-time-proportional, so a
         /// Development Build measures a different admission regime). A warning that reaches the console of a

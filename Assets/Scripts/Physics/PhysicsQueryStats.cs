@@ -4,7 +4,7 @@ using UnityEngine;
 namespace Physics
 {
     /// <summary>
-    /// Dev-only counters for the collision solver's voxel query volume — <c>PH-1</c>'s measurement instrument.
+    /// Instrumented-build counters for the collision solver's voxel query volume — <c>PH-1</c>'s measurement instrument.
     /// <para>
     /// It exists because <c>PH-1</c> is <b>behavior-neutral by design</b>: a green suite says nothing about
     /// whether the refactor achieved anything, and a gather whose envelope is too small still resolves correctly

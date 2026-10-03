@@ -961,11 +961,12 @@ namespace Data
         #region Chunk Section Methods
 
         /// <summary>
-        /// Editor/development-build bounds guard for the local-coordinate accessors: throws when
+        /// Checked-build bounds guard for the local-coordinate accessors: throws when
         /// x/z is outside [0, ChunkWidth) or y is outside [0, ChunkHeight). Without it, an
         /// out-of-bounds local is a position lottery — silent uniform-sky read, silent wrong-voxel
         /// alias, or a throw depending on the coordinates — which hides contract violations
-        /// (lighting fidelity finding A5). Compiles to nothing in non-development builds; the
+        /// (lighting fidelity finding A5). Compiles to nothing outside checked builds
+        /// (UNITY_ENABLE_CHECKS: the Editor and the Debug/Checked code variants); the
         /// accessors are the engine's hottest reads.
         /// </summary>
         /// <param name="x">Local X to validate.</param>

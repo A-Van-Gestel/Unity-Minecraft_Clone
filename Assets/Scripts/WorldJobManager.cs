@@ -168,7 +168,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
 
     #region Mesh Orchestration Diagnostics (MP-1)
 
-    // Editor/dev-only observability for the meshing orchestration loop (MP-1). Both sites here are
+    // Instrumented-build observability for the meshing orchestration loop (MP-1). Both sites here are
     // read-only and main-thread; counters accumulate over a play session as INSTANCE fields (fresh
     // per session via World's `new WorldJobManager` — no domain-reload reset needed, unlike the
     // worker-thread CP-1 static). The increment call sites are [Conditional]-gated, so the whole
@@ -327,7 +327,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     // the pairing rationale in CountMeshMerge. Entries share MeshJobs' lifetime exactly (added with it in
     // ScheduleMeshing, removed in RemoveJob, cleared in Dispose).
     //
-    // POPULATED ONLY IN EDITOR / DEVELOPMENT BUILDS — its writers (TrackMeshJobTarget /
+    // POPULATED ONLY IN INSTRUMENTED BUILDS — its writers (TrackMeshJobTarget /
     // UntrackMeshJobTarget) and its only reader (CountMeshMerge) are all [Conditional]-gated, so in a
     // release player this stays permanently EMPTY. Never read it for behavior: it is diagnostics-only, and
     // any logic built on it would silently take the "no entry" branch in shipping builds.
@@ -519,7 +519,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     public bool ScheduleMeshing(Chunk chunk)
     {
         ChunkCoord chunkCoord = chunk.Coord;
-        CountMeshScheduleAttempt(); // MP-1/F1 denominator (editor/dev-only, compiled out of release)
+        CountMeshScheduleAttempt(); // MP-1/F1 denominator (instrumented builds only)
 
         // The three scheduling gates, routed through the pure MeshingScheduleDecision so this and the
         // validation suite can never disagree (the LightingScheduleDecision precedent). Gate order and

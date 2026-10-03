@@ -58,7 +58,7 @@ namespace Benchmarks
         private CommandEngine _engine;
 
 #if UNITY_INCLUDE_INSTRUMENTATION
-        /// <summary>Spawns the harness once per play session (zero scene edits, dev builds only).</summary>
+        /// <summary>Spawns the harness once per play session (zero scene edits, instrumented builds only).</summary>
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         private static void Bootstrap()
         {
