@@ -594,9 +594,32 @@ that `ShowInternal` silently dropped.
 **Registration.** Like every built-in, via `ConsoleCommandInstaller.RegisterAll`; adding it moved
 `InstalledCommandCount` to **18**, which the B32 count-floor baseline asserts in three places.
 
+### 8.6 `/perf` — performance monitor entry point (implemented 2026-10-03; in-game pending)
+
+The console seat of the performance monitor
+([`../Design/PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md`](../Design/PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md)),
+alias `/profiler`. Future monitor controls (tier, hitches, export) are meant to become sub-commands here.
+
+| Form          | Behavior                                                                                     |
+|---------------|----------------------------------------------------------------------------------------------|
+| `/perf`       | Reports whether the capability probe is running, else the last probe's summary and report path |
+| `/perf probe` | Starts `Diagnostics.EngineApiProbe` (~120 frames, one deliberate `GC.Collect`)                 |
+
+**Result arrives asynchronously.** A command returns synchronously, so the probe raises a toast on
+completion and its summary is read back with `/perf`; no posting path from a command into the console
+output exists, and none was added. The probe refuses to start during an automated capture
+(`WorldLaunchState.IsAutomatedMode`) or while one is already running. Its menu twin is the Settings →
+Benchmark tab's **Run Engine API Probe** action, which also works from the main menu.
+
+**Registration.** `InstalledCommandCount` 18 → **19** (B32 count-floor); tab completion offers `probe`.
+
 ---
 
 ## Document History
+
+* **v1.17** - New §8.6 for `/perf` (alias `/profiler`), the performance monitor's console entry point;
+  `/perf probe` runs the engine API capability probe. `InstalledCommandCount` 18→19; Command Console
+  suite 57/57.
 
 * **v1.16** - **`/toast` in-game CONFIRMED 2026-09-02** — new §8.5 for the toast-surface test
   command shipped with TN-5. `InstalledCommandCount` 17→18 (B32 count-floor asserts it in three

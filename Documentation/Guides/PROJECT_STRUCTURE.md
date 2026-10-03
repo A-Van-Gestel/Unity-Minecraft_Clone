@@ -56,6 +56,12 @@ This is the heart of the project, containing all C# source code. It is organized
     -   `BlockDatabase.cs`: A `ScriptableObject` that holds the master list of all block types and materials.
     -   `JobData.cs`: A collection of job-safe `structs` used to pass data to and from the Job System.
 
+#### `Scripts/Diagnostics/`
+
+-   **Purpose:** The engine's opt-in performance-monitoring and diagnostics layer (namespace `Diagnostics`) — tools a player build carries but runs only when asked. The planned `PerfStore` and `EngineLog` of `Documentation/Design/PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md` belong here; benchmark *harnesses* stay in `Benchmarks/`.
+-   **Examples:**
+    -   `EngineApiProbe.cs`: The capability probe behind `/perf probe` — checks which profiling APIs (recorders, frame timing, GC counters, Burst timestamps) work in the running build and writes a report.
+
 #### `Scripts/Helpers/`
 
 -   **Purpose:** Contains `static` utility classes that provide reusable functions. These classes typically do not hold any state. They are the "verbs" or tools of the project.

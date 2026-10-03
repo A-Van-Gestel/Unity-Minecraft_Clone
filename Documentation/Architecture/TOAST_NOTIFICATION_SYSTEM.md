@@ -80,6 +80,8 @@ coverage from a live `TMP_FontAsset` query.
 
 `ToastManager` and `NowPlayingToastPresenter` share one runtime GameObject named `Toasts`, created
 by `WorldUIManager.Awake` beside the console's — no scene object, no prefab, no serialized reference.
+`MainMenu.unity` gets a manager-only `Toasts` host from `MainMenuController.Awake`, at the scene root (no
+presenter: the main menu has no `SoundManager`).
 
 `NowPlayingToastPresenter` is **the only file that knows music and toasts are related.** The
 scheduler holds no UI reference; the toast system holds no audio reference.
@@ -358,7 +360,7 @@ have raised cards the manager dropped.
 were raised, making the departing card always the **top** of the stack — so the mid-stack case, the
 one thing this command exists to demonstrate, never occurs at any count. Do not simplify it back.
 
-Registered through `ConsoleCommandInstaller.RegisterAll`; `InstalledCommandCount` is **18**, asserted
+Registered through `ConsoleCommandInstaller.RegisterAll`; `InstalledCommandCount` is **19** (since `/perf`), asserted
 in three places by the Command Console suite's B32 count-floor.
 
 ### 7.2 What is and is not covered
@@ -391,8 +393,9 @@ rest of the sound engine, never a verification of the trigger seam.
 - **No authored cover art.** The field, the slot and the null-collapse behaviour all ship; no sprites
   are authored. Everything a `Resources/` asset references is force-included in every build, so cover
   sprites want an import size budget when they are added.
-- **No main-menu host.** `MainMenu.unity` carries no `SoundManager`, and `WorldUIManager` spawns the
-  toast host, so nothing raises toasts there.
+- **Main-menu host is manager-only.** `MainMenuController` spawns a `ToastManager` (its consumers there are the
+  engine API probe's completion card and the Settings button's "not started" warning); with no `SoundManager`
+  in the scene, no now-playing card appears.
 - **No achievement variant.** Deferred until something raises one.
 - **`Info` cards do not match the project's frost.** Their blur tint resolves to `0.606` grey where
   every other frosted surface uses `0.415` (§5). Nothing is visibly wrong, but the "neutral" tint the

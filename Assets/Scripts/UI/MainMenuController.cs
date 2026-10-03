@@ -2,6 +2,7 @@ using System;
 using Data;
 using Data.Enums;
 using TMPro;
+using UI.Toast;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -70,6 +71,10 @@ namespace UI
                     creditsController.onCreditsClosed.AddListener(OnCreditsClosed);
                 }
             }
+
+            // The toast surface, built in code like WorldUIManager's. Scene root, not under this menu: it
+            // configures its own band canvas, and nesting it would make it report the parent canvas's values.
+            new GameObject("Toasts").AddComponent<ToastManager>();
         }
 
         public void StartGame()

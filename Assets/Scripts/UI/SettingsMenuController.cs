@@ -1,7 +1,9 @@
 using System.Collections;
+using Diagnostics;
 using JetBrains.Annotations;
 using UI.Attributes;
 using UI.Enums;
+using UI.Toast;
 using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.UI;
@@ -174,6 +176,27 @@ namespace UI
         public void ClearAllBenchmarks()
         {
             SaveSystem.ClearAllBenchmarks();
+        }
+
+        /// <summary>
+        /// Starts the engine API capability probe — the menu twin of <c>/perf probe</c>, usable from the
+        /// main menu, where no world (and so no streaming load) distorts the frame-timing and per-call figures.
+        /// </summary>
+        [UsedImplicitly]
+        [SettingAction(SettingsTab.Benchmark, Label = "Run Engine API Probe", Order = 110,
+            Tooltip = "Checks which profiling APIs work in this build — profiler counters, GPU frame timing, " +
+                      "GC allocation counters and Burst timestamps — over about two seconds, including one " +
+                      "deliberate garbage-collection hitch.\n" +
+                      "A notification appears when it finishes; the report is written next to the benchmark reports.")]
+        public void RunEngineApiProbe()
+        {
+            if (EngineApiProbe.TryStart(out string reason)) return;
+
+            // A player build has no console to read the log in, so the refusal is shown as well as logged.
+            Debug.LogWarning($"[ApiProbe] Not started: {reason}");
+            if (ToastManager.Instance != null)
+                ToastManager.Show(new ToastRequest("Engine API probe not started", reason,
+                    variant: ToastVariant.Warning));
         }
 
         #endregion
