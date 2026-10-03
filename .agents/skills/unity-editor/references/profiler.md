@@ -60,5 +60,10 @@ single-frame queries take the index from `Threads` **for that frame**.
 - **Frame 0 is startup**; skip it for steady-state analysis.
 - `HierarchyFrameDataView.GetItemCallsCount()` does not exist; read `columnCalls`.
 - `RawFrameDataView.GetSampleMetadataAsLong(i, 4)` is not GC bytes; use `columnGcMemory`.
+- **`OverallGc` attributes allocations only as far as the nearest profiler sample.** It credits each `GC.Alloc`
+  to its parent sample and never reads the managed call stacks the Profiler records with **Call Stacks** on.
+  Without deep profiling, that parent is a coarse marker. Per-method attribution needs a new entry built on
+  `HierarchyFrameDataView.GetItemMergedSampleCallstack` / `ResolveItemCallstack` (or
+  `RawFrameDataView.GetSampleCallstack` + `ResolveMethodInfo`), which exist in 6000.6.
 
 </pitfalls>
