@@ -72,7 +72,7 @@ Retry it; it is not a hang.
 |-------------------------------------------------------------|--------------------------------------------------|
 | Command groups, argument shapes, examples                   | [references/commands.md](references/commands.md) |
 | Project recipes + the full gotcha list                      | [references/recipes.md](references/recipes.md)   |
-| Profiler: loading captures, queries, drill-down             | [references/profiler.md](references/profiler.md) |
+| Profiler: auto-stop recording, captures, queries, drill-down | [references/profiler.md](references/profiler.md) |
 
 ## Constraints
 

@@ -1,6 +1,6 @@
 # Unity CLI Editor Bridge
 
-**Version:** 1.3  
+**Version:** 1.4  
 **Date:** 2026-09-27  
 **Status:** Implemented (Stable)  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production) — agent tooling, Editor only
@@ -63,6 +63,7 @@ The `UC-*` IDs were issued by the design this document was promoted from
 | Agent environment            | `.claude/settings.json` → `env`                                     | `UNITY_PROJECT_PATH=.`, `UNITY_NO_BANNER`, `UNITY_NO_UPDATE_CHECK`; read-only CLI calls pre-allowed. |
 | `unity-editor` skill         | `.agents/skills/unity-editor/`                                      | The agent-facing reference card, recipes and gotcha list. |
 | Profiler queries             | `Tools/UnityCli/Profiler/ProfilerQueries.cs`                        | Profiler analysis entry points (§6). |
+| Profiler capture             | `Tools/UnityCli/Profiler/ProfilerCapture.cs`                        | Arms a recording with GC.Alloc call stacks and stops + saves it after a phase marker (§6). |
 | Capture folder               | `Assets/AgentCaptures~/` (gitignored)                               | The one safe place for saved captures (§5). |
 
 `CLAUDE.md` / `AGENTS.md` carry the always-loaded rules (compile gate, long operations, captures,
@@ -166,9 +167,21 @@ applies only to an image returned inline.
 `Tools/UnityCli/Profiler/ProfilerQueries.cs` sits outside `Assets/`, so neither Unity nor
 `dotnet build` compiles it; `run_script` compiles it per call. Entry points (`UnityCli.
 ProfilerQueries.*`): `Status`, `Load` (a saved `.data` capture), `Clear`, `Threads`,
-`FrameRangeSummary`, `OverallGc`, `FrameTopTime`, `FrameSelfTime`. They read
-`UnityEditorInternal.ProfilerDriver` frames through `HierarchyFrameDataView`, so live recordings
-and loaded captures behave the same, and return compact invariant-culture text.
+`FrameRangeSummary`, `OverallGc`, `GcCallstacks`, `FrameTopTime`, `FrameSelfTime`. They read
+`UnityEditorInternal.ProfilerDriver` frames through `HierarchyFrameDataView` (`GcCallstacks` reads
+`RawFrameDataView` samples and their call stacks), so live recordings and loaded captures behave the
+same, and return compact invariant-culture text.
+
+`Tools/UnityCli/Profiler/ProfilerCapture.cs` is the one script that changes Profiler state, kept apart
+from the read-only queries: `Arm` clears frames, sets `ProfilerDriver.memoryRecordMode = GCAlloc` and
+records; `ArmAutoStop` adds an `EditorApplication.update` hook that stops and saves a set number of
+frames after a phase marker's last frame; `Poll` reports progress; `Disarm` abandons a capture. The stop
+runs in the Editor, not in a shell poll, because a player rendering hundreds of fps fills the Profiler's
+2000-frame buffer faster than a shell can poll. The hook lives in a `run_script` assembly, so a domain
+reload (entering Play mode) drops it: its parameters and a heartbeat sit in `SessionState`, and `Poll`
+reinstalls it once the heartbeat goes stale. Clearing frames restarts the frame indices at 0, which the
+scan detects and restarts from. The save (or `Disarm`) restores the call-stack mode in force before the
+first arm.
 
 **Thread indices are per frame.** Only index `0` (main thread) is stable: in one capture, index 57
 was `Background Job / Worker 1` in frame 305 and `Job / Worker 0` in frame 1000. Single-frame
@@ -252,6 +265,9 @@ bridge installed is `61480be4`.
 
 ## Document History
 
+* **v1.4** - §2/§6: `ProfilerQueries.GcCallstacks` (GC.Alloc bytes by resolved call stack, every thread) and
+  `ProfilerCapture.cs` (arm with call stacks, auto-stop after a phase marker, hook reinstalled after a domain
+  reload, `Disarm`, call-stack mode restored), added for the ES-0 GC attribution capture (2026-10-03).
 * **v1.3** - §10: Unity's official agent plugin evaluated and rejected; its two useful parts adapted
   into project rules and skills.
 * **v1.2** - §4: bounded `unity job wait --timeout` behavior recorded (review finding: an unbounded wait

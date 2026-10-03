@@ -36,6 +36,15 @@ namespace UnityCli
         private const int WORST_FRAMES_SHOWN = 5;
         private const double PERCENTILE_95 = 0.95;
         private const double BYTES_PER_KB = 1024.0;
+        private const string ALL_THREADS = "*";
+        private const string NO_CALLSTACK = "<no callstack>";
+        private const string STACK_SEPARATOR = " <- ";
+        // Joins a stack key to its thread label; the TSV export splits the two columns on it.
+        private const string KEY_FIELD_SEPARATOR = "\t";
+        private const int GC_ALLOC_SIZE_METADATA = 0;
+        private const string HEX_PREFIX = "0x";
+        private const int MIN_STACK_DEPTH = 1;
+        private const string PROJECT_ASSEMBLY_PREFIX = "Assembly-CSharp";
 
         private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
 
@@ -190,6 +199,181 @@ namespace UnityCli
                   .Append("  ").Append(frames.ToString(Inv).PadLeft(6))
                   .Append("  ").Append(Kb(entry.Value / frames).PadLeft(11))
                   .Append("  ").Append(entry.Key).Append('\n');
+            }
+
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Sums managed allocations by resolved call stack over a frame range, across every matching thread.
+        /// Needs a capture recorded with <b>Call Stacks → GC.Alloc</b> on; allocations recorded without a stack
+        /// are listed under their parent sample, so the totals always account for every <c>GC.Alloc</c> byte.
+        /// </summary>
+        /// <param name="firstFrame">First frame, or -1 for the first available.</param>
+        /// <param name="lastFrame">Last frame, or -1 for the last available.</param>
+        /// <param name="top">Number of call sites and stacks to list.</param>
+        /// <param name="stackDepth">Project frames kept per stack key, counted from the call site outwards.</param>
+        /// <param name="threadFilter">"*" for every thread, else a substring of the thread label ("Scripting Threads").
+        /// Threads are matched by label on every index, because identically named threads share one name.</param>
+        /// <param name="windowMarker">Only frames whose main thread holds a sample with this name count; "" counts all.</param>
+        /// <param name="tsvPath">Writes every stack key as a tab-separated row; "" writes nothing.</param>
+        /// <returns>Window and coverage header, top call sites, top stacks and the per-thread totals.</returns>
+        public static string GcCallstacks(int firstFrame, int lastFrame, int top, int stackDepth, string threadFilter,
+            string windowMarker, string tsvPath)
+        {
+            if (!TryResolveRange(ref firstFrame, ref lastFrame, out string error))
+                return error;
+
+            var bySite = new Dictionary<string, GcBucket>();
+            var byStack = new Dictionary<string, GcBucket>();
+            var byThread = new Dictionary<string, double>();
+            var methodNames = new Dictionary<ulong, string>();
+            var callstack = new List<ulong>();
+            var parents = new Stack<(int index, int end)>();
+            double hierarchyBytes = 0;
+            double attributedBytes = 0;
+            double noCallstackBytes = 0;
+            double otherBytes = 0;
+            var byOtherSample = new Dictionary<string, GcBucket>();
+            int windowFrames = 0;
+            int windowFirst = -1;
+            int windowLast = -1;
+
+            for (int frame = firstFrame; frame <= lastFrame; frame++)
+            {
+                if (windowMarker.Length > 0 && !FrameHasMainThreadSample(frame, windowMarker))
+                    continue;
+
+                windowFrames++;
+                if (windowFirst < 0)
+                    windowFirst = frame;
+                windowLast = frame;
+
+                for (int thread = 0;; thread++)
+                {
+                    string label;
+                    using (RawFrameDataView raw = ProfilerDriver.GetRawFrameDataView(frame, thread))
+                    {
+                        if (!raw.valid)
+                            break;
+
+                        label = ThreadLabel(raw);
+                        if (threadFilter != ALL_THREADS && label.IndexOf(threadFilter, StringComparison.Ordinal) < 0)
+                            continue;
+
+                        // Raw samples, because the merged-hierarchy callstack API returns empty stacks for most of them.
+                        int gcMarker = raw.GetMarkerId(GC_ALLOC_MARKER);
+                        if (gcMarker != FrameDataView.invalidMarkerId)
+                        {
+                            parents.Clear();
+                            for (int sample = 0; sample < raw.sampleCount; sample++)
+                            {
+                                while (parents.Count > 0 && parents.Peek().end < sample)
+                                    parents.Pop();
+
+                                int parent = parents.Count > 0 ? parents.Peek().index : -1;
+                                parents.Push((sample, sample + raw.GetSampleChildrenCountRecursive(sample)));
+                                if (raw.GetSampleMarkerId(sample) != gcMarker)
+                                    continue;
+
+                                double bytes = raw.GetSampleMetadataAsLong(sample, GC_ALLOC_SIZE_METADATA);
+                                if (bytes <= 0)
+                                    continue;
+
+                                raw.GetSampleCallstack(sample, callstack);
+                                string site;
+                                string stack;
+                                if (callstack.Count == 0)
+                                {
+                                    site = NO_CALLSTACK + " under " + (parent < 0 ? "<thread root>" : raw.GetSampleName(parent));
+                                    stack = site;
+                                    noCallstackBytes += bytes;
+                                }
+                                else
+                                {
+                                    DescribeStack(raw, callstack, methodNames, stackDepth, out site, out stack);
+                                }
+
+                                attributedBytes += bytes;
+                                Accumulate(byThread, label, bytes);
+                                AddToBucket(bySite, site, bytes, frame);
+                                AddToBucket(byStack, stack + KEY_FIELD_SEPARATOR + label, bytes, frame);
+                            }
+                        }
+                    }
+
+                    // The hierarchy pass only checks the totals and collects GC bytes recorded outside GC.Alloc samples.
+                    using (HierarchyFrameDataView view = OpenView(frame, thread))
+                    {
+                        if (!view.valid)
+                            continue;
+
+                        int gcMarker = view.GetMarkerId(GC_ALLOC_MARKER);
+                        int frameIndex = frame;
+                        Walk(view, (item, parent, depth) =>
+                        {
+                            double itemBytes = view.GetItemColumnDataAsDouble(item, HierarchyFrameDataView.columnGcMemory);
+                            if (depth == 0)
+                                hierarchyBytes += itemBytes;
+                            if (itemBytes <= 0 || view.GetItemMarkerID(item) == gcMarker)
+                                return;
+
+                            // Some samples (e.g. Application.Preload Assets) carry GC bytes with no GC.Alloc child.
+                            double selfBytes = SelfGcBytes(view, item);
+                            if (selfBytes <= 0)
+                                return;
+
+                            otherBytes += selfBytes;
+                            AddToBucket(byOtherSample, view.GetItemName(item) + " | " + label, selfBytes, frameIndex);
+                        });
+                    }
+                }
+            }
+
+            if (windowFrames == 0)
+                return "no frames in " + firstFrame + ".." + lastFrame + " hold main-thread sample '" + windowMarker + "'";
+
+            var sb = new StringBuilder();
+            sb.Append("GC callstacks frames ").Append(firstFrame).Append("..").Append(lastFrame)
+              .Append(" window=").Append(windowFrames).Append(" frames (").Append(windowFirst).Append("..").Append(windowLast).Append(')')
+              .Append(" threads '").Append(threadFilter).Append("'\n");
+            sb.Append("  GC.Alloc total=").Append(Kb(attributedBytes)).Append("KB")
+              .Append(" (").Append(Kb(attributedBytes / windowFrames)).Append("KB/frame)")
+              .Append(" | no callstack=").Append(Kb(noCallstackBytes)).Append("KB (").Append(Percent(noCallstackBytes, attributedBytes)).Append(")\n");
+            sb.Append("  outside GC.Alloc samples=").Append(Kb(otherBytes)).Append("KB")
+              .Append(" | sum=").Append(Kb(attributedBytes + otherBytes)).Append("KB")
+              .Append(" vs thread totals=").Append(Kb(hierarchyBytes)).Append("KB\n");
+
+            sb.Append("  call sites:   totalKB  share    calls  frames  site\n");
+            foreach (KeyValuePair<string, GcBucket> entry in TopBuckets(bySite, top))
+                AppendBucket(sb, entry.Key, entry.Value, attributedBytes);
+
+            sb.Append("  stacks:       totalKB  share    calls  frames  stack | thread\n");
+            foreach (KeyValuePair<string, GcBucket> entry in TopBuckets(byStack, top))
+                AppendBucket(sb, entry.Key.Replace(KEY_FIELD_SEPARATOR, " | "), entry.Value, attributedBytes);
+
+            if (byOtherSample.Count > 0)
+            {
+                sb.Append("  outside GC.Alloc: totalKB  share    calls  frames  sample | thread\n");
+                foreach (KeyValuePair<string, GcBucket> entry in TopBuckets(byOtherSample, top))
+                    AppendBucket(sb, entry.Key, entry.Value, attributedBytes + otherBytes);
+            }
+
+            sb.Append("  GC.Alloc by thread:\n");
+            foreach (KeyValuePair<string, double> entry in TopByValue(byThread, int.MaxValue))
+                sb.Append("  ").Append(Kb(entry.Value).PadLeft(12)).Append("KB  ").Append(entry.Key).Append('\n');
+
+            if (tsvPath.Length > 0)
+            {
+                var tsv = new StringBuilder("bytes\tcalls\tframes\tstack\tthread\n");
+                foreach (KeyValuePair<string, GcBucket> entry in TopBuckets(byStack, int.MaxValue))
+                {
+                    tsv.Append(entry.Value.Bytes.ToString("0", Inv)).Append('\t').Append(entry.Value.Calls).Append('\t')
+                       .Append(entry.Value.Frames).Append('\t').Append(entry.Key).Append('\n');
+                }
+
+                File.WriteAllText(Path.GetFullPath(tsvPath), tsv.ToString());
+                sb.Append("  wrote ").Append(byStack.Count).Append(" stack rows to ").Append(Path.GetFullPath(tsvPath)).Append('\n');
             }
 
             return sb.ToString();
@@ -359,6 +543,139 @@ namespace UnityCli
                     if (raw.threadName == threadName || raw.threadGroupName + " / " + raw.threadName == threadName)
                         return threadIndex;
                 }
+            }
+        }
+
+        private sealed class GcBucket
+        {
+            public double Bytes;
+            public int Calls;
+            public int Frames;
+            public int LastFrame = -1;
+        }
+
+        private static void AddToBucket(Dictionary<string, GcBucket> buckets, string key, double bytes, int frame)
+        {
+            if (!buckets.TryGetValue(key, out GcBucket bucket))
+                buckets[key] = bucket = new GcBucket();
+
+            bucket.Bytes += bytes;
+            bucket.Calls++;
+            if (bucket.LastFrame == frame)
+                return;
+
+            bucket.LastFrame = frame;
+            bucket.Frames++;
+        }
+
+        private static List<KeyValuePair<string, GcBucket>> TopBuckets(Dictionary<string, GcBucket> buckets, int top)
+        {
+            var list = new List<KeyValuePair<string, GcBucket>>(buckets);
+            list.Sort((a, b) => b.Value.Bytes.CompareTo(a.Value.Bytes));
+            if (list.Count > top)
+                list.RemoveRange(top, list.Count - top);
+            return list;
+        }
+
+        private static void AppendBucket(StringBuilder sb, string key, GcBucket bucket, double totalBytes)
+        {
+            sb.Append("  ").Append(Kb(bucket.Bytes).PadLeft(18))
+              .Append("  ").Append(Percent(bucket.Bytes, totalBytes).PadLeft(5))
+              .Append("  ").Append(bucket.Calls.ToString(Inv).PadLeft(7))
+              .Append("  ").Append(bucket.Frames.ToString(Inv).PadLeft(6))
+              .Append("  ").Append(key).Append('\n');
+        }
+
+        // Stacks run innermost first, native "0x…" frames before managed ones. Key = [framework call > innermost managed
+        // frame] (what allocated; "new" when the site allocates directly), then the site and up to stackDepth project
+        // frames outwards — framework and unresolved frames between them would only spend the depth.
+        private static void DescribeStack(FrameDataView view, List<ulong> callstack, Dictionary<ulong, string> methodNames,
+            int stackDepth, out string site, out string stack)
+        {
+            int siteIndex = -1;
+            string innermost = null;
+            string allocator = null;
+            for (int i = 0; i < callstack.Count; i++)
+            {
+                string name = MethodName(view, callstack[i], methodNames);
+                if (name.StartsWith(HEX_PREFIX, StringComparison.Ordinal))
+                    continue;
+                if (!name.StartsWith(PROJECT_ASSEMBLY_PREFIX, StringComparison.Ordinal))
+                {
+                    innermost = innermost ?? name;
+                    allocator = name;
+                    continue;
+                }
+
+                siteIndex = i;
+                break;
+            }
+
+            if (siteIndex < 0)
+            {
+                site = "[no project frame] " + (allocator ?? "[native only]");
+                stack = site;
+                return;
+            }
+
+            site = ShortName(MethodName(view, callstack[siteIndex], methodNames));
+            var sb = new StringBuilder();
+            sb.Append('[').Append(allocator ?? "new");
+            if (innermost != allocator)
+                sb.Append(" > ").Append(innermost);
+            sb.Append(']');
+            int kept = 0;
+            for (int i = siteIndex; i < callstack.Count && kept < Math.Max(MIN_STACK_DEPTH, stackDepth); i++)
+            {
+                string name = MethodName(view, callstack[i], methodNames);
+                if (!name.StartsWith(PROJECT_ASSEMBLY_PREFIX, StringComparison.Ordinal))
+                    continue;
+
+                sb.Append(STACK_SEPARATOR).Append(ShortName(name));
+                kept++;
+            }
+
+            stack = sb.ToString();
+        }
+
+        private static string MethodName(FrameDataView view, ulong address, Dictionary<ulong, string> methodNames)
+        {
+            if (methodNames.TryGetValue(address, out string name))
+                return name;
+
+            name = view.ResolveMethodInfo(address).methodName;
+            if (string.IsNullOrEmpty(name))
+                name = HEX_PREFIX + address.ToString("X", Inv);
+            methodNames[address] = name;
+            return name;
+        }
+
+        // "Assembly-CSharp.dll!::World.Update()" -> "World.Update()"; keeps the namespace of namespaced types.
+        private static string ShortName(string methodName)
+        {
+            int bang = methodName.IndexOf('!');
+            string name = bang >= 0 ? methodName.Substring(bang + 1) : methodName;
+            return name.StartsWith("::", StringComparison.Ordinal) ? name.Substring(2) : name;
+        }
+
+        private static bool FrameHasMainThreadSample(int frame, string sampleName)
+        {
+            using (RawFrameDataView raw = ProfilerDriver.GetRawFrameDataView(frame, MAIN_THREAD_INDEX))
+            {
+                if (!raw.valid)
+                    return false;
+
+                int marker = raw.GetMarkerId(sampleName);
+                if (marker == FrameDataView.invalidMarkerId)
+                    return false;
+
+                for (int sample = 0; sample < raw.sampleCount; sample++)
+                {
+                    if (raw.GetSampleMarkerId(sample) == marker)
+                        return true;
+                }
+
+                return false;
             }
         }
 

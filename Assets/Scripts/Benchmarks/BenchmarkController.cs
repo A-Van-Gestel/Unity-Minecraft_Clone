@@ -5,6 +5,7 @@ using System.Globalization;
 using Data;
 using Data.Enums;
 using Helpers;
+using Unity.Profiling;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using Debug = UnityEngine.Debug;
@@ -65,6 +66,10 @@ namespace Benchmarks
         private const string GROUP_TRANSITION = "Transition";
         private const string GROUP_LOADING = "Loading Pass";
 
+        // No '/' in the name: the Profiler uses it as its sample-path delimiter.
+        private const string GENERATION_PHASE_MARKER_PREFIX = "Benchmark.Generation.";
+        private const string GENERATION_PHASE_MARKER_SUFFIX = "mps";
+
         // ── Fallback Phase Configuration ─────────────────────────────────
 
         private static readonly float[] s_defaultGenerationSpeeds = { 10f, 20f, 50f, 100f, 200f };
@@ -76,6 +81,12 @@ namespace Benchmarks
         private readonly List<Vector3> _loadingWaypoints = new List<Vector3>();
         private float[] _generationSpeeds;
         private float[] _loadingSpeeds;
+
+        /// <summary>
+        /// One named sample per generation speed, recorded once per phase frame, so a Profiler capture can
+        /// select a single phase's frames (e.g. <c>Benchmark.Generation.200mps</c>). Near-zero cost when not recording.
+        /// </summary>
+        private ProfilerMarker[] _generationPhaseMarkers;
         private int _activeWaypointIndex;
         private Transform _playerCamera;
         private BenchmarkMetricsCollector _metricsCollector;
@@ -158,6 +169,12 @@ namespace Benchmarks
             Settings settings = SettingsManager.LoadSettings();
             _generationSpeeds = ParseSpeedString(settings.benchmarkGenerationSpeeds, s_defaultGenerationSpeeds, "Generation");
             _loadingSpeeds = ParseSpeedString(settings.benchmarkLoadingSpeeds, s_defaultLoadingSpeeds, "Loading");
+            _generationPhaseMarkers = new ProfilerMarker[_generationSpeeds.Length];
+            for (int i = 0; i < _generationSpeeds.Length; i++)
+            {
+                _generationPhaseMarkers[i] = new ProfilerMarker(GENERATION_PHASE_MARKER_PREFIX +
+                    _generationSpeeds[i].ToString(CultureInfo.InvariantCulture) + GENERATION_PHASE_MARKER_SUFFIX);
+            }
             _phaseSeconds = settings.benchmarkPhaseSeconds > 0f
                 ? settings.benchmarkPhaseSeconds
                 : DEFAULT_TIME_PER_PHASE;
@@ -391,7 +408,8 @@ namespace Benchmarks
                 // Loop as a safety net: the route is sized with headroom over the timed distance, so this
                 // should never wrap — but a wrap is survivable, whereas standing still at the last waypoint
                 // would silently turn the remaining phases into a stationary hover.
-                StepTowardWaypoint(_generationWaypoints, _generationSpeeds[speedIndex], loop: true);
+                using (_generationPhaseMarkers[speedIndex].Auto())
+                    StepTowardWaypoint(_generationWaypoints, _generationSpeeds[speedIndex], loop: true);
                 yield return null;
             }
 
