@@ -1,9 +1,9 @@
 # Performance Monitor & Logger Overhaul Design
 
-**Version:** 1.3  
+**Version:** 1.4  
 **Date:** 2026-10-02  
-**Status:** In progress — PM-0 ✅ complete (2026-10-03, Master answers in §8); PM-1 ✅ code landed (2026-10-03, §7.2;
-in-game check pending); PM-2…PM-7 not started. PM-0's answers reshaped PM-2/PM-4 (§8).  
+**Status:** In progress — PM-0 ✅ complete (2026-10-03, Master answers in §8); PM-1 ✅ complete (2026-10-03, §7.2;
+confirmed in an IL2CPP Master build); PM-2…PM-7 not started. PM-0's answers reshaped PM-2/PM-4 (§8).  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > An opt-in, settings-driven in-game performance monitor and diagnostic logger that covers **every
@@ -355,7 +355,7 @@ public enum LogLevel : byte { Off, Error, Warning, Info, Verbose }
 | Phase | Scope | Effort | Depends on | Status |
 |---|---|:---:|---|---|
 | **PM-0 — Verify** | Execution packet §7.1. Master-build probe: dump `ProfilerRecorderHandle.GetAvailable` + `Valid`; `FrameTimingManager` with frame-timing stats on; `GC.GetAllocatedBytesForCurrentThread` under IL2CPP; Burst timestamp source; probe cost (QPC ns) | 🟢 | — | ✅ 2026-10-03 — §8 q1–q4 answered in two Master builds |
-| **PM-1 — Core store** | `PerfStore`, `PerfSlot`, raw per-frame ring, exact window statistics, tier setting + live apply, `WorldFrameProfiler` facade (identical `PassMsTotals`), `/perf stats` + `/perf tier` | 🟡 | PM-0 | ✅ 2026-10-03 — code + suite (§7.2); in-game check pending |
+| **PM-1 — Core store** | `PerfStore`, `PerfSlot`, raw per-frame ring, exact window statistics, tier setting + live apply, `WorldFrameProfiler` facade (identical `PassMsTotals`), `/perf stats` + `/perf tier` | 🟡 | PM-0 | ✅ 2026-10-03 — code + suite (§7.2); confirmed in an IL2CPP Master build |
 | **PM-2 — Frame tier** | Per-frame GC + collection flag, `FrameTiming` GPU/render/present-wait, hitch detector + snapshots | 🟡 | PM-1 | — |
 | **PM-3 — Coverage** | Slots for every untimed `World.Update` region + unattributed remainder; non-World systems; `PerfCounter` + counter columns, with gauges for queues, in-flight jobs, pools, resident chunks (moved from PM-1); `World.cs`'s facade probes to the slotted API; the Master IL2CPP overhead A/B (moved from PM-1) | 🟡 | PM-1 | — |
 | **PM-4 — Workers & I/O** | Job schedule→complete latency, in-job execute time, worker utilization; disk latency/bytes/compression; ThreadPool depth | 🟡 | PM-0, PM-1 | — |
@@ -473,7 +473,7 @@ The probe always finishes: a check that throws is reported as `THREW <type>: <me
 about the build — and the remaining checks still run; recorders are released even when the run is cut short.
 Proven in Play mode by two injected throws (one per check kind) and a mid-run `DestroyImmediate`.
 
-### 7.2 PM-1 execution record (2026-10-03; in-game check pending)
+### 7.2 PM-1 execution record (2026-10-03; confirmed in an IL2CPP Master build)
 
 **Shipped** (`Assets/Scripts/Diagnostics/`, namespace `Diagnostics`): `PerfTier`, `PerfSlot` (the ten
 `WorldFrameProfiler` phases, same values and names), `PerfFrame`, `PerfFrameRing` (2 048 frames, `Allocator.Persistent`;
@@ -583,6 +583,8 @@ Answers 1–4 come from `EngineApiProbe_2026-10-03_13-52-20.log`: a `Windows - P
 
 ## Document History
 
+* **v1.4** - **PM-1 confirmed** in an IL2CPP Master build (`2026-10-03 - RC 96-3 Performance (PM-1)`): status line, plan row
+  and §7.2 heading flipped from "in-game check pending".
 * **v1.3** - **PM-1 code landed** (2026-10-03, §7.2; in-game check pending): `PerfStore` + ring + exact window
   statistics, `WorldFrameProfiler` facade (bit-identical, pinned by the new suite's B9), Monitor Detail setting,
   `/perf stats` / `/perf tier`. Plan-review decisions recorded in place: slot-taking probes with marker mirroring

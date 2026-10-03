@@ -594,7 +594,7 @@ that `ShowInternal` silently dropped.
 **Registration.** Like every built-in, via `ConsoleCommandInstaller.RegisterAll`; adding it moved
 `InstalledCommandCount` to **18**, which the B32 count-floor baseline asserts in three places.
 
-### 8.6 `/perf` — performance monitor entry point (implemented 2026-10-03; in-game pending)
+### 8.6 `/perf` — performance monitor entry point (implemented 2026-10-03; confirmed in an IL2CPP Master build)
 
 The console seat of the performance monitor
 ([`../Design/PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md`](../Design/PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md)),
@@ -620,6 +620,7 @@ Benchmark tab's **Run Engine API Probe** action, which also works from the main 
 
 ## Document History
 
+* **v1.19** - §8.6 heading: `/perf` confirmed in an IL2CPP Master build (2026-10-03).
 * **v1.18** - §8.6: `/perf stats` and `/perf tier` (PM-1's store readout and tier control); no new command, so
   `InstalledCommandCount` stays 19; Command Console suite 57/57.
 
