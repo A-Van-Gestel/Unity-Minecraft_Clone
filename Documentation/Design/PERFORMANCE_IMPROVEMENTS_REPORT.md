@@ -1,6 +1,6 @@
 # Performance Improvements Report
 
-**Version:** 1.9  
+**Version:** 1.10  
 **Date:** 2026-10-02  
 **Status:** **Open backlog.** 31 items open, 30 complete, 1 deferred (⏸️), plus 10 not-yet-audited systems
 listed as `AC-*` audit tasks (§ Audit coverage gaps). Completed items keep their ✅
@@ -315,6 +315,11 @@ These remain fully documented in the pipeline analysis — the table is reproduc
 > now worker-side copy bandwidth, not main-thread schedule time. Re-evaluate it together with `LI-2`
 > (section-ranged gather) — both attack the same copies on different axes; implement at most one of
 > them first and re-measure before touching the other.
+>
+> **Correction (2026-10-03):** the per-job neighbor maps are still filled on the **main thread** at schedule
+> time — 9 voxel + 9 light maps, ≈1.73 MB per job (`WorldJobManager.RentAndFillVoxelMap`/`RentAndFillLightMap`
+> via `NeighborMapAssembler`). P-1's slab copies would therefore also cut main-thread schedule time, not only
+> worker-side bandwidth (`ENGINE_SCALING_PERFORMANCE_ROADMAP.md` §2.3).
 
 ### Rollback flags awaiting retirement
 
@@ -1487,6 +1492,9 @@ inherit a one-click `Validate All` that also flags stale-code runs automatically
 project's Document History convention, so they record what the commits changed rather than
 contemporaneous notes.*
 
+* **v1.10** - **`P-1` re-scope note corrected** (2026-10-03): the per-job neighbor-map fills are still
+  main-thread at schedule time, so P-1's slab copies would also cut main-thread cost. Found by the engine-scaling
+  sweep (`ENGINE_SCALING_PERFORMANCE_ROADMAP.md` §8 item 7).
 * **v1.9** - **Audit coverage gaps recorded as `AC-1`…`AC-10`** (2026-10-02). Every system shipped
   after the seventh audit pass (2026-07-02) — audio, clouds, underwater, UI blur, fluid-entity physics,
   sky/bloom, contact shadows + sway, asset/GPU memory, the quit/save path, and the cold UI/tooling tail —
@@ -1577,7 +1585,7 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-10-02 (`AC-1`…`AC-10` audit-coverage pickup list added; `ENGINE_SCALING_PERFORMANCE_ROADMAP.md` cross-linked; 2026-09-06: rollback-flag census emptied — the three P-4 flags and P9-2's `enableConvergentEdgeCheckCascade` retired; the P-4 harness retargeted onto a frame-cap axis rather than collapsed, and the prefab-reserialize gotcha recorded; 2026-08-15: `GS-3` analyzed + ⏸️ deferred, `GS-7` filed; 2026-08-15: `VS-4` filed, `GS-4` verified + archived; 2026-08-12: `GS-4` corrections + locked decisions; 2026-08-09: `MR-8` VX-8 / `SS-*` interlocks; 2026-07-26: header completed, completed
+**Last Updated:** 2026-10-03 (`P-1` re-scope note corrected — the neighbor-map fills are still main-thread; 2026-10-02: `AC-1`…`AC-10` audit-coverage pickup list added; `ENGINE_SCALING_PERFORMANCE_ROADMAP.md` cross-linked; 2026-09-06: rollback-flag census emptied — the three P-4 flags and P9-2's `enableConvergentEdgeCheckCascade` retired; the P-4 harness retargeted onto a frame-cap axis rather than collapsed, and the prefab-reserialize gotcha recorded; 2026-08-15: `GS-3` analyzed + ⏸️ deferred, `GS-7` filed; 2026-08-15: `VS-4` filed, `GS-4` verified + archived; 2026-08-12: `GS-4` corrections + locked decisions; 2026-08-09: `MR-8` VX-8 / `SS-*` interlocks; 2026-07-26: header completed, completed
 items archived, 2,100 → 1,126 lines)  
 **Next Review:** the **GPU & Shaders** group is the live front: `GS-1` (pre-baked liquid noise) is the
 largest single GPU win available, `GS-2` (opaque-texture toggle) was deliberately left out of `GS-4`'s

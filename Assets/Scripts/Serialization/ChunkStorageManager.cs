@@ -18,7 +18,7 @@ namespace Serialization
         private readonly IRegionAddressCodec _codec;
 
         // CP-1 save-durability probe (F5 evidence). Static so the debug HUD can read them without a manager ref.
-        // Interlocked: SaveChunkAsync's body resumes on a ThreadPool thread, so Completed/Failed cross threads.
+        // Interlocked: SaveChunkAsync increments inside its Task.Run worker and in its main-thread catch arms.
         [NoAutoStaticsCleanup] // reset in ResetSaveProbeCounters
         private static long s_savesFired;
         [NoAutoStaticsCleanup] // reset in ResetSaveProbeCounters

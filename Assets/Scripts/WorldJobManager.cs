@@ -1158,12 +1158,9 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                 {
                     chunkData.Populate(jobEntry.Value.Map, jobEntry.Value.HeightMap);
 
-                    // Prefer the jobified active-voxel list (generation path). Generators that do not
-                    // run the scan pass (e.g. legacy) leave it uncreated → fall back to the bitmask scan.
-                    // Contract: IsCreated ⟺ the scan pass ran. An empty *created* list means genuinely zero
-                    // active voxels (NOT a signal to fall back) — a generator that allocates ActiveVoxels must
-                    // run ActiveVoxelScanJob to fill it. Both branches register the same active set; see the
-                    // parity invariant on ActiveVoxelScanJob / ChunkData.RescanActiveVoxels.
+                    // Prefer the job's active-voxel list (IsCreated contract on GenerationJobData.ActiveVoxels).
+                    // Both branches register the same set — the parity invariant on ActiveVoxelScanJob /
+                    // ChunkData.RescanActiveVoxels.
                     if (jobEntry.Value.ActiveVoxels.IsCreated)
                         chunkData.RegisterActiveVoxelsFromJob(jobEntry.Value.ActiveVoxels); // no visual needed: data-only chunks enter view registered
                     else

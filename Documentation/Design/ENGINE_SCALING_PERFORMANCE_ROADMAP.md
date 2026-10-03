@@ -1,6 +1,6 @@
 # Engine Scaling Performance Roadmap
 
-**Version:** 1.3  
+**Version:** 1.4  
 **Date:** 2026-10-02  
 **Status:** In progress — `ES-1`, `ES-2` and `ES-6.1` shipped (2026-10-02); the rest is a near-to-far horizon, not
 scheduled. Tier 1 items are execution-sized; Tier 2/3
@@ -466,9 +466,8 @@ constants + migration change. Prerequisites: ES-13, ES-18, ES-19.
   same-build Master IL2CPP A/Bs per `perf-benchmark` (rollback flags listed in
   `SettingsManager.OverlayBenchmarkSettingsFromDisk`).
 - Pipeline-touching items (ES-3, ES-6, ES-7.4, ES-8, ES-12, ES-13, ES-16, ES-18) require the
-  `chunk-lifecycle` skill. `.agents/rules/chunk-pipeline.md` says meshing must pass
-  `AreNeighborsReadyAndLit`, while `CHUNK_LIFECYCLE_PIPELINE.md` §3.3 says `AreNeighborsMeshReady` —
-  resolve that disagreement before ES-3's pipelining.
+  `chunk-lifecycle` skill. Meshing is gated on `AreNeighborsMeshReady` (`CHUNK_LIFECYCLE_PIPELINE.md`
+  §3.3); the rule and skills that said `AreNeighborsReadyAndLit` were corrected 2026-10-03.
 - ES-20 must follow `SHADER_CONVENTIONS.md` (`#pragma target 4.5`, centroid varyings) and keep GS-5's
   set-output contract.
 - ES-11 and ES-19's on-disk half are format changes → `serialization-migration` skill.
@@ -824,29 +823,34 @@ saving is inferred from step 1's re-entry leg, not re-measured.
    int, int, int)` parameter order (the MCP listing is ambiguous); whether `RenderPrimitives*` draws run
    the material's ShadowCaster/DepthOnly passes under URP; whether DX12/Vulkan in 6000.6 issue real
    multi-draw.
-7. **Doc and comment drift found by the 2026-10-02 sweeps (recorded, not fixed here)** — each was off
-   the analysis path; fix in a `docs-sync` pass or alongside the item that touches the code:
-   - `PERFORMANCE_IMPROVEMENTS_REPORT.md`'s P-1 re-scope note says P-1's win is now worker-side, but the
-     9-map fill is still main-thread (`WorldJobManager.cs:859–862`).
-   - "Unmodified persist-arm chunks regenerate from seed" in the `World.cs:3825–3829` comment and
+7. **Doc and comment drift found by the 2026-10-02 sweeps** — all fixed 2026-10-03 except where noted:
+   - ~~`PERFORMANCE_IMPROVEMENTS_REPORT.md`'s P-1 re-scope note says P-1's win is now worker-side, but the
+     9-map fill is still main-thread (`WorldJobManager.cs:859–862`).~~ Dated correction appended.
+   - ~~"Unmodified persist-arm chunks regenerate from seed" in the `World.cs:3825–3829` comment and
      `CHUNK_LIFECYCLE_PIPELINE.md`'s persist-and-unload bullet ("fresh regeneration for an unmodified
      chunk") — every generated chunk is in `ModifiedChunks`, and an unedited disk-loaded chunk reloads its
-     earlier save (ES-10, AC-9). (`CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md` §3.2's "seed-regenerable" is
-     correct: it describes a discarded, never-populated generation result.)
-   - `.agents/rules/chunk-pipeline.md` says meshing passes `AreNeighborsReadyAndLit`;
-     `CHUNK_LIFECYCLE_PIPELINE.md` §3.3 says `AreNeighborsMeshReady` (§5).
-   - `ChunkStorageManager.cs:21` says the save continuation resumes on a ThreadPool thread; under
-     Unity's synchronization context it resumes on the main thread (`SERIALIZATION_BUGS.md` §15).
-   - `World.cs` `SaveAllModifiedChunks` docstring mentions an "Auto-Save" that does not exist (AC-9).
+     earlier save (ES-10, AC-9).~~ Both now describe the reload path, and `DATA_STRUCTURES.md`'s
+     `ModifiedChunks` entry says every generated chunk is in it. (`CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md`
+     §3.2's "seed-regenerable" is correct: it describes a discarded, never-populated generation result.)
+   - ~~`.agents/rules/chunk-pipeline.md` says meshing passes `AreNeighborsReadyAndLit`;
+     `CHUNK_LIFECYCLE_PIPELINE.md` §3.3 says `AreNeighborsMeshReady` (§5).~~ The code gates meshing on
+     `AreNeighborsMeshReady`; the rule, the `chunk-lifecycle` skill and the `review-changes` pipeline
+     gates now say so.
+   - ~~`ChunkStorageManager.cs:21` says the save continuation resumes on a ThreadPool thread; under
+     Unity's synchronization context it resumes on the main thread (`SERIALIZATION_BUGS.md` §15).~~
+   - ~~`World.cs` `SaveAllModifiedChunks` docstring mentions an "Auto-Save" that does not exist (AC-9).~~
    - ~~`DeviceCalibration.cs:139–141` calls the reference constants "editor-measured"; `:95–97` says IL2CPP
      player, 99-sample median (ES-2 packet).~~ Fixed by ES-2.
-   - `CHUNK_PIPELINE_SCHEDULE_QUOTA_THROUGHPUT.md` §7.1 says a `CalibrationVersion` bump clobbers hand-edited
+   - ~~`CHUNK_PIPELINE_SCHEDULE_QUOTA_THROUGHPUT.md` §7.1 says a `CalibrationVersion` bump clobbers hand-edited
      caps; since ES-2 a bump of an already-calibrated file only raises a field (keep-higher), so a
-     hand-*lowered* cap is the one that gets overwritten.
-   - `World.cs:1185, 1190, 3471` describe the CP-1/LP-1/MP-1 probes as "dev/editor builds only"; they are
+     hand-*lowered* cap is the one that gets overwritten.~~ Dated note added.
+   - ~~`World.cs:1185, 1190, 3471` describe the CP-1/LP-1/MP-1 probes as "dev/editor builds only"; they are
      gated on `UNITY_INCLUDE_INSTRUMENTATION`, so Development builds (Release code variant) compile them
-     out — the DebugScreen "(dev)" rows read 0 there and the save-diagnostics toggle is shown but inert
+     out.~~ Every such comment in `Assets/Scripts` now names its real gate ("instrumented builds" or, for
+     `UNITY_ENABLE_CHECKS`, "checked builds"). **Still open, owned by PM-7:** the DebugScreen "(dev)" rows
+     read 0 in a Release-variant Development build and the save-diagnostics toggle is shown but inert there
      (`PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md` §2).
+   - `OPEN_WORK_INDEX.md`'s ES row still read "Draft, unscheduled" after ES-1/2/6.1 shipped — fixed 2026-10-03.
 
 ---
 
@@ -873,6 +877,9 @@ saving is inferred from step 1's re-entry leg, not re-measured.
 
 ## Document History
 
+* **v1.4** - §8 item 7 closed (2026-10-03): every drift entry fixed in its doc or comment, plus the stale
+  `OPEN_WORK_INDEX` ES row; the DebugScreen "(dev)" labels stay with PM-7. ES-6.1's harness follow-ups
+  (BH-9 in the Behavior fidelity doc) closed the same day.
 * **v1.3** - `ES-6.1` step 3 executed and in-game confirmed (2026-10-02): the registration flag (1a), job-list
   registration for data-only chunks (1b), the scan moved onto `ChunkData`, and the step-4 wake moved off the
   visual `Chunk` (a gap the skip would have exposed); BH-B13 + B34 prove-reds; soak evidence recorded in §7.1;
@@ -894,5 +901,5 @@ saving is inferred from step 1's re-entry leg, not re-measured.
 
 ---
 
-**Last Updated:** 2026-10-02  
+**Last Updated:** 2026-10-03  
 **Next Review:** when ES-0's first capture or ES-25's rendering baseline lands, or before any ES phase starts

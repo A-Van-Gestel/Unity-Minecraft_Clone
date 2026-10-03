@@ -1,6 +1,6 @@
 # P-9 — Schedule-Quota Throughput Ceiling
 
-**Version:** 2.0  
+**Version:** 2.1  
 **Date:** 2026-08-02  
 **Status:** ✅ **THE CORE QUESTION IS CLOSED. P9-0a, P9-0, P9-1 and P9-2 are all done, and P9-2 SHIPPED.**
 The lead lever (§6 Option B1, the convergent edge-check cascade) is live and **unconditional** — it
@@ -801,7 +801,10 @@ nor overlaid fields — they are OM-1 values calibrated once, persisted, and rea
   `calibrationVersion < DeviceCalibration.CalibrationVersion` (`SettingsManager.cs:908`), and the
   file is already stamped current. ⚠️ Two things *do* clobber it: an explicit `RecalibrateDevice()`
   from a menu, and any future bump of `CalibrationVersion`. Re-read the run's settings block rather
-  than trusting the file.
+  than trusting the file.  
+  *Since ES-2 (2026-10-02):* `RecalibrateDevice()` has no caller, and a `CalibrationVersion` bump of an
+  already-calibrated file keeps the higher of the stored and probed value per field — a hand-**raised** cap
+  survives it, a hand-**lowered** one is overwritten (`ENGINE_SCALING_PERFORMANCE_ROADMAP.md` §7.1 ES-2).
 - **P9-0a can therefore run on the existing FP-11a build**, which sidesteps §7's baseline problem
   entirely — it is not merely same-build A/B, it is the *same build as the FP-11a captures*.
 
@@ -1200,10 +1203,12 @@ enabled *and* disabled after each phase.
   the intended 12–15 default, but the vd-32 memory ceiling on a smaller machine stays unmeasured and this
   raises it. **Q7 confirmed in-game**, including cross-border RGB blocklight convergence. Adds **§7.0**,
   the three capture-protocol defects this session paid for.
+* **v2.1** - §7.1's warning that a `CalibrationVersion` bump clobbers a hand-edited cap gained a dated note
+  (2026-10-03): since ES-2 a bump keeps the higher value per field, so only a hand-lowered cap is overwritten.
 
 ---
 
-**Last Updated:** 2026-09-06 (P9-2's `enableConvergentEdgeCheckCascade` retired — the cascade rule is unconditional and B97, its flag-off guard, is gone; 2026-08-02: original)  
+**Last Updated:** 2026-10-03 (§7.1 calibration-bump note updated for ES-2's keep-higher merge; 2026-09-06: P9-2's `enableConvergentEdgeCheckCascade` retired — the cascade rule is unconditional and B97, its flag-off guard, is gone; 2026-08-02: original)  
 **Next Review:** P-9's remaining levers are now optional rather than gating — see §6.
 **C (P-3)** stays worth doing on frame-time grounds; **A′ (P9-3) is arguably moot**, since the cap it would
 raise is no longer the binding constraint at vd 32. Re-rank before scheduling either. The code and its baselines are in;

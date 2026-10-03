@@ -124,7 +124,7 @@ These two classes manage the collection of all chunks.
 This class represents the entire save file state.
 
 - **`Dictionary<Vector2Int, ChunkData> _chunks`**: The master collection of all loaded `ChunkData`, indexed by the chunk's voxel-space origin. Exposed read-only as `Chunks` (`IReadOnlyDictionary`), plus the allocation-free `ChunkValues` / `ChunkKeys` views for hot paths. Structural changes go **only** through the dedicated mutators (add / remove / `ClearChunks`), which bump a topology version so the VQ-1 last-chunk query cache can never go stale silently.
-- **`HashSet<ChunkData> ModifiedChunks`**: Tracks chunks that need to be saved to disk.
+- **`HashSet<ChunkData> ModifiedChunks`**: Tracks chunks that need to be saved to disk — every **generated** chunk (`ChunkData.Populate` adds it) and every edited one (`ModifyVoxel`). An unedited chunk loaded from disk is the only kind left out, so all generated terrain is persisted, not just player edits. Whether to keep persisting unedited terrain is open (`ENGINE_SCALING_PERFORMANCE_ROADMAP.md` `ES-10`).
 - **`Dictionary<Vector2Int, HashSet<Vector2Int>> SkylightRecalculationQueue`**: A bucketed queue (Chunk Coordinate -> List of Local Columns) tracking vertical columns that require a full sky light recalculation (e.g., after a block placement blocks the sky).
 
 ### `World.cs` (The Orchestrator)

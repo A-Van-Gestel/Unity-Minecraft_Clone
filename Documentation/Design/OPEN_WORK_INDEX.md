@@ -1,6 +1,6 @@
 # Open Work Index
 
-**Version:** 1.9  
+**Version:** 1.10  
 **Date:** 2026-09-17  
 **Status:** **Open backlog.** A pointer map, not a tracker — rows are added and removed as docs
 gain or lose open work, never as individual items move.  
@@ -77,7 +77,7 @@ would put the same item on the map twice and mis-sort the doc.
 | **Validation coverage** | [`VALIDATION_SUITE_COVERAGE_ROADMAP.md`](VALIDATION_SUITE_COVERAGE_ROADMAP.md) | `NS-` | Living backlog; `NS-4`, `NS-5`, `NS-7`, `NS-7b` complete |
 | **Lighting async bugs & harness** | [`LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md`](LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md) | `AS-` `HF-` | In progress; `AS-1` closed, `HF-1`…`HF-3` done |
 | **Lighting pipeline state** | [`LIGHTING_PIPELINE_STATE_REFACTOR.md`](LIGHTING_PIPELINE_STATE_REFACTOR.md) | `LP-` | `LP-1`…`LP-7` shipped; **`LP-8` remains** |
-| **Engine scaling (load time, spikes, height, view distance)** | [`ENGINE_SCALING_PERFORMANCE_ROADMAP.md`](ENGINE_SCALING_PERFORMANCE_ROADMAP.md) | `ES-` | Draft, unscheduled: `ES-0`…`ES-25`. Orders the master backlog's open items against the three symptoms and adds the native-store + GPU-renderer tracks |
+| **Engine scaling (load time, spikes, height, view distance)** | [`ENGINE_SCALING_PERFORMANCE_ROADMAP.md`](ENGINE_SCALING_PERFORMANCE_ROADMAP.md) | `ES-` | In progress: `ES-1`, `ES-2` and `ES-6.1` shipped (2026-10-02); the rest of `ES-0`…`ES-25` unscheduled, `ES-0` first. Orders the master backlog's open items against the three symptoms and adds the native-store + GPU-renderer tracks |
 | **Performance monitor & logging** | [`PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md`](PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md) | `PM-` | Proposed, not implemented: `PM-0`…`PM-7`; PM-0 is a Master-build API verification probe |
 | **DOTS / ECS adoption** | [`DOTS_ECS_ADOPTION_ANALYSIS.md`](DOTS_ECS_ADOPTION_ANALYSIS.md) | `EC-` | Decision record; terrain verdicts settled, **`EC-6` (dynamic entities) deferred** behind its reopen triggers |
 | **Chunk pipeline performance** | [`CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md`](CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md) | §-numbered | §1.1 and the §3 backpressure family shipped; **§2 and §4 remain open** |
@@ -139,6 +139,8 @@ doc, not to grow an item row here.
 
 ## Document History
 
+* **v1.10** - `ES-*` row status updated (2026-10-03): `ES-1`, `ES-2` and `ES-6.1` have shipped; the row still
+  read "Draft, unscheduled".
 * **v1.9** - `ES-*`, `PM-*` and `EC-*` rows added (2026-10-02): `ENGINE_SCALING_PERFORMANCE_ROADMAP.md`
   owns the load-time / traversal-spike / scaling roadmap, `PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md`
   the opt-in monitor and logger, and `DOTS_ECS_ADOPTION_ANALYSIS.md` the deferred ECS fit. The master
@@ -190,5 +192,5 @@ doc, not to grow an item row here.
 
 ---
 
-**Last Updated:** 2026-10-02  
+**Last Updated:** 2026-10-03  
 **Next Review:** when a document starts or stops owning open work

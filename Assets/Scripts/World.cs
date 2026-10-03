@@ -2779,7 +2779,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
             // Utilisation is only meaningful over frames where work EXISTED — an idle frame contributes a
             // full quota and zero served, and the generation pass is idle on ~92 % of frames, which would
             // drown the signal P9-1 reads to decide whether the quota binds.
-            int lightWorkAvailable = 0;
+            int lightWorkAvailable;
 
             // Snapshot the ready set into a pooled list to allow safe modification during iteration.
             List<Vector2Int> readySnapshot = ListPool<Vector2Int>.Get();
@@ -3144,8 +3144,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// (<see cref="ChunkData.RegisterActiveVoxelsFromJob"/> / <see cref="ChunkData.RescanActiveVoxels"/>), and
     /// <see cref="ApplyModifications"/>'s cross-chunk wake needs an applied mod next to the sleeping cell.
     /// <para>The newly populated chunk's own side needs nothing — its full scan registers every active voxel it
-    /// has, and those evaluate against real neighbor data. Only the already-populated side was asleep. Called
-    /// from the same two population sites as <see cref="PromoteLightWorkNeighborhood"/>.</para>
+    /// has, and those evaluate against real neighbor data. Only the already-populated side was asleep.</para>
     /// </summary>
     /// <param name="chunkPos">Voxel-origin position of the chunk that just became populated.</param>
     public void WakeSeamBehaviorNeighborhood(Vector2Int chunkPos)
@@ -3878,11 +3877,9 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
             // 2. Save if modified
             if (worldData.ModifiedChunks.Contains(data))
             {
-                // P-4 rec 3: a persist-arm chunk that carries edits must re-light fully on reload (its
-                // in-flight lighting could never complete). Force it here — right before the snapshot, which
-                // SaveChunkAsync takes synchronously so the flag is captured. Unmodified persist-arm chunks
-                // are not saved and regenerate from seed (fresh lighting), so they need no flag — keeping this
-                // off their path avoids flagging a chunk we immediately delete (review finding #1).
+                // P-4 rec 3: an edited persist-arm chunk must re-light fully on reload (its in-flight lighting can
+                // never complete), so flag it before SaveChunkAsync's synchronous snapshot. Unedited disk-loaded
+                // chunks are not re-saved; their earlier save re-lights or edge-checks on load.
                 if (decision == ChunkUnloadDecision.Result.UnloadPersistLightPending)
                     data.FlagInitialLighting();
 
@@ -5704,7 +5701,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// </summary>
     /// <param name="synchronous">
     /// If true, saves immediately on the main thread (CRITICAL for OnApplicationQuit).
-    /// If false, schedules background tasks (Good for Auto-Save/Manual Save).
+    /// If false, schedules background saves.
     /// </param>
     private void SaveAllModifiedChunks(bool synchronous)
     {

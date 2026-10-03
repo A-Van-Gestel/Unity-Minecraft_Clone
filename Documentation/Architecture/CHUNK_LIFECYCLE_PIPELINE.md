@@ -1,7 +1,7 @@
 # Chunk Lifecycle Pipeline: Generation → Lighting → Meshing
 
 **Status:** Living Document  
-**Last Updated:** 2026-09-06 (rollback-flag retirement: the P-4 time budgets, their FPS-cap ceiling scaling, the §3.5 panic gate and P9-2's convergent edge-check cascade are all unconditional — `enablePipelineTimeBudgets`, `scaleBudgetCeilingsWithFpsCap`, `enableGenerationPanicGate` and `enableConvergentEdgeCheckCascade` deleted; 2026-08-25: §4's gate note records LP-6's lazy evaluation — the scan reads only the gate a chunk's arm can reach)  
+**Last Updated:** 2026-10-03 (§9.6 persist-and-unload bullet: a chunk outside `ModifiedChunks` is an unedited disk-loaded one and reloads its earlier save — every generated chunk is in the set; the LP-1 and MP-1 probe notes name their real gate — call sites compile out, the methods may still ship; 2026-09-06: rollback-flag retirement: the P-4 time budgets, their FPS-cap ceiling scaling, the §3.5 panic gate and P9-2's convergent edge-check cascade are all unconditional — `enablePipelineTimeBudgets`, `scaleBudgetCeilingsWithFpsCap`, `enableGenerationPanicGate` and `enableConvergentEdgeCheckCascade` deleted; 2026-08-25: §4's gate note records LP-6's lazy evaluation — the scan reads only the gate a chunk's arm can reach)  
 **Purpose:** Comprehensive reference for how a chunk transitions from empty placeholder to rendered mesh, with all state flags, readiness gates, and inter-system dependencies fully mapped.
 
 ---
@@ -627,7 +627,7 @@ in the worst case not until unload persists them. Two states fail it **legitimat
 - **Resident but not yet populated.** A placeholder can carry the flag while still loading; `PopulateFromSave`
   only ORs flags in and never clears, so the flag survives population and the state self-heals.
 
-> **Observability (LP-1, dev/editor only).** `World.ScanSkylightQueuePairing` walks this store once per fail-safe
+> **Observability (LP-1, instrumented builds only).** `World.ScanSkylightQueuePairing` walks this store once per fail-safe
 > scan and classifies every key against exactly the predicate above, counting genuine violations separately from
 > the two legitimate states, and surfacing all of it on the debug HUD's Chunk Lifecycle block. It is
 > `[Conditional]`-compiled, carries its own `WorldFrameProfiler.Phase.LightQueueProbe` slot, and changes no
@@ -781,8 +781,8 @@ If the chunk is not added to `_meshBuildQueue` (e.g., because `chunk.isActive` w
 > `RequestChunkMeshRebuild` and tallies `MeshRequestTotal` against the two drop buckets
 > `MeshRequestNullDrops` / `MeshRequestInactiveDrops`, warning once with the offending coord and reporting
 > the ratio in the `[MP-1]` diagnostics dump. It is `[Conditional("UNITY_EDITOR")]` +
-> `[Conditional("UNITY_INCLUDE_INSTRUMENTATION")]`, so the machinery compiles out of Release-variant
-> builds entirely.
+> `[Conditional("UNITY_INCLUDE_INSTRUMENTATION")]`, so its call sites compile out of Release-variant
+> builds (the attribute removes calls, not the method, which can still ship uninvoked).
 >
 > This **measures** the population race; it does not close it. A dropped request is still dropped — the
 > probe only means a session that suffers one leaves evidence instead of a silently missing mesh. The
@@ -853,7 +853,7 @@ if (isJobRunning || isProcessingLight) continue; // Skip unload
 - **Strand guard (unchanged intent, narrowed trigger).** Unloading is still deferred (`DeferWouldStrand`) when a populated neighbor with `HasLightChangesToProcess`/`NeedsInitialLighting` would be stranded — **but only if that neighbor is itself within the unload distance**
   (`!IsBeyondUnloadDistance`). An in-range neighbor genuinely needs this chunk's data and can still make progress, so the deadlock this section describes stays guarded.
 - **P-4 rec 3 — persist-and-unload the pinned trail.** A neighbor that is *itself* beyond the unload distance no longer defers the unload: it is being reclaimed on this or a later pass, so stranding it is harmless. Consequently an out-of-range chunk pinned *only* by its own pending/initial lighting — whose lighting can never complete because a further-out neighbor was never generated (the missing-neighbor gate) — takes the `UnloadPersistLightPending` arm: it forces a full re-light on reload via `FlagInitialLighting()` (captured by the synchronous save
-  snapshot; fresh regeneration for an unmodified chunk), persists its pending skylight columns via `LightingStateManager.AddPending`/`PersistOrphanedSkylightColumns`, and unloads. This drains the "pinned trail" (perf analysis §3.3) that previously climbed unbounded behind a moving player.
+  snapshot; a chunk outside `ModifiedChunks` — only an unedited disk-loaded one, since `ChunkData.Populate` adds every generated chunk — is not re-saved and reloads its earlier save, which re-lights or edge-checks on load), persists its pending skylight columns via `LightingStateManager.AddPending`/`PersistOrphanedSkylightColumns`, and unloads. This drains the "pinned trail" (perf analysis §3.3) that previously climbed unbounded behind a moving player.
 
 Precedence is `job → in-range-strand → persist-light → unload`: the strand check sits **above** the light-persist arm so a chunk an in-range neighbor needs always defers rather than shedding its lighting. The only residual is a bounded boundary shell — out-of-range chunks whose *buffer-band* (kept, in-range) neighbor is stuck light-pending — which self-resolves the moment the player moves it past the boundary. Verified in-game (soak: beyond-unload-unreclaimable 743 → ~0–2, `Deferred — light` 308 → 0; durability: edit → unload → reload preserves the edit
 and its lighting).

@@ -27,8 +27,10 @@ namespace Jobs.Data
         /// <summary>
         /// Flat chunk indices (<see cref="Helpers.ChunkMath.GetFlattenedIndexInChunk"/> convention) of
         /// voxels with active behavior, emitted by <see cref="Jobs.ActiveVoxelScanJob"/> for the
-        /// generation path. Default (not created) for generators that do not run the scan pass
-        /// (e.g. the legacy generator), in which case the caller falls back to the bitmask scan.
+        /// generation path. Created ⟺ the scan pass ran: an empty created list means zero active voxels,
+        /// not a fallback signal, so a generator that allocates it must run the scan. Default (not created)
+        /// for generators that skip the pass (e.g. the legacy generator); the caller then falls back to a full
+        /// rescan.
         /// </summary>
         public NativeList<int> ActiveVoxels;
 
