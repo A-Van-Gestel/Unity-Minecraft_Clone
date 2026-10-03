@@ -29,6 +29,10 @@ until unity command editor_status --result-only | grep -q '"status": "ready"'; d
 
 Verified: a constant changed three times read back its new value each time through this gate.
 
+**In Play mode the idle state is `"playing"`, never `"ready"`** — after `editor_play`, wait for
+`'"status": "playing"'` (it follows the play-entry domain reload). A loop that requires `"ready"` while
+playing spins until its timeout.
+
 </recipe>
 
 <recipe name="run-long-menu-item">
