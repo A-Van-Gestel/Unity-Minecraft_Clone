@@ -1,6 +1,6 @@
 # Engine Scaling Performance Roadmap
 
-**Version:** 1.4  
+**Version:** 1.5  
 **Date:** 2026-10-02  
 **Status:** In progress — `ES-1`, `ES-2` and `ES-6.1` shipped (2026-10-02); the rest is a near-to-far horizon, not
 scheduled. Tier 1 items are execution-sized; Tier 2/3
@@ -134,7 +134,8 @@ No shader warmup exists (`GraphicsSettings.asset:41–45` `m_PreloadedShaders: [
 
 #### 2.2.1 Hypothesis H-1 — the unattributed ~142 KB per generated chunk is `ChunkSection` pool misses
 
-*Status: hypothesis, mechanism verified in code, magnitude not measured.* A `ChunkSection` pool miss
+*Status: **REFUTED 2026-10-03** (measurement at the end of this section); the reasoning below is kept as
+the record of what was tested.* A `ChunkSection` pool miss
 allocates **24 KB of managed arrays** (`uint[4096]` + `ushort[4096]`, `ChunkSection.cs:57–62`), and a
 typical surface chunk holds ~6 non-empty sections: 6 × 24 KB ≈ **144 KB** — the measured per-chunk figure.
 Three code paths make generated chunks miss the pool where loaded ones do not:
@@ -158,7 +159,31 @@ A/B'd with ES-10's "do not save unmodified terrain" leg. Refuted if misses per g
 Count `SerializationBufferPool` misses in the same capture: each in-flight save also rents a 256 KB buffer
 before its await (AC-9 static pass), and a rising in-flight peak allocates more of them — a second,
 non-per-chunk contributor that could otherwise be mistaken for H-1. The counter edit is specified in
-`PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md` §7.1 (PM-0 packet).
+`PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md` §7.1 (PM-0 packet). *Instrumented 2026-10-03:* every benchmark
+report's Pipeline section now carries a per-phase "Pool misses" block (section / data / save-buffer misses beside
+chunks generated vs loaded).
+
+**Verdict — refuted.** `BenchmarkRun_2026-10-03_14-00-16` (IL2CPP Master, default route, 30 s phases):
+
+| Generation phase | Chunks generated | Section misses | Per generated chunk | Avg GC/frame |
+|---|---:|---:|---:|---:|
+| 10 m/s | 394 | 123 | 0.31 | 7.1 KB |
+| 20 m/s | 1 026 | 0 | 0.00 | 12.6 KB |
+| 50 m/s | 2 523 | 139 | 0.06 | 30.6 KB |
+| 100 m/s | 4 780 | 1 330 | 0.28 | 130.1 KB |
+| 200 m/s | 8 668 | **0** | **0.00** | 1 419.0 KB |
+
+`ChunkData` and save-buffer misses are **0 in every phase**, loading phases included. A second Master build
+(`BenchmarkRun_2026-10-03_14-34-59`) reproduces it: 0 section misses at 200 m/s over 9 306 generated chunks
+(1 436 KB/frame, ≈ 132 KB per generated chunk), and the same 1 330 misses (0.28 per chunk) at 100 m/s. The garbage H-1 set out to
+explain is still there: at 200 m/s, 1 419 KB/frame × ~26 fps × 30 s ≈ 1.1 GB, **~129 KB per generated chunk**
+(about 120 KB at 100 m/s). The section pool covers it with **zero** misses at 200 m/s, and with 1 330 × 24 KB ≈
+32 MB (~6%) at 100 m/s. The pool reaches steady state during the initial load, and CP-7's linger window keeps
+it warm, so neither the rent-all-8 path nor the save-snapshot path allocates in flight. **The ~130 KB per
+generated chunk is still unattributed and lies elsewhere.** ES-0's per-frame GC capture — under the heap-delta
+fallback, since PM-0 found no live allocation counter in Master — and a GC.Alloc callstack capture are the next
+instruments. ES-9 and ES-10 lose H-1 as their GC justification; their own cases (save ownership, persistence
+policy) stand or fall separately.
 
 ### 2.3 Per-item pipeline costs
 
@@ -257,8 +282,9 @@ backlog entry whose detail lives there. Expected effects marked *(inferred)* are
 PM-6; the bullets below are what ES needs from it.
 - Per-frame raw max and p99 frame time, per-frame GC allocation that survives collection frames, and
   per-frame collection flags per benchmark phase — alongside, not instead of, `PerformanceMonitor`'s
-  smoothed history (always-on by design). (`ProfilerRecorder`'s "GC Allocated In Frame" may be invalid
-  in Master players — PM-0 checks before anything relies on it.)
+  smoothed history (always-on by design). (PM-0, 2026-10-03: `ProfilerRecorder`'s "GC Allocated In Frame"
+  does not exist in Master players, and `GC.GetAllocatedBytesForCurrentThread` is not live under IL2CPP — the
+  per-frame figure comes from the heap-delta method plus a collection flag.)
 - Slots for `CheckViewDistance`, `UnloadChunks`, `ApplyModifications`, the disk-hit populate
   continuation and every other untimed `World.Update` region, plus an unattributed remainder.
 - A once-per-launch **drain stamp** (P-4's tail-inclusive drain predicate): ms to `_isWorldLoaded`, to
@@ -455,7 +481,7 @@ constants + migration change. Prerequisites: ES-13, ES-18, ES-19.
 | Symptom | Biggest levers (in order) |
 |---|---|
 | Time-to-stable | ES-0 (attribute) → ES-1, ES-2, ES-3 → ES-4, ES-11, ES-13 |
-| Traversal spikes | ES-0 (see them; test H-1 §2.2.1) → ES-9 + ES-10 if H-1 holds → ES-6, ES-8, ES-7, ES-25 → ES-18a (heap) |
+| Traversal spikes | ES-0 (see them; H-1 §2.2.1 **refuted 2026-10-03** — attribute the ~130 KB/chunk anew) → ES-6, ES-8, ES-7, ES-25 → ES-18a (heap); ES-9 + ES-10 no longer carry a GC case |
 | Height / vd 32 | ES-13 (200 k cap), ES-25, ES-19, ES-18, ES-20 + ES-21 + ES-23, ES-24 |
 
 ---
@@ -877,6 +903,9 @@ saving is inferred from step 1's re-entry leg, not re-measured.
 
 ## Document History
 
+* **v1.5** - **H-1 refuted** (2026-10-03, IL2CPP Master benchmark with the PM-0 pool-miss counters): 0 section
+  misses per generated chunk at 200 m/s against ~129 KB of garbage per chunk, so the per-chunk garbage is still
+  unattributed. §2.2.1 carries the verdict table, and the §4.1 traversal row drops ES-9/ES-10's GC rationale.
 * **v1.4** - §8 item 7 closed (2026-10-03): every drift entry fixed in its doc or comment, plus the stale
   `OPEN_WORK_INDEX` ES row; the DebugScreen "(dev)" labels stay with PM-7. ES-6.1's harness follow-ups
   (BH-9 in the Behavior fidelity doc) closed the same day.

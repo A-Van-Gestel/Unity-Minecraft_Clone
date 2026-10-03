@@ -2,8 +2,8 @@
 
 **Version:** 1.0  
 **Date:** 2026-10-02  
-**Status:** Proposed design — not implemented. PM-0 is a zero-behavior-change verification probe that
-must run first; its answers may reshape PM-2/PM-4 (§8).  
+**Status:** Proposed design — PM-0 ✅ complete (2026-10-03, Master answers in §8); PM-1…PM-7 not started. PM-0 is a zero-behavior-change verification probe that must run first; its answers may reshape
+PM-2/PM-4 (§8).  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > An opt-in, settings-driven in-game performance monitor and diagnostic logger that covers **every
@@ -108,6 +108,9 @@ read-only `unity command eval`. Unity 6000.6 APIs (`ProfilerRecorder`, `Profiler
 - ❌ **The shipped v2.1 monitor already replaced recorders because they returned invalid data in
   Release builds**, and `ProfilerMarker` samples are only readable through the Profiler. The production
   configuration is Master IL2CPP; a core that goes dark there is no field instrument.
+- *PM-0 (2026-10-03):* in a 6.6 Master player all 49 available counters are valid, so the "invalid in
+  Release" finding no longer holds for counters. The rejection stands: there are no marker timings and no
+  `GC Allocated In Frame` in Master, so recorders cannot be the core. They are the enrichment source §8 q1 lists.
 
 #### Option B — `Stopwatch.GetTimestamp` probes into an enum-indexed store ✅ **CHOSEN**
 
@@ -226,7 +229,10 @@ follows §2's gap list: every untimed `World.Update` region, `DiskLoadApply` aro
   "Idle/Other". **Requires `enableFrameTimingStats`** (`ProjectSettings.asset:162`, currently 0). The
   `Windows - Development` and `Windows - Production` profiles inherit Player Settings (`m_Settings: []`);
   only `Windows - Profiler` holds a frozen full copy (its own `enableFrameTimingStats: 0` at line 187), so it
-  needs its own edit.
+  needs its own edit. *PM-0 (2026-10-03): a Master player with the setting **off** still delivered frame
+  timings while the frame-time recorder counters were recording (§8 q4). PM-2 should first confirm that
+  recording those counters is enough — reading `FrameTimingManager` with no recorder running settles it.
+  If it is, the tier can enable timing on demand and the project setting stays 0.*
 - **Memory:** existing `Profiler.GetTotal*MemoryLong` + managed heap, plus pool counters for
   `ChunkJobArrayPool` / `MeshOutputPool` / `ChunkPoolManager` and per-frame mesh-upload bytes;
   `ProfilerRecorder` memory/render counters only where PM-0 found them `Valid` in the target build.
@@ -330,7 +336,7 @@ public enum LogLevel : byte { Off, Error, Warning, Info, Verbose }
 
 | Phase | Scope | Effort | Depends on | Status |
 |---|---|:---:|---|---|
-| **PM-0 — Verify** | Execution packet §7.1. Master-build probe: dump `ProfilerRecorderHandle.GetAvailable` + `Valid`; `FrameTimingManager` with frame-timing stats on; `GC.GetAllocatedBytesForCurrentThread` under IL2CPP; Burst timestamp source; probe cost (QPC ns) | 🟢 | — | — |
+| **PM-0 — Verify** | Execution packet §7.1. Master-build probe: dump `ProfilerRecorderHandle.GetAvailable` + `Valid`; `FrameTimingManager` with frame-timing stats on; `GC.GetAllocatedBytesForCurrentThread` under IL2CPP; Burst timestamp source; probe cost (QPC ns) | 🟢 | — | ✅ 2026-10-03 — §8 q1–q4 answered in two Master builds |
 | **PM-1 — Core store** | `PerfStore`, `PerfSlot`/`PerfCounter`, raw per-frame ring, histograms, tier setting + live apply, `WorldFrameProfiler` facade (identical `PassMsTotals`) | 🟡 | PM-0 | — |
 | **PM-2 — Frame tier** | Per-frame GC + collection flag, `FrameTiming` GPU/render/present-wait, hitch detector + snapshots | 🟡 | PM-1 | — |
 | **PM-3 — Coverage** | Slots for every untimed `World.Update` region + unattributed remainder; non-World systems; gauges for queues, in-flight jobs, pools, resident chunks | 🟡 | PM-1 | — |
@@ -423,6 +429,30 @@ change: the probe runs only when triggered, and the counters are one in-lock inc
 **Not doing.** `PerfStore` (PM-1) and any tier/settings work; enabling frame-timing stats permanently; fixing
 anything H-1 points at (ES-9/ES-10 own that).
 
+**Execution record (2026-10-03, code landed; Master player run pending).** Decisions as taken:
+1. **Trigger → console command, plus the button**: `/perf probe` (`PerfCommand`, alias `/profiler`; `/perf` alone
+   prints the last summary; `InstalledCommandCount` 18 → 19) in a world, and a Benchmark-tab **Run Engine API
+   Probe** `[SettingAction]` that also works from the main menu — the cleaner run, with no chunk streaming in the
+   frames sampled. Completion raises a toast, so `MainMenuController` now spawns a toast host too.
+2. **Frame-timing stats → temporary flip** for the player run, reverted after.
+3. **Probe → kept as part of the diagnostics layer**: `Assets/Scripts/Diagnostics/EngineApiProbe.cs` (namespace
+   `Diagnostics`, the planned home of `PerfStore`/`EngineLog`), neutrally named — log tag `[ApiProbe]`, report
+   `EngineApiProbe_<timestamp>.log`, no backlog ID in player-facing text. The Burst half is `Jobs/TimestampProbeJob.cs`.
+4. **H-1 visibility → both**: a DebugScreen "Pool misses — data | sect | save buffers" row, and a per-phase
+   "Pool misses" block in the benchmark report's Pipeline section (miss deltas per pool beside chunks generated vs
+   loaded; misses per generated chunk is a phase-wide ratio, not a per-chunk attribution).
+
+Corrections to the packet found while executing: `SerializationBufferPool` is a static class, so its counter is
+annotated and zeroed in the existing `DomainReset`; `GC.GetTotalAllocatedBytes` does **not compile** under the
+project's .NET Framework API level (a build-time answer, so the probe omits it rather than "failing to compile in
+Master"); and the generated/loaded split cannot come from `AdmittedTicks` (stamped for disk loads too) — it is
+counted at the two `StampPopulated` arms (new `generated` parameter), pinned by Pipeline Backpressure **B25**.
+The phase deltas are taken only when both readings come from the same `ChunkPoolManager` instance.
+
+The probe always finishes: a check that throws is reported as `THREW <type>: <message>` — itself an answer
+about the build — and the remaining checks still run; recorders are released even when the run is cut short.
+Proven in Play mode by two injected throws (one per check kind) and a mid-run `DestroyImmediate`.
+
 ### Extension roadmap
 
 | Version | Extension |
@@ -435,15 +465,40 @@ anything H-1 points at (ES-9/ES-10 own that).
 
 ## 8. Open questions (PM-0 answers 1–4)
 
+Answers 1–4 come from `EngineApiProbe_2026-10-03_13-52-20.log`: a `Windows - Production` player (IL2CPP
+**Master**, non-development, D3D11, Burst AOT), frame-timing stats temporarily on, probe run from the main menu.
+
 1. Which `ProfilerRecorder` counters are `Valid` in a Master IL2CPP player (memory, "GC Allocated In
    Frame", draw calls/batches/triangles)? The v2.1 doc says categories were invalid in Release; PM-0
-   records the exact list.
+   records the exact list. **Answered:** 82 handles — 33 markers, **49 counters, all 49 recorder-valid**, 29
+   non-zero over 120 frames (the Editor has 196). Valid and reporting: `GC Used/Reserved Memory`, `System Used
+   Memory`, `Total Used/Reserved Memory`, `App Resident/Committed Memory`, `CPU Total/Main Thread/Render
+   Thread Frame Time`, `GPU Frame Time`, `Standard`/`SRP Batcher Draw Calls Count`, `SetPass Calls Count`,
+   `Triangles`/`Vertices Count`, render-texture and buffer counts, and per-frame vertex/index buffer uploads.
+   **`GC Allocated In Frame` does not exist in a Master player** (Editor-only). The frame-time counters were
+   read with frame-timing stats on; whether they need that setting is open (see 4).
 2. Does `GC.GetAllocatedBytesForCurrentThread()` exist and stay monotonic under IL2CPP/Boehm with the
-   project's API compatibility level? If not, §4.3's fallback applies.
+   project's API compatibility level? If not, §4.3's fallback applies. **Answered: it compiles but is NOT live**
+   — 0 B over a known 1 MB allocation, in the Master player as in Editor Mono; `GC.GetTotalAllocatedBytes` is
+   not in the API surface at all. With `GC Allocated In Frame` also absent (1), **§4.3's fallback applies**:
+   heap delta plus a per-frame collection flag. `GC.CollectionCount(0)` works (`MaxGeneration` 0).
 3. Which timestamp source is Burst-callable for in-job execute timing (`ProfilerUnsafeUtility.Timestamp`
-   or equivalent), and what does it cost?
+   or equivalent), and what does it cost? **Answered: `ProfilerUnsafeUtility.Timestamp`** — Burst path
+   confirmed in the Master player, **11.4 ns/read** (100 ns ticks). Managed main-thread reads: `Stopwatch.GetTimestamp`
+   15.1 ns, `ProfilerUnsafeUtility.Timestamp` 11.6 ns. (Editor: ~14.8 ns in Burst.)
 4. Does `FrameTimingManager` report `gpuFrameTime` on D3D11 (the primary API) with frame-timing stats on,
-   and what does enabling the stats cost?
+   and what does enabling the stats cost? **Answered: yes** — `IsFeatureEnabled` true, 120 of 120 frames
+   timed, `gpuFrameTime` p50 3.30 ms, `cpuRenderThreadFrameTime` p50 0.11 ms, `cpuMainThreadPresentWaitTime`
+   p50 3.54 ms (main menu). **The setting turned out not to be the gate.** The same build with it **off**
+   (`EngineApiProbe_2026-10-03_14-27-27.log`) reported `IsFeatureEnabled` **false**, yet `GetLatestTimings`
+   returned timings for 116 of 120 frames (GPU p50 3.41 ms), and the `GPU`/`CPU Main Thread Frame Time` recorder
+   counters reported in 115. The probe starts those recorders before it samples, so the likely mechanism is that
+   recording the frame-time counters turns frame timing on for as long as they record. *Unverified:* reading
+   `FrameTimingManager` before any recorder starts would settle it. **Cost: no measurable difference.** The A/B
+   pair of benchmarks (stats on `BenchmarkRun_2026-10-03_14-00-16`, off `…14-34-59`) differs in both directions
+   — avg CPU 1.3 vs 1.0 ms at 10 m/s, but 1.1 vs 1.6 ms at 50 m/s loading — which is run-to-run spread, not an
+   attributable cost. The cost question is moot unless PM-2 needs the setting itself. (The Editor reports these
+   times regardless, so it cannot answer either half.)
 5. Default hitch thresholds (33 ms / ×2.5 median) — to be tuned against real sessions after PM-2.
 6. Should Tier 0 stay the default, or should Tier 1 ship on by default once its cost is measured?
 
@@ -464,6 +519,14 @@ anything H-1 points at (ES-9/ES-10 own that).
 
 ## Document History
 
+* **v1.2** - **PM-0 complete** (2026-10-03, two Master player builds): §8 q1–q4 answered — 49 counters valid in
+  Master, but no `GC Allocated In Frame`; the per-thread GC counter is not live under IL2CPP, so §4.3's fallback
+  applies; `ProfilerUnsafeUtility.Timestamp` is Burst-callable at 11.4 ns; with the project setting off, frame
+  timings still arrived while the frame-time recorders were recording (§4.3 note, mechanism unverified), and
+  the A/B shows no measurable cost. Both builds' benchmarks refuted the roadmap's H-1.
+* **v1.1** - PM-0 code landed (§7.1 execution record): `/perf probe` + `EngineApiProbe` in a new
+  `Scripts/Diagnostics/` folder, pool-miss counters with a DebugScreen row and per-phase report rows (B25);
+  §8 q2/q3 gained their Editor-side answers. Master player run still pending.
 * **v1.0** - Initial design: four-tier opt-in `PerfStore` over the kept always-on `PerformanceMonitor`,
   `WorldFrameProfiler` facade, GC/GPU/worker/I-O coverage, hitch snapshots, session export, category
   logger, `PM-0`…`PM-7`; PM-0 execution packet (§7.1) with the H-1 pool-miss counters; §4.3 corrected —
@@ -472,4 +535,4 @@ anything H-1 points at (ES-9/ES-10 own that).
 ---
 
 **Last Updated:** 2026-10-02  
-**Next Review:** when PM-0's verification probe has run in a Master build
+**Next Review:** when PM-1 starts (PM-0 complete 2026-10-03)
