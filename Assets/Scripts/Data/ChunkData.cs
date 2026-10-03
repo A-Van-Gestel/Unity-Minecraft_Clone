@@ -44,7 +44,8 @@ namespace Data
         public byte[] SectionUniformSkyLevel;
 
         /// <summary>
-        /// The heightmap for this chunk. Stores the Y-level of the highest opaque block for each column.
+        /// The heightmap for this chunk. Stores, per column, the Y-level of the highest block that obstructs the sky
+        /// column (<c>LightAttenuation.ObstructsSkyColumn</c>, orientation-aware for partial blocks — not opacity).
         /// </summary>
         public ushort[] heightMap = new ushort[VoxelData.ChunkWidth * VoxelData.ChunkWidth];
 

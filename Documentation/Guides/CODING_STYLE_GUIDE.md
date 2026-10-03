@@ -10,7 +10,7 @@ Consistency in naming is one of the fastest ways to make code understandable.
 |-----------------------------------|------------------|--------|--------------------------------------------------|
 | Classes, Structs, Enums           | `PascalCase`     | N/A    | `WorldData`, `MeshGenerationJob`                 |
 | Public Fields & Properties        | `PascalCase`     | N/A    | `PlayerChunkCoord`, `IsSolid`                    |
-| `[SerializeField]` private fields | `camelCase`      | N/A    | `walkSpeed`, `chunkBorderPrefab`                 |
+| `[SerializeField]` private fields | `_camelCase`     | `_`    | `_walkSpeed`, `_chunkBorderPrefab`               |
 | Private Fields                    | `_camelCase`     | `_`    | `_world`, `_meshFilter`                          |
 | `readonly` Private Fields         | `_camelCase`     | `_`    | `private readonly World _world;`                 |
 | `static readonly` Fields          | `s_camelCase`    | `s_`   | `private static readonly int[] s_faceChecks;`    |
@@ -184,11 +184,11 @@ Use `[SerializeField]` on private fields to expose them to the Unity Inspector. 
 // Good
 [Tooltip("The maximum number of lighting jobs that can be scheduled in a single frame.")]
 [SerializeField]
-private int maxLightJobsPerFrame = 8;
+private int _maxLightJobsPerFrame = 8;
 
 // Bad
 [SerializeField]
-private int maxLightJobsPerFrame;
+private int _maxLightJobsPerFrame;
 ```
 
 ## 5. General Principles & Best Practices

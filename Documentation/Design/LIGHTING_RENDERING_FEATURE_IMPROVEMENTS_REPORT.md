@@ -336,7 +336,7 @@ which is now authoritative for the sky. Only §6 and the deferred items below re
 > five-shader edit rather than enabling a checkbox; `SunElevation` was a flat, latitude-free sine that
 > the celestial model supersedes rather than builds on; §2's blood-moon tint has no hook, because
 > RF-1 §4's `SkyEvent` was deliberately never shipped; and the line references had drifted
-> (clear flags `World.unity:3634`, background colour `World.cs:1964`).
+> (clear flags `World.unity:3634`, background color `World.cs:1964`).
 
 **What existed before implementation (verified 2026-07-02).**
 
@@ -412,7 +412,7 @@ game. Tonemapping (§1's second half) and the §5 effects remain open, each stil
 > **As built.** Four commits on `feat/world-scaling`: `b981ec44` (emissive path, default-inert),
 > `3b246bc2` (alpha-sentinel fix), `c1748d15` (liquid emissive read), `95bae9a0` (bloom + setting).
 >
-> - **Channel:** emissive strength lives in **`Color32.a`** of the mesh colour stream — the only channel
+> - **Channel:** emissive strength lives in **`Color32.a`** of the mesh color stream — the only channel
 >   free on all three submeshes. Block emission (0-15) is scaled ×17 and stamped by
 >   `MeshGenerationJob.StampEmissiveStrength`, a single pass at the shape router, so standard cubes,
 >   custom meshes, cross meshes and fluids are all covered by one code path. RGB is untouched and
@@ -453,9 +453,9 @@ game. Tonemapping (§1's second half) and the §5 effects remain open, each stil
 
 **Open / known limitations.**
 
-1. **Tonemapping + HDR colour grading not adopted.** Shipped with `m_ColorGradingMode` at LDR and no
+1. **Tonemapping + HDR color grading not adopted.** Shipped with `m_ColorGradingMode` at LDR and no
    tonemapper, so exactly one variable changed and the A/B captures stayed readable. ACES visibly shifts
-   every existing colour and still needs its own capture pass and sign-off.
+   every existing color and still needs its own capture pass and sign-off.
 2. ~~**Bloom does not appear in the UI blur backdrop.**~~ **CLOSED 2026-09-07 by UB-3.** The entry
    correctly named the fix — "moving the injection point past post-processing" — and that is what
    happened: UI moved into the render graph and the capture now records at
@@ -828,7 +828,7 @@ identically in both models; what changed is that the usable range above it colla
 visibility* factor and darkening is a *source-intensity* factor, so they should multiply with the
 subtraction applied to the source — `max(exposure − darken, 0) × (1 − occlusion)` — not
 `max(exposure × (1 − occlusion) − darken, 0)`. Under the correct order the same 30% vertex reads
-`0.267 × 0.70 = 0.187` of the sky's night intensity: dimmer than its neighbours, still legible, and
+`0.267 × 0.70 = 0.187` of the sky's night intensity: dimmer than its neighbors, still legible, and
 the AO ratio stays constant at every hour.
 
 **Why it is not a one-line fix.** The vertex holds only the product, so the shader cannot recover the
@@ -867,7 +867,7 @@ gradient it reads has simply never been authored.
 
 - `DefaultTimeOfDaySettings.asset` is the only `TimeOfDaySettings` in the project, and its skylight
   gradient evaluates to **pure white `(1.00, 1.00, 1.00)` at all nine sampled day fractions**
-  (0.00 → 1.00). It carries two colour keys, both `r:1 g:1 b:1`.
+  (0.00 → 1.00). It carries two color keys, both `r:1 g:1 b:1`.
 - `BuildDefaultSkylightGradient()` (`TimeOfDaySettings.cs`) is white→white by construction. The asset
   never overrode it, so the shipped content *is* the placeholder default.
 - The transport around it runs every frame: `World.SetGlobalLightValue()` (`World.cs:2163-2164`) reads
@@ -902,13 +902,13 @@ the tint multiplies only the sky contribution before the per-channel `max()` in 
 |---|---|
 | Author the skylight gradient alone | The minimum that delivers moonlit nights. Self-contained, reversible, no code |
 | Author the background/fog gradient in the same blue family | RF-1 §3's "RF-2 coordination" bullet — without it the horizon clashes with the newly-tinted terrain. Recommended as the same sitting |
-| Leave flat white | Honest only if the intent is a deliberately colourless night. Should then be recorded as a decision, because it currently reads as an oversight |
+| Leave flat white | Honest only if the intent is a deliberately colorless night. Should then be recorded as a decision, because it currently reads as an oversight |
 
 **Dependencies / ordering.** RF-1 (shipped) supplies the mechanism and the spec; RF-2 (shipped)
-supplies the horizon colours to coordinate against. **Distinct from RF-1 §4's `SkyEvent` blood-moon
+supplies the horizon colors to coordinate against. **Distinct from RF-1 §4's `SkyEvent` blood-moon
 tint**, which is a genuine *code* gap (the lerp seam is left open, no gameplay system produces events)
 — RF-10 is content only and does not unblock or depend on it. Interacts with RF-9 only in that the tint
-applies after §10's subtractive shade, so it recolours without re-darkening.
+applies after §10's subtractive shade, so it recolors without re-darkening.
 
 **Risks.** 🟢 — no code, no pipeline invariants, no seed or save impact (the gradient lives on a
 ScriptableObject asset, not in the save; `worldState.timeOfDay` is unaffected). The visual reach is
@@ -1020,7 +1020,7 @@ engineering time and can land whenever someone opens the Sky Editor).
   editor tool" row narrows to the per-biome override alone — which still needs its design pass and is
   explicitly not an implementation task. Two findings from building it are recorded in
   [`../Architecture/SKY_AND_CELESTIAL_RENDERING.md`](../Architecture/SKY_AND_CELESTIAL_RENDERING.md) v1.2:
-  the per-pixel CPU colour conversion, not the GPU render, is what would force a preview to debounce
+  the per-pixel CPU color conversion, not the GPU render, is what would force a preview to debounce
   (27 ms vs 3 ms at 640×260); and backlog IDs had leaked into user-facing strings, with an `RF-2` header
   reaching the tool's own UI. **Editor tooling must not surface backlog IDs** — several remain elsewhere
   (`BlockEditorWindow`, `Clouds`, `SettingsManager`, benchmark headers) and are unswept.
