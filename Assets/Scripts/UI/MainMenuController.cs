@@ -1,11 +1,10 @@
 using System;
-using Data;
 using Data.Enums;
+using Launch;
 using TMPro;
 using UI.Toast;
 using UnityEditor;
 using UnityEngine;
-using UnityEngine.SceneManagement;
 
 namespace UI
 {
@@ -139,29 +138,13 @@ namespace UI
         /// Automatically configures and launches a benchmark profiling session.
         /// Bypasses the World Select Menu.
         /// </summary>
-        public void RunBenchmark()
-        {
-            WorldLaunchState.CurrentMode = RuntimeMode.Benchmark;
-            WorldLaunchState.WorldName = $"Benchmark_{DateTime.Now:yyyyMMdd_HHmmss}";
-            WorldLaunchState.Seed = 0; // Deterministic seed
-            WorldLaunchState.IsNewGame = true;
-
-            SceneManager.LoadScene("Scenes/World", LoadSceneMode.Single);
-        }
+        public void RunBenchmark() => AutomatedRunLauncher.StartBenchmark();
 
         /// <summary>
         /// Automatically configures and launches the full-world fluid stress pass (the TG-4 §5 attribution gate):
         /// loads a fresh deterministic world, then <c>FluidStressController</c> seeds an ocean flood and captures
         /// the per-frame Tick / Apply / Mesh / Lighting breakdown. Bypasses the World Select Menu.
         /// </summary>
-        public void RunFluidStress()
-        {
-            WorldLaunchState.CurrentMode = RuntimeMode.FluidStress;
-            WorldLaunchState.WorldName = $"FluidStress_{DateTime.Now:yyyyMMdd_HHmmss}";
-            WorldLaunchState.Seed = 0; // Deterministic seed (substrate is overwritten by the flood box anyway)
-            WorldLaunchState.IsNewGame = true;
-
-            SceneManager.LoadScene("Scenes/World", LoadSceneMode.Single);
-        }
+        public void RunFluidStress() => AutomatedRunLauncher.StartFluidStress();
     }
 }
