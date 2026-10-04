@@ -28,6 +28,9 @@ also matches `batch`). Pick the entry by its `name`.
 - JSON-typed parameters (`args`, `operations`, `properties`): pass a JSON string, single-quoted
   in bash (`--args '[305, 10, 0]'`).
 - `eval` takes its code as the first positional argument: `unity command eval "return 1;"`.
+  It runs under a **5 s main-thread limit** ("Main thread operation timed out after 5000ms") that the CLI cannot
+  raise: `eval`'s own `timeout` parameter is shadowed by the CLI's `--timeout <seconds>`. The work still runs to
+  completion behind the error. Put anything longer behind a menu item and run it with `menu … --detach`.
 - **Every `run_script` argument must be passed**; C# default parameter values are not applied.
 
 **Long work:** add `--detach` to get a job id back immediately, then `unity job wait <id> --timeout 90`
