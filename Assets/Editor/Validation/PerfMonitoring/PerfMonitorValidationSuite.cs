@@ -391,13 +391,13 @@ namespace Editor.Validation.PerfMonitoring
 
             PerfWindowSummary summary = PerfWindowStats.Summarize(samples, n);
             bool match = summary.Count == n
-                         && ExactValue.Equal(summary.MaxMs, sorted[n - 1])
-                         && ExactValue.Equal(summary.MeanMs, (float)(sum / n))
-                         && ExactValue.Equal(summary.P50Ms, sorted[PerfWindowStats.NearestRankIndex(n, PerfWindowStats.MedianPercentile)])
-                         && ExactValue.Equal(summary.P99Ms, sorted[PerfWindowStats.NearestRankIndex(n, PerfWindowStats.HighPercentile)]);
+                         && ExactValue.Equal(summary.Max, sorted[n - 1])
+                         && ExactValue.Equal(summary.Mean, (float)(sum / n))
+                         && ExactValue.Equal(summary.P50, sorted[PerfWindowStats.NearestRankIndex(n, PerfWindowStats.MedianPercentile)])
+                         && ExactValue.Equal(summary.P99, sorted[PerfWindowStats.NearestRankIndex(n, PerfWindowStats.HighPercentile)]);
 
             if (!match)
-                Debug.LogError($"  [FAIL] Oracle mismatch ({label}): got max {summary.MaxMs} p50 {summary.P50Ms} p99 {summary.P99Ms}");
+                Debug.LogError($"  [FAIL] Oracle mismatch ({label}): got max {summary.Max} p50 {summary.P50} p99 {summary.P99}");
             return match;
         }
 

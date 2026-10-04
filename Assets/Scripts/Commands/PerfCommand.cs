@@ -132,7 +132,7 @@ namespace Commands
                 summaries[i] = PerfStore.SummarizeSlotMs(slots[i]);
             }
 
-            Array.Sort(summaries, slots, Comparer<PerfWindowSummary>.Create((a, b) => b.MeanMs.CompareTo(a.MeanMs)));
+            Array.Sort(summaries, slots, Comparer<PerfWindowSummary>.Create((a, b) => b.Mean.CompareTo(a.Mean)));
 
             lines.Add(new ConsoleLine(ConsoleLineSeverity.Info,
                 $"World systems over the last {PerfStore.SlotFramesRecorded} frames (avg / p99 / worst ms):"));
@@ -140,7 +140,7 @@ namespace Commands
             {
                 PerfWindowSummary s = summaries[i];
                 lines.Add(new ConsoleLine(ConsoleLineSeverity.Info,
-                    $"  {slots[i].ToString().PadRight(SLOT_NAME_WIDTH)} {Ms(s.MeanMs)} / {Ms(s.P99Ms)} / {Ms(s.MaxMs)}"));
+                    $"  {slots[i].ToString().PadRight(SLOT_NAME_WIDTH)} {Ms(s.Mean)} / {Ms(s.P99)} / {Ms(s.Max)}"));
             }
 
             return new CommandResult(lines.ToArray());
@@ -160,7 +160,7 @@ namespace Commands
         }
 
         private static string FormatFrameLine(string label, PerfWindowSummary s) =>
-            $"  {label.PadRight(FRAME_LABEL_WIDTH)} worst {Ms(s.MaxMs)}  p99 {Ms(s.P99Ms)}  p50 {Ms(s.P50Ms)}  avg {Ms(s.MeanMs)}";
+            $"  {label.PadRight(FRAME_LABEL_WIDTH)} worst {Ms(s.Max)}  p99 {Ms(s.P99)}  p50 {Ms(s.P50)}  avg {Ms(s.Mean)}";
 
         /// <summary>Formats milliseconds independent of the host's locale.</summary>
         private static string Ms(float value) => value.ToString(MS_FORMAT, CultureInfo.InvariantCulture);

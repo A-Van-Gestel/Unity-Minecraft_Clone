@@ -10,15 +10,15 @@ namespace Diagnostics
         public int Count;
 
         /// <summary>The largest sample — the worst frame.</summary>
-        public float MaxMs;
+        public float Max;
 
         /// <summary>The arithmetic mean.</summary>
-        public float MeanMs;
+        public float Mean;
 
         /// <summary>The nearest-rank median.</summary>
-        public float P50Ms;
+        public float P50;
 
         /// <summary>The nearest-rank 99th percentile.</summary>
-        public float P99Ms;
+        public float P99;
     }
 }

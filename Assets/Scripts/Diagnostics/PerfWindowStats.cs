@@ -9,10 +9,10 @@ namespace Diagnostics
     /// </summary>
     public static class PerfWindowStats
     {
-        /// <summary>Percentile reported as <see cref="PerfWindowSummary.P50Ms"/>.</summary>
+        /// <summary>Percentile reported as <see cref="PerfWindowSummary.P50"/>.</summary>
         public const int MedianPercentile = 50;
 
-        /// <summary>Percentile reported as <see cref="PerfWindowSummary.P99Ms"/>.</summary>
+        /// <summary>Percentile reported as <see cref="PerfWindowSummary.P99"/>.</summary>
         public const int HighPercentile = 99;
 
         private const int PERCENT = 100;
@@ -38,10 +38,10 @@ namespace Diagnostics
             return new PerfWindowSummary
             {
                 Count = count,
-                MaxMs = max,
-                MeanMs = (float)(sum / count),
-                P50Ms = Select(samples, count, NearestRankIndex(count, MedianPercentile)),
-                P99Ms = Select(samples, count, NearestRankIndex(count, HighPercentile)),
+                Max = max,
+                Mean = (float)(sum / count),
+                P50 = Select(samples, count, NearestRankIndex(count, MedianPercentile)),
+                P99 = Select(samples, count, NearestRankIndex(count, HighPercentile)),
             };
         }
 
