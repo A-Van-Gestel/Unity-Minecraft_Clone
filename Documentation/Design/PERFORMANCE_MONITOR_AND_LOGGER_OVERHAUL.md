@@ -1,10 +1,11 @@
 # Performance Monitor & Logger Overhaul Design
 
-**Version:** 1.5  
+**Version:** 1.7  
 **Date:** 2026-10-02  
 **Status:** In progress — PM-0 ✅ complete (2026-10-03, Master answers in §8); PM-1 ✅ complete (2026-10-03, §7.2;
-confirmed in an IL2CPP Master build); PM-2 ✅ complete (2026-10-04, §7.3; confirmed in an IL2CPP Master build); PM-3…PM-7 not
-started. PM-0's answers reshaped PM-2/PM-4 (§8).  
+confirmed in an IL2CPP Master build); PM-2 ✅ complete (2026-10-04, §7.3; confirmed in an IL2CPP Master build); PM-3 ✅
+complete (2026-10-04, §7.4; confirmed in an IL2CPP Master build); PM-4…PM-7 not started. PM-0's answers reshaped
+PM-2/PM-4 (§8).  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > An opt-in, settings-driven in-game performance monitor and diagnostic logger that covers **every
@@ -122,7 +123,8 @@ PM-0 proves valid in the target build (memory, render stats), and a probe opened
 names. *PM-1 (2026-10-03):* the slot-less `Begin()` this section originally specified cannot emit one —
 `ProfilerMarker` has only `Begin()`/`End()`, so a marker must be opened by name before the region runs. The slot-less
 pair survives only as the `WorldFrameProfiler` facade's path (no marker); `World.cs`'s ten facade probes move to the
-slotted API when PM-3 re-touches those lines.
+slotted API when PM-3 re-touches those lines. *PM-3 (2026-10-04):* done; the facade's `Begin`/`Add` stay, used by the
+Pipeline Backpressure suite.
 
 ### 3.2 Opt-in model
 
@@ -213,6 +215,19 @@ public struct PerfFrame
   in-use/peak per pool, I/O ops/bytes, ThreadPool depth) are gauges sampled once per frame into a
   second column set, plus `Interlocked`-updated cumulative counters for worker-thread producers.
   *Moved to PM-3 (2026-10-03),* which brings their first producers; PM-1 built no counter storage.
+  *PM-3 (2026-10-04), as built:* `PerfCounter` holds 13 gauges — queue depths, jobs in flight per type, resident and
+  active chunks, active sections, and the idle stock of the job-array and mesh-output pools — and 5 per-frame counts
+  derived from running totals: section, chunk-data, job-array, mesh-output and save-buffer pool misses. A gauge holds
+  until set again; a per-frame count is zeroed by each commit, and its running-total baseline restarts when the tier
+  enters Systems or a total goes down. The integer columns exist with the slot columns; `World` samples them at the end
+  of `Update` while slots record, after the remainder bracket. Peaks come from window statistics over a gauge. The two
+  native pools report idle stock rather than rented buffers, because some rented buffers are disposed by their owners.
+- *PM-3 (2026-10-04), slot set as built:* 31 slots — the ten phases, the eleven `World.Update` regions listed above,
+  `WorldUnattributed`, and outside `World.Update` `DiskLoadApply`, `Physics`, `Player` (input, camera and the block-cursor
+  raycast), `AudioDirectors`, `Clouds`, `Environment` (foliage sway and the world-border wall), `DebugHud`, `Ui` and
+  `VoxelVisualizer`. The remainder is a slot rather than a `PerfFrame` field, so a Basic row stays 40 B and the remainder
+  joins the hitch records' top-three ranking. `SkyAndTime` was dropped: the day/night cycle runs inside
+  `AdvanceWorldTime`, the `WorldTime` slot.
 - **Statistics** are exact: nearest-rank percentiles (p50, p99), mean and worst frame, computed on read by
   in-place selection over a scratch copy of the ring (O(n), no sorting, no allocation) — `PerfWindowStats`.
   *PM-1 (2026-10-03):* this replaces the log-scale histograms first specified here, whose bucket width (±5–12 %)
@@ -237,6 +252,17 @@ follows §2's gap list: every untimed `World.Update` region, `DiskLoadApply` aro
 
 **Unattributed remainder:** `World.Update` is bracketed once as a whole; the remainder is
 `total − Σ(World slots)` per frame. A remainder that grows is a coverage gap, by construction.
+
+*PM-3 (2026-10-04), as built:* `PerfStore.BeginWorldFrame`/`EndWorldFrame` bracket `World.Update` after the facade's
+per-frame clear, and subtract only the slot time recorded **inside** the bracket, so time charged elsewhere in the frame
+(the disk continuation, a settings reload) cannot distort the remainder. A negative remainder means two slots overlapped;
+it is kept as measured, counted, and reported by `/perf stats`. `CheckViewDistance` is probed inside the method, so all
+three callers are charged — `OnSettingsChanged` included — with its span closed before `UnloadChunks`, which has its own
+slot; the cloud rebuild it starts stays in `ViewDistance`, and `Clouds` covers `Clouds.Update` only. `DiskLoadApply`
+opens after the read's `await` and is skipped while the bracket is open: a read that finishes before its `await`
+resumes synchronously inside the `World.Update` slot that started the load, which already counts the time. Only the
+`World.Update` slots are disjoint; a slot outside it may contain world work it triggers (a console teleport).
+`VoxelRigidbody` is probed in `FixedUpdate` only, and `ChunkLoadAnimation` — one instance per chunk — not at all.
 
 ### 4.3 GC, GPU and memory
 
@@ -302,7 +328,9 @@ open window join it (counted, the slowest becomes the worst row) without extendi
 frame. The newest 16 records are held, a new one overwriting the oldest. Slot columns and the top three slots — the
 costliest non-zero slots of the worst frame — exist only for records closed at Systems; dropping to Frame keeps the
 ranking but frees the per-row slot times, and leaving Frame discards every record and an open window. Records carry
-no counters or log lines yet: those arrive with PM-3 and PM-7. The thresholds are the settings-file fields
+no counters or log lines yet: those arrive with PM-3 and PM-7. *PM-3 (2026-10-04):* records closed at Systems carry
+every row's counters, in a block allocated and freed with the slot block; `/perf hitches` prints the worst frame's
+non-zero counters. The thresholds are the settings-file fields
 `perfHitchMinMs` / `perfHitchMedianFactor`, read when the tier is applied; `/perf hitches` lists the records.
 
 ### 4.6 Logger
@@ -389,7 +417,7 @@ public enum LogLevel : byte { Off, Error, Warning, Info, Verbose }
 | **PM-0 — Verify** | Execution packet §7.1. Master-build probe: dump `ProfilerRecorderHandle.GetAvailable` + `Valid`; `FrameTimingManager` with frame-timing stats on; `GC.GetAllocatedBytesForCurrentThread` under IL2CPP; Burst timestamp source; probe cost (QPC ns) | 🟢 | — | ✅ 2026-10-03 — §8 q1–q4 answered in two Master builds |
 | **PM-1 — Core store** | `PerfStore`, `PerfSlot`, raw per-frame ring, exact window statistics, tier setting + live apply, `WorldFrameProfiler` facade (identical `PassMsTotals`), `/perf stats` + `/perf tier` | 🟡 | PM-0 | ✅ 2026-10-03 — code + suite (§7.2); confirmed in an IL2CPP Master build |
 | **PM-2 — Frame tier** | Per-frame GC + collection flag, `FrameTiming` GPU/render/present-wait, hitch detector + snapshots | 🟡 | PM-1 | ✅ 2026-10-04 — code + suite (§7.3); confirmed in an IL2CPP Master build |
-| **PM-3 — Coverage** | Slots for every untimed `World.Update` region + unattributed remainder; non-World systems; `PerfCounter` + counter columns, with gauges for queues, in-flight jobs, pools, resident chunks (moved from PM-1); `World.cs`'s facade probes to the slotted API; the Master IL2CPP overhead A/B (moved from PM-1) | 🟡 | PM-1 | — |
+| **PM-3 — Coverage** | Slots for every untimed `World.Update` region + unattributed remainder; non-World systems; `PerfCounter` + counter columns, with gauges for queues, in-flight jobs, pools, resident chunks (moved from PM-1); `World.cs`'s facade probes to the slotted API; the Master IL2CPP overhead A/B (moved from PM-1) | 🟡 | PM-1 | ✅ 2026-10-04 — code + suite (§7.4); confirmed in an IL2CPP Master build |
 | **PM-4 — Workers & I/O** | Job schedule→complete latency, in-job execute time, worker utilization; disk latency/bytes/compression; ThreadPool depth | 🟡 | PM-0, PM-1 | — |
 | **PM-5 — HUD** | Systems panel, hitch list, GPU/CPU split, raw-max graph overlay; `DT-4` | 🟡 | PM-2, PM-3 | — |
 | **PM-6 — Export** | Session CSV + hitch dumps on a background writer; benchmark reports read the store, with phase-wide percentiles (an aggregate spanning more than the ring — moved from PM-1); benchmark mode forces Capture | 🟡 | PM-2 | — |
@@ -603,7 +631,9 @@ generation 200 m/s + loading 50 m/s, `-mc-mute -mc-quit`, both exit 0), read fro
   live; one (frame 83192) is present-wait-bound (35.6 ms), the split this tier exists to show.
 - **Systems tier** (`…14-30-54`): every record names its costliest slots. The traversal hitches at 200 m/s are led by
   `Tick` (26–38 ms of 34–52 ms frames); the initial load's by `LightMerge` (up to 47.8 ms) and `Tick`. One 39 ms frame
-  measured 1.3 ms of CPU — time outside the phases `PerformanceMonitor` brackets, which PM-3's remainder targets.
+  measured 1.3 ms of CPU — time outside the phases `PerformanceMonitor` brackets. *(Corrected at PM-3: this said PM-3's
+  remainder targets that time, but the `World.Update` remainder lies inside the bracketed Update phase and cannot see it;
+  §7.4.)*
 
 The match *rate* was not measured: the summary prints received/matched only when no GPU time arrives, and two records
 per run show "n/a" for their worst frame — one with a present wait but no GPU time (stored as none, §4.3), one with no
@@ -613,6 +643,85 @@ timing at all.
 detects with the defaults (33 ms / ×2.5) — PM-6, which owns benchmark comparability, decides whether they join the
 overlay; printing received/matched alongside a reported GPU time (so the match rate is always visible) fits PM-5's HUD
 or PM-6's export.
+
+### 7.4 PM-3 execution record (2026-10-04; confirmed in an IL2CPP Master build)
+
+**Shipped.** `PerfSlot` grows from 10 to 31 slots and the new `PerfCounter` holds 18 counters (§4.1); `PerfFrameRing` and
+`PerfHitchDetector` gain integer counter columns and a per-row counter block, allocated with their slot storage.
+`PerfStore` gains the remainder bracket (`BeginWorldFrame`, `EndWorldFrame`, `EndWorldFrameAt` for exact tests,
+`IsWorldFrameOpen`, `NegativeRemainderFrames`) and the counter API (`SetGauge`, `SampleTotal`, `ResetCounters`,
+`SummarizeCounter`). `World.cs`'s ten facade probes use the slotted API, eleven `World.Update` regions and the disk-load
+continuation gained probes, and `World.SamplePerfCounters` records the counters; twenty scripts outside `World.Update`
+carry one probe per update method. `ChunkJobArrayPool` and `MeshOutputPool` gain `TotalAllocated` and `PooledCount`
+(exposed through `WorldJobManager`); `PerformanceMonitor.OnEnable` also resets the counters. `/perf stats` lists the slots
+that recorded time (the rest on one line), warns on a negative remainder and prints every counter's avg/p99/max;
+`/perf hitches` adds the worst frame's non-zero counters.
+
+**Decisions taken at plan review:**
+1. **The remainder is a slot** (`WorldUnattributed`), not a `PerfFrame` field (§4.1).
+2. **Slot set:** the §4.1 list less `SkyAndTime`, plus `Player` and `Environment`; `ChunkLoadAnimation` unprobed.
+3. **Hitch records carry per-row counters** (§4.5).
+4. **Overhead gate in the Editor**, where it resolves nanoseconds without a ~9-minute Master build; the Master
+   Basic-vs-Systems A/B rides the PM-3 confirmation build instead of a build of its own.
+
+**Verification.** `Validate Performance Monitor` 23/23, with four new scenarios: B20 (remainder from injected ticks, slot
+time outside the bracket ignored, overlap counted, the bracket's open state), B21 (gauge and per-frame semantics,
+running-total baselines), B22 (counter columns and exact statistics) and B23 (hitch-record counter rows across the ring
+wrap). Proven red by mutation and green again on restore, the file checksum identical: B20 by subtracting the whole slot
+sum instead of the in-bracket part, and by dropping the commit's close of a bracket left open; B21 by zeroing gauges at
+commit; B23 by shifting the copied counter rows one frame. `Validate All` 32/32 suites green (run before the
+`IsWorldFrameOpen` guard below; Performance Monitor, Pipeline Backpressure and Command Console re-run green after it).
+Editor micro-benchmark (Mono, three clean sequential runs): an inactive bracket 3–5 ns, an active probe pair ≈ 45 ns
+(≈ 63 ns with its marker), one frame's counter samples ≈ 32 ns, `CommitFrame` at Systems ≈ 640–660 ns (PM-2: ≈ 280 ns with
+ten slots and no counters), and a whole Systems frame — 40 probe pairs, the bracket, the counters and the commit —
+≈ 3.4–3.6 µs against the 50 µs budget; 0 collections in every case. The first runs exposed `EndWorldFrame` reading the
+clock before checking for an inactive start (24 ns); fixed before the runs quoted.
+Editor Play-mode smoke (two runs, new worlds at seed 4242, Systems tier, player moved to voxel (1500, 140, 1500) and back,
+chunk borders toggled both ways, an 80 ms sleep injected): every slot that runs each frame recorded time; the far
+teleport's crossing frame was led by `Unload` (496 ms) with `ViewDistance` 16 ms and `OriginShift` 3.6 ms, the return's by
+`Unload` (124 ms), and the return's disk loads put 100–125 ms into `DiskLoadApply` across a hitch window. The conditional
+slots (`BorderToggle`, `OriginShift`, `Unload`, `DiskLoadApply`) recorded only in the frames that ran them; `DebugHud`
+stays 0 while the debug screen is closed. Counters: the far teleport's frame counted 730 chunk-data, 7 section and 841
+save-buffer pool misses; hitch records showed the queues building (generation queue 697, mesh queue 401). A 1 322-frame
+GC.Alloc capture attributed 1 003.8 KB on the main thread, none of it to `PerfStore`, the probes, the counter sampler or
+`PerformanceMonitor` (≈ 99 % was `ES-28`'s UI passes); leaving Play mode logged no leak.
+
+**Overlap found by the smoke.** The first run counted 7 negative-remainder frames (down to −1.1 ms), all around the far
+teleport: a read that finished before its `await` resumed synchronously inside the `World.Update` slot that started the
+load, so `DiskLoadApply` overlapped it. Proven with a temporary counter in the second run: with `DiskLoadApply` skipped
+while the bracket is open, 2 synchronous continuations occurred, 0 frames went negative, and `DiskLoadApply` still
+recorded 260.6 ms from the asynchronous ones.
+
+**Corrections found while planning:** §4.1's `SkyAndTime` named no system separate from `WorldTime`; §7.3 claimed PM-3's
+remainder targets time outside `PerformanceMonitor`'s brackets; §2 and §4.2 missed `CheckViewDistance`'s third caller
+(`OnSettingsChanged`) and the `UnloadChunks` and cloud rebuild nested inside it; §2 omitted `Player`/`PlayerInteraction`
+from the untimed systems; the scaling roadmap's ES-0 asked for an `ApplyModifications` slot that already existed as
+`Apply`.
+
+**Master player confirmation (2026-10-04).** One `Windows - Production` build (IL2CPP **Master**, non-development,
+D3D11), four unattended Flow A runs (generation 200 m/s + loading 50 m/s, `-mc-mute -mc-quit`, all exit 0) in the order
+Basic, Systems, Systems, Basic, read from the reports and the run-end Player.log summaries:
+- **Coverage works in Master.** Both Systems runs record every slot that runs each frame, `DiskLoadApply` on the loading
+  pass's disk hits (p99 1.1–1.2 ms, and 32 ms in one startup hitch), and the remainder at no more than 0.01 ms; neither run
+  logged a negative remainder. Hitch records name their costliest slots and carry their counters (one Systems run's 16
+  records): the 200 m/s phase's (75–166 ms frames) are led by `Tick` (32–104 ms, modification queue up to 2 236) and
+  `LightMerge` (15–36 ms); the ensure sweep's (35–39 ms) by `Tick` (27–36 ms); and a 135 ms frame after the 200 m/s phase
+  by `Unload` at 96.5 ms, with 563 chunk-data and 583 save-buffer pool misses counted in it. No exception or leak was
+  logged.
+- **Overhead A/B: no frame-level difference.** Average CPU per phase was equal at the reports' 0.1 ms resolution on the
+  50 m/s loading pass (1.1 ms in all four runs) and the ensure sweep (1.2–1.3 ms); the 200 m/s phase read 42.6 / 37.0 /
+  35.5 / 35.4 ms, the first run an outlier that the closing Basic run does not repeat. Over each run's last 2 048 frames,
+  CPU p50 read 0.77 / 0.78 ms at Basic and 0.79 / 0.80 ms at Systems — at most ≈ 0.02 ms (≈ 3 %), inside the ±1–5 % noise
+  floor with two runs per tier, and the Systems side also carries PM-2's Frame-tier work (hitch detector, frame-time
+  recorders). The Editor's ≈ 3.5 µs per Systems frame remains the precise figure.
+
+**Left for later:**
+- Time outside `PerformanceMonitor`'s brackets (wall − CPU − present wait) stays unattributed; reaching it means changing
+  the monitor's brackets, which the standing decision rules out.
+- Unity's own work — uGUI canvas rebuilds, the UI band passes, animation, the physics engine — has no slot.
+- In the Editor and development builds the slot markers add ≈ 20 ns per probe pair, and an exception inside a probed
+  region leaves its marker open; Master compiles the markers out.
+- Counters are sampled by `World.Update`, so during the initial load they read 0.
 
 ### Extension roadmap
 
@@ -684,6 +793,13 @@ Answers 1–4 come from `EngineApiProbe_2026-10-03_13-52-20.log`: a `Windows - P
 
 ## Document History
 
+* **v1.7** - **PM-3 complete** (2026-10-04): confirmed in an IL2CPP Master build — coverage, counters and hitch-record
+  counters record in Master, and the Basic-vs-Systems A/B shows no frame-level difference (§7.4); status line, plan row
+  and §7.4 heading flipped from "Master build check pending".
+* **v1.6** - **PM-3 code landed** (2026-10-04, §7.4; Master build check and overhead A/B pending): 31 slots incl. the
+  `WorldUnattributed` remainder as a slot, `PerfCounter` gauges and per-frame pool-miss counts with per-row hitch-record
+  counters, `World.cs`'s probes on the slotted API. As-built notes in §3.1, §4.1, §4.2 and §4.5; §7.3's claim that PM-3's
+  remainder reaches time outside `PerformanceMonitor`'s brackets corrected.
 * **v1.5** - **PM-2 complete** (2026-10-04, §7.3; confirmed in an IL2CPP Master build): GC allocation + collection flag at
   every tier, frame timings back-filled by timestamp at Frame, hitch detector + records, `/perf hitches`, run-end
   Player.log summary. As-built notes in §3.2, §4.1, §4.3, §4.5 and §8 q4; §4.3 corrected — rows time their end on the
@@ -712,4 +828,4 @@ Answers 1–4 come from `EngineApiProbe_2026-10-03_13-52-20.log`: a `Windows - P
 ---
 
 **Last Updated:** 2026-10-02  
-**Next Review:** when PM-3 starts (PM-2 complete 2026-10-04)
+**Next Review:** when PM-4 starts (PM-3 complete 2026-10-04)

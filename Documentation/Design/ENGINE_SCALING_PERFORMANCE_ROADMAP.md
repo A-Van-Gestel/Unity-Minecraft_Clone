@@ -1,6 +1,6 @@
 # Engine Scaling Performance Roadmap
 
-**Version:** 1.9  
+**Version:** 1.11  
 **Date:** 2026-10-02  
 **Status:** In progress — `ES-1`, `ES-2` and `ES-6.1` shipped (2026-10-02); ES-0's GC.Alloc attribution captured
 (2026-10-03, §2.2.1 — added `ES-26`/`ES-27`; PM-1's smoke capture added the `ES-28` quick win); the rest is a near-to-far horizon, not
@@ -316,7 +316,15 @@ PM-6; the bullets below are what ES needs from it.
   Systems-tier run: the 200 m/s traversal's hitch frames (34–52 ms) are led by the `Tick` slot at 26–38 ms, the initial
   load's by `LightMerge` and `Tick` — `PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md` §7.3; one run, not yet a ranking.)
 - Slots for `CheckViewDistance`, `UnloadChunks`, `ApplyModifications`, the disk-hit populate
-  continuation and every other untimed `World.Update` region, plus an unattributed remainder.
+  continuation and every other untimed `World.Update` region, plus an unattributed remainder. (PM-3, 2026-10-04, confirmed
+  in an IL2CPP Master build: every `World.Update` region has a slot — `ViewDistance`, `Unload` and nine more —
+  with a `WorldUnattributed` remainder, plus slots for the disk-hit continuation (`DiskLoadApply`) and the other systems
+  outside it, and per-frame counters for
+  queue depths, jobs in flight, resident chunks and pool misses; `ApplyModifications` already was the `Apply` slot. First
+  Editor reading: a 1 500-block teleport's crossing frame spent 496 ms in `Unload` and 16 ms in `ViewDistance`. First Master
+  reading, one Systems benchmark run: the 200 m/s phase's hitches are led by `Tick` (32–104 ms) and `LightMerge`
+  (15–36 ms), and a 135 ms frame after it by `Unload` at 96.5 ms — `PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md` §7.4; one
+  build, not yet a ranking.)
 - A once-per-launch **drain stamp** (P-4's tail-inclusive drain predicate): ms to `_isWorldLoaded`, to
   drained, to frame time within 1.25× median for 2 s — splits the 30 s into before/after handoff.
 - One Development-build (not deep-profiling) Profiler capture of a 200 m/s generation flight with
@@ -592,7 +600,7 @@ constants + migration change. Prerequisites: ES-13, ES-18, ES-19.
 
 | Phase | Scope | Effort | Depends on | Status |
 |---|---|:---:|---|---|
-| **ES-0 — Measure** | Spike-visible capture, drain stamp, crossing slots, GC.Alloc capture | 🟢 | — | GC.Alloc capture ✅ 2026-10-03 (§2.2.1); PM-1 store ✅ 2026-10-03; PM-2 frame tier ✅ 2026-10-04 (Master-confirmed); rest via PM-3 + PM-6 |
+| **ES-0 — Measure** | Spike-visible capture, drain stamp, crossing slots, GC.Alloc capture | 🟢 | — | GC.Alloc capture ✅ 2026-10-03 (§2.2.1); PM-1 store ✅ 2026-10-03; PM-2 frame tier ✅ 2026-10-04 (Master-confirmed); PM-3 crossing slots + remainder + counters ✅ 2026-10-04 (Master-confirmed); rest via PM-6 |
 | **ES-1 — No frame-paced load** | Completion counter at `World.cs:1064` — execution packet §7.1 | 🟢 | — | ✅ 2026-10-02 (in-game) |
 | **ES-2 — Calibration** | Robust OM-1 lighting probe — execution packet §7.1 | 🟢 | — | ✅ 2026-10-02 (in-game) |
 | **ES-3 — Loading mode** | SU-1 + SU-2, pooled/banded/shared startup snapshots | 🟡 | ES-0 | — |
@@ -985,6 +993,11 @@ saving is inferred from step 1's re-entry leg, not re-measured.
 
 ## Document History
 
+* **v1.11** - ES-0 slot bullet + plan row: PM-3 confirmed in an IL2CPP Master build (2026-10-04), with the first Master
+  reading of the 200 m/s (`Tick`- and `LightMerge`-led) and post-phase (`Unload`-led) hitches.
+* **v1.10** - ES-0 slot bullet + plan row: PM-3's coverage code landed (2026-10-04, Master build check pending) — a slot
+  for every `World.Update` region incl. the crossing work, the unattributed remainder, and per-frame counters; the
+  bullet's `ApplyModifications` slot already existed as `Apply`.
 * **v1.9** - ES-0 bullet + plan row: PM-2's Frame tier complete (2026-10-04, confirmed in an IL2CPP Master build) — per-frame
   allocation that leaves collection frames out, collection counts, GPU/render-thread/present-wait time and
   GC-correlated hitch records.

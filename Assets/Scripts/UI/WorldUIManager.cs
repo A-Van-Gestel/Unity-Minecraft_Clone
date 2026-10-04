@@ -1,4 +1,5 @@
 using Commands;
+using Diagnostics;
 using UI.Toast;
 using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
@@ -186,6 +187,8 @@ namespace UI
 
         private void Update()
         {
+            long uiStart = PerfStore.Begin(PerfSlot.Ui);
+
             // Recovery (UI_BUGS #04): if a tracked UI (observed: the console's ConsolePanel) is destroyed
             // out from under us while open, InUI latches true with the Gameplay map disabled and no way to
             // re-toggle (T lives on that map) — a soft-lock. Restore the ground state; the next open self-heals.
@@ -202,6 +205,7 @@ namespace UI
             {
                 if (InputManager.Instance.ConsoleCancelPressed)
                     IsConsoleOpen = false;
+                PerfStore.End(PerfSlot.Ui, uiStart);
                 return;
             }
 
@@ -222,6 +226,8 @@ namespace UI
             {
                 IsConsoleOpen = true;
             }
+
+            PerfStore.End(PerfSlot.Ui, uiStart);
         }
 
         #endregion

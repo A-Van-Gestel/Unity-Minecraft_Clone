@@ -1,6 +1,7 @@
 // ReSharper disable CompareOfFloatsByEqualityOperator
 
 using System;
+using Diagnostics;
 using Helpers;
 using UnityEngine;
 
@@ -325,6 +326,7 @@ namespace Physics
             // and freeze while a teleport arrival hold waits for its destination chunk (CMD-2 §3.3).
             if (!_world.IsWorldLoaded || IsTeleportHeld) return;
 
+            long physicsStart = PerfStore.Begin(PerfSlot.Physics);
             CalculateVelocity();
 
             ApplyPendingJump();
@@ -334,6 +336,7 @@ namespace Physics
             ClampToWorldBorder();
 
             CollectStepSmoothing();
+            PerfStore.End(PerfSlot.Physics, physicsStart);
         }
 
         /// <summary>

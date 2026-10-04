@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Data;
+using Diagnostics;
 using Input;
 using Serialization;
 using UI;
@@ -49,6 +50,8 @@ public class Toolbar : MonoBehaviour
         if (WorldLaunchState.IsAutomatedMode) return;
         if (WorldUIManager.Instance != null && WorldUIManager.Instance.IsPauseMenuOpen) return;
 
+        long uiStart = PerfStore.Begin(PerfSlot.Ui);
+
         // SCROLL WHEEL
         float scroll = _input.ScrollValue;
 
@@ -78,6 +81,8 @@ public class Toolbar : MonoBehaviour
                 SetItemSlot();
             }
         }
+
+        PerfStore.End(PerfSlot.Ui, uiStart);
     }
 
     /// <summary>

@@ -2,6 +2,7 @@ using System;
 using Data;
 using Data.Enums;
 using Data.WorldTypes;
+using Diagnostics;
 using Helpers;
 using Jobs.BurstData;
 using Jobs.Helpers;
@@ -161,8 +162,10 @@ namespace Audio
 
         private void Update()
         {
+            long audioStart = PerfStore.Begin(PerfSlot.AudioDirectors);
             SampleContext();
             AdvanceSubmersion();
+            PerfStore.End(PerfSlot.AudioDirectors, audioStart);
         }
 
         /// <summary>

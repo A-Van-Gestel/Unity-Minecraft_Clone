@@ -1,5 +1,6 @@
 using Data;
 using Data.Enums;
+using Diagnostics;
 using Helpers;
 using Physics;
 using UnityEngine;
@@ -56,6 +57,7 @@ namespace Audio
             _world ??= World.Instance;
             if (_world == null || SoundManager.Instance == null) return;
 
+            long audioStart = PerfStore.Begin(PerfSlot.AudioDirectors);
             FootfallSample sample = new FootfallSample
             {
                 Position = transform.position,
@@ -72,6 +74,7 @@ namespace Audio
             if (outcome.Splash) PlayStroke(BlockSoundEvent.Splash);
             if (outcome.HasFootfall) PlayFootfall(outcome.Footfall);
             if (outcome.HasStroke) PlayStroke(outcome.Stroke);
+            PerfStore.End(PerfSlot.AudioDirectors, audioStart);
         }
 
         /// <summary>

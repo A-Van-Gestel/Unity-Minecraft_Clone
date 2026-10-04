@@ -15,8 +15,9 @@ namespace Diagnostics
     /// frame timings, which arrive a few frames after their frame, reach the hitch rows before they are copied.
     /// </para>
     /// <para>
-    /// Frame rows live in native memory, allocated with the detector; the per-slot block only between
-    /// <see cref="AllocateSlotBlock"/> and <see cref="ReleaseSlotBlock"/>. Main thread only.
+    /// Frame rows live in native memory, allocated with the detector; the per-slot block, and with it the
+    /// per-counter block, only between <see cref="AllocateSlotBlock"/> and <see cref="ReleaseSlotBlock"/>. A record
+    /// carries counter rows exactly when it carries slot times. Main thread only.
     /// </para>
     /// </summary>
     public sealed class PerfHitchDetector : IDisposable
@@ -48,11 +49,13 @@ namespace Diagnostics
         private const int TOP_SLOTS = 3;
 
         private readonly int _slotCount;
+        private readonly int _counterCount;
         private readonly float[] _baselineScratch = new float[BaselineFrames];
         private readonly PerfHitchRecord[] _records = new PerfHitchRecord[MaxRecords];
 
         private NativeArray<PerfFrame> _recordFrames;
         private NativeArray<float> _recordSlots;
+        private NativeArray<int> _recordCounters;
         private bool _hasSlotBlock;
         private bool _isDisposed;
 
@@ -76,11 +79,14 @@ namespace Diagnostics
         /// <param name="slotCount">Slot columns per frame, as in the ring.</param>
         /// <param name="minMs">Minimum hitch threshold; see <see cref="SetThresholds"/>.</param>
         /// <param name="medianFactor">Multiple of the median; see <see cref="SetThresholds"/>.</param>
-        public PerfHitchDetector(int slotCount, float minMs, float medianFactor)
+        /// <param name="counterCount">Counter columns per frame, as in the ring; 0 for none.</param>
+        public PerfHitchDetector(int slotCount, float minMs, float medianFactor, int counterCount = 0)
         {
             if (slotCount <= 0) throw new ArgumentOutOfRangeException(nameof(slotCount));
+            if (counterCount < 0) throw new ArgumentOutOfRangeException(nameof(counterCount));
 
             _slotCount = slotCount;
+            _counterCount = counterCount;
             _recordFrames = new NativeArray<PerfFrame>(MaxRecords * WindowFrames, Allocator.Persistent);
             SetThresholds(minMs, medianFactor);
         }
@@ -118,7 +124,7 @@ namespace Diagnostics
             _medianFactor = medianFactor >= 1f && !float.IsInfinity(medianFactor) ? medianFactor : DefaultMedianFactor;
         }
 
-        /// <summary>Allocates the per-slot block; a no-op when already allocated.</summary>
+        /// <summary>Allocates the per-slot and per-counter blocks; a no-op when already allocated.</summary>
         public void AllocateSlotBlock()
         {
             if (_isDisposed) throw new ObjectDisposedException(nameof(PerfHitchDetector));
@@ -126,16 +132,24 @@ namespace Diagnostics
 
             _recordSlots = new NativeArray<float>(MaxRecords * WindowFrames * _slotCount, Allocator.Persistent,
                 NativeArrayOptions.UninitializedMemory);
+            if (_counterCount > 0)
+            {
+                _recordCounters = new NativeArray<int>(MaxRecords * WindowFrames * _counterCount, Allocator.Persistent,
+                    NativeArrayOptions.UninitializedMemory);
+            }
+
             _hasSlotBlock = true;
         }
 
-        /// <summary>Frees the per-slot block; held records keep their top slots but lose their per-row slot times.</summary>
+        /// <summary>Frees the per-slot and per-counter blocks; held records keep their top slots but lose their per-row slot times and counters.</summary>
         public void ReleaseSlotBlock()
         {
             if (!_hasSlotBlock) return;
 
             _recordSlots.Dispose();
             _recordSlots = default;
+            if (_recordCounters.IsCreated) _recordCounters.Dispose();
+            _recordCounters = default;
             _hasSlotBlock = false;
             for (int i = 0; i < MaxRecords; i++)
                 _records[i].HasSlots = false;
@@ -198,6 +212,21 @@ namespace Diagnostics
             return _recordSlots[(index * WindowFrames + row) * _slotCount + (int)slot];
         }
 
+        /// <summary>Reads one counter for a frame of a held record that has slot times.</summary>
+        /// <param name="age">The record's age, as for <see cref="GetRecord"/>.</param>
+        /// <param name="row">The frame's row, as for <see cref="GetRecordFrame"/>.</param>
+        /// <param name="counter">The counter.</param>
+        /// <returns>The counter's value in that frame.</returns>
+        public int GetRecordCounter(int age, int row, PerfCounter counter)
+        {
+            int index = IndexOfAge(age);
+            PerfHitchRecord record = _records[index];
+            if (!record.HasSlots || _counterCount == 0) throw new InvalidOperationException("The record holds no counters.");
+            if ((uint)row >= (uint)record.RowCount) throw new ArgumentOutOfRangeException(nameof(row));
+            if ((int)counter >= _counterCount) throw new ArgumentOutOfRangeException(nameof(counter));
+            return _recordCounters[(index * WindowFrames + row) * _counterCount + (int)counter];
+        }
+
         /// <summary>Frees the native blocks and discards an open window. Safe to call more than once.</summary>
         public void Dispose()
         {
@@ -243,8 +272,14 @@ namespace Diagnostics
             ring.CopyNewestFrames(_recordFrames, frameStart, rows);
 
             // The ring keeps slot columns only for frames committed since they were last allocated.
-            bool hasSlots = _hasSlotBlock && ring.HasSlotColumns && ring.SlotFrameCount >= rows;
-            if (hasSlots) ring.CopyNewestSlotRows(_recordSlots, frameStart * _slotCount, rows);
+            // A record's counter rows come with its slot times, so a ring with other counters gives neither.
+            bool hasSlots = _hasSlotBlock && ring.HasSlotColumns && ring.SlotFrameCount >= rows
+                            && ring.CounterCount == _counterCount;
+            if (hasSlots)
+            {
+                ring.CopyNewestSlotRows(_recordSlots, frameStart * _slotCount, rows);
+                if (_counterCount > 0) ring.CopyNewestCounterRows(_recordCounters, frameStart * _counterCount, rows);
+            }
 
             _open.RowCount = rows;
             _open.HitchRow = rows - 1 - _framesSinceHitch;

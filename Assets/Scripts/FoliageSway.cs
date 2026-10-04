@@ -1,3 +1,4 @@
+using Diagnostics;
 using Helpers;
 using UnityEngine;
 
@@ -74,11 +75,13 @@ public class FoliageSway : MonoBehaviour
     /// <summary>Pushes the sway globals for this frame (wind may be tweaked at runtime).</summary>
     private void Update()
     {
+        long environmentStart = PerfStore.Begin(PerfSlot.Environment);
         bool swayEnabled = _world != null && _world.settings.enableFoliageSway;
         if (!swayEnabled)
         {
             Shader.SetGlobalVector(s_shaderFoliageWindVector, Vector2.zero);
             Shader.SetGlobalVector(s_shaderFoliageWavePhase, Vector4.zero);
+            PerfStore.End(PerfSlot.Environment, environmentStart);
             return;
         }
 
@@ -106,6 +109,7 @@ public class FoliageSway : MonoBehaviour
         Shader.SetGlobalVector(s_shaderFoliageSwayParams2,
             new Vector4(spatialFrequency, _phaseJitter, _verticalBobFraction, _gustSpatialMultiplier));
         PushWavePhase(windVector, spatialFrequency);
+        PerfStore.End(PerfSlot.Environment, environmentStart);
     }
 
     /// <summary>

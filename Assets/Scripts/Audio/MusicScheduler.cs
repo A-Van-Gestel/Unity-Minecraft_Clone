@@ -1,5 +1,6 @@
 using Data;
 using Data.WorldTypes;
+using Diagnostics;
 using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 using UnityEngine.Audio;
@@ -184,6 +185,14 @@ namespace Audio
             SoundManager manager = SoundManager.Instance;
             if (manager == null || _source == null) return;
 
+            long audioStart = PerfStore.Begin(PerfSlot.AudioDirectors);
+            AdvanceSchedule(manager);
+            PerfStore.End(PerfSlot.AudioDirectors, audioStart);
+        }
+
+        /// <summary>Advances the fade and volume, then starts the queued or next track once the gap has elapsed.</summary>
+        private void AdvanceSchedule(SoundManager manager)
+        {
             float deltaTime = Time.unscaledDeltaTime;
 
             AdvanceFade(deltaTime);

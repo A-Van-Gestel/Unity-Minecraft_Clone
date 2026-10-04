@@ -198,9 +198,8 @@ namespace Benchmarks
 
         /// <summary>
         /// Opens a timed section: returns a start timestamp to hand back to <see cref="Add"/>. Returns <c>0</c>
-        /// (no <see cref="Stopwatch"/> read) while the probes are inactive. Used as a two-line pair around an
-        /// existing <c>World.Update</c> region so the region's control flow is never re-bracketed or reordered
-        /// (a hard invariant of the deadlock-prone chunk pipeline).
+        /// (no <see cref="Stopwatch"/> read) while the probes are inactive. Slot-less, so it opens no Profiler marker; a
+        /// region that should appear in Profiler captures is probed with <see cref="PerfStore.Begin(PerfSlot)"/> instead.
         /// </summary>
         /// <returns>The stopwatch start timestamp, or <c>0</c> when inactive.</returns>
         public static long Begin() => PerfStore.Begin();

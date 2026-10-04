@@ -1,5 +1,6 @@
 using Data;
 using Data.Enums;
+using Diagnostics;
 using Helpers;
 using Jobs.Data;
 using Unity.Mathematics;
@@ -156,6 +157,8 @@ namespace Audio
             SoundManager manager = SoundManager.Instance;
             if (manager == null || _sources == null) return;
 
+            long audioStart = PerfStore.Begin(PerfSlot.AudioDirectors);
+
             // Completed a frame after scheduling, never in the same one: the whole point of the job is that
             // the main thread does not wait on it.
             if (_scanner.IsScanning)
@@ -188,6 +191,7 @@ namespace Audio
             }
 
             AdvanceSources(manager, deltaTime);
+            PerfStore.End(PerfSlot.AudioDirectors, audioStart);
         }
 
         /// <summary>

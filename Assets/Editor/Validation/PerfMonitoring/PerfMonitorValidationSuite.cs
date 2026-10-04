@@ -17,7 +17,8 @@ namespace Editor.Validation.PerfMonitoring
     /// slot-column lifecycle, <see cref="PerfWindowStats"/>' exact percentiles against a sorted oracle,
     /// <see cref="PerfStore"/>'s tier gating, frame boundary and shutdown, and the
     /// <see cref="WorldFrameProfiler"/> facade's slot mapping and bit-identical published values. The Frame-tier
-    /// scenarios (B11–B19: GC readings, frame-timing back-fill, hitch detection) live in the <c>.Frame</c> part.
+    /// scenarios (B11–B19: GC readings, frame-timing back-fill, hitch detection) live in the <c>.Frame</c> part, and the
+    /// coverage scenarios (B20 on: the unattributed remainder and the counters) in the <c>.Coverage</c> part.
     /// <para>
     /// Timing <i>values</i> are not asserted beyond "zero" versus "positive" — wall-clock durations are not
     /// deterministic. Every scenario that touches the static store starts and ends from
@@ -82,6 +83,10 @@ namespace Editor.Validation.PerfMonitoring
                 new Scenario("B17 Hitches in an open window join it; the newest records are kept", RunB17HitchMergeAndRetention),
                 new Scenario("B18 Hitch attribution: GC-correlated flag, top three slots at Systems, none at Frame", RunB18HitchAttribution),
                 new Scenario("B19 Leaving Frame discards the detector and its open window; shutdown frees Frame resources", RunB19TierDropAndShutdown),
+                new Scenario("B20 Unattributed remainder: bracket minus in-bracket slot time; outside time ignored; overlap counted", RunB20UnattributedRemainder),
+                new Scenario("B21 Counters: gauges hold, per-frame counts reset each commit, running totals re-baseline", RunB21CounterSemantics),
+                new Scenario("B22 Counter columns live with the slot columns; exact window statistics over a gauge", RunB22CounterColumnsAndStats),
+                new Scenario("B23 Hitch records carry per-row counters, oldest first across the ring wrap", RunB23HitchRecordCounters),
             };
             return ValidationSuiteRunner.Execute("Performance Monitor", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }

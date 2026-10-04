@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using Data;
+using Diagnostics;
 using TMPro;
 using UI;
 using Unity.Scripting.LifecycleManagement;
@@ -182,6 +183,7 @@ namespace Input
 
         private void Update()
         {
+            long uiStart = PerfStore.Begin(PerfSlot.Ui);
             bool showPersistent = ShouldShowPersistentControls();
             if (_persistentRoot.activeSelf != showPersistent)
                 _persistentRoot.SetActive(showPersistent);
@@ -193,9 +195,10 @@ namespace Input
                 if (!showGameplay) ResetTouchState();
             }
 
-            if (!showGameplay) return;
+            if (showGameplay)
+                ProcessTouches();
 
-            ProcessTouches();
+            PerfStore.End(PerfSlot.Ui, uiStart);
         }
 
         /// <summary>

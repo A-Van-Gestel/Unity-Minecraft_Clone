@@ -1,6 +1,6 @@
 # Open Work Index
 
-**Version:** 1.15  
+**Version:** 1.17  
 **Date:** 2026-09-17  
 **Status:** **Open backlog.** A pointer map, not a tracker — rows are added and removed as docs
 gain or lose open work, never as individual items move.  
@@ -78,7 +78,7 @@ would put the same item on the map twice and mis-sort the doc.
 | **Lighting async bugs & harness** | [`LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md`](LIGHTING_ASYNC_BUG_VALIDATION_ROADMAP.md) | `AS-` `HF-` | In progress; `AS-1` closed, `HF-1`…`HF-3` done |
 | **Lighting pipeline state** | [`LIGHTING_PIPELINE_STATE_REFACTOR.md`](LIGHTING_PIPELINE_STATE_REFACTOR.md) | `LP-` | `LP-1`…`LP-7` shipped; **`LP-8` remains** |
 | **Engine scaling (load time, spikes, height, view distance)** | [`ENGINE_SCALING_PERFORMANCE_ROADMAP.md`](ENGINE_SCALING_PERFORMANCE_ROADMAP.md) | `ES-` | In progress: `ES-1`, `ES-2` and `ES-6.1` shipped (2026-10-02); `ES-0`'s GC.Alloc attribution captured (2026-10-03), which added `ES-26`/`ES-27`, and PM-1's smoke capture `ES-28` (2026-10-03); the rest of `ES-0`…`ES-28` unscheduled. Orders the master backlog's open items against the three symptoms and adds the native-store + GPU-renderer tracks |
-| **Performance monitor & logging** | [`PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md`](PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md) | `PM-` | In progress: `PM-0` ✅ complete (2026-10-03); `PM-1` ✅ complete (2026-10-03, confirmed in an IL2CPP Master build); `PM-2` ✅ complete (2026-10-04, confirmed in an IL2CPP Master build); `PM-3`…`PM-7` not started |
+| **Performance monitor & logging** | [`PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md`](PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md) | `PM-` | In progress: `PM-0` ✅ complete (2026-10-03); `PM-1` ✅ complete (2026-10-03, confirmed in an IL2CPP Master build); `PM-2` ✅ complete (2026-10-04, confirmed in an IL2CPP Master build); `PM-3` ✅ complete (2026-10-04, confirmed in an IL2CPP Master build); `PM-4`…`PM-7` not started |
 | **DOTS / ECS adoption** | [`DOTS_ECS_ADOPTION_ANALYSIS.md`](DOTS_ECS_ADOPTION_ANALYSIS.md) | `EC-` | Decision record; terrain verdicts settled, **`EC-6` (dynamic entities) deferred** behind its reopen triggers |
 | **Chunk pipeline performance** | [`CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md`](CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md) | §-numbered | §1.1 and the §3 backpressure family shipped; **§2 and §4 remain open** |
 | **Visibility culling** | [`VISIBILITY_CULLING_ARCHITECTURE.md`](VISIBILITY_CULLING_ARCHITECTURE.md) | Phases 0–3 | Phases 0 and 0.5 complete; **the culler itself (Phases 1–3) is unbuilt** |
@@ -139,6 +139,8 @@ doc, not to grow an item row here.
 
 ## Document History
 
+* **v1.17** - `PM-*` row updated (2026-10-04): `PM-3` confirmed in an IL2CPP Master build.
+* **v1.16** - `PM-*` row updated (2026-10-04): `PM-3`'s coverage code landed, Master build check pending.
 * **v1.15** - `PM-*` row updated (2026-10-04): `PM-2`'s Frame tier complete, confirmed in an IL2CPP Master build.
 * **v1.14** - `PM-*` row updated (2026-10-03): `PM-1` confirmed in an IL2CPP Master build.
 * **v1.13** - `ES-*` row updated (2026-10-03): `ES-28` added (UI pass garbage quick win).

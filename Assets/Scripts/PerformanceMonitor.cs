@@ -227,8 +227,9 @@ public class PerformanceMonitor : MonoBehaviour
     {
         // Applied here rather than in Awake: OnEnable also runs after a script reload in Play mode,
         // which resets the store's statics. The store outlives the World scene, so its last heap
-        // reading may predate a trip through the main menu.
+        // reading and counter levels may predate a trip through the main menu.
         PerfStore.ResetGcBaseline();
+        PerfStore.ResetCounters();
         ApplyStoreSettings();
         SettingsManager.OnSettingChanged += HandleSettingChanged;
     }

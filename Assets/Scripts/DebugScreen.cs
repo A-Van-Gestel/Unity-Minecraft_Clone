@@ -3,6 +3,7 @@ using System.Text;
 using Data;
 using Data.WorldTypes;
 using DebugVisualizations;
+using Diagnostics;
 using Helpers;
 using Helpers.UI;
 using JetBrains.Annotations;
@@ -175,6 +176,8 @@ public class DebugScreen : MonoBehaviour
 
     private void Update()
     {
+        long hudStart = PerfStore.Begin(PerfSlot.DebugHud);
+
         // --- Timed Updates ---
         // Update expensive data on a timer to reduce per-frame cost.
         _infrequentUpdateTimer += Time.deltaTime;
@@ -192,6 +195,8 @@ public class DebugScreen : MonoBehaviour
             BuildDebugStrings();
             _textUpdateTimer = 0;
         }
+
+        PerfStore.End(PerfSlot.DebugHud, hudStart);
     }
 
     private void HandleNewMetrics(PerformanceMonitor.FrameMetricSnapshot snapshot)

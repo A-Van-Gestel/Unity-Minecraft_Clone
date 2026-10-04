@@ -1,4 +1,5 @@
 using System.Collections;
+using Diagnostics;
 using TMPro;
 using UI.Blur;
 using Unity.Scripting.LifecycleManagement;
@@ -67,10 +68,13 @@ namespace UI.Tooltip
         {
             if (_activeTooltip == null || !_activeTooltip.activeSelf) return;
 
+            long uiStart = PerfStore.Begin(PerfSlot.Ui);
             if (_activeHoverMode == TooltipHoverPosition.FollowMouse)
             {
                 UpdateFollowMousePosition();
             }
+
+            PerfStore.End(PerfSlot.Ui, uiStart);
         }
 
         /// <summary>

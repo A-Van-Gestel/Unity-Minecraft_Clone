@@ -13,6 +13,7 @@ using Data.JobData;
 using Data.NativeData;
 using Data.WorldTypes;
 using DebugVisualizations;
+using Diagnostics;
 using Helpers;
 using JetBrains.Annotations;
 using Jobs;
@@ -1301,7 +1302,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     {
         // Bracketed inside this [Conditional] method so release builds pay nothing for a phase that would
         // always read zero there, and so the probe's cost never lands in LightFailSafeScan's slot.
-        long probeStart = WorldFrameProfiler.Begin();
+        long probeStart = PerfStore.Begin(PerfSlot.LightQueueProbe);
 
         int unflagged = 0;
         int orphaned = 0;
@@ -1348,7 +1349,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         _skylightQueueUnpopulated = unpopulated;
         _skylightQueueUnpopulatedTotal += unpopulated;
 
-        WorldFrameProfiler.Add(WorldFrameProfiler.Phase.LightQueueProbe, probeStart);
+        PerfStore.End(PerfSlot.LightQueueProbe, probeStart);
     }
 
     /// <summary>
@@ -1375,15 +1376,25 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         // alone cannot (CP-3; same epoch guard as the LoadOrGenerateChunk fault path).
         int epochAtEntry = data.LifecycleEpoch;
 
+        // Opened only once the read resumes, so the continuation — which runs outside World.Update — is charged to
+        // DiskLoadApply, while a load without persistence stays 0 here and is charged to its synchronous caller.
+        long diskApplyStart = 0L;
+
         // 1. Try Load from Disk if allowed
         if (settings.EnablePersistence)
         {
             ChunkData loaded = await StorageManager.LoadChunkAsync(chunkVoxelPos);
 
+            // A read that finished before its await resumes synchronously, inside the World.Update slot that started
+            // the load; that slot already counts the time, and a second slot over it would overlap.
+            if (!PerfStore.IsWorldFrameOpen) diskApplyStart = PerfStore.Begin(PerfSlot.DiskLoadApply);
+
             // Ensure the chunk wasn't unloaded or recycled during the "await" above.
             if (!worldData.TryGetChunk(chunkVoxelPos, out ChunkData currentData) || currentData != data
                                                                                  || data.LifecycleEpoch != epochAtEntry)
             {
+                PerfStore.End(PerfSlot.DiskLoadApply, diskApplyStart);
+
                 // The chunk was unloaded. Recycle the loaded data to prevent a memory leak.
                 if (loaded != null)
                 {
@@ -1556,6 +1567,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                     }
                 }
 
+                PerfStore.End(PerfSlot.DiskLoadApply, diskApplyStart);
                 return;
             }
 
@@ -1567,6 +1579,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
 
         // 2. Not on disk (or Persistence disabled) -> Generate
         JobManager.ScheduleGeneration(chunkCoord);
+        PerfStore.End(PerfSlot.DiskLoadApply, diskApplyStart);
     }
 
     /// <summary>How often (in lighting sweeps) the startup convergence diagnostics emit a log line.</summary>
@@ -2592,29 +2605,43 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         // Prevent normal generation logic from interfering with the startup coroutine
         if (!_isWorldLoaded) return;
 
-        // Reset the opt-in sub-phase profiler's per-frame accumulators (no-op unless a fluid stress pass or a
-        // flight capture has enabled it). Bookends the timed regions below — one per budgeted pass plus the
+        // Reset the sub-phase profiler's per-frame accumulators (no-op unless a capture or the performance monitor's
+        // tier has the slot probes recording). Bookends the timed regions below — one per budgeted pass plus the
         // three unbudgeted lighting regions; EndFrame() publishes them at the bottom of Update.
         WorldFrameProfiler.BeginFrame();
 
+        // Opened after BeginFrame's clear, which would otherwise count as negative slot time. Every region below
+        // that no slot probes lands in WorldUnattributed; the slots inside this bracket must stay disjoint.
+        long worldFrameStart = PerfStore.BeginWorldFrame();
+
+        long worldTimeStart = PerfStore.Begin(PerfSlot.WorldTime);
         AdvanceWorldTime();
+        PerfStore.End(PerfSlot.WorldTime, worldTimeStart);
 
         PlayerChunkCoord = WorldOrigin.UnityToChunk(_playerTransform.position);
 
         // Voxel space, not render space: the query samples generation noise, which only ever agrees
         // with the generator in voxel coordinates. Ticked before the origin shift below so the cell
         // and the transform it came from belong to the same frame.
+        long biomeStart = PerfStore.Begin(PerfSlot.BiomeTracker);
         BiomeTracker.Tick(Time.deltaTime, WorldOrigin.UnityToVoxelCell(_playerTransform.position));
+        PerfStore.End(PerfSlot.BiomeTracker, biomeStart);
 
         // WS-4b: re-anchor before anything consumes this frame's positions. PlayerChunkCoord is voxel-chunk space, so
         // the shift cannot change it — every distance loop below is unaffected by construction.
         if (WorldOrigin.ShouldReanchor(PlayerChunkCoord))
+        {
+            long originShiftStart = PerfStore.Begin(PerfSlot.OriginShift);
             ShiftOrigin(PlayerChunkCoord);
+            PerfStore.End(PerfSlot.OriginShift, originShiftStart);
+        }
 
         AssertPlayerNearOrigin();
 
         // CMD-2: release the teleport arrival hold once the destination chunk is ready (or times out).
+        long teleportHoldStart = PerfStore.Begin(PerfSlot.TeleportHold);
         UpdateTeleportHold();
+        PerfStore.End(PerfSlot.TeleportHold, teleportHoldStart);
 
         // Only update the chunks if the player has moved from the chunk they were previously on.
         if (!PlayerChunkCoord.Equals(_playerLastChunkCoord))
@@ -2626,6 +2653,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         // Toggle chunk border visibility if the runtime state has changed.
         if (_lastChunkBordersState != ShowChunkBorders)
         {
+            long borderToggleStart = PerfStore.Begin(PerfSlot.BorderToggle);
             foreach (GameObject borderObject in _chunkBorders.Values)
             {
                 if (borderObject != null)
@@ -2635,10 +2663,13 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
             }
 
             _lastChunkBordersState = ShowChunkBorders;
+            PerfStore.End(PerfSlot.BorderToggle, borderToggleStart);
         }
 
         // Debug: Voxel Visualization Management
+        long visualizationStart = PerfStore.Begin(PerfSlot.Visualization);
         HandleVisualization();
+        PerfStore.End(PerfSlot.Visualization, visualizationStart);
 
         _playerLastChunkCoord = PlayerChunkCoord;
 
@@ -2653,33 +2684,37 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         //    P-4 §3.4: time-budgeted — un-processed completed jobs stay enrolled for next frame (the
         //    same retry contract as the pass's structure-mods budget). The startup coroutine calls the
         //    pass without a window and stays unbudgeted.
-        long genProcessStart = WorldFrameProfiler.Begin();
+        long genProcessStart = PerfStore.Begin(PerfSlot.GenerationProcess);
         JobManager.ProcessGenerationJobs(
             PipelinePassBudget.StartWindow(PipelinePassBudget.ScaleCeilingMs(settings.genProcessBudgetMs, ceilingScaleInterval)));
-        WorldFrameProfiler.Add(WorldFrameProfiler.Phase.GenerationProcess, genProcessStart);
+        PerfStore.End(PerfSlot.GenerationProcess, genProcessStart);
 
         // 1b. Admit queued generation requests under the in-flight cap (P-4 §3.1). Runs after the drain
         //     above so completions this frame free headroom for new admissions immediately.
+        long admissionStart = PerfStore.Begin(PerfSlot.GenerationAdmission);
         DrainGenerationRequests();
+        PerfStore.End(PerfSlot.GenerationAdmission, admissionStart);
 
         // 1c. CP-6: retry at most one pending failed save (cheap no-op when the registry is empty).
         //     Per-frame rather than per-UnloadChunks pass — UnloadChunks only runs on chunk-boundary
         //     crossings, so a stationary player would otherwise never drain a failed save.
+        long saveRetryStart = PerfStore.Begin(PerfSlot.SaveRetryDrain);
         StorageManager?.DrainFailedSaveRetries();
+        PerfStore.End(PerfSlot.SaveRetryDrain, saveRetryStart);
 
         // 2. Apply all queued voxel modifications (from player and world gen).
-        long applyStart = WorldFrameProfiler.Begin();
+        long applyStart = PerfStore.Begin(PerfSlot.Apply);
         if (!_applyingModifications)
             ApplyModifications();
-        WorldFrameProfiler.Add(WorldFrameProfiler.Phase.Apply, applyStart);
+        PerfStore.End(PerfSlot.Apply, applyStart);
 
         // 3. Process completed lighting jobs from the PREVIOUS frame.
         //    P9-0: timed in its own slot. This merge takes no budget window, so it reports no stop reason and
         //    was invisible to every capture to date — the gap that forced the P9-0a analysis to attribute its
         //    unexplained frame cost by a fitted model rather than a measurement.
-        long lightMergeStart = WorldFrameProfiler.Begin();
+        long lightMergeStart = PerfStore.Begin(PerfSlot.LightMerge);
         JobManager.ProcessLightingJobs();
-        WorldFrameProfiler.Add(WorldFrameProfiler.Phase.LightMerge, lightMergeStart);
+        PerfStore.End(PerfSlot.LightMerge, lightMergeStart);
 
         // 4. Schedule lighting jobs from the ready set (only chunks whose gates can plausibly pass —
         //    parked chunks re-enter via promotion events or the fail-safe scan; see LightWorkScheduler).
@@ -2694,9 +2729,9 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         {
             // Drain the thread-safe staging queue into the main-thread ready set.
             // Background deserialization threads may enqueue positions here.
-            long lightStagingStart = WorldFrameProfiler.Begin();
+            long lightStagingStart = PerfStore.Begin(PerfSlot.LightStagingDrain);
             _lightWork.DrainStaging();
-            WorldFrameProfiler.Add(WorldFrameProfiler.Phase.LightStagingDrain, lightStagingStart);
+            PerfStore.End(PerfSlot.LightStagingDrain, lightStagingStart);
 
             int lightJobsScheduled = 0;
 
@@ -2704,7 +2739,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
             // It runs outside the ms ceiling by design (the window starts after it), and its cost scales with
             // resident chunks rather than with scheduled work, so charging it to LightSchedule would both
             // overstate that pass against its own 8 ms budget and hide a view-distance-dependent cost.
-            long lightFailSafeStart = WorldFrameProfiler.Begin();
+            long lightFailSafeStart = PerfStore.Begin(PerfSlot.LightFailSafeScan);
 
             // Fail-safe: periodic full scan to catch any chunks whose dirty-set registration
             // was missed (e.g., from a code path that set a flag before the callback was registered).
@@ -2735,10 +2770,10 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                 //
                 // Its cost belongs to LightQueueProbe alone, so this scan's span is closed before the call
                 // and reopened after — the phase slots must stay disjoint for the report's "all timed
-                // regions" total. Add() accumulates, so both segments sum into one LightFailSafeScan figure.
-                WorldFrameProfiler.Add(WorldFrameProfiler.Phase.LightFailSafeScan, lightFailSafeStart);
+                // regions" total. End() accumulates, so both segments sum into one LightFailSafeScan figure.
+                PerfStore.End(PerfSlot.LightFailSafeScan, lightFailSafeStart);
                 ScanSkylightQueuePairing();
-                lightFailSafeStart = WorldFrameProfiler.Begin();
+                lightFailSafeStart = PerfStore.Begin(PerfSlot.LightFailSafeScan);
 
                 int failSafePromoted = _lightWork.PromoteAll();
 
@@ -2748,11 +2783,11 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                     Debug.Log($"[LIGHTING] Fail-safe promoted {failSafePromoted.ToString()} parked chunk(s) to the ready set.");
             }
 
-            WorldFrameProfiler.Add(WorldFrameProfiler.Phase.LightFailSafeScan, lightFailSafeStart);
+            PerfStore.End(PerfSlot.LightFailSafeScan, lightFailSafeStart);
 
             // P9-0: from here to the end of the block is the pass the 8 ms ceiling actually governs, so the
             // milliseconds recorded for LightSchedule are directly comparable to lightScheduleBudgetMs.
-            long lightScanStart = WorldFrameProfiler.Begin();
+            long lightScanStart = PerfStore.Begin(PerfSlot.LightSchedule);
 
             // P-4 §3.4: the throttle is a rate quota (cap × frame duration × 60 — constant jobs/sec
             // instead of constant jobs/frame, so throughput no longer collapses with FPS) bounded by a
@@ -2930,21 +2965,21 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
             // DrainGenerationRequests.
             _readyCountAfterScan = _lightWork.ReadyCount;
 
-            WorldFrameProfiler.Add(WorldFrameProfiler.Phase.LightSchedule, lightScanStart);
+            PerfStore.End(PerfSlot.LightSchedule, lightScanStart);
         }
 
         // 5. Process completed mesh jobs from the PREVIOUS frame.
         //    P-4 §3.4: time-budgeted — deferred completions stay enrolled (buffers held one more frame,
         //    bounded by the in-flight cap).
-        long meshProcessStart = WorldFrameProfiler.Begin();
+        long meshProcessStart = PerfStore.Begin(PerfSlot.MeshProcess);
         JobManager.ProcessMeshJobs(
             PipelinePassBudget.StartWindow(PipelinePassBudget.ScaleCeilingMs(settings.meshApplyBudgetMs, ceilingScaleInterval)));
-        WorldFrameProfiler.Add(WorldFrameProfiler.Phase.MeshProcess, meshProcessStart);
+        PerfStore.End(PerfSlot.MeshProcess, meshProcessStart);
 
         // 6. Schedule NEW mesh jobs for chunks that now need them.
         //    NOTE: If too many mesh jobs are already in flight, pause scheduling new ones to let the
         //          Job System catch up. The cap is device-calibrated (OM-1) — see Settings.maxInFlightMeshJobs.
-        long meshScheduleStart = WorldFrameProfiler.Begin();
+        long meshScheduleStart = PerfStore.Begin(PerfSlot.MeshSchedule);
         int inFlightMeshCap = Mathf.Max(1, settings.maxInFlightMeshJobs);
 
         // P-4 §3.4: rate quota, same shape as the lighting throttle above. Derived HERE rather than inside
@@ -2989,7 +3024,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
             PipelineTelemetry.RecordPassWork(PipelinePass.MeshSchedule, meshDrain.Scheduled, meshQuota);
         }
 
-        WorldFrameProfiler.Add(WorldFrameProfiler.Phase.MeshSchedule, meshScheduleStart);
+        PerfStore.End(PerfSlot.MeshSchedule, meshScheduleStart);
 
         // MP-6: there is no step 8. The load animation is triggered by the mesh completion pass (step 5)
         // the instant a chunk's mesh is applied, so no queue of Chunk references survives a frame — the
@@ -2997,12 +3032,14 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
 
 
         // Run Pool Cleanup
+        long poolPruneStart = PerfStore.Begin(PerfSlot.ChunkPoolPrune);
         ChunkPool.Update();
+        PerfStore.End(PerfSlot.ChunkPoolPrune, poolPruneStart);
 
         // Process block behavior ticks (grass spreading, fluid flow, etc.)
-        long tickStart = WorldFrameProfiler.Begin();
+        long tickStart = PerfStore.Begin(PerfSlot.Tick);
         ProcessTickUpdates();
-        WorldFrameProfiler.Add(WorldFrameProfiler.Phase.Tick, tickStart);
+        PerfStore.End(PerfSlot.Tick, tickStart);
 
         // Check if settings changed to update pool target
         // (Optional: You can move this to a dedicated ApplySettings method)
@@ -3012,7 +3049,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
             CheckViewDistance();
         }
 
-        // Publish the per-frame sub-phase accumulators (no-op unless a capture has enabled the profiler).
+        // Publish the per-frame sub-phase accumulators (no-op unless the slot probes are recording).
         // Must precede PipelineTelemetry.RecordFrame below, which folds these values into the phase totals.
         WorldFrameProfiler.EndFrame();
 
@@ -3026,6 +3063,38 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
             _lightWork.WaitingCount,
             _meshBuildQueue.Count,
             _generationGateOpen);
+
+        PerfStore.EndWorldFrame(worldFrameStart);
+
+        // After the bracket, so the monitor's own sampling is not reported as unattributed engine work.
+        if (PerfStore.SlotsActive) SamplePerfCounters();
+    }
+
+    /// <summary>
+    /// Records this frame's pipeline and pool levels, and the pool misses since the last frame, into the performance
+    /// monitor's counters. Called at the end of <see cref="Update"/> while the slot probes are recording.
+    /// </summary>
+    private void SamplePerfCounters()
+    {
+        PerfStore.SetGauge(PerfCounter.GenerationQueue, _generationRequestQueue.Count);
+        PerfStore.SetGauge(PerfCounter.GenerationInFlight, JobManager.GenerationJobs.Count);
+        PerfStore.SetGauge(PerfCounter.LightReady, _lightWork.ReadyCount);
+        PerfStore.SetGauge(PerfCounter.LightWaiting, _lightWork.WaitingCount);
+        PerfStore.SetGauge(PerfCounter.LightInFlight, JobManager.LightingJobs.Count);
+        PerfStore.SetGauge(PerfCounter.MeshQueue, _meshBuildQueue.Count);
+        PerfStore.SetGauge(PerfCounter.MeshInFlight, JobManager.MeshJobs.Count);
+        PerfStore.SetGauge(PerfCounter.ModificationQueue, _modifications.Count);
+        PerfStore.SetGauge(PerfCounter.ResidentChunks, worldData.ChunkCount);
+        PerfStore.SetGauge(PerfCounter.ActiveChunks, _activeChunks.Count);
+        PerfStore.SetGauge(PerfCounter.ActiveSections, ChunkPool.ActiveSections);
+        PerfStore.SetGauge(PerfCounter.JobArraysPooled, JobManager.JobArraysPooled);
+        PerfStore.SetGauge(PerfCounter.MeshOutputsPooled, JobManager.MeshOutputsPooled);
+
+        PerfStore.SampleTotal(PerfCounter.SectionPoolMisses, ChunkPool.CreatedSections);
+        PerfStore.SampleTotal(PerfCounter.DataPoolMisses, ChunkPool.CreatedData);
+        PerfStore.SampleTotal(PerfCounter.JobArrayMisses, JobManager.JobArraysAllocated);
+        PerfStore.SampleTotal(PerfCounter.MeshOutputMisses, JobManager.MeshOutputsAllocated);
+        PerfStore.SampleTotal(PerfCounter.SaveBufferMisses, SerializationBufferPool.TotalCreated);
     }
 
     // --- JOB-RELATED METHODS ---
@@ -4116,12 +4185,21 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// </summary>
     private void CheckViewDistance()
     {
+        // Probed here rather than at the call sites so every caller is charged, the settings reload included. The
+        // span closes before UnloadChunks, which has a slot of its own, so the two stay disjoint.
+        long viewDistanceStart = PerfStore.Begin(PerfSlot.ViewDistance);
+
         clouds.UpdateClouds();
 
         ChunkCoord playerCurrentChunkCoord = WorldOrigin.UnityToChunk(_playerTransform.position);
 
         // Return early if the player hasn't moved outside the last chunk.
-        if (playerCurrentChunkCoord.Equals(_playerLastChunkCoord)) return;
+        if (playerCurrentChunkCoord.Equals(_playerLastChunkCoord))
+        {
+            PerfStore.End(PerfSlot.ViewDistance, viewDistanceStart);
+            return;
+        }
+
         _playerLastChunkCoord = playerCurrentChunkCoord;
 
         // OPTIMIZATION: Clear cached sets instead of allocating new ones
@@ -4261,9 +4339,12 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         // OPTIMIZATION: Clear and copy to avoid replacing the reference with a new allocation.
         _activeChunks.Clear();
         _activeChunks.UnionWith(_currentViewChunks);
+        PerfStore.End(PerfSlot.ViewDistance, viewDistanceStart);
 
         // Run cleanup
+        long unloadStart = PerfStore.Begin(PerfSlot.Unload);
         UnloadChunks();
+        PerfStore.End(PerfSlot.Unload, unloadStart);
     }
 
     #region Debug Methods

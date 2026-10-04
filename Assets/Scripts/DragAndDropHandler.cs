@@ -1,3 +1,4 @@
+using Diagnostics;
 using JetBrains.Annotations;
 using Serialization;
 using UI;
@@ -114,6 +115,7 @@ public class DragAndDropHandler : MonoBehaviour
         if (!inventoryOpen && !_cursorSlot.HasItem)
             return;
 
+        long uiStart = PerfStore.Begin(PerfSlot.Ui);
         if (_creativeInventory == null)
             _creativeInventory = GameObject.Find("CreativeInventory").GetComponent<CreativeInventory>();
 
@@ -121,6 +123,7 @@ public class DragAndDropHandler : MonoBehaviour
         if (!inventoryOpen && _cursorSlot.HasItem)
         {
             PlaceStackToLastLocation(_cursorSlot);
+            PerfStore.End(PerfSlot.Ui, uiStart);
             return;
         }
 
@@ -134,6 +137,8 @@ public class DragAndDropHandler : MonoBehaviour
             HandleSlotRightClick(_pendingSlot);
             _longPressHandled = true;
         }
+
+        PerfStore.End(PerfSlot.Ui, uiStart);
     }
 
     /// <summary><c>true</c> while the creative inventory UI is open.</summary>

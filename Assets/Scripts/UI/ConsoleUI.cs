@@ -1,6 +1,7 @@
 using System.Collections;
 using System.Text;
 using Commands;
+using Diagnostics;
 using TMPro;
 using UI.Blur;
 using UI.Builders;
@@ -103,11 +104,16 @@ namespace UI
             if (!IsOpen)
                 return;
 
+            long uiStart = PerfStore.Begin(PerfSlot.Ui);
+
             // UI_BUGS #04: heal any child destroyed while the console is open before Update and
             // LateUpdate dereference it (both read _inputField/_ghostText/_scrollRect/_historyText).
             // Bail this frame only if the panel itself is gone.
             if (!RebuildMissingChildren())
+            {
+                PerfStore.End(PerfSlot.Ui, uiStart);
                 return;
+            }
 
             // ↑/↓ history recall + Tab autocomplete + RightArrow/End accept (UI action map — the
             // gameplay map is disabled while open).
@@ -121,6 +127,7 @@ namespace UI
                 TryAcceptInlineSuggestion();
 
             RefreshGhostIfChanged();
+            PerfStore.End(PerfSlot.Ui, uiStart);
         }
 
         /// <summary>
@@ -196,6 +203,8 @@ namespace UI
             if (!IsOpen)
                 return;
 
+            long uiStart = PerfStore.Begin(PerfSlot.Ui);
+
             // Coalesce per-line append events into at most one text rebuild + scroll per frame.
             if (_historyDirty)
             {
@@ -209,6 +218,8 @@ namespace UI
                 Canvas.ForceUpdateCanvases();
                 _scrollRect.verticalNormalizedPosition = 0f;
             }
+
+            PerfStore.End(PerfSlot.Ui, uiStart);
         }
 
         /// <summary>Opens the panel and focuses the input field (T-leak-guarded), self-healing any destroyed child first. Called by <see cref="WorldUIManager"/>.</summary>

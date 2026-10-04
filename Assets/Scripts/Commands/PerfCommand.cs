@@ -25,7 +25,8 @@ namespace Commands
         private const string TIER_VERB = "tier";
         private const string HITCHES_VERB = "hitches";
         private const string MS_FORMAT = "0.00";
-        private const int SLOT_NAME_WIDTH = 18;
+        private const string COUNT_FORMAT = "0.#";
+        private const int SLOT_NAME_WIDTH = 20;
         private const int FRAME_LABEL_WIDTH = 7;
 
         [NoAutoStaticsCleanup] // immutable table
@@ -116,7 +117,7 @@ namespace Commands
             return text.ToString();
         }
 
-        /// <summary>Prints wall and CPU frame statistics, then per-slot statistics sorted by average cost.</summary>
+        /// <summary>Prints wall and CPU frame statistics, then per-slot statistics sorted by average cost, then the counters.</summary>
         /// <returns>The readout.</returns>
         private static CommandResult Stats()
         {
@@ -159,15 +160,45 @@ namespace Commands
             Array.Sort(summaries, slots, Comparer<PerfWindowSummary>.Create((a, b) => b.Mean.CompareTo(a.Mean)));
 
             lines.Add(new ConsoleLine(ConsoleLineSeverity.Info,
-                $"World systems over the last {PerfStore.SlotFramesRecorded} frames (avg / p99 / worst ms):"));
+                $"Systems over the last {PerfStore.SlotFramesRecorded} frames (avg / p99 / worst ms):"));
+            List<string> idle = new List<string>();
             for (int i = 0; i < slots.Length; i++)
             {
                 PerfWindowSummary s = summaries[i];
+                if (s.Max == 0f && s.Mean == 0f)
+                {
+                    idle.Add(slots[i].ToString());
+                    continue;
+                }
+
                 lines.Add(new ConsoleLine(ConsoleLineSeverity.Info,
                     $"  {slots[i].ToString().PadRight(SLOT_NAME_WIDTH)} {Ms(s.Mean)} / {Ms(s.P99)} / {Ms(s.Max)}"));
             }
 
+            if (idle.Count > 0)
+                lines.Add(new ConsoleLine(ConsoleLineSeverity.Info, $"  No time recorded: {string.Join(", ", idle)}"));
+
+            if (PerfStore.NegativeRemainderFrames > 0)
+            {
+                lines.Add(new ConsoleLine(ConsoleLineSeverity.Warning,
+                    $"  {PerfStore.NegativeRemainderFrames} frames had a negative {PerfSlot.WorldUnattributed}: two slots overlap."));
+            }
+
+            AddCounterLines(lines);
             return new CommandResult(lines.ToArray());
+        }
+
+        /// <summary>Adds every counter's statistics over the frames that carry counter values.</summary>
+        private static void AddCounterLines(List<ConsoleLine> lines)
+        {
+            lines.Add(new ConsoleLine(ConsoleLineSeverity.Info, "Counters (avg / p99 / max):"));
+            for (int i = 0; i < PerfStore.CounterCount; i++)
+            {
+                PerfCounter counter = (PerfCounter)i;
+                PerfWindowSummary s = PerfStore.SummarizeCounter(counter);
+                lines.Add(new ConsoleLine(ConsoleLineSeverity.Info,
+                    $"  {counter.ToString().PadRight(SLOT_NAME_WIDTH)} {Count(s.Mean)} / {Count(s.P99)} / {Count(s.Max)}"));
+            }
         }
 
         /// <summary>Adds managed-allocation statistics over the frames with a usable figure, plus the collections held.</summary>
@@ -253,6 +284,19 @@ namespace Commands
                 text += $"{(rank == 0 ? "; top " : ", ")}{slot} {Ms(ms)}";
             }
 
+            if (!record.HasSlots) return text;
+
+            // The worst frame's non-zero counters: the queue and pool levels the spike happened at.
+            bool first = true;
+            for (int i = 0; i < PerfStore.CounterCount; i++)
+            {
+                int value = hitches.GetRecordCounter(age, record.WorstRow, (PerfCounter)i);
+                if (value == 0) continue;
+
+                text += $"{(first ? "; counters " : ", ")}{(PerfCounter)i} {value}";
+                first = false;
+            }
+
             return text;
         }
 
@@ -276,6 +320,9 @@ namespace Commands
 
         /// <summary>Formats milliseconds independent of the host's locale.</summary>
         private static string Ms(float value) => value.ToString(MS_FORMAT, CultureInfo.InvariantCulture);
+
+        /// <summary>Formats a counter statistic independent of the host's locale.</summary>
+        private static string Count(float value) => value.ToString(COUNT_FORMAT, CultureInfo.InvariantCulture);
 
         private static string[] CreateTierNames()
         {

@@ -1,6 +1,7 @@
 using Audio;
 using Data;
 using Data.Enums;
+using Diagnostics;
 using Helpers;
 using Jobs.BurstData;
 using Physics;
@@ -97,8 +98,10 @@ public class PlayerInteraction : MonoBehaviour
     {
         if (World.InUI || WorldLaunchState.IsAutomatedMode) return;
 
+        long playerStart = PerfStore.Begin(PerfSlot.Player);
         PlaceCursorBlocks();
         HandleBlockModificationInput();
+        PerfStore.End(PerfSlot.Player, playerStart);
     }
 
     private void HandleBlockModificationInput()

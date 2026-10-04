@@ -2,6 +2,7 @@ using Benchmarks;
 using Data;
 using Data.Enums;
 using DebugVisualizations;
+using Diagnostics;
 using Helpers;
 using Physics;
 using Serialization;
@@ -104,6 +105,7 @@ public class Player : MonoBehaviour
 
     private void Update()
     {
+        long playerStart = PerfStore.Begin(PerfSlot.Player);
         if (WorldLaunchState.IsAutomatedMode)
         {
             // The active automated controller (BenchmarkController / FluidStressController) drives movement.
@@ -149,6 +151,8 @@ public class Player : MonoBehaviour
             orientation = 1; // Player is facing south.
         else
             orientation = 4; // Player is facing west.
+
+        PerfStore.End(PerfSlot.Player, playerStart);
     }
 
     /// <summary>

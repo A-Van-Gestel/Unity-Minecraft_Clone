@@ -1,3 +1,4 @@
+using Diagnostics;
 using UnityEngine;
 
 namespace UI
@@ -19,10 +20,13 @@ namespace UI
 
         private void Update()
         {
+            long uiStart = PerfStore.Begin(PerfSlot.Ui);
             if (_lastSafeArea != Screen.safeArea)
             {
                 ApplySafeArea();
             }
+
+            PerfStore.End(PerfSlot.Ui, uiStart);
         }
 
         private void ApplySafeArea()

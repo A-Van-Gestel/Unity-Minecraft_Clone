@@ -5,11 +5,12 @@ namespace Diagnostics
 {
     /// <summary>
     /// Fixed-capacity history of <see cref="PerfFrame"/> rows, plus an optional block of per-slot columns
-    /// (one <c>float</c> of milliseconds per <see cref="PerfSlot"/> per frame). Both live in native memory, so
-    /// the monitor's own storage never shows up in the managed-heap readings it takes.
+    /// (one <c>float</c> of milliseconds per <see cref="PerfSlot"/> per frame) with its per-counter columns (one
+    /// <c>int</c> per <see cref="PerfCounter"/> per frame). All live in native memory, so the monitor's own storage
+    /// never shows up in the managed-heap readings it takes.
     /// <para>
-    /// The slot columns are allocated and released independently of the frame rows, so a tier change costs
-    /// only the slot block. Frames committed while the columns were absent carry no slot data, which is why
+    /// The slot and counter columns are allocated and released together, independently of the frame rows, so a
+    /// tier change costs only those blocks. Frames committed while the columns were absent carry no slot data, which is why
     /// <see cref="SlotFrameCount"/> can trail <see cref="Count"/>. Main thread only.
     /// </para>
     /// </summary>
@@ -19,9 +20,11 @@ namespace Diagnostics
 
         private readonly int _capacity;
         private readonly int _slotCount;
+        private readonly int _counterCount;
 
         private NativeArray<PerfFrame> _frames;
         private NativeArray<float> _slotMs;
+        private NativeArray<int> _counterValues;
         private bool _hasSlotColumns;
         private bool _isDisposed;
 
@@ -31,16 +34,19 @@ namespace Diagnostics
         private int _count;
         private int _slotFrameCount;
 
-        /// <summary>Allocates the frame rows; the slot columns stay unallocated until <see cref="AllocateSlotColumns"/>.</summary>
+        /// <summary>Allocates the frame rows; the slot and counter columns stay unallocated until <see cref="AllocateSlotColumns"/>.</summary>
         /// <param name="capacity">Frames retained; older frames are overwritten.</param>
         /// <param name="slotCount">Slot columns per frame.</param>
-        public PerfFrameRing(int capacity, int slotCount)
+        /// <param name="counterCount">Counter columns per frame; 0 for none.</param>
+        public PerfFrameRing(int capacity, int slotCount, int counterCount = 0)
         {
             if (capacity <= 0) throw new ArgumentOutOfRangeException(nameof(capacity));
             if (slotCount <= 0) throw new ArgumentOutOfRangeException(nameof(slotCount));
+            if (counterCount < 0) throw new ArgumentOutOfRangeException(nameof(counterCount));
 
             _capacity = capacity;
             _slotCount = slotCount;
+            _counterCount = counterCount;
             _frames = new NativeArray<PerfFrame>(capacity, Allocator.Persistent);
         }
 
@@ -53,30 +59,37 @@ namespace Diagnostics
         /// <summary>Held frames that carry slot columns — those committed since the columns were last allocated.</summary>
         public int SlotFrameCount => _slotFrameCount;
 
-        /// <summary>Whether the per-slot columns are allocated.</summary>
+        /// <summary>Whether the per-slot columns, and with them the per-counter columns, are allocated.</summary>
         public bool HasSlotColumns => _hasSlotColumns;
+
+        /// <summary>Counter columns per frame.</summary>
+        public int CounterCount => _counterCount;
 
         /// <summary>Whether <see cref="Dispose"/> has run.</summary>
         public bool IsDisposed => _isDisposed;
 
-        /// <summary>Allocates the per-slot columns; a no-op when already allocated.</summary>
+        /// <summary>Allocates the per-slot and per-counter columns; a no-op when already allocated.</summary>
         public void AllocateSlotColumns()
         {
             if (_isDisposed) throw new ObjectDisposedException(nameof(PerfFrameRing));
             if (_hasSlotColumns) return;
 
             _slotMs = new NativeArray<float>(_capacity * _slotCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            if (_counterCount > 0)
+                _counterValues = new NativeArray<int>(_capacity * _counterCount, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
             _hasSlotColumns = true;
             _slotFrameCount = 0;
         }
 
-        /// <summary>Frees the per-slot columns; a no-op when not allocated.</summary>
+        /// <summary>Frees the per-slot and per-counter columns; a no-op when not allocated.</summary>
         public void ReleaseSlotColumns()
         {
             if (!_hasSlotColumns) return;
 
             _slotMs.Dispose();
             _slotMs = default;
+            if (_counterValues.IsCreated) _counterValues.Dispose();
+            _counterValues = default;
             _hasSlotColumns = false;
             _slotFrameCount = 0;
         }
@@ -88,7 +101,17 @@ namespace Diagnostics
         /// <param name="frame">The frame row.</param>
         /// <param name="slotTicks">Per-slot stopwatch ticks for the frame; at least as long as the slot count.</param>
         /// <param name="tickToMs">Milliseconds per stopwatch tick.</param>
-        public void Commit(PerfFrame frame, long[] slotTicks, double tickToMs)
+        public void Commit(PerfFrame frame, long[] slotTicks, double tickToMs) => Commit(frame, slotTicks, tickToMs, null);
+
+        /// <summary>
+        /// Appends one frame as <see cref="Commit(PerfFrame, long[], double)"/> does, storing the counter values beside its
+        /// slot times while the columns are allocated.
+        /// </summary>
+        /// <param name="frame">The frame row.</param>
+        /// <param name="slotTicks">Per-slot stopwatch ticks for the frame; at least as long as the slot count.</param>
+        /// <param name="tickToMs">Milliseconds per stopwatch tick.</param>
+        /// <param name="counterValues">Per-counter values for the frame, at least as long as the counter count; null stores zeros.</param>
+        public void Commit(PerfFrame frame, long[] slotTicks, double tickToMs, int[] counterValues)
         {
             _frames[_head] = frame;
 
@@ -97,6 +120,10 @@ namespace Diagnostics
                 int row = _head * _slotCount;
                 for (int i = 0; i < _slotCount; i++)
                     _slotMs[row + i] = (float)(slotTicks[i] * tickToMs);
+
+                int counterRow = _head * _counterCount;
+                for (int i = 0; i < _counterCount; i++)
+                    _counterValues[counterRow + i] = counterValues?[i] ?? 0;
 
                 if (_slotFrameCount < _capacity) _slotFrameCount++;
             }
@@ -123,6 +150,17 @@ namespace Diagnostics
         {
             if ((uint)age >= (uint)_slotFrameCount) throw new ArgumentOutOfRangeException(nameof(age));
             return _slotMs[IndexOfAge(age) * _slotCount + (int)slot];
+        }
+
+        /// <summary>Reads one counter for a held frame by age.</summary>
+        /// <param name="age">0 for the newest frame, up to <see cref="SlotFrameCount"/> − 1.</param>
+        /// <param name="counter">The counter; below <see cref="CounterCount"/>.</param>
+        /// <returns>The counter's value in that frame.</returns>
+        public int GetCounter(int age, PerfCounter counter)
+        {
+            if ((uint)age >= (uint)_slotFrameCount) throw new ArgumentOutOfRangeException(nameof(age));
+            if ((int)counter >= _counterCount) throw new ArgumentOutOfRangeException(nameof(counter));
+            return _counterValues[IndexOfAge(age) * _counterCount + (int)counter];
         }
 
         /// <summary>Copies the held frames' wall milliseconds, newest first.</summary>
@@ -223,6 +261,35 @@ namespace Diagnostics
                 NativeArray<float>.Copy(_slotMs, IndexOfAge(count - 1 - i) * _slotCount,
                     destination, destinationStart + i * _slotCount, _slotCount);
             }
+        }
+
+        /// <summary>Copies the counter columns of the newest held frames into a buffer, oldest row first.</summary>
+        /// <param name="destination">The receiving buffer, one row of counter-count ints per frame.</param>
+        /// <param name="destinationStart">Index of the first int written.</param>
+        /// <param name="count">Frames to copy; at most <see cref="SlotFrameCount"/>.</param>
+        public void CopyNewestCounterRows(NativeArray<int> destination, int destinationStart, int count)
+        {
+            if ((uint)count > (uint)_slotFrameCount) throw new ArgumentOutOfRangeException(nameof(count));
+
+            for (int i = 0; i < count; i++)
+            {
+                NativeArray<int>.Copy(_counterValues, IndexOfAge(count - 1 - i) * _counterCount,
+                    destination, destinationStart + i * _counterCount, _counterCount);
+            }
+        }
+
+        /// <summary>Copies one counter for the frames that carry counter columns, newest first, as floats for window statistics.</summary>
+        /// <param name="counter">The counter.</param>
+        /// <param name="destination">Receives up to its length of values.</param>
+        /// <returns>The number of values copied (0 when the columns are not allocated or the counter is out of range).</returns>
+        public int CopyCounter(PerfCounter counter, float[] destination)
+        {
+            if ((int)counter >= _counterCount) return 0;
+
+            int n = Math.Min(_slotFrameCount, destination.Length);
+            for (int age = 0; age < n; age++)
+                destination[age] = _counterValues[IndexOfAge(age) * _counterCount + (int)counter];
+            return n;
         }
 
         /// <summary>Copies one slot's milliseconds for the frames that carry slot columns, newest first.</summary>

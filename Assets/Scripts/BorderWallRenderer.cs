@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using Diagnostics;
 using Helpers;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -76,14 +77,18 @@ public class BorderWallRenderer : MonoBehaviour
     {
         if (!_isInitialized) return;
 
+        long environmentStart = PerfStore.Begin(PerfSlot.Environment);
+
         // No border, or player not ready yet → hide.
         if (_world == null || _world.player == null || _world.BorderRadius <= 0)
         {
             if (_meshRenderer.enabled) _meshRenderer.enabled = false;
+            PerfStore.End(PerfSlot.Environment, environmentStart);
             return;
         }
 
         RebuildMesh();
+        PerfStore.End(PerfSlot.Environment, environmentStart);
     }
 
     /// <summary>

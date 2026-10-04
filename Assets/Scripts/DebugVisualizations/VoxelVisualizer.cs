@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Data;
 using DebugVisualizations.Jobs;
+using Diagnostics;
 using Helpers;
 using Unity.Collections;
 using Unity.Jobs;
@@ -99,6 +100,8 @@ namespace DebugVisualizations
         // We use LateUpdate to check for completed jobs from the current frame.
         private void LateUpdate()
         {
+            long visualizerStart = PerfStore.Begin(PerfSlot.VoxelVisualizer);
+
             // This is the "Apply" step of our async process.
             foreach (VisualizerChunkData chunkData in _visualizerChunks.Values)
             {
@@ -110,6 +113,8 @@ namespace DebugVisualizations
                     chunkData.DisposeJobData(); // Dispose the Native collections used by the job.
                 }
             }
+
+            PerfStore.End(PerfSlot.VoxelVisualizer, visualizerStart);
         }
 
         /// <summary>

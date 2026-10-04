@@ -47,6 +47,17 @@ namespace Diagnostics
     /// <see cref="Begin()"/> / <see cref="Accumulate"/> pair cannot open a marker, because a marker must be
     /// opened by name before the region runs.
     /// </para>
+    /// <para>
+    /// <b>Unattributed remainder.</b> <see cref="BeginWorldFrame"/> / <see cref="EndWorldFrame"/> bracket
+    /// <c>World.Update</c> and charge <see cref="PerfSlot.WorldUnattributed"/> with the bracket's time minus the slot
+    /// time recorded <i>inside</i> it, so slot time recorded elsewhere in the frame never distorts it. A negative
+    /// remainder means two slots overlapped; it is kept as measured and counted in <see cref="NegativeRemainderFrames"/>.
+    /// </para>
+    /// <para>
+    /// <b>Counters.</b> Each <see cref="PerfCounter"/> is stored beside the slot times, in columns that exist with the
+    /// slot columns: gauges set with <see cref="SetGauge"/> hold their level until set again, while per-frame counts
+    /// added by <see cref="SampleTotal"/> are zeroed by every commit.
+    /// </para>
     /// <para>Main thread only. Native memory is freed on application quit and before an Editor assembly reload.</para>
     /// </summary>
     public static class PerfStore
@@ -56,6 +67,12 @@ namespace Diagnostics
 
         /// <summary>Number of <see cref="PerfSlot"/> values.</summary>
         public const int SlotCount = (int)PerfSlot.Count;
+
+        /// <summary>Number of <see cref="PerfCounter"/> values.</summary>
+        public const int CounterCount = (int)PerfCounter.Count;
+
+        /// <summary>The first per-frame count; every <see cref="PerfCounter"/> before it is a gauge.</summary>
+        public const PerfCounter FirstPerFrameCount = PerfCounter.SectionPoolMisses;
 
         private const double MILLISECONDS_PER_SECOND = 1000.0;
 
@@ -75,6 +92,18 @@ namespace Diagnostics
 
         [NoAutoStaticsCleanup] // scratch buffer, overwritten by every read
         private static readonly float[] s_statsScratch = new float[RingCapacity];
+
+        /// <summary>Per-counter values for the frame being recorded: gauges held across frames, per-frame counts zeroed by each commit.</summary>
+        [NoAutoStaticsCleanup] // contents cleared in DomainReset
+        private static readonly int[] s_counterValues = new int[CounterCount];
+
+        /// <summary>Per-counter running total last passed to <see cref="SampleTotal"/>.</summary>
+        [NoAutoStaticsCleanup] // contents cleared in DomainReset
+        private static readonly long[] s_lastTotals = new long[CounterCount];
+
+        /// <summary>Whether <see cref="s_lastTotals"/> holds a baseline for the counter.</summary>
+        [NoAutoStaticsCleanup] // contents cleared in DomainReset
+        private static readonly bool[] s_hasTotal = new bool[CounterCount];
 
 #if ENABLE_PROFILER
         private const string MARKER_PREFIX = "PerfStore.";
@@ -136,6 +165,16 @@ namespace Diagnostics
         [NoAutoStaticsCleanup] // reset in DomainReset
         private static int s_timingsMatched;
 
+        /// <summary>Slot ticks recorded before the open <see cref="BeginWorldFrame"/> bracket, excluding the remainder slot.</summary>
+        [NoAutoStaticsCleanup] // reset in DomainReset
+        private static long s_worldFrameStartSlotTicks;
+
+        [NoAutoStaticsCleanup] // reset in DomainReset
+        private static int s_negativeRemainderFrames;
+
+        [NoAutoStaticsCleanup] // reset in DomainReset
+        private static bool s_isWorldFrameOpen;
+
         /// <summary>The current tier.</summary>
         public static PerfTier Tier => s_tier;
 
@@ -156,6 +195,15 @@ namespace Diagnostics
 
         /// <summary>Submitted frame timings that matched a held row.</summary>
         public static int FrameTimingsMatched => s_timingsMatched;
+
+        /// <summary>World-update brackets whose remainder came out negative — slots that overlapped — since the last reset.</summary>
+        public static int NegativeRemainderFrames => s_negativeRemainderFrames;
+
+        /// <summary>
+        /// Whether a <see cref="BeginWorldFrame"/> bracket is open. A probe for work that can run either inside
+        /// <c>World.Update</c> or outside it checks this, so that inside it the enclosing slot keeps the time.
+        /// </summary>
+        public static bool IsWorldFrameOpen => s_isWorldFrameOpen;
 
         /// <summary>Garbage collections recorded across the held frames.</summary>
         public static int GcCollectionsHeld => s_ring?.SumGcCollections() ?? 0;
@@ -190,6 +238,9 @@ namespace Diagnostics
         /// <param name="tier">The tier to apply.</param>
         public static void SetTier(PerfTier tier)
         {
+            // Totals sampled before the counter columns existed would span every frame since; start over instead.
+            if (tier >= PerfTier.Systems && s_tier < PerfTier.Systems) Array.Clear(s_hasTotal, 0, CounterCount);
+
             s_tier = tier;
             RefreshSlotsActive();
             ApplyFrameTierResources();
@@ -250,6 +301,79 @@ namespace Diagnostics
             s_slotTicks[(int)slot] += Stopwatch.GetTimestamp() - startTimestamp;
         }
 
+        /// <summary>
+        /// Opens the <c>World.Update</c> bracket from which <see cref="PerfSlot.WorldUnattributed"/> is derived. Open it
+        /// after any <see cref="ClearSlots"/> in the same update; close it with <see cref="EndWorldFrame"/>.
+        /// </summary>
+        /// <returns>The start timestamp, or 0 when slots are not active.</returns>
+        public static long BeginWorldFrame()
+        {
+            if (!s_slotsActive) return 0L;
+
+            s_worldFrameStartSlotTicks = SumAttributedSlotTicks();
+            s_isWorldFrameOpen = true;
+            return Stopwatch.GetTimestamp();
+        }
+
+        /// <summary>Closes the bracket opened by <see cref="BeginWorldFrame"/>. A start of 0 is a no-op.</summary>
+        /// <param name="startTimestamp">The value <see cref="BeginWorldFrame"/> returned.</param>
+        public static void EndWorldFrame(long startTimestamp)
+        {
+            if (startTimestamp == 0L) return;
+
+            EndWorldFrameAt(startTimestamp, Stopwatch.GetTimestamp());
+        }
+
+        /// <summary>
+        /// <see cref="EndWorldFrame"/> with an explicit end, so the remainder can be checked against known ticks.
+        /// </summary>
+        /// <param name="startTimestamp">The value <see cref="BeginWorldFrame"/> returned; 0 is a no-op.</param>
+        /// <param name="endTimestamp">The bracket's end, on the <see cref="Stopwatch"/> clock.</param>
+        public static void EndWorldFrameAt(long startTimestamp, long endTimestamp)
+        {
+            if (startTimestamp == 0L) return;
+
+            s_isWorldFrameOpen = false;
+            long attributedInBracket = SumAttributedSlotTicks() - s_worldFrameStartSlotTicks;
+            long remainder = endTimestamp - startTimestamp - attributedInBracket;
+            if (remainder < 0) s_negativeRemainderFrames++;
+
+            s_slotTicks[(int)PerfSlot.WorldUnattributed] += remainder;
+        }
+
+        /// <summary>Sets a gauge for the frame being recorded; it holds until set again.</summary>
+        /// <param name="counter">A gauge — a counter before <see cref="FirstPerFrameCount"/>.</param>
+        /// <param name="value">The gauge's level.</param>
+        public static void SetGauge(PerfCounter counter, int value) => s_counterValues[(int)counter] = value;
+
+        /// <summary>
+        /// Adds a per-frame count's growth since the previous sample of its running total. The first sample, the first
+        /// after the counter columns are allocated, and a total that went down (a new owner, counting from 0) only set
+        /// the baseline and add nothing.
+        /// </summary>
+        /// <param name="counter">A per-frame count — <see cref="FirstPerFrameCount"/> or later.</param>
+        /// <param name="total">The counter's running total.</param>
+        public static void SampleTotal(PerfCounter counter, long total)
+        {
+            int index = (int)counter;
+            if (s_hasTotal[index] && total >= s_lastTotals[index])
+                s_counterValues[index] = (int)Math.Min(s_counterValues[index] + (total - s_lastTotals[index]), int.MaxValue);
+
+            s_lastTotals[index] = total;
+            s_hasTotal[index] = true;
+        }
+
+        /// <summary>
+        /// Zeroes every counter and forgets every running-total baseline. For a monitor starting on a new world, whose
+        /// gauges would otherwise hold the previous world's levels until first set.
+        /// </summary>
+        public static void ResetCounters()
+        {
+            Array.Clear(s_counterValues, 0, CounterCount);
+            Array.Clear(s_lastTotals, 0, CounterCount);
+            Array.Clear(s_hasTotal, 0, CounterCount);
+        }
+
         /// <summary>Zeroes a contiguous range of slot accumulators.</summary>
         /// <param name="firstSlot">Index of the first slot.</param>
         /// <param name="count">Number of slots.</param>
@@ -271,14 +395,17 @@ namespace Diagnostics
         public static double PublishedMs(PerfSlot slot) => s_publishedMs[(int)slot];
 
         /// <summary>
-        /// Records one frame into the history ring (slot columns included when allocated), zeroes every slot
-        /// accumulator, then lets the hitch detector test the frame. Call once per frame, after every probed region.
+        /// Records one frame into the history ring (slot and counter columns included when allocated), zeroes every slot
+        /// accumulator and per-frame count, then lets the hitch detector test the frame. Call once per frame, after
+        /// every probed region.
         /// </summary>
         /// <param name="readings">The frame's raw end-of-frame readings.</param>
         public static void CommitFrame(in PerfFrameReadings readings)
         {
             if (s_isShutDown) return;
 
+            // A bracket left open by an exception in World.Update must not outlive its frame.
+            s_isWorldFrameOpen = false;
             EnsureRing();
             PerfFrame frame = new PerfFrame
             {
@@ -291,9 +418,10 @@ namespace Diagnostics
                 EndTimestamp = readings.EndTimestamp,
             };
             RecordGc(ref frame, readings.HeapBytes, readings.GcCollectionCount);
-            s_ring.Commit(frame, s_slotTicks, s_tickToMs);
+            s_ring.Commit(frame, s_slotTicks, s_tickToMs, s_counterValues);
 
             Array.Clear(s_slotTicks, 0, SlotCount);
+            Array.Clear(s_counterValues, (int)FirstPerFrameCount, CounterCount - (int)FirstPerFrameCount);
             s_hitches?.OnFrameCommitted(s_ring);
         }
 
@@ -372,6 +500,12 @@ namespace Diagnostics
         public static PerfWindowSummary SummarizeSlotMs(PerfSlot slot) =>
             PerfWindowStats.Summarize(s_statsScratch, s_ring?.CopySlotMs(slot, s_statsScratch) ?? 0);
 
+        /// <summary>Exact statistics of one counter over the held frames that carry counter values (those with slot times).</summary>
+        /// <param name="counter">The counter.</param>
+        /// <returns>The summary; empty when no frame carries counter values.</returns>
+        public static PerfWindowSummary SummarizeCounter(PerfCounter counter) =>
+            PerfWindowStats.Summarize(s_statsScratch, s_ring?.CopyCounter(counter, s_statsScratch) ?? 0);
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void DomainReset()
         {
@@ -389,11 +523,24 @@ namespace Diagnostics
             s_lastTimingStart = 0;
             s_timingsReceived = 0;
             s_timingsMatched = 0;
+            s_worldFrameStartSlotTicks = 0;
+            s_isWorldFrameOpen = false;
+            s_negativeRemainderFrames = 0;
             Array.Clear(s_slotTicks, 0, SlotCount);
             Array.Clear(s_publishedMs, 0, SlotCount);
+            ResetCounters();
         }
 
         private static void RefreshSlotsActive() => s_slotsActive = s_forceSlots || s_tier >= PerfTier.Systems;
+
+        /// <summary>The sum of every slot accumulator except <see cref="PerfSlot.WorldUnattributed"/>.</summary>
+        private static long SumAttributedSlotTicks()
+        {
+            long sum = 0;
+            for (int i = 0; i < SlotCount; i++)
+                sum += s_slotTicks[i];
+            return sum - s_slotTicks[(int)PerfSlot.WorldUnattributed];
+        }
 
         /// <summary>Fills a frame's allocation fields from the heap and collection readings, then keeps them as the next baseline.</summary>
         private static void RecordGc(ref PerfFrame frame, long heapBytes, int collectionCount)
@@ -438,7 +585,7 @@ namespace Diagnostics
                 return;
             }
 
-            s_hitches ??= new PerfHitchDetector(SlotCount, s_hitchMinMs, s_hitchMedianFactor);
+            s_hitches ??= new PerfHitchDetector(SlotCount, s_hitchMinMs, s_hitchMedianFactor, CounterCount);
             s_frameTiming ??= new PerfFrameTimingSource();
             if (s_tier >= PerfTier.Systems) s_hitches.AllocateSlotBlock();
             else s_hitches.ReleaseSlotBlock();
@@ -458,7 +605,7 @@ namespace Diagnostics
         {
             if (s_ring != null) return;
 
-            s_ring = new PerfFrameRing(RingCapacity, SlotCount);
+            s_ring = new PerfFrameRing(RingCapacity, SlotCount, CounterCount);
             if (s_tier >= PerfTier.Systems) s_ring.AllocateSlotColumns();
             RegisterShutDown();
         }

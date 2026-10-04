@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Diagnostics;
 using Helpers;
 using Jobs;
 using Unity.Collections;
@@ -287,6 +288,7 @@ public class Clouds : MonoBehaviour
         if (!_isInitialized || _world.settings.clouds == CloudStyle.Off)
             return;
 
+        long cloudsStart = PerfStore.Begin(PerfSlot.Clouds);
         foreach (CloudLayerState state in _layerStates)
         {
             if (state.EffectiveStyle == CloudStyle.Off)
@@ -309,6 +311,8 @@ public class Clouds : MonoBehaviour
             else
                 PositionRoot(state);
         }
+
+        PerfStore.End(PerfSlot.Clouds, cloudsStart);
     }
 
     /// <summary>

@@ -1,5 +1,6 @@
 using Data;
 using Data.WorldTypes;
+using Diagnostics;
 using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 using UnityEngine.Audio;
@@ -264,12 +265,14 @@ namespace Audio
             SoundManager manager = SoundManager.Instance;
             if (manager == null || _bedSources == null) return;
 
+            long audioStart = PerfStore.Begin(PerfSlot.AudioDirectors);
             float deltaTime = Time.unscaledDeltaTime;
 
             UpdateRestCycle(deltaTime);
             UpdateCaveBed(manager, deltaTime);
             UpdateBiomeBeds(manager, deltaTime);
             ApplySubmersion(manager);
+            PerfStore.End(PerfSlot.AudioDirectors, audioStart);
         }
 
         /// <summary>How far the cave bed has faded in, [0, 1]. Diagnostics only.</summary>
