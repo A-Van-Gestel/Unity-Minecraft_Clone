@@ -16,7 +16,8 @@ namespace Editor.Validation.PerfMonitoring
     /// Truth-table suite for the performance monitor's store: <see cref="PerfFrameRing"/>'s wrap-around and
     /// slot-column lifecycle, <see cref="PerfWindowStats"/>' exact percentiles against a sorted oracle,
     /// <see cref="PerfStore"/>'s tier gating, frame boundary and shutdown, and the
-    /// <see cref="WorldFrameProfiler"/> facade's slot mapping and bit-identical published values.
+    /// <see cref="WorldFrameProfiler"/> facade's slot mapping and bit-identical published values. The Frame-tier
+    /// scenarios (B11–B19: GC readings, frame-timing back-fill, hitch detection) live in the <c>.Frame</c> part.
     /// <para>
     /// Timing <i>values</i> are not asserted beyond "zero" versus "positive" — wall-clock durations are not
     /// deterministic. Every scenario that touches the static store starts and ends from
@@ -24,7 +25,7 @@ namespace Editor.Validation.PerfMonitoring
     /// play mode discards the history ring but leaves the session's settings in force.
     /// </para>
     /// </summary>
-    public static class PerfMonitorValidationSuite
+    public static partial class PerfMonitorValidationSuite
     {
         private const int SMALL_RING_CAPACITY = 4;
         private const int SMALL_RING_SLOTS = 3;
@@ -72,6 +73,15 @@ namespace Editor.Validation.PerfMonitoring
                 new Scenario("B8 Facade mapping: WorldFrameProfiler.Phase matches PerfSlot by name and value", RunB8FacadeMapping),
                 new Scenario("B9 Facade values: LastFrameMs is bit-identical to ticks × (1000 / Frequency)", RunB9FacadeBitIdentity),
                 new Scenario("B10 Facade Enabled is the force flag: on at Basic records, off never disables Systems", RunB10FacadeEnabled),
+                new Scenario("B11 GC readings: no baseline, measured growth, collection, unexplained shrink, saturation", RunB11GcReadings),
+                new Scenario("B12 GC statistics take only measured frames; collections are summed", RunB12GcStatistics),
+                new Scenario("B13 Frame timings back-fill the row whose interval holds their start; misses stay NaN", RunB13FrameTimingBackfill),
+                new Scenario("B14 Frame-tier resources: timing reader and detector exist only at Frame+, slot block only at Systems+", RunB14FrameTierResources),
+                new Scenario("B15 Hitch threshold: absolute floor, median factor after the first refresh, setting fallbacks", RunB15HitchThreshold),
+                new Scenario("B16 Hitch window: closes after the frames after it, rows oldest first across the ring wrap", RunB16HitchWindow),
+                new Scenario("B17 Hitches in an open window join it; the newest records are kept", RunB17HitchMergeAndRetention),
+                new Scenario("B18 Hitch attribution: GC-correlated flag, top three slots at Systems, none at Frame", RunB18HitchAttribution),
+                new Scenario("B19 Leaving Frame discards the detector and its open window; shutdown frees Frame resources", RunB19TierDropAndShutdown),
             };
             return ValidationSuiteRunner.Execute("Performance Monitor", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }
@@ -239,8 +249,8 @@ namespace Editor.Validation.PerfMonitoring
             long start = PerfStore.Begin(PerfSlot.Tick);
             Spin();
             PerfStore.End(PerfSlot.Tick, start);
-            PerfStore.CommitFrame(wallTicks, wallTicks, 1);
-            PerfStore.CommitFrame(wallTicks, wallTicks, 2);
+            PerfStore.CommitFrame(Readings(wallTicks, 1));
+            PerfStore.CommitFrame(Readings(wallTicks, 2));
 
             PerfFrameRing ring = GetStoreRing();
             bool ok = Check("Two frames held, both with slot columns",
@@ -263,13 +273,13 @@ namespace Editor.Validation.PerfMonitoring
         private static bool RunB7ShutdownAndReset() => WithFreshStore(() =>
         {
             PerfStore.SetTier(PerfTier.Systems);
-            PerfStore.CommitFrame(1, 1, 1);
+            PerfStore.CommitFrame(Readings(1, 1));
             PerfFrameRing ring = GetStoreRing();
 
             InvokeStorePrivate("ShutDown");
             bool ok = Check("Shutdown disposes the ring", ring != null && ring.IsDisposed && GetStoreRing() == null);
 
-            PerfStore.CommitFrame(1, 1, 2);
+            PerfStore.CommitFrame(Readings(1, 2));
             ok &= Check("A commit after shutdown does not reallocate", GetStoreRing() == null && PerfStore.FramesRecorded == 0);
 
             PerfStore.ForceSlots = true;
@@ -277,7 +287,7 @@ namespace Editor.Validation.PerfMonitoring
             ok &= Check("DomainReset restores Basic, unforced, inactive",
                 PerfStore.Tier == PerfTier.Basic && !PerfStore.ForceSlots && !PerfStore.SlotsActive);
 
-            PerfStore.CommitFrame(1, 1, 3);
+            PerfStore.CommitFrame(Readings(1, 3));
             ok &= Check("Commits work again after DomainReset", PerfStore.FramesRecorded == 1);
             return ok;
         });
@@ -348,11 +358,13 @@ namespace Editor.Validation.PerfMonitoring
 
         #region Helpers
 
-        /// <summary>Runs a scenario against a freshly reset store, then resets again and restores the tier and force flag.</summary>
+        /// <summary>Runs a scenario against a freshly reset store, then resets again and restores the tier, force flag and hitch thresholds.</summary>
         private static bool WithFreshStore(Func<bool> scenario)
         {
             PerfTier tier = PerfStore.Tier;
             bool forced = PerfStore.ForceSlots;
+            float hitchMinMs = PerfStore.HitchMinMs;
+            float hitchMedianFactor = PerfStore.HitchMedianFactor;
             try
             {
                 InvokeStorePrivate("DomainReset");
@@ -361,6 +373,7 @@ namespace Editor.Validation.PerfMonitoring
             finally
             {
                 InvokeStorePrivate("DomainReset");
+                PerfStore.SetHitchThresholds(hitchMinMs, hitchMedianFactor);
                 PerfStore.SetTier(tier);
                 PerfStore.ForceSlots = forced;
             }
@@ -438,6 +451,10 @@ namespace Editor.Validation.PerfMonitoring
                                 ?? throw new MissingMethodException(nameof(PerfStore), methodName);
             method.Invoke(null, null);
         }
+
+        /// <summary>Readings with equal wall and CPU ticks and no heap, collection or timestamp data.</summary>
+        private static PerfFrameReadings Readings(long wallTicks, int frameIndex) =>
+            new PerfFrameReadings { WallTicks = wallTicks, CpuTicks = wallTicks, FrameIndex = frameIndex };
 
         private static PerfFrameRing GetStoreRing() => (PerfFrameRing)GetStoreField("s_ring");
 

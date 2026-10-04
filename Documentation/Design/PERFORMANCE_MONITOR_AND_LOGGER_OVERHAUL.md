@@ -1,9 +1,10 @@
 # Performance Monitor & Logger Overhaul Design
 
-**Version:** 1.4  
+**Version:** 1.5  
 **Date:** 2026-10-02  
 **Status:** In progress — PM-0 ✅ complete (2026-10-03, Master answers in §8); PM-1 ✅ complete (2026-10-03, §7.2;
-confirmed in an IL2CPP Master build); PM-2…PM-7 not started. PM-0's answers reshaped PM-2/PM-4 (§8).  
+confirmed in an IL2CPP Master build); PM-2 ✅ complete (2026-10-04, §7.3; confirmed in an IL2CPP Master build); PM-3…PM-7 not
+started. PM-0's answers reshaped PM-2/PM-4 (§8).  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > An opt-in, settings-driven in-game performance monitor and diagnostic logger that covers **every
@@ -146,6 +147,9 @@ launches alike. Logging levels (§4.6) are independent of the tier. *PM-1 (2026-
 ("Monitor Detail") ships all four values, contiguous from 0, because the Settings dropdown maps option index to enum
 value and the JSON stores the integer — a tier inserted later would shift saved values. Until PM-2/PM-6 land, Frame
 records the same as Basic and Capture the same as Systems; the tooltip says so. `/perf tier` sets it from the console.
+*PM-2 (2026-10-04):* per-frame GC allocation and collections record at **every** tier, Basic included — the heap read
+already ran every frame, so Basic adds one `GC.CollectionCount` call; Frame adds the frame timings and the hitch
+detector. A Basic row is 40 B (12 B at PM-1; the table's "8 B" never matched the code).
 
 ### 3.3 Relationship to the existing instruments
 
@@ -201,6 +205,10 @@ public struct PerfFrame
   *PM-1 (2026-10-03):* `PerfFrame` ships with only the fields PM-1 fills (`FrameIndex`, `WallMs`, `CpuMs` —
   12 B/frame); PM-2 adds the GPU and GC fields and PM-3 `UnattributedMs`. The frame rows are allocated on the first
   committed frame at every tier (24 KB); the slot block (10 slots × 4 B × 2 048 ≈ 80 KB today) only at Systems and up.
+  *PM-2 (2026-10-04):* the row is 40 B (80 KB of rows). `GcAllocBytes` is meaningful only when a `PerfGcState` byte says
+  `Measured` (otherwise `NoBaseline`, `Collected` or `Shrank`); `GcCollections` saturates at 255; the three frame-timing
+  fields are NaN until a timing arrives; `EndTimestamp` (on the `FrameTiming` clock, §4.3) bounds each row so a
+  late timing finds it. `CommitFrame` takes the raw readings (`PerfFrameReadings`) and computes the deltas itself.
 - **Counters** (`PerfCounter` enum: queue depths, in-flight jobs per type, resident chunks, pool
   in-use/peak per pool, I/O ops/bytes, ThreadPool depth) are gauges sampled once per frame into a
   second column set, plus `Interlocked`-updated cumulative counters for worker-thread producers.
@@ -249,6 +257,21 @@ follows §2's gap list: every untimed `World.Update` region, `DiskLoadApply` aro
   timings while the frame-time recorder counters were recording (§8 q4). PM-2 should first confirm that
   recording those counters is enough — reading `FrameTimingManager` with no recorder running settles it.
   If it is, the tier can enable timing on demand and the project setting stays 0.*
+- *PM-2 (2026-10-04), as built:* allocation is §4.3's fallback — the heap delta, with a frame in which a collection
+  completed flagged `Collected` and left out of allocation statistics, and a frame whose heap shrank with no counted
+  collection flagged `Shrank` and counted (0 such frames over ~25 000 in the Editor smoke). The delta is process-wide,
+  so worker-thread allocation still lands on the main frame. The store outlives the World scene, so
+  `PerformanceMonitor.OnEnable` resets the baseline: the first frame after a trip through the main menu records
+  `NoBaseline` rather than a delta spanning the menu. Frame timing: `PerfFrameTimingSource` records the
+  `Render`-category counters `GPU Frame Time` and `CPU Main Thread Frame Time` while the tier is at Frame or above, and
+  the project setting stays 0. `GetLatestTimings` returns frames a few frames late; each timing is written into the
+  row whose interval `[previous end, own end)` holds its `frameStartTimestamp`. **That timestamp is not on the
+  `Stopwatch` clock** — in the Editor both tick at 10 MHz, but their epochs differ by ≈ 1 823 s — so rows record their
+  end with `ProfilerUnsafeUtility.Timestamp`, which matches it. Rows never matched stay NaN, and `/perf stats` reports
+  received vs matched, so a clock mismatch in another player shows as "n/a" instead of a wrong value. Every timing
+  `GetLatestTimings` returns is written again on each read (a later read of a frame replaces an earlier one), but
+  counted only on its first; a GPU time of 0 is stored as NaN — the platform reporting none — and `/perf stats` then
+  says the timings arrive without GPU time.
 - **Memory:** existing `Profiler.GetTotal*MemoryLong` + managed heap, plus pool counters for
   `ChunkJobArrayPool` / `MeshOutputPool` / `ChunkPoolManager` and per-frame mesh-upload bytes;
   `ProfilerRecorder` memory/render counters only where PM-0 found them `Valid` in the target build.
@@ -272,6 +295,15 @@ recording *M* more (default 30), then copies that window into a hitch record: fr
 counters, GC flag, the top three slots by cost, and the log lines emitted in the window (§4.6). The HUD
 lists recent hitches; at Capture tier each record is queued for export. Records are pooled; at most
 *H* (default 16) are retained.
+
+*PM-2 (2026-10-04), as built* (`PerfHitchDetector`): the median is the p50 of the last 240 frames, refreshed every 60,
+so until the first refresh only the absolute floor applies; a hitch is strictly `>` the threshold. Hitches inside an
+open window join it (counted, the slowest becomes the worst row) without extending it, including one on the closing
+frame. The newest 16 records are held, a new one overwriting the oldest. Slot columns and the top three slots — the
+costliest non-zero slots of the worst frame — exist only for records closed at Systems; dropping to Frame keeps the
+ranking but frees the per-row slot times, and leaving Frame discards every record and an open window. Records carry
+no counters or log lines yet: those arrive with PM-3 and PM-7. The thresholds are the settings-file fields
+`perfHitchMinMs` / `perfHitchMedianFactor`, read when the tier is applied; `/perf hitches` lists the records.
 
 ### 4.6 Logger
 
@@ -356,7 +388,7 @@ public enum LogLevel : byte { Off, Error, Warning, Info, Verbose }
 |---|---|:---:|---|---|
 | **PM-0 — Verify** | Execution packet §7.1. Master-build probe: dump `ProfilerRecorderHandle.GetAvailable` + `Valid`; `FrameTimingManager` with frame-timing stats on; `GC.GetAllocatedBytesForCurrentThread` under IL2CPP; Burst timestamp source; probe cost (QPC ns) | 🟢 | — | ✅ 2026-10-03 — §8 q1–q4 answered in two Master builds |
 | **PM-1 — Core store** | `PerfStore`, `PerfSlot`, raw per-frame ring, exact window statistics, tier setting + live apply, `WorldFrameProfiler` facade (identical `PassMsTotals`), `/perf stats` + `/perf tier` | 🟡 | PM-0 | ✅ 2026-10-03 — code + suite (§7.2); confirmed in an IL2CPP Master build |
-| **PM-2 — Frame tier** | Per-frame GC + collection flag, `FrameTiming` GPU/render/present-wait, hitch detector + snapshots | 🟡 | PM-1 | — |
+| **PM-2 — Frame tier** | Per-frame GC + collection flag, `FrameTiming` GPU/render/present-wait, hitch detector + snapshots | 🟡 | PM-1 | ✅ 2026-10-04 — code + suite (§7.3); confirmed in an IL2CPP Master build |
 | **PM-3 — Coverage** | Slots for every untimed `World.Update` region + unattributed remainder; non-World systems; `PerfCounter` + counter columns, with gauges for queues, in-flight jobs, pools, resident chunks (moved from PM-1); `World.cs`'s facade probes to the slotted API; the Master IL2CPP overhead A/B (moved from PM-1) | 🟡 | PM-1 | — |
 | **PM-4 — Workers & I/O** | Job schedule→complete latency, in-job execute time, worker utilization; disk latency/bytes/compression; ThreadPool depth | 🟡 | PM-0, PM-1 | — |
 | **PM-5 — HUD** | Systems panel, hitch list, GPU/CPU split, raw-max graph overlay; `DT-4` | 🟡 | PM-2, PM-3 | — |
@@ -516,6 +548,72 @@ records no frames; the tier is applied when the World scene's monitor is enabled
 `GenerationProcess`); §4.2's slot-less `Begin()` could not emit a marker; §5's "pin before PM-1" baseline already
 existed as B22 but tested thresholds; §7's "B34-style reset sweep" named no existing mechanism.
 
+### 7.3 PM-2 execution record (2026-10-04; confirmed in an IL2CPP Master build)
+
+**Shipped** (`Assets/Scripts/Diagnostics/`): the 40 B `PerfFrame` with `PerfGcState` (§4.1); `PerfFrameReadings`, the
+raw end-of-frame readings `CommitFrame` now takes; `PerfFrameField` + `PerfFrameRing.CopyField`, so statistics skip frames
+without a value; `PerfFrameTimingSource` (§4.3); `PerfHitchDetector` + `PerfHitchRecord` (§4.5). `PerfWindowSummary`'s
+fields lost their `Ms` suffix (`Max`, `Mean`, `P50`, `P99`) because they now also carry kilobytes. `PerformanceMonitor`
+passes the heap size and collection count and calls `PerfStore.SampleFrameTiming` after each commit; `Settings` gains
+the settings-file fields `perfHitchMinMs` and `perfHitchMedianFactor`, applied with the tier. `/perf stats` gains GC,
+GPU/render-thread/present-wait and hitch lines, `/perf hitches` lists the records, and an automated run logs both
+readouts to Player.log when it ends (`LaunchSession.TryQuitAfterRun`) — the only way to read the store from an
+unattended player until PM-6's export.
+
+**Decisions taken at plan review:**
+1. **Frame timing on demand** — the tier records the frame-time counters; the project setting stays 0 (§4.3, §8 q4).
+2. **Timestamp back-fill** — each timing goes into the row it describes, not the row being committed.
+3. **GC at every tier**, Basic included (§3.2).
+4. **Master player check in a dedicated build**, read from the run-end Player.log summary (chosen while executing,
+   since nothing else in a player exposes the store). Not yet run.
+
+**Verification.** `Validate Performance Monitor` 19/19, the nine new scenarios B11–B19 covering the GC readings and
+statistics, frame-timing back-fill, Frame-tier resources, the hitch threshold, window, merge and retention, attribution,
+and tier drop/shutdown. B12, B13 and B16 proven red by mutation — collection frames counted as measured, the back-fill
+interval shifted by one tick, and a window copy broken only across the ring wrap (B16's no-wrap case stayed green) — and
+green again on restore, the file checksum identical. Pipeline Backpressure 25/25, Command Console 57/57.
+Editor micro-benchmark (Mono, three clean runs): `CommitFrame` ≈ 45–52 ns at Basic, ≈ 141–151 ns at Frame and
+≈ 272–286 ns at Systems (PM-1: 160–210 ns, before the row grew from 12 to 40 B); `SampleFrameTiming` ≈ 100–125 ns; 0
+collections and 0 KB over 10⁶ calls in every case. The Frame tier costs ≈ 0.3 µs/frame.
+Editor Play-mode smoke (new world, seed 4242, terrain streamed by moving the player to (1500, 140, 1500)): an injected
+80 ms sleep produced a hitch record one frame after the call, not GC-correlated; an injected `GC.Collect` produced a
+GC-correlated record and one collection frame left out of the allocation statistics; 24 893 of 24 893 frame timings
+matched a row; no frame shrank without a collection; at Systems the traversal's records attributed their worst frames
+(e.g. a window of 25 slow frames led by `LightMerge` at 47.8 ms); six back-to-back tier switches logged nothing; a
+946-frame GC.Alloc capture attributed 720 KB on the main thread, none of it to `PerfStore`, the detector, the timing
+source or `PerformanceMonitor` (99 % was `ES-28`'s UI passes); leaving Play mode logged no leak.
+
+**Review follow-ups (same day, after the smoke):** the GC baseline is reset when `PerformanceMonitor` enables, so a
+world entered from the main menu does not open with a delta spanning the menu; frame timings are written on every read,
+counted on the first; a GPU time of 0 is stored as "none" (§4.3). Proven by new B11/B13 checks, each red under its
+mutation (the reset as a no-op, the zero stored as-is) and green on restore with the checksum identical. With
+re-reads, `SampleFrameTiming` costs ≈ 163–178 ns (two runs, 0 collections, 0 KB). The Play-mode smoke above predates
+these three changes and was not repeated.
+
+**Corrections found while executing:** `Stopwatch` is not the `FrameTiming` clock (§4.3); §4.5's record "counters" and
+"log lines" cannot exist before PM-3 and PM-7; §3.2's "8 B/frame" never matched the code.
+
+**Master player confirmation (2026-10-04).** One `Windows - Production` build (IL2CPP **Master**, non-development,
+D3D11; `enableFrameTimingStats: 0` unchanged), two unattended Flow A runs (`perf-benchmark` `references/player-capture.md`,
+generation 200 m/s + loading 50 m/s, `-mc-mute -mc-quit`, both exit 0), read from the run-end Player.log summary:
+- **Frame tier** (`BenchmarkRun_2026-10-04_14-26-25`): timings arrived with the setting off — GPU p50 0.90 / p99
+  2.16 ms, render thread p50 0.58 ms, present wait p99 0.20 ms over the last 2 048 frames — so recording the two
+  counters is enough (§8 q4). Timings landed in their rows on the `ProfilerUnsafeUtility.Timestamp` clock: 14 of 16
+  held hitch records carry their worst frame's GPU time. 10 of the 16 are GC-correlated, so the collection flag is
+  live; one (frame 83192) is present-wait-bound (35.6 ms), the split this tier exists to show.
+- **Systems tier** (`…14-30-54`): every record names its costliest slots. The traversal hitches at 200 m/s are led by
+  `Tick` (26–38 ms of 34–52 ms frames); the initial load's by `LightMerge` (up to 47.8 ms) and `Tick`. One 39 ms frame
+  measured 1.3 ms of CPU — time outside the phases `PerformanceMonitor` brackets, which PM-3's remainder targets.
+
+The match *rate* was not measured: the summary prints received/matched only when no GPU time arrives, and two records
+per run show "n/a" for their worst frame — one with a present wait but no GPU time (stored as none, §4.3), one with no
+timing at all.
+
+**Left for later phases:** the hitch thresholds are not in `OverlayBenchmarkSettingsFromDisk`, so a benchmark run always
+detects with the defaults (33 ms / ×2.5) — PM-6, which owns benchmark comparability, decides whether they join the
+overlay; printing received/matched alongside a reported GPU time (so the match rate is always visible) fits PM-5's HUD
+or PM-6's export.
+
 ### Extension roadmap
 
 | Version | Extension |
@@ -561,7 +659,10 @@ Answers 1–4 come from `EngineApiProbe_2026-10-03_13-52-20.log`: a `Windows - P
    pair of benchmarks (stats on `BenchmarkRun_2026-10-03_14-00-16`, off `…14-34-59`) differs in both directions
    — avg CPU 1.3 vs 1.0 ms at 10 m/s, but 1.1 vs 1.6 ms at 50 m/s loading — which is run-to-run spread, not an
    attributable cost. The cost question is moot unless PM-2 needs the setting itself. (The Editor reports these
-   times regardless, so it cannot answer either half.)
+   times regardless, so it cannot answer either half.) *PM-2 (2026-10-04):* built on that reading — the Frame tier
+   records the two frame-time counters and leaves the setting at 0, and a Master player with the setting off delivered
+   timings that way (GPU p50 0.90 ms over a benchmark run, §7.3). Whether timings also arrive with no recorder at all
+   was not tested; the design no longer depends on it.
 5. Default hitch thresholds (33 ms / ×2.5 median) — to be tuned against real sessions after PM-2.
 6. Should Tier 0 stay the default, or should Tier 1 ship on by default once its cost is measured?
 
@@ -583,6 +684,11 @@ Answers 1–4 come from `EngineApiProbe_2026-10-03_13-52-20.log`: a `Windows - P
 
 ## Document History
 
+* **v1.5** - **PM-2 complete** (2026-10-04, §7.3; confirmed in an IL2CPP Master build): GC allocation + collection flag at
+  every tier, frame timings back-filled by timestamp at Frame, hitch detector + records, `/perf hitches`, run-end
+  Player.log summary. As-built notes in §3.2, §4.1, §4.3, §4.5 and §8 q4; §4.3 corrected — rows time their end on the
+  `FrameTiming` clock (`ProfilerUnsafeUtility.Timestamp`), not `Stopwatch`. Review follow-ups in §7.3: GC baseline reset
+  on monitor enable, timings re-written on every read, a zero GPU time stored as none.
 * **v1.4** - **PM-1 confirmed** in an IL2CPP Master build (`2026-10-03 - RC 96-3 Performance (PM-1)`): status line, plan row
   and §7.2 heading flipped from "in-game check pending".
 * **v1.3** - **PM-1 code landed** (2026-10-03, §7.2; in-game check pending): `PerfStore` + ring + exact window
@@ -606,4 +712,4 @@ Answers 1–4 come from `EngineApiProbe_2026-10-03_13-52-20.log`: a `Windows - P
 ---
 
 **Last Updated:** 2026-10-02  
-**Next Review:** when PM-2 or PM-3 starts (PM-1 code landed 2026-10-03)
+**Next Review:** when PM-3 starts (PM-2 complete 2026-10-04)

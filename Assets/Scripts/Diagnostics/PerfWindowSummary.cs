@@ -1,8 +1,9 @@
 namespace Diagnostics
 {
     /// <summary>
-    /// Exact statistics over a window of per-frame milliseconds. Percentiles are nearest-rank: each is a sample
-    /// that actually occurred, never an interpolation or a bucket bound. All zero when <see cref="Count"/> is 0.
+    /// Exact statistics over a window of per-frame samples, in the unit of the samples (milliseconds for times,
+    /// kilobytes for allocation). Percentiles are nearest-rank: each is a sample that actually occurred, never an
+    /// interpolation or a bucket bound. All zero when <see cref="Count"/> is 0.
     /// </summary>
     public struct PerfWindowSummary
     {

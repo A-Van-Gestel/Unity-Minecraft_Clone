@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Commands;
 using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 #if UNITY_EDITOR
@@ -143,14 +144,17 @@ namespace Launch
         }
 
         /// <summary>
-        /// Called by an automated run when it has finished. With <c>-mc-quit</c>, logs the outcome and exits the
-        /// process with <paramref name="exitCode"/>; otherwise does nothing, and the run shows its results as usual.
+        /// Called by an automated run when it has finished. Logs the performance monitor's readout of the run's
+        /// last frames and hitches; then, with <c>-mc-quit</c>, logs the outcome and exits the process with
+        /// <paramref name="exitCode"/>, otherwise lets the run show its results as usual.
         /// </summary>
         /// <param name="exitCode"><see cref="ExitSuccess"/> or <see cref="ExitRunFailed"/>.</param>
         /// <param name="reportPath">The report the run wrote, or <c>null</c> when it wrote none.</param>
         /// <returns>True when the process is exiting, so the caller must not show its results screen.</returns>
         public static bool TryQuitAfterRun(int exitCode, string reportPath)
         {
+            Debug.Log($"{LOG_TAG}Performance monitor at run end:\n{PerfCommand.FormatSummary()}");
+
             if (!s_quitWhenDone)
                 return false;
 

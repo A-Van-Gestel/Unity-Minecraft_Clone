@@ -7,10 +7,10 @@ namespace Diagnostics
     /// </summary>
     public enum PerfTier
     {
-        /// <summary>Raw per-frame wall and CPU time, for worst-frame and percentile readouts. Always on.</summary>
+        /// <summary>Raw per-frame wall and CPU time, managed allocation and collections, for worst-frame and percentile readouts. Always on.</summary>
         Basic = 0,
 
-        /// <summary>Records the same as <see cref="Basic"/>.</summary>
+        /// <summary>Adds per-frame GPU, render-thread and present-wait time, and hitch detection with the frames around each hitch.</summary>
         Frame = 1,
 
         /// <summary>Adds a per-frame time for every <see cref="PerfSlot"/>.</summary>

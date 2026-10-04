@@ -16,11 +16,23 @@ namespace Diagnostics
     /// begin/end probes, and a <see cref="PerfFrameRing"/> history of raw per-frame timings from which exact
     /// worst-frame and percentile statistics are read.
     /// <para>
-    /// <b>Tiers.</b> The frame rows (wall and CPU time) are always recorded. Slot probes record only while
-    /// <see cref="SlotsActive"/> — at <see cref="PerfTier.Systems"/> and above, or while <see cref="ForceSlots"/>
-    /// is set — and otherwise cost one static bool read, with no timestamp taken. The ring's slot columns exist
-    /// only at <see cref="PerfTier.Systems"/> and above; a forced run at a lower tier keeps the accumulators
-    /// live without allocating them.
+    /// <b>Tiers.</b> The frame rows (wall and CPU time, managed allocation and collections) are always recorded.
+    /// At <see cref="PerfTier.Frame"/> and above, <see cref="SampleFrameTiming"/> adds GPU, render-thread and
+    /// present-wait times to the rows, and a <see cref="PerfHitchDetector"/> keeps the frames around each hitch.
+    /// Slot probes record only while <see cref="SlotsActive"/> — at <see cref="PerfTier.Systems"/> and above, or
+    /// while <see cref="ForceSlots"/> is set — and otherwise cost one static bool read, with no timestamp taken.
+    /// The ring's slot columns exist only at <see cref="PerfTier.Systems"/> and above; a forced run at a lower
+    /// tier keeps the accumulators live without allocating them.
+    /// </para>
+    /// <para>
+    /// <b>Allocation.</b> A frame's figure is the managed heap's growth since the previous frame, which includes
+    /// worker-thread allocations. A frame in which a collection completed has no usable figure, so it is flagged
+    /// (<see cref="PerfGcState.Collected"/>) and left out of allocation statistics rather than recorded as 0.
+    /// </para>
+    /// <para>
+    /// <b>Frame timings</b> arrive a few frames after their frame. Each is matched to its row by timestamp
+    /// (<see cref="PerfFrameRing.TryBackfillFrameTiming"/>); a row whose timing never arrives keeps NaN, and so does
+    /// the GPU time of a timing that reports none (0).
     /// </para>
     /// <para>
     /// <b>Frame boundary.</b> <see cref="CommitFrame"/>, called once at the end of every frame, stores the
@@ -46,6 +58,9 @@ namespace Diagnostics
         public const int SlotCount = (int)PerfSlot.Count;
 
         private const double MILLISECONDS_PER_SECOND = 1000.0;
+
+        /// <summary>Oldest row a late frame timing is matched against; timings arrive a few frames after their frame.</summary>
+        private const int FRAME_TIMING_MAX_AGE = 16;
 
         [NoAutoStaticsCleanup] // immutable
         private static readonly double s_tickToMs = MILLISECONDS_PER_SECOND / Stopwatch.Frequency;
@@ -84,8 +99,66 @@ namespace Diagnostics
         [NoAutoStaticsCleanup] // reset in DomainReset
         private static bool s_isShutDown;
 
+        /// <summary>The hitch detector; exists at <see cref="PerfTier.Frame"/> and above.</summary>
+        [NoAutoStaticsCleanup] // reset in DomainReset
+        private static PerfHitchDetector s_hitches;
+
+        /// <summary>The frame-timing reader; exists at <see cref="PerfTier.Frame"/> and above.</summary>
+        [NoAutoStaticsCleanup] // reset in DomainReset
+        private static PerfFrameTimingSource s_frameTiming;
+
+        [NoAutoStaticsCleanup] // reset in DomainReset
+        private static float s_hitchMinMs;
+
+        [NoAutoStaticsCleanup] // reset in DomainReset
+        private static float s_hitchMedianFactor;
+
+        /// <summary>Whether the previous commit's heap and collection readings exist to subtract from.</summary>
+        [NoAutoStaticsCleanup] // reset in DomainReset
+        private static bool s_hasGcBaseline;
+
+        [NoAutoStaticsCleanup] // reset in DomainReset
+        private static long s_lastHeapBytes;
+
+        [NoAutoStaticsCleanup] // reset in DomainReset
+        private static int s_lastGcCollectionCount;
+
+        [NoAutoStaticsCleanup] // reset in DomainReset
+        private static int s_gcShrinkFrames;
+
+        /// <summary>Start of the newest frame timing submitted, so a timing read again on a later frame is not resubmitted.</summary>
+        [NoAutoStaticsCleanup] // reset in DomainReset
+        private static long s_lastTimingStart;
+
+        [NoAutoStaticsCleanup] // reset in DomainReset
+        private static int s_timingsReceived;
+
+        [NoAutoStaticsCleanup] // reset in DomainReset
+        private static int s_timingsMatched;
+
         /// <summary>The current tier.</summary>
         public static PerfTier Tier => s_tier;
+
+        /// <summary>The hitch detector, or null below <see cref="PerfTier.Frame"/>.</summary>
+        public static PerfHitchDetector Hitches => s_hitches;
+
+        /// <summary>The minimum hitch threshold last passed to <see cref="SetHitchThresholds"/>, as given.</summary>
+        public static float HitchMinMs => s_hitchMinMs;
+
+        /// <summary>The median factor last passed to <see cref="SetHitchThresholds"/>, as given.</summary>
+        public static float HitchMedianFactor => s_hitchMedianFactor;
+
+        /// <summary>Frames whose heap shrank with no collection counted (<see cref="PerfGcState.Shrank"/>) since the last reset.</summary>
+        public static int GcShrinkFrames => s_gcShrinkFrames;
+
+        /// <summary>Frame timings submitted since the last reset.</summary>
+        public static int FrameTimingsReceived => s_timingsReceived;
+
+        /// <summary>Submitted frame timings that matched a held row.</summary>
+        public static int FrameTimingsMatched => s_timingsMatched;
+
+        /// <summary>Garbage collections recorded across the held frames.</summary>
+        public static int GcCollectionsHeld => s_ring?.SumGcCollections() ?? 0;
 
         /// <summary>
         /// Keeps the slot probes recording regardless of tier. Independent of the tier, so clearing it never turns
@@ -110,17 +183,31 @@ namespace Diagnostics
         /// <summary>Held frames that carry per-slot times.</summary>
         public static int SlotFramesRecorded => s_ring?.SlotFrameCount ?? 0;
 
-        /// <summary>Applies a tier, allocating or freeing the ring's slot columns to match.</summary>
+        /// <summary>
+        /// Applies a tier, allocating or freeing the ring's slot columns, the hitch detector and the frame-timing
+        /// reader to match. Leaving <see cref="PerfTier.Frame"/> discards the held hitch records.
+        /// </summary>
         /// <param name="tier">The tier to apply.</param>
         public static void SetTier(PerfTier tier)
         {
             s_tier = tier;
             RefreshSlotsActive();
+            ApplyFrameTierResources();
 
             if (s_ring == null) return;
 
             if (tier >= PerfTier.Systems) s_ring.AllocateSlotColumns();
             else s_ring.ReleaseSlotColumns();
+        }
+
+        /// <summary>Sets the hitch thresholds, now and for detectors created later; invalid values fall back to the defaults.</summary>
+        /// <param name="minMs">Wall milliseconds above which a frame is always a hitch.</param>
+        /// <param name="medianFactor">Multiple of the recent median frame time above which a frame is a hitch.</param>
+        public static void SetHitchThresholds(float minMs, float medianFactor)
+        {
+            s_hitchMinMs = minMs;
+            s_hitchMedianFactor = medianFactor;
+            s_hitches?.SetThresholds(minMs, medianFactor);
         }
 
         /// <summary>Opens a timed region with no Profiler marker; close it with <see cref="Accumulate"/>.</summary>
@@ -184,36 +271,100 @@ namespace Diagnostics
         public static double PublishedMs(PerfSlot slot) => s_publishedMs[(int)slot];
 
         /// <summary>
-        /// Records one frame into the history ring (slot columns included when allocated), then zeroes every slot
-        /// accumulator. Call once per frame, after every probed region.
+        /// Records one frame into the history ring (slot columns included when allocated), zeroes every slot
+        /// accumulator, then lets the hitch detector test the frame. Call once per frame, after every probed region.
         /// </summary>
-        /// <param name="wallTicks">The frame's wall-clock stopwatch ticks.</param>
-        /// <param name="cpuTicks">The frame's measured main-thread CPU stopwatch ticks.</param>
-        /// <param name="frameIndex">The frame's <c>Time.frameCount</c>.</param>
-        public static void CommitFrame(long wallTicks, long cpuTicks, int frameIndex)
+        /// <param name="readings">The frame's raw end-of-frame readings.</param>
+        public static void CommitFrame(in PerfFrameReadings readings)
         {
             if (s_isShutDown) return;
 
             EnsureRing();
-            s_ring.Commit(new PerfFrame
+            PerfFrame frame = new PerfFrame
             {
-                FrameIndex = frameIndex,
-                WallMs = (float)(wallTicks * s_tickToMs),
-                CpuMs = (float)(cpuTicks * s_tickToMs),
-            }, s_slotTicks, s_tickToMs);
+                FrameIndex = readings.FrameIndex,
+                WallMs = (float)(readings.WallTicks * s_tickToMs),
+                CpuMs = (float)(readings.CpuTicks * s_tickToMs),
+                GpuMs = float.NaN,
+                RenderThreadMs = float.NaN,
+                PresentWaitMs = float.NaN,
+                EndTimestamp = readings.EndTimestamp,
+            };
+            RecordGc(ref frame, readings.HeapBytes, readings.GcCollectionCount);
+            s_ring.Commit(frame, s_slotTicks, s_tickToMs);
 
             Array.Clear(s_slotTicks, 0, SlotCount);
+            s_hitches?.OnFrameCommitted(s_ring);
         }
+
+        /// <summary>
+        /// Reads the latest frame timings and writes each into its row. A no-op below <see cref="PerfTier.Frame"/>.
+        /// Call once per frame, after <see cref="CommitFrame"/>.
+        /// </summary>
+        public static void SampleFrameTiming()
+        {
+            if (s_frameTiming == null) return;
+
+            // Newest first: walk oldest to newest so the first-read check only moves forward. Re-reads are written
+            // again, so a later read of a frame replaces an earlier one; only the first read is counted.
+            for (int i = s_frameTiming.Capture() - 1; i >= 0; i--)
+            {
+                FrameTiming timing = s_frameTiming.GetTiming(i);
+                long start = (long)timing.frameStartTimestamp;
+                bool isFirstRead = start > s_lastTimingStart;
+                if (isFirstRead) s_lastTimingStart = start;
+
+                SubmitFrameTiming(start, (float)timing.gpuFrameTime, (float)timing.cpuRenderThreadFrameTime,
+                    (float)timing.cpuMainThreadPresentWaitTime, isFirstRead);
+            }
+        }
+
+        /// <summary>
+        /// Writes one frame timing into the held row it describes. A GPU time of 0 or less is stored as NaN — the
+        /// platform reporting none, not a frame that cost nothing. A first read is counted as received and, when a
+        /// row matched, matched.
+        /// </summary>
+        /// <param name="frameStartTimestamp">The timing's frame start, on the <see cref="PerfFrame.EndTimestamp"/> clock.</param>
+        /// <param name="gpuMs">GPU milliseconds.</param>
+        /// <param name="renderThreadMs">Render-thread milliseconds.</param>
+        /// <param name="presentWaitMs">Present-wait milliseconds.</param>
+        /// <param name="isFirstRead">Whether this frame's timing is submitted for the first time; re-reads are written but not counted.</param>
+        /// <returns>True when a held row matched.</returns>
+        public static bool SubmitFrameTiming(long frameStartTimestamp, float gpuMs, float renderThreadMs, float presentWaitMs,
+            bool isFirstRead = true)
+        {
+            if (s_ring == null) return false;
+
+            float reportedGpuMs = gpuMs > 0f ? gpuMs : float.NaN;
+            bool matched = s_ring.TryBackfillFrameTiming(frameStartTimestamp, reportedGpuMs, renderThreadMs, presentWaitMs,
+                FRAME_TIMING_MAX_AGE);
+            if (!isFirstRead) return matched;
+
+            s_timingsReceived++;
+            if (matched) s_timingsMatched++;
+            return matched;
+        }
+
+        /// <summary>
+        /// Forgets the previous heap and collection readings, so the next commit records
+        /// <see cref="PerfGcState.NoBaseline"/>. For a monitor starting after frames it did not see, whose heap delta
+        /// would otherwise span them.
+        /// </summary>
+        public static void ResetGcBaseline() => s_hasGcBaseline = false;
 
         /// <summary>Exact statistics of wall time over the held frames.</summary>
         /// <returns>The summary; empty when no frame is held.</returns>
-        public static PerfWindowSummary SummarizeWallMs() =>
-            PerfWindowStats.Summarize(s_statsScratch, s_ring?.CopyWallMs(s_statsScratch) ?? 0);
+        public static PerfWindowSummary SummarizeWallMs() => Summarize(PerfFrameField.WallMs);
 
         /// <summary>Exact statistics of CPU time over the held frames.</summary>
         /// <returns>The summary; empty when no frame is held.</returns>
-        public static PerfWindowSummary SummarizeCpuMs() =>
-            PerfWindowStats.Summarize(s_statsScratch, s_ring?.CopyCpuMs(s_statsScratch) ?? 0);
+        public static PerfWindowSummary SummarizeCpuMs() => Summarize(PerfFrameField.CpuMs);
+
+        /// <summary>Exact statistics of one frame field over the held frames that have a value for it (see <see cref="PerfFrameRing.CopyField"/>).</summary>
+        /// <param name="field">The field.</param>
+        /// <returns>The summary; empty when no held frame has a value.</returns>
+        public static PerfWindowSummary Summarize(PerfFrameField field) =>
+            PerfWindowStats.Summarize(s_statsScratch, s_ring?.CopyField(field, s_statsScratch) ?? 0);
 
         /// <summary>Exact statistics of one slot over the held frames that carry slot times.</summary>
         /// <param name="slot">The slot.</param>
@@ -224,16 +375,84 @@ namespace Diagnostics
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void DomainReset()
         {
-            DisposeRing();
+            DisposeNative();
             s_tier = PerfTier.Basic;
             s_forceSlots = false;
             s_slotsActive = false;
             s_isShutDown = false;
+            s_hitchMinMs = PerfHitchDetector.DefaultMinMs;
+            s_hitchMedianFactor = PerfHitchDetector.DefaultMedianFactor;
+            s_hasGcBaseline = false;
+            s_lastHeapBytes = 0;
+            s_lastGcCollectionCount = 0;
+            s_gcShrinkFrames = 0;
+            s_lastTimingStart = 0;
+            s_timingsReceived = 0;
+            s_timingsMatched = 0;
             Array.Clear(s_slotTicks, 0, SlotCount);
             Array.Clear(s_publishedMs, 0, SlotCount);
         }
 
         private static void RefreshSlotsActive() => s_slotsActive = s_forceSlots || s_tier >= PerfTier.Systems;
+
+        /// <summary>Fills a frame's allocation fields from the heap and collection readings, then keeps them as the next baseline.</summary>
+        private static void RecordGc(ref PerfFrame frame, long heapBytes, int collectionCount)
+        {
+            if (!s_hasGcBaseline)
+            {
+                frame.GcState = PerfGcState.NoBaseline;
+            }
+            else
+            {
+                int collections = Math.Max(collectionCount - s_lastGcCollectionCount, 0);
+                long delta = heapBytes - s_lastHeapBytes;
+                frame.GcCollections = (byte)Math.Min(collections, byte.MaxValue);
+
+                if (collections > 0)
+                {
+                    frame.GcState = PerfGcState.Collected;
+                }
+                else if (delta < 0)
+                {
+                    frame.GcState = PerfGcState.Shrank;
+                    s_gcShrinkFrames++;
+                }
+                else
+                {
+                    frame.GcState = PerfGcState.Measured;
+                    frame.GcAllocBytes = (int)Math.Min(delta, int.MaxValue);
+                }
+            }
+
+            s_lastHeapBytes = heapBytes;
+            s_lastGcCollectionCount = collectionCount;
+            s_hasGcBaseline = true;
+        }
+
+        /// <summary>Creates or frees the hitch detector, its slot block and the frame-timing reader for the current tier.</summary>
+        private static void ApplyFrameTierResources()
+        {
+            if (s_tier < PerfTier.Frame || s_isShutDown)
+            {
+                ReleaseFrameTierResources();
+                return;
+            }
+
+            s_hitches ??= new PerfHitchDetector(SlotCount, s_hitchMinMs, s_hitchMedianFactor);
+            s_frameTiming ??= new PerfFrameTimingSource();
+            if (s_tier >= PerfTier.Systems) s_hitches.AllocateSlotBlock();
+            else s_hitches.ReleaseSlotBlock();
+
+            RegisterShutDown();
+        }
+
+        private static void ReleaseFrameTierResources()
+        {
+            s_hitches?.Dispose();
+            s_hitches = null;
+            s_frameTiming?.Dispose();
+            s_frameTiming = null;
+        }
 
         private static void EnsureRing()
         {
@@ -241,7 +460,11 @@ namespace Diagnostics
 
             s_ring = new PerfFrameRing(RingCapacity, SlotCount);
             if (s_tier >= PerfTier.Systems) s_ring.AllocateSlotColumns();
+            RegisterShutDown();
+        }
 
+        private static void RegisterShutDown()
+        {
             Application.quitting -= ShutDown;
             Application.quitting += ShutDown;
 #if UNITY_EDITOR
@@ -252,16 +475,18 @@ namespace Diagnostics
 
         private static void ShutDown()
         {
-            DisposeRing();
+            DisposeNative();
             s_isShutDown = true;
         }
 
-        private static void DisposeRing()
+        /// <summary>Frees the ring, the hitch detector and the frame-timing reader, and stops listening for shutdown.</summary>
+        private static void DisposeNative()
         {
             Application.quitting -= ShutDown;
 #if UNITY_EDITOR
             AssemblyReloadEvents.beforeAssemblyReload -= ShutDown;
 #endif
+            ReleaseFrameTierResources();
             s_ring?.Dispose();
             s_ring = null;
         }

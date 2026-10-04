@@ -1,6 +1,6 @@
 # Engine Scaling Performance Roadmap
 
-**Version:** 1.8  
+**Version:** 1.9  
 **Date:** 2026-10-02  
 **Status:** In progress — `ES-1`, `ES-2` and `ES-6.1` shipped (2026-10-02); ES-0's GC.Alloc attribution captured
 (2026-10-03, §2.2.1 — added `ES-26`/`ES-27`; PM-1's smoke capture added the `ES-28` quick win); the rest is a near-to-far horizon, not
@@ -309,7 +309,12 @@ PM-6; the bullets below are what ES needs from it.
   does not exist in Master players, and `GC.GetAllocatedBytesForCurrentThread` is not live under IL2CPP — the
   per-frame figure comes from the heap-delta method plus a collection flag.) (PM-1, 2026-10-03: the raw per-frame
   wall/CPU ring and exact worst/p99 over its last 2 048 frames exist — read with `/perf stats`; per-phase benchmark
-  columns arrive with PM-6.)
+  columns arrive with PM-6.) (PM-2, 2026-10-04, confirmed in an IL2CPP Master build: every frame row
+  carries its heap-delta allocation — collection frames flagged and left out of the statistics — and its collection
+  count, and at the Frame tier its GPU/render-thread/present-wait time and hitch records marked GC-correlated; read
+  with `/perf stats` / `/perf hitches`, and logged to Player.log when an automated run ends. First Master reading, one
+  Systems-tier run: the 200 m/s traversal's hitch frames (34–52 ms) are led by the `Tick` slot at 26–38 ms, the initial
+  load's by `LightMerge` and `Tick` — `PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md` §7.3; one run, not yet a ranking.)
 - Slots for `CheckViewDistance`, `UnloadChunks`, `ApplyModifications`, the disk-hit populate
   continuation and every other untimed `World.Update` region, plus an unattributed remainder.
 - A once-per-launch **drain stamp** (P-4's tail-inclusive drain predicate): ms to `_isWorldLoaded`, to
@@ -587,7 +592,7 @@ constants + migration change. Prerequisites: ES-13, ES-18, ES-19.
 
 | Phase | Scope | Effort | Depends on | Status |
 |---|---|:---:|---|---|
-| **ES-0 — Measure** | Spike-visible capture, drain stamp, crossing slots, GC.Alloc capture | 🟢 | — | GC.Alloc capture ✅ 2026-10-03 (§2.2.1); PM-1 store ✅ 2026-10-03; rest via PM-2, PM-3 + PM-6 |
+| **ES-0 — Measure** | Spike-visible capture, drain stamp, crossing slots, GC.Alloc capture | 🟢 | — | GC.Alloc capture ✅ 2026-10-03 (§2.2.1); PM-1 store ✅ 2026-10-03; PM-2 frame tier ✅ 2026-10-04 (Master-confirmed); rest via PM-3 + PM-6 |
 | **ES-1 — No frame-paced load** | Completion counter at `World.cs:1064` — execution packet §7.1 | 🟢 | — | ✅ 2026-10-02 (in-game) |
 | **ES-2 — Calibration** | Robust OM-1 lighting probe — execution packet §7.1 | 🟢 | — | ✅ 2026-10-02 (in-game) |
 | **ES-3 — Loading mode** | SU-1 + SU-2, pooled/banded/shared startup snapshots | 🟡 | ES-0 | — |
@@ -980,6 +985,9 @@ saving is inferred from step 1's re-entry leg, not re-measured.
 
 ## Document History
 
+* **v1.9** - ES-0 bullet + plan row: PM-2's Frame tier complete (2026-10-04, confirmed in an IL2CPP Master build) — per-frame
+  allocation that leaves collection frames out, collection counts, GPU/render-thread/present-wait time and
+  GC-correlated hitch records.
 * **v1.8** - New `ES-28` (2026-10-03): the UI band/blur Render Graph passes allocate ≈ 0.75 KB every frame (98.8 % of
   main-thread garbage in the PM-1 Play-mode smoke capture); Tier 1b entry, plan row, §4.1 traversal row, status line.
 * **v1.7** - ES-0 bullet + plan row: PM-1's store landed (2026-10-03) — raw per-frame ring with exact worst/p99

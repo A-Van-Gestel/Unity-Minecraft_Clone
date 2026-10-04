@@ -3,6 +3,7 @@ using System.Collections;
 using System.Diagnostics;
 using Diagnostics;
 using Helpers;
+using Unity.Profiling.LowLevel.Unsafe;
 using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 using UnityEngine.Profiling;
@@ -21,9 +22,10 @@ using UnityEngine.Profiling;
 /// invalid data in non-Development Release builds.
 /// </para>
 /// <para>
-/// Every frame's raw wall and CPU ticks are also committed to <see cref="PerfStore"/>, which keeps the
-/// unsmoothed per-frame history this class's moving averages cannot; this class also applies the
-/// <see cref="Settings.perfMonitorTier"/> setting to it on enable and live on change.
+/// Every frame's raw wall and CPU ticks, heap size and collection count are also committed to
+/// <see cref="PerfStore"/>, which keeps the unsmoothed per-frame history this class's moving averages cannot, and
+/// which then samples the frame timings; this class also applies the <see cref="Settings.perfMonitorTier"/> setting
+/// to it on enable and live on change.
 /// </para>
 /// </summary>
 /// <remarks>
@@ -224,8 +226,10 @@ public class PerformanceMonitor : MonoBehaviour
     private void OnEnable()
     {
         // Applied here rather than in Awake: OnEnable also runs after a script reload in Play mode,
-        // which resets the store's statics.
-        PerfStore.SetTier(SettingsManager.LoadSettings().perfMonitorTier);
+        // which resets the store's statics. The store outlives the World scene, so its last heap
+        // reading may predate a trip through the main menu.
+        PerfStore.ResetGcBaseline();
+        ApplyStoreSettings();
         SettingsManager.OnSettingChanged += HandleSettingChanged;
     }
 
@@ -244,7 +248,15 @@ public class PerformanceMonitor : MonoBehaviour
     private static void HandleSettingChanged(string fieldName)
     {
         if (fieldName == nameof(Settings.perfMonitorTier))
-            PerfStore.SetTier(SettingsManager.LoadSettings().perfMonitorTier);
+            ApplyStoreSettings();
+    }
+
+    /// <summary>Applies the hitch thresholds (settings-file only, so read with the tier) and the tier to <see cref="PerfStore"/>.</summary>
+    private static void ApplyStoreSettings()
+    {
+        Settings settings = SettingsManager.LoadSettings();
+        PerfStore.SetHitchThresholds(settings.perfHitchMinMs, settings.perfHitchMedianFactor);
+        PerfStore.SetTier(settings.perfMonitorTier);
     }
 
     private void OnDestroy()
@@ -339,13 +351,24 @@ public class PerformanceMonitor : MonoBehaviour
             WallFrameTime.Sample(wallTicks);
             _frameStopwatch.Restart();
 
-            // The raw, unsmoothed frame; the end of the frame is after every probed region has run.
-            if (Instance == this)
-                PerfStore.CommitFrame(wallTicks, cpuTicks, Time.frameCount);
-
             // Track Managed GC Allocations per frame.
             long currentGcMemory = GC.GetTotalMemory(false);
             long delta = currentGcMemory - _lastGcMemory;
+
+            // The raw, unsmoothed frame; the end of the frame is after every probed region has run.
+            if (Instance == this)
+            {
+                PerfStore.CommitFrame(new PerfFrameReadings
+                {
+                    WallTicks = wallTicks,
+                    CpuTicks = cpuTicks,
+                    FrameIndex = Time.frameCount,
+                    HeapBytes = currentGcMemory,
+                    GcCollectionCount = GC.CollectionCount(0),
+                    EndTimestamp = ProfilerUnsafeUtility.Timestamp,
+                });
+                PerfStore.SampleFrameTiming();
+            }
 
             // Always sample (even zero/negative) so the moving average correctly
             // decays to zero when allocations stop. Negative deltas indicate a

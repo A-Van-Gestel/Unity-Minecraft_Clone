@@ -598,13 +598,14 @@ that `ShowInternal` silently dropped.
 
 The console seat of the performance monitor
 ([`../Design/PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md`](../Design/PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md)),
-alias `/profiler`. Future monitor controls (hitches, export) are meant to become sub-commands here.
+alias `/profiler`. Future monitor controls (export) are meant to become sub-commands here.
 
 | Form                 | Behavior                                                                                     |
 |----------------------|----------------------------------------------------------------------------------------------|
 | `/perf`              | Reports whether the capability probe is running, else the last probe's summary and report path |
 | `/perf probe`        | Starts `Diagnostics.EngineApiProbe` (~120 frames, one deliberate `GC.Collect`)                 |
-| `/perf stats`        | Worst, p99, p50 and mean wall/CPU frame time over `PerfStore`'s ring; at the Systems tier, every slot's avg/p99/worst, costliest first |
+| `/perf stats`        | Worst, p99, p50 and mean wall/CPU frame time over `PerfStore`'s ring, plus allocated KB per frame over the frames without a collection and the collections held; at the Frame tier, GPU/render-thread/present-wait time (or why they are n/a) and the hitch count; at the Systems tier, every slot's avg/p99/worst, costliest first |
+| `/perf hitches`      | At the Frame tier and above, the held hitch records, newest first: worst wall time and threshold, slow-frame count, GC-correlation, the worst frame's CPU/GPU/present-wait time and, at Systems, its top three slots (added 2026-10-04; confirmed in an IL2CPP Master build) |
 | `/perf tier [name]`  | Reads the monitor tier, or sets `Settings.perfMonitorTier` and raises `OnSettingChanged` — the same live-apply path as the Settings dropdown |
 
 **Result arrives asynchronously.** A command returns synchronously, so the probe raises a toast on
@@ -613,13 +614,15 @@ output exists, and none was added. The probe refuses to start during an automate
 (`WorldLaunchState.IsAutomatedMode`) or while one is already running. Its menu twin is the Settings →
 Benchmark tab's **Run Engine API Probe** action, which also works from the main menu.
 
-**Registration.** `InstalledCommandCount` 18 → **19** (B32 count-floor); tab completion offers `probe`, `stats` and
-`tier` for the first argument and the tier names for the second.
+**Registration.** `InstalledCommandCount` 18 → **19** (B32 count-floor); tab completion offers `probe`, `stats`,
+`hitches` and `tier` for the first argument and the tier names for the second.
 
 ---
 
 ## Document History
 
+* **v1.20** - §8.6: `/perf hitches` and the Frame-tier lines of `/perf stats` (PM-2, 2026-10-04); no new command, so
+  `InstalledCommandCount` stays 19; Command Console suite 57/57.
 * **v1.19** - §8.6 heading: `/perf` confirmed in an IL2CPP Master build (2026-10-03).
 * **v1.18** - §8.6: `/perf stats` and `/perf tier` (PM-1's store readout and tier control); no new command, so
   `InstalledCommandCount` stays 19; Command Console suite 57/57.

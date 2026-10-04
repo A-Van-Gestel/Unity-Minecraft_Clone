@@ -60,7 +60,8 @@ This is the heart of the project, containing all C# source code. It is organized
 
 -   **Purpose:** The engine's opt-in performance-monitoring and diagnostics layer (namespace `Diagnostics`) — tools a player build carries but runs only when asked. The `PerfStore` and planned `EngineLog` of `Documentation/Design/PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md` live here; benchmark *harnesses* stay in `Benchmarks/`.
 -   **Examples:**
-    -   `PerfStore.cs`: The engine-wide timing store — per-slot `Stopwatch` probes gated by the Monitor Detail tier, and a native history ring of raw per-frame timings with exact worst-frame/percentile readouts.
+    -   `PerfStore.cs`: The engine-wide timing store — per-slot `Stopwatch` probes gated by the Monitor Detail tier, and a native history ring of raw per-frame timings, allocation and GPU times with exact worst-frame/percentile readouts.
+    -   `PerfHitchDetector.cs`: Flags hitch frames and keeps the frames around each one (`/perf hitches`), at the Frame detail tier and above.
     -   `EngineApiProbe.cs`: The capability probe behind `/perf probe` — checks which profiling APIs (recorders, frame timing, GC counters, Burst timestamps) work in the running build and writes a report.
 
 #### `Scripts/Launch/`

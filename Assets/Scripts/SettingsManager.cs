@@ -907,9 +907,9 @@ public class Settings
     [SettingField(SettingsTab.DebugScreen, Label = "Monitor Detail", Order = 12)]
     [Tooltip("How much the performance monitor records. Read the results with /perf stats.\n\n" +
              TooltipTags.BulletOptionStart + "Basic" + TooltipTags.BulletOptionEnd +
-             "Raw time of every frame, for worst-frame and percentile readouts (default).\n" +
+             "Raw time and garbage-collector activity of every frame, for worst-frame and percentile readouts (default).\n" +
              TooltipTags.BulletOptionStart + "Frame" + TooltipTags.BulletOptionEnd +
-             "Currently records the same as Basic.\n" +
+             "Adds GPU and render-thread time, and keeps the frames around every hitch (/perf hitches).\n" +
              TooltipTags.BulletOptionStart + "Systems" + TooltipTags.BulletOptionEnd +
              "Adds the time each world system takes every frame.\n" +
              TooltipTags.BulletOptionStart + "Capture" + TooltipTags.BulletOptionEnd +
@@ -932,6 +932,21 @@ public class Settings
     [Tooltip("Stores save data in a temporary volatile directory instead of the permanent project folder.\n\n" +
              TooltipTags.Note + "Only applies when running inside the Unity Editor.")]
     public bool enableVolatileSaveData = true;
+
+    [Header("Performance Monitor")]
+    /// <summary>
+    /// Wall milliseconds above which a frame always counts as a hitch, at Frame detail and above. Read when the
+    /// detail level is applied; a non-positive value falls back to the default.
+    /// </summary>
+    [Tooltip("A frame slower than this many milliseconds always counts as a hitch.")]
+    public float perfHitchMinMs = PerfHitchDetector.DefaultMinMs;
+
+    /// <summary>
+    /// Multiple of the recent median frame time above which a frame counts as a hitch. Read when the detail level
+    /// is applied; a value below 1 falls back to the default.
+    /// </summary>
+    [Tooltip("A frame slower than this multiple of the recent median frame time counts as a hitch.")]
+    public float perfHitchMedianFactor = PerfHitchDetector.DefaultMedianFactor;
 
     /// <summary>
     /// Returns true if the game should behave normally (Save/Load/Unload).

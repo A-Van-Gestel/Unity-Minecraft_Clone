@@ -15,6 +15,8 @@ namespace Diagnostics
     /// </summary>
     public sealed class PerfFrameRing : IDisposable
     {
+        private const float BYTES_PER_KILOBYTE = 1024f;
+
         private readonly int _capacity;
         private readonly int _slotCount;
 
@@ -126,23 +128,101 @@ namespace Diagnostics
         /// <summary>Copies the held frames' wall milliseconds, newest first.</summary>
         /// <param name="destination">Receives up to its length of values.</param>
         /// <returns>The number of values copied.</returns>
-        public int CopyWallMs(float[] destination)
-        {
-            int n = Math.Min(_count, destination.Length);
-            for (int age = 0; age < n; age++)
-                destination[age] = _frames[IndexOfAge(age)].WallMs;
-            return n;
-        }
+        public int CopyWallMs(float[] destination) => CopyField(PerfFrameField.WallMs, destination);
 
         /// <summary>Copies the held frames' CPU milliseconds, newest first.</summary>
         /// <param name="destination">Receives up to its length of values.</param>
         /// <returns>The number of values copied.</returns>
-        public int CopyCpuMs(float[] destination)
+        public int CopyCpuMs(float[] destination) => CopyField(PerfFrameField.CpuMs, destination);
+
+        /// <summary>
+        /// Copies one field of the held frames, newest first, skipping frames for which the field has no value:
+        /// allocation outside <see cref="PerfGcState.Measured"/> frames, and frame timings that never arrived.
+        /// </summary>
+        /// <param name="field">The field.</param>
+        /// <param name="destination">Receives up to its length of values.</param>
+        /// <returns>The number of values copied.</returns>
+        public int CopyField(PerfFrameField field, float[] destination)
         {
-            int n = Math.Min(_count, destination.Length);
-            for (int age = 0; age < n; age++)
-                destination[age] = _frames[IndexOfAge(age)].CpuMs;
+            int n = 0;
+            for (int age = 0; age < _count && n < destination.Length; age++)
+            {
+                if (TryReadField(_frames[IndexOfAge(age)], field, out float value))
+                    destination[n++] = value;
+            }
+
             return n;
+        }
+
+        /// <summary>Total garbage collections recorded across the held frames.</summary>
+        /// <returns>The sum of <see cref="PerfFrame.GcCollections"/>.</returns>
+        public int SumGcCollections()
+        {
+            int sum = 0;
+            for (int age = 0; age < _count; age++)
+                sum += _frames[IndexOfAge(age)].GcCollections;
+            return sum;
+        }
+
+        /// <summary>
+        /// Writes a late-arriving frame timing into the held row it describes: the row whose interval
+        /// [previous row's <see cref="PerfFrame.EndTimestamp"/>, own end) contains the frame's start. The oldest
+        /// held row has no known start, so a timing that predates the second-oldest row's interval is not matched.
+        /// </summary>
+        /// <param name="frameStartTimestamp">The timing's <c>frameStartTimestamp</c>, on the <see cref="PerfFrame.EndTimestamp"/> clock.</param>
+        /// <param name="gpuMs">GPU milliseconds.</param>
+        /// <param name="renderThreadMs">Render-thread milliseconds.</param>
+        /// <param name="presentWaitMs">Present-wait milliseconds.</param>
+        /// <param name="maxAge">Oldest row age searched; timings arrive a few frames late, so the search stays short.</param>
+        /// <returns>True when a row matched and was written.</returns>
+        public bool TryBackfillFrameTiming(long frameStartTimestamp, float gpuMs, float renderThreadMs, float presentWaitMs,
+            int maxAge)
+        {
+            int lastAge = Math.Min(maxAge, _count - 2);
+            for (int age = 0; age <= lastAge; age++)
+            {
+                int index = IndexOfAge(age);
+                PerfFrame row = _frames[index];
+                if (frameStartTimestamp >= row.EndTimestamp) return false;
+
+                long rowStart = _frames[IndexOfAge(age + 1)].EndTimestamp;
+                if (frameStartTimestamp < rowStart) continue;
+
+                row.GpuMs = gpuMs;
+                row.RenderThreadMs = renderThreadMs;
+                row.PresentWaitMs = presentWaitMs;
+                _frames[index] = row;
+                return true;
+            }
+
+            return false;
+        }
+
+        /// <summary>Copies the newest held frames into a buffer, oldest first.</summary>
+        /// <param name="destination">The receiving buffer.</param>
+        /// <param name="destinationStart">Index of the first row written.</param>
+        /// <param name="count">Frames to copy; at most <see cref="Count"/>.</param>
+        public void CopyNewestFrames(NativeArray<PerfFrame> destination, int destinationStart, int count)
+        {
+            if ((uint)count > (uint)_count) throw new ArgumentOutOfRangeException(nameof(count));
+
+            for (int i = 0; i < count; i++)
+                destination[destinationStart + i] = _frames[IndexOfAge(count - 1 - i)];
+        }
+
+        /// <summary>Copies the slot columns of the newest held frames into a buffer, oldest row first.</summary>
+        /// <param name="destination">The receiving buffer, one row of slot-count floats per frame.</param>
+        /// <param name="destinationStart">Index of the first float written.</param>
+        /// <param name="count">Frames to copy; at most <see cref="SlotFrameCount"/>.</param>
+        public void CopyNewestSlotRows(NativeArray<float> destination, int destinationStart, int count)
+        {
+            if ((uint)count > (uint)_slotFrameCount) throw new ArgumentOutOfRangeException(nameof(count));
+
+            for (int i = 0; i < count; i++)
+            {
+                NativeArray<float>.Copy(_slotMs, IndexOfAge(count - 1 - i) * _slotCount,
+                    destination, destinationStart + i * _slotCount, _slotCount);
+            }
         }
 
         /// <summary>Copies one slot's milliseconds for the frames that carry slot columns, newest first.</summary>
@@ -174,6 +254,33 @@ namespace Diagnostics
         {
             int index = _head - 1 - age;
             return index < 0 ? index + _capacity : index;
+        }
+
+        private static bool TryReadField(in PerfFrame frame, PerfFrameField field, out float value)
+        {
+            switch (field)
+            {
+                case PerfFrameField.WallMs:
+                    value = frame.WallMs;
+                    return true;
+                case PerfFrameField.CpuMs:
+                    value = frame.CpuMs;
+                    return true;
+                case PerfFrameField.GcAllocKb:
+                    value = frame.GcAllocBytes / BYTES_PER_KILOBYTE;
+                    return frame.GcState == PerfGcState.Measured;
+                case PerfFrameField.GpuMs:
+                    value = frame.GpuMs;
+                    return !float.IsNaN(value);
+                case PerfFrameField.RenderThreadMs:
+                    value = frame.RenderThreadMs;
+                    return !float.IsNaN(value);
+                case PerfFrameField.PresentWaitMs:
+                    value = frame.PresentWaitMs;
+                    return !float.IsNaN(value);
+                default:
+                    throw new ArgumentOutOfRangeException(nameof(field));
+            }
         }
     }
 }

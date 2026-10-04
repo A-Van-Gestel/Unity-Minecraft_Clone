@@ -9,8 +9,8 @@ namespace Editor.Benchmarking
 {
     /// <summary>
     /// Editor micro-benchmark of <see cref="PerfStore"/>'s per-frame overhead: a probe pair (slot-less and
-    /// slotted) with slots inactive and active, and <see cref="PerfStore.CommitFrame"/> with and without slot
-    /// columns. Reports nanoseconds per call, and the GC collections and heap growth over the timed calls — an
+    /// slotted) with slots inactive and active, <see cref="PerfStore.CommitFrame"/> at Basic, at Frame (hitch
+    /// detector) and with slot columns, and <see cref="PerfStore.SampleFrameTiming"/>. Reports nanoseconds per call, and the GC collections and heap growth over the timed calls — an
     /// allocation-free path shows neither. The Editor compiles in the Profiler, so the slotted active pair
     /// includes a <c>ProfilerMarker</c> begin/end that Master players compile out — an upper bound for them.
     /// Resets the store before and after, so it discards the session's history ring.
@@ -23,18 +23,27 @@ namespace Editor.Benchmarking
         private const double NANOSECONDS_PER_MILLISECOND = 1e6;
         private const long BYTES_PER_KILOBYTE = 1024;
 
+        /// <summary>A short, constant frame: the steady state, in which the hitch detector never opens a window.</summary>
+        private const long STEADY_FRAME_TICKS = 1;
+
         /// <summary>Runs every measurement and logs one line per case.</summary>
         [MenuItem("Minecraft Clone/Benchmarks/PerfStore Overhead")]
         public static void RunBenchmark()
         {
             PerfTier tier = PerfStore.Tier;
             bool forced = PerfStore.ForceSlots;
+            float hitchMinMs = PerfStore.HitchMinMs;
+            float hitchMedianFactor = PerfStore.HitchMedianFactor;
             try
             {
                 ResetStore();
                 Report("Slot-less pair, inactive (Basic)", MeasureSlotlessPair);
                 Report("Slotted pair, inactive (Basic)", MeasureSlottedPair);
                 Report("CommitFrame, Basic (no slot columns)", MeasureCommit);
+
+                PerfStore.SetTier(PerfTier.Frame);
+                Report("CommitFrame, Frame (hitch detector)", MeasureCommit);
+                Report("SampleFrameTiming, Frame", MeasureSampleFrameTiming);
 
                 PerfStore.SetTier(PerfTier.Systems);
                 Report("Slot-less pair, active (Systems)", MeasureSlotlessPair);
@@ -44,6 +53,7 @@ namespace Editor.Benchmarking
             finally
             {
                 ResetStore();
+                PerfStore.SetHitchThresholds(hitchMinMs, hitchMedianFactor);
                 PerfStore.SetTier(tier);
                 PerfStore.ForceSlots = forced;
             }
@@ -64,7 +74,13 @@ namespace Editor.Benchmarking
         private static void MeasureCommit(int iterations)
         {
             for (int i = 0; i < iterations; i++)
-                PerfStore.CommitFrame(i, i, i);
+                PerfStore.CommitFrame(new PerfFrameReadings { WallTicks = STEADY_FRAME_TICKS, CpuTicks = STEADY_FRAME_TICKS, FrameIndex = i });
+        }
+
+        private static void MeasureSampleFrameTiming(int iterations)
+        {
+            for (int i = 0; i < iterations; i++)
+                PerfStore.SampleFrameTiming();
         }
 
         private static void Report(string label, Action<int> body)

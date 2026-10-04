@@ -14,8 +14,9 @@ not re-checked** and still carry their original 2.0 evidence.
 > are historical rationale, not current-state claims.
 
 > **Planned successor layer:** [`../Design/PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md`](../Design/PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md)
-> (`PM-*`, proposed) keeps this always-on monitor as-is and adds opt-in per-frame, per-system, GC/GPU and
-> logging tiers on top of it. Nothing in this document changes until a PM phase ships.
+> (`PM-*`, in progress) keeps this always-on monitor as-is and adds opt-in per-frame, per-system, GC/GPU and
+> logging tiers on top of it. Since PM-1/PM-2 the monitor also hands each frame's raw wall/CPU ticks, heap size and
+> collection count to `Diagnostics.PerfStore` at the end of its frame coroutine; its own metrics below are unchanged.
 
 ## 1. Executive Summary
 
