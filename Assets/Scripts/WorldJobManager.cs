@@ -100,6 +100,18 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     /// </summary>
     public bool HasActiveJobs => GenerationJobs.Count > 0 || MeshJobs.Count > 0 || LightingJobs.Count > 0;
 
+    /// <summary>Job buffers the chunk job array pool has allocated because none was retained (its misses).</summary>
+    public long JobArraysAllocated => _jobArrayPool.TotalAllocated;
+
+    /// <summary>Job buffers retained by the chunk job array pool, ready to rent.</summary>
+    public int JobArraysPooled => _jobArrayPool.PooledCount;
+
+    /// <summary>Mesh outputs the mesh output pool has allocated because none was retained (its misses).</summary>
+    public long MeshOutputsAllocated => _meshOutputPool.TotalAllocated;
+
+    /// <summary>Mesh outputs retained by the mesh output pool, ready to rent.</summary>
+    public int MeshOutputsPooled => _meshOutputPool.PooledCount;
+
     #endregion
 
     #region Lighting Diagnostics

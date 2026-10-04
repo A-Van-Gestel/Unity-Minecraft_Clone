@@ -45,9 +45,16 @@ namespace Helpers
         private readonly Stack<NativeArray<ushort>> _paddedLight = new Stack<NativeArray<ushort>>();
 
         private bool _isDisposed;
+        private long _totalAllocated;
 
         /// <summary>Default retention cap reproducing the historical desktop constant.</summary>
         public const int DefaultMaxRetainedPerType = 512;
+
+        /// <summary>Buffers allocated because no retained buffer of the requested type was available (pool misses).</summary>
+        public long TotalAllocated => _totalAllocated;
+
+        /// <summary>Buffers of every type retained and ready to rent.</summary>
+        public int PooledCount => _voxelMaps.Count + _lightMaps.Count + _paddedVoxels.Count + _paddedLight.Count;
 
         /// <summary>
         /// Creates a pool with the given per-type retention cap.
@@ -70,9 +77,10 @@ namespace Helpers
         /// <returns>A Persistent-allocated NativeArray of length <see cref="BufferLength"/>.</returns>
         public NativeArray<uint> RentVoxelMap()
         {
-            return _voxelMaps.Count > 0
-                ? _voxelMaps.Pop()
-                : new NativeArray<uint>(BufferLength, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            if (_voxelMaps.Count > 0) return _voxelMaps.Pop();
+
+            _totalAllocated++;
+            return new NativeArray<uint>(BufferLength, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
         }
 
         /// <summary>
@@ -82,9 +90,10 @@ namespace Helpers
         /// <returns>A Persistent-allocated NativeArray of length <see cref="BufferLength"/>.</returns>
         public NativeArray<ushort> RentLightMap()
         {
-            return _lightMaps.Count > 0
-                ? _lightMaps.Pop()
-                : new NativeArray<ushort>(BufferLength, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            if (_lightMaps.Count > 0) return _lightMaps.Pop();
+
+            _totalAllocated++;
+            return new NativeArray<ushort>(BufferLength, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
         }
 
         /// <summary>
@@ -95,9 +104,10 @@ namespace Helpers
         /// <returns>A Persistent-allocated NativeArray of length <see cref="PaddedBufferLength"/>.</returns>
         public NativeArray<uint> RentPaddedVoxels()
         {
-            return _paddedVoxels.Count > 0
-                ? _paddedVoxels.Pop()
-                : new NativeArray<uint>(PaddedBufferLength, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            if (_paddedVoxels.Count > 0) return _paddedVoxels.Pop();
+
+            _totalAllocated++;
+            return new NativeArray<uint>(PaddedBufferLength, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
         }
 
         /// <summary>
@@ -108,9 +118,10 @@ namespace Helpers
         /// <returns>A Persistent-allocated NativeArray of length <see cref="PaddedBufferLength"/>.</returns>
         public NativeArray<ushort> RentPaddedLight()
         {
-            return _paddedLight.Count > 0
-                ? _paddedLight.Pop()
-                : new NativeArray<ushort>(PaddedBufferLength, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            if (_paddedLight.Count > 0) return _paddedLight.Pop();
+
+            _totalAllocated++;
+            return new NativeArray<ushort>(PaddedBufferLength, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
         }
 
         /// <summary>

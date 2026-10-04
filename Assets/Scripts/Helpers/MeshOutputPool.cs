@@ -35,6 +35,13 @@ namespace Helpers
         private readonly Stack<MeshDataJobOutput> _pool = new Stack<MeshDataJobOutput>();
 
         private bool _isDisposed;
+        private long _totalAllocated;
+
+        /// <summary>Outputs allocated because none was retained (pool misses).</summary>
+        public long TotalAllocated => _totalAllocated;
+
+        /// <summary>Outputs retained and ready to rent.</summary>
+        public int PooledCount => _pool.Count;
 
         /// <summary>
         /// Rents a pooled <see cref="MeshDataJobOutput"/> — either a previously returned (cleared,
@@ -46,6 +53,8 @@ namespace Helpers
         {
             if (_pool.Count > 0)
                 return _pool.Pop();
+
+            _totalAllocated++;
 
             // Persistent: pooled instances are long-lived (rented and returned across many frames).
             MeshDataJobOutput output = new MeshDataJobOutput(Allocator.Persistent)
