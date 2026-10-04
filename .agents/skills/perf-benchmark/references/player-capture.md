@@ -106,5 +106,7 @@ if ($p.WaitForExit(900000)) { "exit $($p.ExitCode)" } else { Stop-Process -Id $p
   through `unity command eval`.
 - A build rewrites `Assets/Resources/Data/BuildStamp.asset` and may add `m_RuntimeSettings` entries to
   `Assets/UniversalRenderPipelineGlobalSettings.asset`: `git restore` both unless the build is a release.
+- It also bakes today's date into `PlayerSettings.bundleVersion` (`ProjectSettings/ProjectSettings.asset`, via
+  `GameVersionManager`). Keep that one: it lands alone, as `Updated: Version to "<YYYY-MM-DD> - PreAlpha"`.
 - Delete the throwaway build folder. The `[IL2CPP]` suffix is a wildcard to PowerShell path cmdlets — use
   `-LiteralPath` there, or bash.
