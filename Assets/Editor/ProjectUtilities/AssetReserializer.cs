@@ -17,19 +17,17 @@ namespace Editor.ProjectUtilities
         /// <summary>
         /// Forcibly loads and re-serializes all assets, flushing any outstanding data changes to disk.
         /// This is useful when changes in serialize field names or structs occur, and assets need to be updated.
+        /// <para>
+        /// Runs without a confirmation dialog so a command-line call (<c>unity command menu … --detach</c>) cannot block on
+        /// it; the work only rewrites assets in their current format. Asset imports it triggers can end in a domain reload.
+        /// </para>
         /// </summary>
         [MenuItem("Tools/Voxel Engine/Force Reserialize All Assets")]
         public static void ForceReserializeAllAssets()
         {
-            if (EditorUtility.DisplayDialog("Force Reserialize Assets",
-                    "This will forcibly load and re-serialize all assets in the project.\n\n" +
-                    "This might take a while depending on the project size. Do you want to continue?",
-                    "Yes, Reserialize", "Cancel"))
-            {
-                Debug.Log("Starting to force reserialize all assets...");
-                AssetDatabase.ForceReserializeAssets();
-                Debug.Log("Finished reserializing all assets.");
-            }
+            Debug.Log("Starting to force reserialize all assets...");
+            AssetDatabase.ForceReserializeAssets();
+            Debug.Log("Finished reserializing all assets.");
         }
 
         /// <summary>
