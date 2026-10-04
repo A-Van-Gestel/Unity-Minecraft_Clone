@@ -1,6 +1,6 @@
 # Performance Improvements Report
 
-**Version:** 1.10  
+**Version:** 1.11  
 **Date:** 2026-10-02  
 **Status:** **Open backlog.** 31 items open, 30 complete, 1 deferred (⏸️), plus 10 not-yet-audited systems
 listed as `AC-*` audit tasks (§ Audit coverage gaps). Completed items keep their ✅
@@ -398,7 +398,7 @@ date and a link — **the row stays**, like every other row here, so the ID keep
 | **AC-7** | **Contact shadows + foliage sway** | `MeshGenerationJob.cs:874–922` (sub-quads), the block shaders' sway path | Sub-quad tessellation costs 1.4–1.7× world vertices at N = 2 (`SILHOUETTE_CONTACT_SHADOWS.md` §8) — the shared-vertex fix is already filed as roadmap `ES-25` item 4. The sway vertex-shader cost has never been measured | Vertex count/frame with contact shadows on vs off; vertex-shader GPU ms with sway | `SS-3` ships default-OFF; no per-voxel sway de-sync (`FL-*`) | — |
 | **AC-8** | **Asset and GPU memory** | URP asset, render targets, block atlas, audio clips, shader variants, section meshes | Render targets: HDR 32-bit, MSAA 2×, plus opaque texture and depth copy (`VoxelEngine-URP-Asset.asset:22–28`); 416 Decompress On Load one-shot clips (19.3 MB PCM once all have played, § AC-1); per-resident-chunk mesh memory at 32 B/vertex — none of it ever measured as a budget | A Memory Profiler snapshot (`com.unity.memoryprofiler` 1.1.12 is installed) at vd 10 and vd 32, broken down by category | `AU-4` font atlases and `AU-5` music quality are **declined** — do not re-propose | — |
 | **AC-9** | **Quit / save path** | `World.cs` `SaveAllModifiedChunks` (`:5653`, called on quit at `:726`), `ChunkStorageManager` | `ChunkData.Populate` marks every generated chunk modified (`ChunkData.cs:395`), so quit saves every generated chunk still resident or pending (5 333 observed at one quit) through the synchronous flush | Quit latency against session length and view distance | Depends on roadmap `ES-10`'s open decision (keep saving unmodified terrain as a cache, or not); CP-6's durability contract must hold | Static pass ✅ 2026-10-02 (§ AC-9 below) — found suspected data-loss bug `SERIALIZATION_BUGS.md` §15; measurement pending |
-| **AC-10** | **Cold UI, tooling and minor per-frame services** | Command console, toast notifications, `Input/TouchControls.cs` (598), `UI/SettingsUIGenerator.cs`, `UI/WorldSelectMenu.cs`, `DebugScreen.cs`; `BiomeTracker.Tick`, `AdvanceWorldTime`, `UpdateTeleportHold` | Event-driven or O(1) per frame by reading; `DebugScreen`'s own allocation leftovers are already `DT-4`; `ChunkLoadAnimation` is off by default | Only if PM-3's slots show any of them in a frame | — | — |
+| **AC-10** | **Cold UI, tooling and minor per-frame services** | Command console, toast notifications, `Input/TouchControls.cs` (598), `UI/SettingsUIGenerator.cs`, `UI/WorldSelectMenu.cs`, `DebugScreen.cs`; `BiomeTracker.Tick`, `AdvanceWorldTime`, `UpdateTeleportHold` | Event-driven or O(1) per frame by reading; `DebugScreen`'s own allocation leftovers are already `DT-4`; `ChunkLoadAnimation` is off by default | Only if PM-3's slots show any of them in a frame | — | Partly measured 2026-10-04 (PM-3 slots in the Editor smoke and Master benchmark runs described in [`PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md`](PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md) §7.4): `BiomeTracker.Tick` worst ≤ 0.01 ms; `AdvanceWorldTime` (`WorldTime`) worst 0.15 ms in the Editor, 0.03 ms in Master; `UpdateTeleportHold` 0 ms with no hold active; the in-world UI scripts (`Ui`) worst ≤ 0.01 ms with the console closed — nothing to file. Not yet measured: `DebugScreen` (`DebugHud` read 0 because the HUD was closed in every run), the console while open, and the main-menu UI (`SettingsUIGenerator`, `WorldSelectMenu`), which the World-scene monitor does not record |
 
 ### AC-1 — Audio engine: static pass (2026-10-02)
 
@@ -1492,6 +1492,9 @@ inherit a one-click `Validate All` that also flags stale-code runs automatically
 project's Document History convention, so they record what the commits changed rather than
 contemporaneous notes.*
 
+* **v1.11** - **`AC-10` partly measured** (2026-10-04): PM-3's slots put `BiomeTracker.Tick`, `AdvanceWorldTime`,
+  `UpdateTeleportHold` and the in-world UI scripts at ≤ 0.15 ms worst — nothing to file; `DebugScreen`, the open console and
+  the main-menu UI remain unmeasured.
 * **v1.10** - **`P-1` re-scope note corrected** (2026-10-03): the per-job neighbor-map fills are still
   main-thread at schedule time, so P-1's slab copies would also cut main-thread cost. Found by the engine-scaling
   sweep (`ENGINE_SCALING_PERFORMANCE_ROADMAP.md` §8 item 7).
