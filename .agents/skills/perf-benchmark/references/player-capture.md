@@ -65,7 +65,9 @@ if ($p.WaitForExit(900000)) { "exit $($p.ExitCode)" } else { Stop-Process -Id $p
   `/perf stats` + `/perf hitches` readouts over the run's last 2 048 frames. Pick the depth with
   `-mc-set perfMonitorTier=Frame` (adds GPU/render-thread/present-wait time and hitch records) or `=Systems` (adds
   per-slot times and each hitch's top three slots); the default `Basic` gives wall/CPU and GC only. Until the
-  benchmark report itself reads the store, this block is the only place a player exposes it.
+  benchmark report itself reads the store, this block is the only place a player exposes it. The next launch
+  overwrites Player.log, so copy it after each run; `python Tools/Python/tabulate_tick_hitches.py <logs…>` turns a
+  Systems run's `Tick`-led hitch records into one table of the tick's parts and counts.
 
 ## 3b. Flow B — Profiler capture of one phase
 
