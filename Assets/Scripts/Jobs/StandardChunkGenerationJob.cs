@@ -200,6 +200,9 @@ namespace Jobs
         /// </summary>
         public NativeQueue<StructureSpawnMarker>.ParallelWriter StructureSpawns;
 
+        /// <summary>Accumulates each column's execute time for the performance monitor; untimed by default.</summary>
+        public JobBusyTimer Timer;
+
         #endregion
 
         /// <summary>
@@ -208,6 +211,7 @@ namespace Jobs
         /// <param name="index">The 1D flattened index representing the X and Z coordinates (0 to 255).</param>
         public void Execute(int index)
         {
+            long busyStart = Timer.Begin();
             int x = index % VoxelData.ChunkWidth;
             int z = index / VoxelData.ChunkWidth;
 
@@ -609,6 +613,8 @@ namespace Jobs
                 int heightmapIndex = x + VoxelData.ChunkWidth * z;
                 OutputHeightMap[heightmapIndex] = 0;
             }
+
+            Timer.End(busyStart);
         }
     }
 }

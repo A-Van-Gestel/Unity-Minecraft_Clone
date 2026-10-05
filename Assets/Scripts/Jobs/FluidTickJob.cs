@@ -3,6 +3,7 @@ using System.Runtime.InteropServices;
 using Data;
 using Helpers;
 using Jobs.BurstData;
+using Jobs.Data;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
@@ -121,12 +122,17 @@ namespace Jobs
         /// </summary>
         public NativeList<int> ModsPerSource;
 
+        /// <summary>Accumulates this job's execute time for the performance monitor; untimed by default.</summary>
+        public JobBusyTimer Timer;
+
         /// <summary>32-bit golden-ratio constant mixing the per-tick salt into the voxel-position hash (mirror of BlockBehavior).</summary>
         private const uint TICK_SALT_HASH_MULTIPLIER = 0x9E3779B1u;
 
         /// <inheritdoc />
         public void Execute()
         {
+            long busyStart = Timer.Begin();
+
             // TG-4 Phase 4b: gather center + 8 neighbors into the halo-padded volume on this worker (the LI-1/P-2-Layer-1
             // pattern), so border voxels' cross-chunk reads resolve from one contiguous buffer. For the interior-only
             // path the neighbors are empty (sentinel halo) and the center region is identical to the old snapshot, so
@@ -177,6 +183,7 @@ namespace Jobs
 
             searchQueue.Dispose();
             searchVisited.Dispose();
+            Timer.End(busyStart);
         }
 
         // ─────────────────────────────────────────────────────────────────────────────────────────────

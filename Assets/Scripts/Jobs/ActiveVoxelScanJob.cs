@@ -1,6 +1,7 @@
 using Data;
 using Helpers;
 using Jobs.BurstData;
+using Jobs.Data;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
@@ -41,9 +42,13 @@ namespace Jobs
         /// <summary>Output list of packed local indices (0..ChunkVolume-1) for active voxels.</summary>
         public NativeList<int> ActiveVoxels;
 
+        /// <summary>Accumulates this job's execute time for the performance monitor; untimed by default.</summary>
+        public JobBusyTimer Timer;
+
         /// <inheritdoc />
         public void Execute()
         {
+            long busyStart = Timer.Begin();
             for (int i = 0; i < VoxelMap.Length; i++)
             {
                 ushort id = BurstVoxelDataBitMapping.GetId(VoxelMap[i]);
@@ -56,6 +61,8 @@ namespace Jobs
                     ActiveVoxels.Add(i);
                 }
             }
+
+            Timer.End(busyStart);
         }
     }
 }

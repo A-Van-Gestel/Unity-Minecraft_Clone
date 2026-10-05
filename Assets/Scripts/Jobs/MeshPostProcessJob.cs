@@ -1,4 +1,5 @@
 using Data;
+using Jobs.Data;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
@@ -34,8 +35,13 @@ namespace Jobs
 
         public int SectionHeight;
 
+        /// <summary>Accumulates this job's execute time for the performance monitor; untimed by default.</summary>
+        public JobBusyTimer Timer;
+
         public void Execute()
         {
+            long busyStart = Timer.Begin();
+
             // Build interleaved Normal + LightData for GPU stream 3 upload.
             // Done here (Burst-compiled) instead of on the main thread.
             // MR-2: the full-precision working normal is packed to SNorm8×4 here, so the writers
@@ -77,6 +83,8 @@ namespace Jobs
                 AdjustIndices(TransparentTris, s.TransparentTriStartIndex, s.TransparentTriCount, offset);
                 AdjustIndices(FluidTris, s.FluidTriStartIndex, s.FluidTriCount, offset);
             }
+
+            Timer.End(busyStart);
         }
 
         private static void AdjustIndices(NativeList<int> indices, int start, int count, int offset)

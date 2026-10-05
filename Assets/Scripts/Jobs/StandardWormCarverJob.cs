@@ -81,6 +81,9 @@ namespace Jobs
         /// </summary>
         public NativeList<WormTelemetryEntry> Telemetry;
 
+        /// <summary>Accumulates this job's execute time for the performance monitor; untimed by default.</summary>
+        public JobBusyTimer Timer;
+
         private const int TRUNK_SEED_SALT = 0x5472756E; // "Trun" as int — decorrelates trunk RNG from local worm RNG
         private const float PITCH_STEER_HORIZON = 16f; // virtual horizontal lookahead (blocks) for atan2-based pitch steering
         private const int RADIUS_NOISE_SEED_SALT = 0x52614E6F; // "RaNo" as int — decorrelates radius noise from other noise sources
@@ -132,6 +135,13 @@ namespace Jobs
         }
 
         public void Execute()
+        {
+            long busyStart = Timer.Begin();
+            ExecuteCore();
+            Timer.End(busyStart);
+        }
+
+        private void ExecuteCore()
         {
             if (!FeatureFlags.EnableWormCarver) return;
 

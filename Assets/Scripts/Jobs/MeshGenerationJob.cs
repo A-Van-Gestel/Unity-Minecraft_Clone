@@ -5,6 +5,7 @@ using Data;
 using Data.Enums;
 using Helpers;
 using Jobs.BurstData;
+using Jobs.Data;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
@@ -129,6 +130,9 @@ namespace Jobs
         // --- OUTPUT ---
         public MeshDataJobOutput Output;
 
+        /// <summary>Accumulates this job's execute time for the performance monitor; untimed by default.</summary>
+        public JobBusyTimer Timer;
+
         // --- INTERNAL TRACKING ---
         private int _vertexIndex;
         private int _clipMaxY;
@@ -148,6 +152,13 @@ namespace Jobs
         /// Executes the mesh generation logic across all sections of the chunk, iterating through voxels to build visual face data.
         /// </summary>
         public void Execute()
+        {
+            long busyStart = Timer.Begin();
+            ExecuteCore();
+            Timer.End(busyStart);
+        }
+
+        private void ExecuteCore()
         {
             _vertexIndex = 0;
 

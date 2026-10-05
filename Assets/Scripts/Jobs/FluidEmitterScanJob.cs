@@ -59,9 +59,13 @@ namespace Jobs
         /// </summary>
         public NativeArray<FluidEmitterBin> Bins;
 
+        /// <summary>Accumulates this job's execute time for the performance monitor; untimed by default.</summary>
+        public JobBusyTimer Timer;
+
         /// <inheritdoc />
         public void Execute()
         {
+            long busyStart = Timer.Begin();
             for (int i = 0; i < Bins.Length; i++) Bins[i] = default;
 
             for (int s = 0; s < SectionCount; s++)
@@ -118,6 +122,8 @@ namespace Jobs
                     Bins[binIndex] = cell;
                 }
             }
+
+            Timer.End(busyStart);
         }
     }
 }

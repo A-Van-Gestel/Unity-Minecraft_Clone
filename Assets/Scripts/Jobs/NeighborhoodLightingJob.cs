@@ -190,6 +190,9 @@ namespace Jobs
         // A flag to indicate if the lighting in the central chunk has stabilized.
         public NativeArray<bool> IsStable;
 
+        /// <summary>Accumulates this job's execute time for the performance monitor; untimed by default.</summary>
+        public JobBusyTimer Timer;
+
         #endregion
 
         /// <summary>
@@ -304,6 +307,8 @@ namespace Jobs
         /// </summary>
         public void Execute()
         {
+            long busyStart = Timer.Begin();
+
             // --- P-2 LAYER 1: WORKER-THREAD GATHER ---
             // Gather the center + 8 neighbor snapshot maps into the halo-padded volumes BEFORE any BFS
             // work. This used to run on the main thread before scheduling (LI-1); moving it here lands the
@@ -520,6 +525,7 @@ namespace Jobs
             blocklightPlacementQueue.Dispose();
             emittedSkyRemovals.Dispose();
             emittedBlockRemovals.Dispose();
+            Timer.End(busyStart);
         }
 
         /// <summary>

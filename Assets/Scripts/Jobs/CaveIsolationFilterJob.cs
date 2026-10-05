@@ -1,6 +1,7 @@
 using Data;
 using Helpers;
 using Jobs.BurstData;
+using Jobs.Data;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
@@ -39,8 +40,12 @@ namespace Jobs
         [ReadOnly]
         public NativeArray<BlockTypeJobData> BlockTypes;
 
+        /// <summary>Accumulates this job's execute time for the performance monitor; untimed by default.</summary>
+        public JobBusyTimer Timer;
+
         public void Execute()
         {
+            long busyStart = Timer.Begin();
             NativeArray<byte> visited = new NativeArray<byte>(TOTAL_VOXELS, Allocator.Temp);
             NativeList<int> queue = new NativeList<int>(256, Allocator.Temp);
             NativeList<int> region = new NativeList<int>(256, Allocator.Temp);
@@ -95,6 +100,7 @@ namespace Jobs
             visited.Dispose();
             queue.Dispose();
             region.Dispose();
+            Timer.End(busyStart);
         }
 
         private void TryEnqueue(int x, int y, int z, ref NativeList<int> queue, ref NativeArray<byte> visited)
