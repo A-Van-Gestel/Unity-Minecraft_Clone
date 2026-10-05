@@ -368,9 +368,16 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     private readonly List<int> _parallelFluidTimingRecords = new List<int>();
     private readonly List<long> _parallelFluidScheduleTimestamps = new List<long>();
 
+    // The behavior tick's main-thread parts, accumulated while the monitor's slots record; sampled into the Tick* counters.
+    private PerfTickTotals _tickTotals;
+
     /// <summary>Lazily-created pool of per-chunk fluid runners for the parallel tick (one in-flight per scheduled chunk). Cleared in <c>OnDestroy</c>.</summary>
     private DynamicPool<FluidBurstTicker> FluidTickerPool =>
         _fluidTickerPool ??= new DynamicPool<FluidBurstTicker>(() => new FluidBurstTicker(), t => t.Dispose());
+
+    /// <summary>Fluid tickers the pool has created: those held, those rented, and those it destroyed.</summary>
+    private long FluidTickersCreated =>
+        _fluidTickerPool == null ? 0L : _fluidTickerPool.PooledCount + _fluidTickerPool.ActiveCount + _fluidTickerPool.TotalDestroyed;
 
     // --- Chunk Border Visualization ---
     private readonly Dictionary<ChunkCoord, GameObject> _chunkBorders = new Dictionary<ChunkCoord, GameObject>();
@@ -2487,9 +2494,11 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         List<Chunk> snapshot = ListPool<Chunk>.Get();
         try
         {
+            long listStart = PerfStore.Begin();
             foreach (ChunkCoord chunkCoord in _activeChunks)
                 if (_chunkMap.TryGetValue(chunkCoord, out Chunk chunk))
                     snapshot.Add(chunk);
+            PerfTickTotals.Lap(ref _tickTotals.ListTicks, listStart);
 
             TickChunksParallel(snapshot);
         }
@@ -2537,6 +2546,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
 
                 // Record the acquired ticker BEFORE scheduling so the finally always returns it (and completes its
                 // job) even if Schedule throws — the chunk/ticker lists stay paired for the drain cursor.
+                long lap = PerfStore.Begin();
                 FluidBurstTicker ticker = FluidTickerPool.Get();
                 _parallelFluidChunks.Add(chunk);
                 _parallelFluidTickers.Add(ticker);
@@ -2545,18 +2555,29 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                 int timingRecord = JobManager != null ? JobManager.BeginJobTiming(out timer, out scheduleTimestamp) : 0;
                 _parallelFluidTimingRecords.Add(timingRecord);
                 _parallelFluidScheduleTimestamps.Add(scheduleTimestamp);
+                lap = PerfTickTotals.Lap(ref _tickTotals.ScheduleTicks, lap);
+
                 // Tick ALL fluids (interior AND border) in-job, border voxels reading the per-tick Y-band neighbor halo.
-                JobHandle handle = ticker.ScheduleFluids(chunk.ChunkData, _tickCounter, JobDataManager.BlockTypesJobData, worldData,
-                    timer);
+                bool prepared = ticker.TryPrepare(chunk.ChunkData, worldData);
+                lap = PerfTickTotals.Lap(ref _tickTotals.PrepareTicks, lap);
+                JobHandle handle = prepared ? ticker.Schedule(chunk.ChunkData, _tickCounter, JobDataManager.BlockTypesJobData, timer) : default;
                 _parallelFluidHandles.Add(handle);
+                if (PerfTickTotals.Lap(ref _tickTotals.ScheduleTicks, lap) != 0L && prepared)
+                {
+                    _tickTotals.FluidChunks++;
+                    _tickTotals.SnapshotMaps += ticker.SnapshotMaps;
+                }
             }
 
             // Kick the scheduled jobs onto worker threads so they actually run in parallel before we block on them.
+            long phaseLap = PerfStore.Begin();
             JobHandle.ScheduleBatchedJobs();
+            phaseLap = PerfTickTotals.Lap(ref _tickTotals.ScheduleTicks, phaseLap);
 
             // Phase 2: complete all scheduled jobs.
             for (int i = 0; i < _parallelFluidHandles.Count; i++)
                 _parallelFluidHandles[i].Complete();
+            PerfTickTotals.Lap(ref _tickTotals.WaitTicks, phaseLap);
 
             // Phase 3: drain serially in the same snapshot order. A cursor pairs each fluid chunk with its ticker
             // (Phase 1 added chunks in this same order, so the cursor stays aligned without a lookup).
@@ -2575,7 +2596,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                     fluidCursor++;
                 }
 
-                chunk.DrainTick(ticker);
+                chunk.DrainTick(ticker, ref _tickTotals);
                 if (fluidJob >= 0) EndFluidJobTiming(fluidJob);
             }
         }
@@ -3148,6 +3169,23 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         PerfStore.SampleTotal(PerfCounter.DiskSaveBytes, StorageIoStats.SaveBytes);
         PerfStore.SampleTotal(PerfCounter.IoQueueWaitUs, StorageIoStats.QueueWaitMicros);
         PerfStore.SampleTotal(PerfCounter.IoBackgroundOps, StorageIoStats.BackgroundOps);
+
+        SampleTickCounters();
+    }
+
+    /// <summary>Samples the behavior tick's running totals into the <c>Tick*</c> counters and the fluid ticker pool's misses.</summary>
+    private void SampleTickCounters()
+    {
+        PerfStore.SampleTotal(PerfCounter.TickListUs, PerfStore.TicksToMicros(_tickTotals.ListTicks));
+        PerfStore.SampleTotal(PerfCounter.TickPrepareUs, PerfStore.TicksToMicros(_tickTotals.PrepareTicks));
+        PerfStore.SampleTotal(PerfCounter.TickScheduleUs, PerfStore.TicksToMicros(_tickTotals.ScheduleTicks));
+        PerfStore.SampleTotal(PerfCounter.TickWaitUs, PerfStore.TicksToMicros(_tickTotals.WaitTicks));
+        PerfStore.SampleTotal(PerfCounter.TickGrassUs, PerfStore.TicksToMicros(_tickTotals.GrassTicks));
+        PerfStore.SampleTotal(PerfCounter.TickFluidReplayUs, PerfStore.TicksToMicros(_tickTotals.ReplayTicks));
+        PerfStore.SampleTotal(PerfCounter.TickFluidChunks, _tickTotals.FluidChunks);
+        PerfStore.SampleTotal(PerfCounter.TickSnapshotKb, _tickTotals.SnapshotMaps * PerfTickTotals.SnapshotMapKb);
+        PerfStore.SampleTotal(PerfCounter.TickGrassVoxels, _tickTotals.GrassVoxels);
+        PerfStore.SampleTotal(PerfCounter.FluidTickerPoolMisses, FluidTickersCreated);
     }
 
     /// <summary>Samples one job type's running totals into its per-frame completed, latency and busy counts.</summary>

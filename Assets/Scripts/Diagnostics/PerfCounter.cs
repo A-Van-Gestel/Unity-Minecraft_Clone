@@ -150,6 +150,36 @@ namespace Diagnostics
         /// <summary>Background loads and saves that started on a ThreadPool thread this frame — the operations <see cref="IoQueueWaitUs"/> covers.</summary>
         IoBackgroundOps,
 
+        /// <summary>Behavior-tick time spent building the active-chunk list, in microseconds.</summary>
+        TickListUs,
+
+        /// <summary>Behavior-tick time spent preparing fluid chunks — partitions, voxel-map copies, first-use allocation — in microseconds.</summary>
+        TickPrepareUs,
+
+        /// <summary>Behavior-tick time spent renting tickers and scheduling the fluid jobs, in microseconds.</summary>
+        TickScheduleUs,
+
+        /// <summary>Behavior-tick time spent waiting for the fluid jobs to complete, in microseconds.</summary>
+        TickWaitUs,
+
+        /// <summary>Behavior-tick time spent in the managed grass tick, in microseconds.</summary>
+        TickGrassUs,
+
+        /// <summary>Behavior-tick time spent replaying the fluid jobs' results, in microseconds.</summary>
+        TickFluidReplayUs,
+
+        /// <summary>Fluid chunks the behavior tick prepared a job for.</summary>
+        TickFluidChunks,
+
+        /// <summary>Kilobytes of voxel maps copied for those fluid jobs.</summary>
+        TickSnapshotKb,
+
+        /// <summary>Active grass voxels the behavior tick ticked.</summary>
+        TickGrassVoxels,
+
+        /// <summary>Fluid tickers the ticker pool had to create; each allocates its native scratch on its first prepare.</summary>
+        FluidTickerPoolMisses,
+
         /// <summary>Number of counters; not a counter.</summary>
         Count,
     }

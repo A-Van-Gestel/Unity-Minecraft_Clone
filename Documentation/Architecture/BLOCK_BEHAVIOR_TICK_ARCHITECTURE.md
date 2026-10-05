@@ -68,13 +68,14 @@ World.Update()
 └─ ProcessTickUpdates()                          // World.cs:1837 — bumps _tickCounter, snapshots active chunks
    └─ TickChunksParallel(snapshot)                // World.cs:1879 — schedule-all → ScheduleBatchedJobs → complete → drain
       ├─ per chunk: rent FluidBurstTicker from DynamicPool<FluidBurstTicker>
-      │             └─ ScheduleFluids(chunkData, tickCounter, blockTypes, worldData, timer) → JobHandle
-      │                ├─ acquire 9 pre-tick neighbor voxel snapshots (center + 8 horizontal)
-      │                ├─ gather them into a Y-banded padded buffer on the WORKER thread
+      │             ├─ TryPrepare(chunkData, worldData)
+      │             │  └─ acquire 9 pre-tick neighbor voxel snapshots (center + 8 horizontal)
+      │             └─ Schedule(chunkData, tickCounter, blockTypes, timer) → JobHandle
+      │                ├─ gather the snapshots into a Y-banded padded buffer on the WORKER thread
       │                └─ FluidTickJob: flow, decay, falling/waterfall reset, infinite-source
       │                   regeneration, TG-3 viscosity RNG → NativeList<VoxelMod> + ModsPerSource
       └─ after JobHandle.Complete(), serially in chunk-snapshot order:
-         └─ Chunk.DrainTick(ticker)               // Chunk.cs:367
+         └─ Chunk.DrainTick(ticker, ref tickTotals) // Chunk.cs:367
             ├─ TickFamily(grassBucket, …)          // Chunk.cs:289 — grass stays MANAGED, main-thread
             ├─ ReplayFluids(ticker, fluidBucket, …)// Chunk.cs:333 — replays job mods in bucket order
             └─ (after DrainTick) the job's busy-time record → WorldJobManager.EndJobTiming(Fluids, …)
@@ -130,7 +131,8 @@ and does not tick. That is why the step-4 wake (`World.WakeActiveNeighbors`) reg
 
 Every fluid voxel — interior *and* border — is Burst-ticked by `Jobs/FluidTickJob.cs`, a faithful 1:1 port of
 the managed `BlockBehavior.Fluids` rules. `Jobs/FluidBurstTicker.cs` owns the per-chunk scratch and exposes
-`ScheduleFluids` (production) and `RunFluids` (the `.Run()` serial-determinism oracle the harness drives).
+`TryPrepare` + `Schedule` (production, timed apart for the performance monitor), `ScheduleFluids` (the same pair in
+one call) and `RunFluids` (the `.Run()` serial-determinism oracle the harness drives).
 
 Border voxels read across chunk seams through a **per-tick 9-snapshot neighbor halo**, gathered on the worker
 thread. Its dimensions are grounded in the job's *measured* read reach, not assumption:

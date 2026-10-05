@@ -1,6 +1,6 @@
 # Engine Scaling Performance Roadmap
 
-**Version:** 1.12  
+**Version:** 1.13  
 **Date:** 2026-10-02  
 **Status:** In progress — `ES-1`, `ES-2` and `ES-6.1` shipped (2026-10-02); ES-0's GC.Alloc attribution captured
 (2026-10-03, §2.2.1 — added `ES-26`/`ES-27`; PM-1's smoke capture added the `ES-28` quick win); the rest is a near-to-far horizon, not
@@ -327,7 +327,11 @@ PM-6; the bullets below are what ES needs from it.
   build, not yet a ranking.) (PM-4, 2026-10-05, confirmed in an IL2CPP Master build: the `Tick`-led 200 m/s hitches track
   the fluid tick's job count — every hitch record with more than 200 fluid chunk jobs had a 46–160 ms `Tick` and 170–399 ms
   of fluid worker time, three Systems runs — with the main-thread prepare and drain the inferred larger share; §7.5. No ES
-  item owns the fluid tick's fan-out yet; PM-8 measures that main-thread split first.)
+  item owns the fluid tick's fan-out yet; PM-8 measures that main-thread split first.) (PM-8, 2026-10-05, confirmed in an
+  IL2CPP Master build: `Tick` is split into six timed parts that sum to it within 0.31 ms. In the 229–273-fluid-chunk
+  records the fluid prepare's full-chunk voxel-map copies (258–307 MB per tick, 26–39 ms) and the wait for the fluid jobs
+  (12–46 ms) share the time, with the replay at 4–10 ms; a third of the `Tick`-led records are the managed grass tick
+  instead, 19–27 ms at 44–69 k active grass voxels — §7.6. No ES item owns either fix yet.)
 - A once-per-launch **drain stamp** (P-4's tail-inclusive drain predicate): ms to `_isWorldLoaded`, to
   drained, to frame time within 1.25× median for 2 s — splits the 30 s into before/after handoff.
 - One Development-build (not deep-profiling) Profiler capture of a 200 m/s generation flight with
@@ -603,7 +607,7 @@ constants + migration change. Prerequisites: ES-13, ES-18, ES-19.
 
 | Phase | Scope | Effort | Depends on | Status |
 |---|---|:---:|---|---|
-| **ES-0 — Measure** | Spike-visible capture, drain stamp, crossing slots, GC.Alloc capture | 🟢 | — | GC.Alloc capture ✅ 2026-10-03 (§2.2.1); PM-1 store ✅ 2026-10-03; PM-2 frame tier ✅ 2026-10-04 (Master-confirmed); PM-3 crossing slots + remainder + counters ✅ 2026-10-04 (Master-confirmed); PM-4 job/I-O counters ✅ 2026-10-05 (Master-confirmed); rest via PM-6 |
+| **ES-0 — Measure** | Spike-visible capture, drain stamp, crossing slots, GC.Alloc capture | 🟢 | — | GC.Alloc capture ✅ 2026-10-03 (§2.2.1); PM-1 store ✅ 2026-10-03; PM-2 frame tier ✅ 2026-10-04 (Master-confirmed); PM-3 crossing slots + remainder + counters ✅ 2026-10-04 (Master-confirmed); PM-4 job/I-O counters ✅ 2026-10-05 (Master-confirmed); PM-8 tick breakdown ✅ 2026-10-05 (Master-confirmed); rest via PM-6 |
 | **ES-1 — No frame-paced load** | Completion counter at `World.cs:1064` — execution packet §7.1 | 🟢 | — | ✅ 2026-10-02 (in-game) |
 | **ES-2 — Calibration** | Robust OM-1 lighting probe — execution packet §7.1 | 🟢 | — | ✅ 2026-10-02 (in-game) |
 | **ES-3 — Loading mode** | SU-1 + SU-2, pooled/banded/shared startup snapshots | 🟡 | ES-0 | — |
@@ -996,6 +1000,9 @@ saving is inferred from step 1's re-entry leg, not re-measured.
 
 ## Document History
 
+* **v1.13** - ES-0 slot bullet + plan row: PM-8 confirmed in an IL2CPP Master build (2026-10-05) — the 200 m/s `Tick`
+  hitches are the fluid prepare's voxel-map copies and the wait for the fluid jobs, plus the managed grass tick; no ES item
+  owns either fix yet.
 * **v1.12** - ES-0 slot bullet + plan row: PM-4 confirmed in an IL2CPP Master build (2026-10-05) — the `Tick`-led 200 m/s
   hitches track the fluid tick's job count; no ES item owns that fan-out yet (PM-8 measures its main-thread split).
 * **v1.11** - ES-0 slot bullet + plan row: PM-3 confirmed in an IL2CPP Master build (2026-10-04), with the first Master

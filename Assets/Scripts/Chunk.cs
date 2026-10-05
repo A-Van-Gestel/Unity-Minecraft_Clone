@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Data;
+using Diagnostics;
 using Helpers;
 using Jobs;
 using Unity.Collections;
@@ -309,7 +310,8 @@ public class Chunk
     /// parallel by <see cref="World.TickChunksParallel"/>.
     /// </summary>
     /// <param name="ticker">The chunk's prepared fluid runner (job complete), or null if none was scheduled.</param>
-    public void DrainTick(FluidBurstTicker ticker)
+    /// <param name="totals">The performance monitor's tick totals, charged with the grass tick and the fluid replay.</param>
+    public void DrainTick(FluidBurstTicker ticker, ref PerfTickTotals totals)
     {
         if (ChunkData == null) return;
 
@@ -325,12 +327,16 @@ public class Chunk
             List<int> toRemove = ListPool<int>.Get();
             if (grassCount > 0)
             {
+                long grassStart = PerfStore.Begin();
                 using (s_tickGrassMarker.Auto())
                     TickFamily(grass, toRemove);
+                if (PerfTickTotals.Lap(ref totals.GrassTicks, grassStart) != 0L)
+                    totals.GrassVoxels += grassCount;
             }
 
             if (fluidCount > 0)
             {
+                long replayStart = PerfStore.Begin();
                 using (s_tickFluidMarker.Auto())
                 {
                     // ticker is non-null for every chunk with active fluids (scheduled in Phase 1); the managed
@@ -340,6 +346,8 @@ public class Chunk
                     else
                         TickFamily(fluids, toRemove);
                 }
+
+                PerfTickTotals.Lap(ref totals.ReplayTicks, replayStart);
             }
 
             ListPool<int>.Release(toRemove);

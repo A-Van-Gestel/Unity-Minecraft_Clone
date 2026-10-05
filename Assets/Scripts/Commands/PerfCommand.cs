@@ -43,6 +43,17 @@ namespace Commands
         [NoAutoStaticsCleanup] // immutable table
         private static readonly string[] s_tierNames = CreateTierNames();
 
+        /// <summary>The behavior tick's timed parts, in tick order; <see cref="s_tickPartNames"/> labels them.</summary>
+        [NoAutoStaticsCleanup] // immutable table
+        private static readonly PerfCounter[] s_tickParts =
+        {
+            PerfCounter.TickListUs, PerfCounter.TickPrepareUs, PerfCounter.TickScheduleUs, PerfCounter.TickWaitUs,
+            PerfCounter.TickGrassUs, PerfCounter.TickFluidReplayUs,
+        };
+
+        [NoAutoStaticsCleanup] // immutable table
+        private static readonly string[] s_tickPartNames = { "List", "Prepare", "Schedule", "Wait", "Grass", "Replay" };
+
         /// <inheritdoc/>
         public string Name => "perf";
 
@@ -192,10 +203,34 @@ namespace Commands
                     $"  {PerfStore.NegativeRemainderFrames} frames had a negative {PerfSlot.WorldUnattributed}: two slots overlap."));
             }
 
+            AddTickLines(lines);
             AddCounterLines(lines);
             AddWorkerLines(lines);
             AddDiskLines(lines);
             return new CommandResult(lines.ToArray());
+        }
+
+        /// <summary>
+        /// Adds the behavior tick's split: each part's statistics, and the average the parts leave unexplained — exact
+        /// for averages only, since a part's worst frame need not be the slot's.
+        /// </summary>
+        private static void AddTickLines(List<ConsoleLine> lines)
+        {
+            PerfWindowSummary tick = PerfStore.SummarizeSlotMs(PerfSlot.Tick);
+            if (tick.Mean == 0f) return;
+
+            lines.Add(new ConsoleLine(ConsoleLineSeverity.Info, "Tick split (avg / p99 / worst ms):"));
+            double partsMeanMs = 0.0;
+            for (int i = 0; i < s_tickParts.Length; i++)
+            {
+                PerfWindowSummary s = PerfStore.SummarizeCounter(s_tickParts[i]);
+                partsMeanMs += s.Mean / MICROSECONDS_PER_MILLISECOND;
+                lines.Add(new ConsoleLine(ConsoleLineSeverity.Info,
+                    $"  {s_tickPartNames[i].PadRight(SLOT_NAME_WIDTH)} {UsAsMs(s.Mean)} / {UsAsMs(s.P99)} / {UsAsMs(s.Max)}"));
+            }
+
+            lines.Add(new ConsoleLine(ConsoleLineSeverity.Info,
+                $"  {"Other".PadRight(SLOT_NAME_WIDTH)} {Ms((float)(tick.Mean - partsMeanMs))} avg"));
         }
 
         /// <summary>Adds the job workers' utilization over the counter frames and each timed job type's per-job latency and busy time.</summary>
@@ -359,6 +394,13 @@ namespace Commands
 
             if (!record.HasSlots) return text;
 
+            if (record.TopSlotCount > 0)
+            {
+                record.GetTopSlot(0, out PerfSlot top, out float _);
+                string largestPart = top == PerfSlot.Tick ? LargestTickPart(hitches, age, record.WorstRow) : null;
+                if (largestPart != null) text += $"; Tick led by {largestPart}";
+            }
+
             // The worst frame's non-zero counters: the queue and pool levels the spike happened at.
             bool first = true;
             for (int i = 0; i < PerfStore.CounterCount; i++)
@@ -373,7 +415,30 @@ namespace Commands
             return text;
         }
 
+        /// <summary>
+        /// The largest timed tick part in one row of a hitch record, as "name ms", or null when no part recorded time — a
+        /// frame without a behavior tick, whose near-empty <see cref="PerfSlot.Tick"/> can still top an idle hitch.
+        /// </summary>
+        private static string LargestTickPart(PerfHitchDetector hitches, int age, int row)
+        {
+            int largest = 0;
+            int largestUs = hitches.GetRecordCounter(age, row, s_tickParts[0]);
+            for (int i = 1; i < s_tickParts.Length; i++)
+            {
+                int us = hitches.GetRecordCounter(age, row, s_tickParts[i]);
+                if (us <= largestUs) continue;
+
+                largest = i;
+                largestUs = us;
+            }
+
+            return largestUs > 0 ? $"{s_tickPartNames[largest]} {UsAsMs(largestUs)} ms" : null;
+        }
+
         private static string MsOrNa(float value) => float.IsNaN(value) ? "n/a" : Ms(value);
+
+        /// <summary>Formats a microsecond figure as milliseconds.</summary>
+        private static string UsAsMs(float microseconds) => Ms((float)(microseconds / MICROSECONDS_PER_MILLISECOND));
 
         /// <summary>Sets the monitor tier through the settings, so the live-apply path and the Settings menu agree.</summary>
         /// <param name="text">The tier name, case-insensitive.</param>

@@ -95,6 +95,7 @@ namespace Editor.Validation.PerfMonitoring
                 new Scenario("B28 Storage I/O: a save, a hit and a miss counted exactly at Systems, nothing below, in-flight balanced", RunB28StorageIoCounters),
                 new Scenario("B29 Worker utilization: busy time over workers × wall time, summed over the counter frames only", RunB29WorkerUtilization),
                 new Scenario("B30 Fluid jobs: a timed fluid tick and a timed fluid sound scan each time one link; untimed writes nothing", RunB30FluidJobLinks),
+                new Scenario("B31 Tick breakdown: a real tick times each part within its call, counts exactly, maps to its counters; nothing below Systems", RunB31TickBreakdown),
             };
             return ValidationSuiteRunner.Execute("Performance Monitor", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }
