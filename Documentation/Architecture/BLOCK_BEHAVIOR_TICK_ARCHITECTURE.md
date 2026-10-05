@@ -141,7 +141,7 @@ thread. Its dimensions are grounded in the job's *measured* read reach, not assu
 | **Vertical**   | 1     | Every read is at the source's level, one below (`below`/`belowNeighbor`) or one above (`above`/`nbAbove`) — *regardless of horizontal distance*, because the BFS only moves horizontally. No vertical cross-chunk neighbor exists (chunks are full height). |
 
 **Y-band sizing.** Since the only sources are the chunk's active fluids and the vertical reach is ±1, *every*
-read lands in `[minActiveY − 1, maxActiveY + 1]`. `FluidBurstTicker.PrepareFluidJob` scans the bucket for
+read lands in `[minActiveY − 1, maxActiveY + 1]`. `FluidBurstTicker.TryPrepare` scans the bucket for
 min/max Y and sets `_bandMinY = max(0, minActiveY − FLUID_VERTICAL_REACH)` / `_bandHeight`; `FluidTickJob`
 carries `BandMinY`/`BandHeight` and `GetStateLocal` reads at band-local `py = y − BandMinY`. The band is a
 tight **superset** of every read (mirroring `LIGHTING_HALO = MAX_LIGHTING_BFS_REACH`), so it is byte-identical

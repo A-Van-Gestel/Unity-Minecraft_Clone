@@ -28,9 +28,9 @@ namespace Jobs
     /// then drains <see cref="Mods"/> / <see cref="ModsPerSource"/> / <see cref="InactiveInterior"/>
     /// serially in snapshot order (<c>Chunk.DrainTick</c>). That split — parallel read+emit, serial apply,
     /// emission order fixed by the emitting voxel — is what makes the parallel tick byte-identical to the
-    /// original single-threaded loop. Production schedules via <see cref="ScheduleFluids"/>;
-    /// <see cref="RunFluids"/> is the same work run serially and exists as the validation harness's
-    /// determinism oracle (<c>Schedule == Run</c>).
+    /// original single-threaded loop. <see cref="TryPrepare"/> and <see cref="Schedule"/> are separate so the main-thread
+    /// copy can be timed apart from scheduling; <see cref="ScheduleFluids"/> is the pair in one call, and
+    /// <see cref="RunFluids"/> runs the same work serially with identical output (<c>Schedule == Run</c>).
     /// </para>
     /// </summary>
     public sealed class FluidBurstTicker : IDisposable
@@ -101,12 +101,17 @@ namespace Jobs
         public NativeList<int> InteriorIndices => _interior;
 
         /// <summary>
+        /// Full-chunk voxel maps the most recent <see cref="TryPrepare"/> copied: the center plus each populated
+        /// neighbor, or 0 when it found no active fluid.
+        /// </summary>
+        public int SnapshotMaps { get; private set; }
+
+        /// <summary>
         /// The serial (<c>.Run()</c>) fluid tick: ticks EVERY active fluid (interior AND border) of <paramref name="cd"/>
         /// through <see cref="FluidTickJob"/>, border voxels resolving cross-chunk reads from the gathered neighbor
         /// halo (neighbors looked up in <paramref name="worldData"/>). Reads a pre-tick snapshot and does NOT modify
         /// the chunk; the caller drains <see cref="Mods"/>/<see cref="ModsPerSource"/>/<see cref="InactiveInterior"/>
-        /// afterward. Used by the validation harness as the serial determinism baseline; production schedules via
-        /// <see cref="ScheduleFluids"/>.
+        /// afterward. Its output is byte-identical to the scheduled path's, which makes it the serial determinism baseline.
         /// </summary>
         /// <param name="cd">The chunk whose fluids to tick.</param>
         /// <param name="tickCounter">The current tick salt (<c>World.TickCounter</c>) for the viscosity RNG.</param>
@@ -119,7 +124,7 @@ namespace Jobs
         /// </remarks>
         public void RunFluids(ChunkData cd, int tickCounter, NativeArray<BlockTypeJobData> blockTypes, WorldData worldData)
         {
-            if (PrepareFluidJob(cd, worldData))
+            if (TryPrepare(cd, worldData))
                 BuildJob(cd, tickCounter, blockTypes).Run();
         }
 
@@ -138,28 +143,29 @@ namespace Jobs
         public JobHandle ScheduleFluids(ChunkData cd, int tickCounter, NativeArray<BlockTypeJobData> blockTypes, WorldData worldData,
             JobBusyTimer timer = default)
         {
-            if (!PrepareFluidJob(cd, worldData))
+            if (!TryPrepare(cd, worldData))
                 return default;
 
-            return BuildJob(cd, tickCounter, blockTypes, timer).Schedule();
+            return Schedule(cd, tickCounter, blockTypes, timer);
         }
 
         /// <summary>
         /// Clears the per-run outputs and partitions <see cref="ChunkData.ActiveFluidsBucket"/> for the tick: collects
         /// <b>every</b> active fluid index for the job, sizes the active-fluid Y-band, then gathers the 8 neighbor
         /// snapshots and the center. Shared by the serial (<see cref="RunFluids"/>) and parallel
-        /// (<see cref="ScheduleFluids"/>) paths.
+        /// (<see cref="ScheduleFluids"/>) paths, and public apart from <see cref="Schedule"/> so its copy can be timed alone.
         /// </summary>
         /// <param name="cd">The chunk whose fluids to prepare.</param>
         /// <param name="worldData">The chunk store used to resolve the neighbor snapshots.</param>
         /// <returns>True if there is any active fluid (a job should run); false if the bucket is empty.</returns>
-        private bool PrepareFluidJob(ChunkData cd, WorldData worldData)
+        public bool TryPrepare(ChunkData cd, WorldData worldData)
         {
             EnsureAllocated();
             _interior.Clear();
             _mods.Clear();
             _modsPerSource.Clear();
             _inactive.Clear();
+            SnapshotMaps = 0;
 
             NativeHashSet<int> bucket = cd.ActiveFluidsBucket;
             if (!bucket.IsCreated || bucket.Count == 0)
@@ -186,8 +192,21 @@ namespace Jobs
             // Gather the 8 neighbor snapshots (for the border voxels) + the center snapshot, all pre-tick.
             PrepareNeighbors(cd, worldData);
             cd.FillJobVoxelMap(_snapshot);
+            SnapshotMaps++;
             return true;
         }
+
+        /// <summary>
+        /// Schedules the fluid job over the state the last successful <see cref="TryPrepare"/> of <paramref name="cd"/>
+        /// left in this ticker. Call it only after that returned true.
+        /// </summary>
+        /// <param name="cd">The chunk passed to <see cref="TryPrepare"/>.</param>
+        /// <param name="tickCounter">The current tick salt (<c>World.TickCounter</c>) for the viscosity RNG.</param>
+        /// <param name="blockTypes">The global block-type job blob.</param>
+        /// <param name="timer">The performance monitor's busy-time timer for the job; untimed by default.</param>
+        /// <returns>The scheduled job's handle.</returns>
+        public JobHandle Schedule(ChunkData cd, int tickCounter, NativeArray<BlockTypeJobData> blockTypes, JobBusyTimer timer = default) =>
+            BuildJob(cd, tickCounter, blockTypes, timer).Schedule();
 
         /// <summary>
         /// Fills the owned neighbor buffers from the 8 loaded neighbor chunks (pre-tick snapshots) and points
@@ -210,6 +229,7 @@ namespace Jobs
                 {
                     neighbor.FillJobVoxelMap(_neighborBuffers[i]);
                     _jobNeighbors[i] = _neighborBuffers[i];
+                    SnapshotMaps++;
                 }
                 else
                 {
