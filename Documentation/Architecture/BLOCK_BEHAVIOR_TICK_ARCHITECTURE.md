@@ -1,6 +1,6 @@
 # Block Behavior Tick Architecture
 
-**Version:** 2.1  
+**Version:** 2.2  
 **Date:** 2026-07-26  
 **Status:** **Implemented (Stable)** — the whole TG-4 arc (Phases 0–4b + the Y-band optimization) is shipped,
 in-game confirmed, and its rollback flags were retired in the 2026-07-23 cleanup, so the parallel Y-band halo
@@ -65,8 +65,8 @@ The tick runs **once per `VoxelData.TickLength`**, parallel across chunks, with 
 
 ```
 World.Update()
-└─ ProcessTickUpdates()                          // World.cs:1837 — bumps _tickCounter, snapshots active chunks
-   └─ TickChunksParallel(snapshot)                // World.cs:1879 — schedule-all → ScheduleBatchedJobs → complete → drain
+└─ ProcessTickUpdates()                          // World.cs:2483 — bumps _tickCounter, snapshots active chunks
+   └─ TickChunksParallel(snapshot)                // World.cs:2527 — schedule-all → ScheduleBatchedJobs → complete → drain
       ├─ per chunk: rent FluidBurstTicker from DynamicPool<FluidBurstTicker>
       │             ├─ TryPrepare(chunkData, worldData)
       │             │  └─ acquire 9 pre-tick neighbor voxel snapshots (center + 8 horizontal)
@@ -75,9 +75,9 @@ World.Update()
       │                └─ FluidTickJob: flow, decay, falling/waterfall reset, infinite-source
       │                   regeneration, TG-3 viscosity RNG → NativeList<VoxelMod> + ModsPerSource
       └─ after JobHandle.Complete(), serially in chunk-snapshot order:
-         └─ Chunk.DrainTick(ticker, ref tickTotals) // Chunk.cs:367
-            ├─ TickFamily(grassBucket, …)          // Chunk.cs:289 — grass stays MANAGED, main-thread
-            ├─ ReplayFluids(ticker, fluidBucket, …)// Chunk.cs:333 — replays job mods in bucket order
+         └─ Chunk.DrainTick(ticker, ref tickTotals) // Chunk.cs:314
+            ├─ TickFamily(grassBucket, …)          // Chunk.cs:235 — grass stays MANAGED, main-thread
+            ├─ ReplayFluids(ticker, fluidBucket, …)// Chunk.cs:279 — replays job mods in bucket order
             └─ (after DrainTick) the job's busy-time record → WorldJobManager.EndJobTiming(Fluids, …)
 World.Update() (after all chunks ticked)
 └─ ApplyModifications()                           // unchanged: placement gate, support cascade,
@@ -167,8 +167,9 @@ A missing or ungenerated neighbor must read exactly as managed `GetVoxelState` d
 Grass ticks on the main thread via `Chunk.TickFamily`. This is deliberate, not an omission: the profile gate
 measured grass at **0.044 µs/voxel (~12× cheaper than fluid)**, so there is no frame win to capture, and a
 periodic grass tick would pay per-tick snapshot + schedule/complete **job latency** on a workload too small to
-amortize it. Grass-Burst is a trivial follow-on reusing the fluid scaffolding **only if** a future profile ever
-shows grass costing a frame.
+amortize it. Grass-Burst is a trivial follow-on reusing the fluid scaffolding **only if** a profile shows grass
+costing a frame — and one now does: the PM-8 traversal capture (IL2CPP Master, 2026-10-05) measured the grass tick
+at ≈ 0.4 µs per voxel, 19–27 ms per tick at 44–69 k active grass voxels (§7). No `ES-*` item has taken it on yet.
 
 ### 2.4 Why the parallel tick is byte-identical
 
@@ -339,16 +340,21 @@ deliberately sequenced *after* the per-family layout existed, to avoid throwaway
 - **Family count.** Only Grass and Fluid exist today. A third `isActive` block family would need its own
   bucket + job before the collection layout is considered final — confirm none is planned before treating §2.1
   as closed.
-- **Grass-Burst** remains available as a trivial follow-on (§2.3) if a profile ever shows grass costing a frame.
-- **Reserved gather levers** (deferred — the A/B showed the copy is already a small term, and in-game the flood
-  frame is Light-bound, so these only widen margin): band the neighbor `FillJobVoxelMap` snapshots themselves
-  (edge-slab-only, section-aligned), and snapshot dedup (each unique chunk gathered once per tick). The guards
-  for both already exist: the vertically-split `BH-4-SPLIT-Y` fixture (water at y=11 + y=71 in one border
-  chunk), the section-boundary `BH-4-BAND-EDGE` fixture, and the Y-band cross-chunk determinism stress.
-- **Frame-level context.** The tick is *not* the frame bottleneck. The sustained ocean frame is
-  **lighting-dominated (~66 %)** with the tick at ~2 %, so further tick work is low priority versus the
-  lighting line. **TG-5** (function-pointer dispatch, no parallel re-architecture) was the documented lighter
-  alternative and was never needed.
+- **Grass-Burst** remains available as a follow-on (§2.3). Grass now has a profile showing it costing frames: in
+  a 200 m/s traversal (IL2CPP Master, 2026-10-05) the managed grass tick took 19–27 ms at 44–69 k active grass
+  voxels and led 8 of 22 `Tick`-led hitch records.
+- **Reserved gather levers** (not scheduled): band the neighbor `FillJobVoxelMap` snapshots themselves
+  (edge-slab-only, section-aligned), and snapshot dedup (each unique chunk gathered once per tick). The TG-4 A/B
+  found the copy a small term on its flood scenarios, but the same traversal measured it at 26–39 ms of a 51–87 ms
+  `Tick` at 229–273 fluid chunks — nine 128 KB maps per chunk, ≈ 0.11–0.14 ms each chunk. The guards for both
+  levers already exist: the vertically-split `BH-4-SPLIT-Y` fixture (water at y=11 + y=71 in one border chunk),
+  the section-boundary `BH-4-BAND-EDGE` fixture, and the Y-band cross-chunk determinism stress.
+- **Frame-level context.** In steady state the tick is *not* the frame bottleneck: the sustained ocean frame is
+  **lighting-dominated (~66 %)** with the tick at ~2 %. Spikes differ — during fast traversal the tick leads the
+  hitch records, split between the copy above, the wait for the fluid jobs, and the grass tick
+  ([`PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md`](../Design/PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md) §7.6).
+  **TG-5** (function-pointer dispatch, no parallel re-architecture) was the documented lighter alternative and was
+  never needed.
 
 ---
 
@@ -621,6 +627,10 @@ the ones any future tick-path change must address.*
 
 ## Document History
 
+* **v2.2** - PM-8 (2026-10-05): §2 call tree shows `TryPrepare` + `Schedule` and `DrainTick`'s tick totals, with its
+  line anchors re-verified; §7's Grass-Burst, gather-lever and frame-level bullets carry the IL2CPP Master traversal
+  measurements (grass 19–27 ms, snapshot copy 26–39 ms at 229–273 fluid chunks), and §2.3 notes its "only if a profile
+  shows grass costing a frame" condition is met. The rest of the doc was not re-audited.
 * **v2.1** - §2 call tree: at the performance monitor's Systems tier each scheduled fluid job carries a `JobBusyTimer`
   record from `WorldJobManager`, recorded once its chunk is drained (PM-4, 2026-10-05). Line anchors not re-verified.
 * **v2.0** - **Promoted `Design/TG4_BLOCK_BEHAVIOR_DATA_SEPARATION.md` → `Architecture/BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md`
@@ -639,6 +649,6 @@ the ones any future tick-path change must address.*
 ---
 
 **Last Updated:** 2026-07-26 (promoted to `Architecture/` and restructured as an as-built system description)  
-**Next Review:** if a third behavior family is added (§7 — the collection layout assumes exactly Grass + Fluid), if a
-profile ever shows grass costing a frame (§2.3), or if P-2 Layer 2 is built for the lighting/meshing/world-scaling
+**Next Review:** if a third behavior family is added (§7 — the collection layout assumes exactly Grass + Fluid), when
+an `ES-*` item takes on Grass-Burst (§2.3) or the reserved gather levers (§7), or if P-2 Layer 2 is built for the lighting/meshing/world-scaling
 reasons and this tick path could be simplified onto it (§3.2).

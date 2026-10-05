@@ -1179,5 +1179,5 @@ Answers 1–4 come from `EngineApiProbe_2026-10-03_13-52-20.log`: a `Windows - P
 
 ---
 
-**Last Updated:** 2026-10-02  
+**Last Updated:** 2026-10-05  
 **Next Review:** when PM-5 starts (PM-8 complete 2026-10-05)

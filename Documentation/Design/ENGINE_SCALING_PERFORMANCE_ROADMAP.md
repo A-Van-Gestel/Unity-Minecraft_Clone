@@ -1049,5 +1049,5 @@ saving is inferred from step 1's re-entry leg, not re-measured.
 
 ---
 
-**Last Updated:** 2026-10-03  
+**Last Updated:** 2026-10-05  
 **Next Review:** when ES-26 is scored against the ES-0 capture or ES-25's rendering baseline lands, or before any ES phase starts

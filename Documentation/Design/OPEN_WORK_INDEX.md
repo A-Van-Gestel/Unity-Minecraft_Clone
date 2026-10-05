@@ -1,6 +1,6 @@
 # Open Work Index
 
-**Version:** 1.17  
+**Version:** 1.18  
 **Date:** 2026-09-17  
 **Status:** **Open backlog.** A pointer map, not a tracker — rows are added and removed as docs
 gain or lose open work, never as individual items move.  
@@ -139,6 +139,8 @@ doc, not to grow an item row here.
 
 ## Document History
 
+* **v1.18** - `PM-*` row updated (2026-10-05): `PM-4` and `PM-8` complete, both confirmed in an IL2CPP Master build;
+  `PM-5`…`PM-7` not started.
 * **v1.17** - `PM-*` row updated (2026-10-04): `PM-3` confirmed in an IL2CPP Master build.
 * **v1.16** - `PM-*` row updated (2026-10-04): `PM-3`'s coverage code landed, Master build check pending.
 * **v1.15** - `PM-*` row updated (2026-10-04): `PM-2`'s Frame tier complete, confirmed in an IL2CPP Master build.
@@ -200,5 +202,5 @@ doc, not to grow an item row here.
 
 ---
 
-**Last Updated:** 2026-10-03  
+**Last Updated:** 2026-10-05  
 **Next Review:** when a document starts or stops owning open work
