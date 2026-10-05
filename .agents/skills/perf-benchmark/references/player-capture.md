@@ -55,6 +55,9 @@ if ($p.WaitForExit(900000)) { "exit $($p.ExitCode)" } else { Stop-Process -Id $p
 
 - **Always `-mc-mute`, always a timeout.** A player occasionally freezes after quitting (pre-existing, see
   `SKILL.md`); kill it on expiry.
+- **`Start-Process` takes no `-LiteralPath`** (confirmed in Windows PowerShell 5.1), so do not swap it in for the
+  `[IL2CPP]` folder. If `-FilePath` misbehaves, launch with `[System.Diagnostics.Process]::Start($psi)` from a
+  `ProcessStartInfo` whose `FileName` is the path — it takes the path literally.
 - Exit code `0` = report written. `Player.log` (in `persistentDataPath`) carries
   `[Launch] Run finished: report <path>, exit code <n>`, which names the report — or take the newest
   `BenchmarkRun_*.log` in `persistentDataPath/Benchmarks/`.
