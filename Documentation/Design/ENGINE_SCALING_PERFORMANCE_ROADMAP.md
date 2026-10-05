@@ -327,7 +327,7 @@ PM-6; the bullets below are what ES needs from it.
   build, not yet a ranking.) (PM-4, 2026-10-05, confirmed in an IL2CPP Master build: the `Tick`-led 200 m/s hitches track
   the fluid tick's job count — every hitch record with more than 200 fluid chunk jobs had a 46–160 ms `Tick` and 170–399 ms
   of fluid worker time, three Systems runs — with the main-thread prepare and drain the inferred larger share; §7.5. No ES
-  item owns the fluid tick's fan-out yet.)
+  item owns the fluid tick's fan-out yet; PM-8 measures that main-thread split first.)
 - A once-per-launch **drain stamp** (P-4's tail-inclusive drain predicate): ms to `_isWorldLoaded`, to
   drained, to frame time within 1.25× median for 2 s — splits the 30 s into before/after handoff.
 - One Development-build (not deep-profiling) Profiler capture of a 200 m/s generation flight with
@@ -997,7 +997,7 @@ saving is inferred from step 1's re-entry leg, not re-measured.
 ## Document History
 
 * **v1.12** - ES-0 slot bullet + plan row: PM-4 confirmed in an IL2CPP Master build (2026-10-05) — the `Tick`-led 200 m/s
-  hitches track the fluid tick's job count; no ES item owns that fan-out yet.
+  hitches track the fluid tick's job count; no ES item owns that fan-out yet (PM-8 measures its main-thread split).
 * **v1.11** - ES-0 slot bullet + plan row: PM-3 confirmed in an IL2CPP Master build (2026-10-04), with the first Master
   reading of the 200 m/s (`Tick`- and `LightMerge`-led) and post-phase (`Unload`-led) hitches.
 * **v1.10** - ES-0 slot bullet + plan row: PM-3's coverage code landed (2026-10-04, Master build check pending) — a slot

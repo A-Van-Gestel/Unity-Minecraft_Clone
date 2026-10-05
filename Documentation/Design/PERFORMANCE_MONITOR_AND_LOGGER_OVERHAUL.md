@@ -1,11 +1,11 @@
 # Performance Monitor & Logger Overhaul Design
 
-**Version:** 1.9  
+**Version:** 1.11  
 **Date:** 2026-10-02  
 **Status:** In progress — PM-0 ✅ complete (2026-10-03, Master answers in §8); PM-1 ✅ complete (2026-10-03, §7.2;
 confirmed in an IL2CPP Master build); PM-2 ✅ complete (2026-10-04, §7.3; confirmed in an IL2CPP Master build); PM-3 ✅
 complete (2026-10-04, §7.4; confirmed in an IL2CPP Master build); PM-4 ✅ complete (2026-10-05, §7.5; confirmed in an
-IL2CPP Master build); PM-5…PM-7 not started. PM-0's answers reshaped PM-2/PM-4 (§8).  
+IL2CPP Master build); PM-5…PM-8 not started. PM-0's answers reshaped PM-2/PM-4 (§8).  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > An opt-in, settings-driven in-game performance monitor and diagnostic logger that covers **every
@@ -390,6 +390,115 @@ public enum LogLevel : byte { Off, Error, Warning, Info, Verbose }
   reset inside the class's single `[RuntimeInitializeOnLoadMethod]`; native buffers disposed on tier
   exit and on application quit.
 
+### 4.9 Coverage map
+
+*As of 2026-10-05 (PM-4), derived from the code — the probe sites, the per-frame scripts and the job structs — not from the
+sections above.* Every phase that adds, moves or removes a probe updates this section in the same commit. Before relying
+on it for a coverage analysis, re-derive it with the commands at the end: the tables are a snapshot, the commands are
+the check. Whether a system has had a performance *analysis* pass is a different question, tracked as `AC-1`…`AC-10` in
+[`PERFORMANCE_IMPROVEMENTS_REPORT.md`](PERFORMANCE_IMPROVEMENTS_REPORT.md) § Audit coverage gaps.
+
+**Frame level.**
+
+| Measure | Tier | Source | Not covered |
+|---|---|---|---|
+| Wall and CPU time per frame | every tier | `PerformanceMonitor`'s brackets → `CommitFrame` | time outside the brackets (wall − CPU − present wait) |
+| Managed allocation and collections | every tier | heap delta + `GC.CollectionCount` | process-wide: worker allocation lands on the main frame; a collection frame has no figure |
+| GPU, render-thread and present-wait time | Frame | `FrameTiming` via the frame-time recorders | whole frame only — no per-pass GPU time |
+| Hitch records | Frame (slot times and counters at Systems) | `PerfHitchDetector` | — |
+| `World.Update` remainder | Systems | `PerfSlot.WorldUnattributed` | `World.Update` only — no whole-frame remainder |
+| Memory | always-on history only | `PerformanceMonitor` (`Profiler.GetTotal*Memory`, managed heap) | not in `PerfStore`'s frame rows or hitch records |
+
+**Main thread — slots (Systems tier, or forced).** Inside `World.Update` the slots are disjoint, so with the remainder
+they sum to the bracket:
+
+| Slot(s) | Covers |
+|---|---|
+| `Tick` | `ProcessTickUpdates`: active-chunk snapshot, per-chunk fluid prepare, scheduling, the `Complete()` wait, and the drain (grass tick, fluid replay) — one figure until PM-8 splits it |
+| `Apply` | `ApplyModifications` |
+| `LightMerge`, `LightStagingDrain`, `LightFailSafeScan`, `LightSchedule`, `LightQueueProbe` | the lighting passes; `LightQueueProbe` exists only in instrumented builds |
+| `MeshProcess`, `MeshSchedule` | completed-mesh apply and upload; mesh-queue drain |
+| `GenerationProcess`, `GenerationAdmission` | completed-generation pass; admission of queued requests |
+| `WorldTime`, `BiomeTracker`, `OriginShift`, `TeleportHold`, `BorderToggle`, `Visualization` | the smaller `World.Update` regions, each probed around its call |
+| `ViewDistance`, `Unload` | the crossing rebuild (all three callers, including the cloud rebuild it starts) and the unload pass |
+| `SaveRetryDrain`, `ChunkPoolPrune` | one pending failed-save retry; the pools' prune (`ChunkPoolManager.Update`, a plain method) |
+| `WorldUnattributed` | the bracket minus the slots recorded inside it |
+
+Outside `World.Update` (a slot here may contain world work it triggers, e.g. a console teleport):
+
+| Slot | Probed in | Not covered |
+|---|---|---|
+| `DiskLoadApply` | the disk-load continuation in `World.cs` | skipped while the `World.Update` bracket is open (already counted there) |
+| `Physics` | `VoxelRigidbody.FixedUpdate` | its `Update` (step-smoothing ease) and `LateUpdate` (debug bounds) |
+| `Player` | `Player`, `PlayerInteraction` | — |
+| `AudioDirectors` | `SoundManager`, `AmbienceDirector`, `MusicScheduler`, `FluidEmitterDirector`, `PlayerFootsteps` | — |
+| `Clouds` | `Clouds.Update` | the crossing rebuild is in `ViewDistance` |
+| `Environment` | `FoliageSway`, `BorderWallRenderer` | — |
+| `DebugHud` | `DebugScreen.Update` | — |
+| `Ui` | `ConsoleUI`, `Toolbar`, `DragAndDropHandler`, `TooltipManager`, `WorldUIManager`, `SafeAreaFitter`, `TouchControls` | uGUI's own layout and canvas rebuilds |
+| `VoxelVisualizer` | `VoxelVisualizer.LateUpdate` | — |
+
+**Worker jobs (Systems tier).**
+
+| Job | Type | Timed |
+|---|---|---|
+| `StandardWormCarverJob`, `StandardChunkGenerationJob` (per column), `CaveIsolationFilterJob`, `ActiveVoxelScanJob` | Generation | ✅ one record per chain |
+| `LegacyChunkGenerationJob` | Generation | latency only — the job is frozen |
+| `NeighborhoodLightingJob` | Lighting | ✅ |
+| `MeshGenerationJob`, `MeshPostProcessJob` | Meshing | ✅ one record per chain |
+| `FluidTickJob` | Fluids | ✅ one record per chunk |
+| `FluidEmitterScanJob` | FluidSoundScan | ✅ the scanner's own one-record pool |
+| `CloudPatternJob` | — | ❌ rare rebuild, completed where it is scheduled, inside `Clouds` / `ViewDistance` |
+| `VoxelVisualizerJob` | — | ❌ debug visualizer |
+| `TimestampProbeJob` | — | n/a — the engine API probe's own measurement |
+
+Unity's own jobs (rendering, animation, uGUI) are invisible, so utilization is the engine's share of the workers.
+
+**Background I/O (Systems tier).** `ChunkStorageManager` only: loads (hits, misses, read and deserialize time, payload
+bytes), saves on every path (serialize and write time, payload bytes), the ThreadPool wait and the background operations
+it covers, and the operations in flight. Region files touched outside it — the migration step, the world list — and the
+non-chunk files (`level.dat`, pending modifications, pending lighting) are not counted.
+
+**Counters (Systems tier).** 46, sampled in `World.SamplePerfCounters`:
+- *Gauges (14):* the pipeline queues and jobs in flight (`GenerationQueue`, `GenerationInFlight`, `LightReady`,
+  `LightWaiting`, `LightInFlight`, `MeshQueue`, `MeshInFlight`, `ModificationQueue`), residency (`ResidentChunks`,
+  `ActiveChunks`, `ActiveSections`), the native pools' idle stock (`JobArraysPooled`, `MeshOutputsPooled`) and `IoInFlight`.
+- *Per-frame counts (32):* pool misses (section, chunk data, job array, mesh output, save buffer); completed / latency /
+  busy for each of the five job types, and `UntimedJobs`; the eleven disk I/O counts.
+
+**Known gaps.**
+
+| Gap | Consequence | Owner |
+|---|---|---|
+| `Tick`'s internals | a `Tick`-led hitch cannot say prepare, wait or drain | **PM-8** (§7.6) |
+| Other composite slots (`LightMerge`, `Unload`) | same blind spot, smaller hitches | PM-8's pattern, if their hitches warrant it — not filed |
+| Unity's own main-thread work: uGUI layout and canvas rebuilds, the renderer features' Render Graph recording (UI band composite and blur, cloud prepass, underwater overlay), animation | in the frame's CPU time, in no slot | not filed; `AC-4` covers the UI blur's cost statically |
+| A whole-frame remainder | CPU time outside every slot and outside `World.Update` has no figure | not filed |
+| Per-pass GPU time | a GPU-bound frame cannot say which pass | `ES-25`'s rendering baseline (Frame Debugger) |
+| Memory per frame | a memory spike cannot be tied to a hitch | not filed |
+| Main menu and loading scenes | `PerformanceMonitor` lives in the World scene, so they record no frames | not filed |
+| The initial load's counters | sampled in `World.Update`, so they read 0 until it ends | not filed |
+| Per-job latency split (queue wait, execution, completion lag) | latency is one figure | v2 swimlanes (extension roadmap) |
+| Phase-wide statistics and export | everything reads the last 2 048 frames | **PM-6** |
+| Log volume and cost | — | **PM-7** |
+| Small or debug per-frame code: `ChunkLoadAnimation` (one per chunk), `VoxelRigidbody.Update`/`LateUpdate`, `TerrainGenDebugOverlay`, `CreditsMenuController`, the benchmark harness scripts | negligible or tooling | not filed — low value |
+| Untimed jobs: `CloudPatternJob`, `VoxelVisualizerJob`, the legacy generation job's busy time | — | not filed — low value |
+
+**Re-deriving the map** (from the repo root):
+
+```bash
+# Every slot and the files that probe it
+grep -rnoE "PerfStore\.Begin\(PerfSlot\.[A-Za-z]+" Assets/Scripts
+# Per-frame scripts, marked probed or not (a plain method named Update shows here too — ChunkPoolManager is one)
+for f in $(grep -rlE "void (Update|LateUpdate|FixedUpdate)\(\)" Assets/Scripts --include=*.cs); do
+  grep -q "PerfStore.Begin(PerfSlot" "$f" && echo "probed    $f" || echo "UNPROBED  $f"; done | sort
+# Timed jobs against every job struct
+grep -rln "public JobBusyTimer Timer;" Assets/Scripts
+grep -rnE "struct \w+ : IJob\w*" Assets/Scripts --include=*.cs
+```
+
+The counters and their sources are the body of `World.SamplePerfCounters`.
+
 ---
 
 ## 5. Prerequisites & integration points
@@ -434,6 +543,7 @@ public enum LogLevel : byte { Off, Error, Warning, Info, Verbose }
 | **PM-5 — HUD** | Systems panel, hitch list, GPU/CPU split, raw-max graph overlay; `DT-4` | 🟡 | PM-2, PM-3 | — |
 | **PM-6 — Export** | Session CSV + hitch dumps on a background writer; benchmark reports read the store, with phase-wide percentiles (an aggregate spanning more than the ring — moved from PM-1); benchmark mode forces Capture | 🟡 | PM-2 | — |
 | **PM-7 — Logger** | `EngineLog` categories/levels/rate limits/tags, migration of the 3 diagnostic flags and the 327 call sites (by category, in passes), stack-trace policy per build profile, variant-drift fix | 🟡 | — | — |
+| **PM-8 — Behavior-tick breakdown** | Execution packet §7.6. Split the `Tick` slot's main-thread time into its parts — active-chunk snapshot, per-chunk fluid prepare, scheduling, the `Complete()` wait, and the drain (grass tick, fluid replay) — with per-tick fluid chunk and snapshot-byte counts | 🟢 | PM-3, PM-4 | — |
 
 **Minimal set with standalone value:** PM-0 + PM-1 + PM-2 — worst-frame, p99, hitch snapshots with GC
 and GPU attribution — answers the roadmap's "is the traversal spike GC?" question on its own. PM-7 is
@@ -863,6 +973,45 @@ all exit 0, no exception logged — read from the reports and the run-end Player
 PM-4 row lists PM-3 as a dependency, since its counters build on PM-3's counter API. "ThreadPool depth" is measured by
 the engine's own in-flight count and submission wait, not a ThreadPool API.
 
+### 7.6 Execution packet — PM-8 behavior-tick breakdown (added 2026-10-05, not started)
+
+**Goal.** Say where the `Tick` slot's main-thread time goes. PM-4's Master runs attributed the 200 m/s `Tick` hitches to
+the fluid tick's fan-out (§7.5), but `Tick` exceeded the fluid worker time spread over 15 job threads by 3.5–8× in the seven largest records, so most of
+it is main-thread work no slot splits, and a few `Tick` hitches had almost no fluid work at all.
+
+**Verified (at `305604fb` plus the uncommitted PM-4 work, 2026-10-05).**
+- `PerfSlot.Tick` brackets exactly `ProcessTickUpdates()` (`World.cs:3072–3074`), which builds the active-chunk snapshot
+  list (`:2476`) and calls `TickChunksParallel` (`:2518`). That method runs three phases on the main thread: per chunk,
+  rent a `FluidBurstTicker` and call `ScheduleFluids`, then `JobHandle.ScheduleBatchedJobs` (`:2555`); `Complete()` on
+  every handle (`:2557`); then a serial drain (`:2561`) calling `Chunk.DrainTick` (`Chunk.cs:312`), which runs the managed
+  grass tick (`TickFamily`, `:329`) and the fluid replay (`ReplayFluids`, `:339`).
+- `FluidBurstTicker.PrepareFluidJob` (`:156`) copies the chunk's active-fluid bucket into the index list, sizes the
+  Y-band, fills the eight neighbor snapshots (`PrepareNeighbors`, `:202–211`) and the center snapshot (`:188`) with
+  `ChunkData.FillJobVoxelMap` (`Data/ChunkData.cs:1152`). That fill copies **every section** into a full-chunk buffer,
+  whatever the Y-band, so one fluid chunk's prepare copies nine full chunk maps (≈ 1.1 MB at 128 height). Whether this
+  copy dominates `Tick` is the hypothesis to test, not a finding.
+- `Tick` is a `WorldFrameProfiler` facade phase, and the `World.Update` remainder subtracts all slot time recorded inside
+  its bracket (§4.2), so a slot nested inside `Tick` would be counted twice.
+
+**Plan sketch.**
+1. Time each part of the tick: the snapshot list, the fluid prepare (per chunk, summed), scheduling, the `Complete()`
+   wait, the grass drain and the fluid replay. Add per-tick counts: fluid chunks prepared and snapshot bytes copied.
+2. Readout: `/perf stats` shows the split; hitch records carry it, so a `Tick`-led hitch names its largest part.
+3. Gate: a suite scenario that runs a real `TickChunksParallel` over seeded fluid chunks and checks every part records,
+   the parts sum to no more than the bracket, and nothing records below Systems; then a Master run reading the 200 m/s
+   `Tick` hitches again.
+
+**Open decisions (ask first).**
+1. **How the parts are stored** — per-frame microsecond counters (no nesting, so the remainder and the `Tick` facade
+   phase stay exact, and hitch records carry them unchanged) · or nested "detail slots" excluded from the remainder sum
+   (Profiler markers and slot statistics, but a new store concept). **Recommend counters.**
+2. **Per-chunk prepare distribution** — per-frame sums only · or a per-chunk sample ring like PM-4's job samples, to see
+   whether a few heavy chunks or the count drives the cost. **Recommend sums first**; add the ring if the sums point at
+   the prepare.
+
+**Not doing.** Changing the fluid tick itself (an `ES-*` item, decided on PM-8's numbers); breaking down other composite
+slots (`LightMerge`, `Unload`), which would follow the same pattern if their hitches warrant it.
+
 ### Extension roadmap
 
 | Version | Extension |
@@ -933,6 +1082,11 @@ Answers 1–4 come from `EngineApiProbe_2026-10-03_13-52-20.log`: a `Windows - P
 
 ## Document History
 
+* **v1.11** - Added **§4.9 Coverage map**: what each tier measures, every slot with its probe sites, the timed and
+  untimed jobs, the I/O and counter coverage, the known gaps with their owners, and the commands that re-derive the map.
+* **v1.10** - Added **PM-8** (behavior-tick breakdown, §7.6 execution packet) to measure the `Tick` slot's main-thread
+  parts, after PM-4's Master runs showed the fluid tick's fan-out leading the 200 m/s hitches with most of its time
+  outside the jobs.
 * **v1.9** - **PM-4 complete** (2026-10-05): confirmed in an IL2CPP Master build — all five job types and the disk counters
   record in Master, the Basic-vs-Systems A/B shows no frame-level difference, and the 200 m/s `Tick` hitches are
   attributed to the fluid tick's fan-out (§7.5); status line, plan row and §7.5 heading flipped from "Master build check
@@ -976,4 +1130,4 @@ Answers 1–4 come from `EngineApiProbe_2026-10-03_13-52-20.log`: a `Windows - P
 ---
 
 **Last Updated:** 2026-10-02  
-**Next Review:** when PM-5 starts (PM-4 complete 2026-10-05)
+**Next Review:** when PM-5 or PM-8 starts (PM-4 complete 2026-10-05)
