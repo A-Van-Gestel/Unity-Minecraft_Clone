@@ -364,6 +364,10 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     private readonly List<FluidBurstTicker> _parallelFluidTickers = new List<FluidBurstTicker>();
     private readonly List<JobHandle> _parallelFluidHandles = new List<JobHandle>();
 
+    // Per scheduled fluid job, aligned with _parallelFluidTickers: its busy-time record and schedule time (0 = untimed).
+    private readonly List<int> _parallelFluidTimingRecords = new List<int>();
+    private readonly List<long> _parallelFluidScheduleTimestamps = new List<long>();
+
     /// <summary>Lazily-created pool of per-chunk fluid runners for the parallel tick (one in-flight per scheduled chunk). Cleared in <c>OnDestroy</c>.</summary>
     private DynamicPool<FluidBurstTicker> FluidTickerPool =>
         _fluidTickerPool ??= new DynamicPool<FluidBurstTicker>(() => new FluidBurstTicker(), t => t.Dispose());
@@ -2516,6 +2520,8 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         _parallelFluidChunks.Clear();
         _parallelFluidTickers.Clear();
         _parallelFluidHandles.Clear();
+        _parallelFluidTimingRecords.Clear();
+        _parallelFluidScheduleTimestamps.Clear();
 
         try
         {
@@ -2534,8 +2540,14 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                 FluidBurstTicker ticker = FluidTickerPool.Get();
                 _parallelFluidChunks.Add(chunk);
                 _parallelFluidTickers.Add(ticker);
+                JobBusyTimer timer = default;
+                long scheduleTimestamp = 0L;
+                int timingRecord = JobManager != null ? JobManager.BeginJobTiming(out timer, out scheduleTimestamp) : 0;
+                _parallelFluidTimingRecords.Add(timingRecord);
+                _parallelFluidScheduleTimestamps.Add(scheduleTimestamp);
                 // Tick ALL fluids (interior AND border) in-job, border voxels reading the per-tick Y-band neighbor halo.
-                JobHandle handle = ticker.ScheduleFluids(chunk.ChunkData, _tickCounter, JobDataManager.BlockTypesJobData, worldData);
+                JobHandle handle = ticker.ScheduleFluids(chunk.ChunkData, _tickCounter, JobDataManager.BlockTypesJobData, worldData,
+                    timer);
                 _parallelFluidHandles.Add(handle);
             }
 
@@ -2555,13 +2567,16 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                     continue;
 
                 FluidBurstTicker ticker = null;
+                int fluidJob = -1;
                 if (fluidCursor < _parallelFluidChunks.Count && ReferenceEquals(_parallelFluidChunks[fluidCursor], chunk))
                 {
                     ticker = _parallelFluidTickers[fluidCursor];
+                    fluidJob = fluidCursor;
                     fluidCursor++;
                 }
 
                 chunk.DrainTick(ticker);
+                if (fluidJob >= 0) EndFluidJobTiming(fluidJob);
             }
         }
         finally
@@ -2572,10 +2587,27 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
             for (int i = 0; i < _parallelFluidHandles.Count; i++)
                 _parallelFluidHandles[i].Complete();
 
-            // Return every acquired ticker to the pool for reuse next tick.
+            // Return every acquired ticker to the pool for reuse next tick, and any timing record a throw left unconsumed.
             foreach (FluidBurstTicker ticker in _parallelFluidTickers)
                 FluidTickerPool.Return(ticker);
+            foreach (int timingRecord in _parallelFluidTimingRecords)
+                JobManager?.CancelJobTiming(timingRecord);
         }
+    }
+
+    /// <summary>
+    /// Records a drained fluid job with the performance monitor and clears its record slot. A chunk whose prepare found
+    /// nothing to tick scheduled no job, so its record is returned unrecorded.
+    /// </summary>
+    /// <param name="index">The job's index in the per-tick fluid lists.</param>
+    private void EndFluidJobTiming(int index)
+    {
+        int timingRecord = _parallelFluidTimingRecords[index];
+        _parallelFluidTimingRecords[index] = 0;
+        if (JobManager == null) return;
+
+        if (_parallelFluidHandles[index].Equals(default(JobHandle))) JobManager.CancelJobTiming(timingRecord);
+        else JobManager.EndJobTiming(PerfJobType.Fluids, timingRecord, _parallelFluidScheduleTimestamps[index]);
     }
 
     /// <summary>
@@ -3089,12 +3121,41 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         PerfStore.SetGauge(PerfCounter.ActiveSections, ChunkPool.ActiveSections);
         PerfStore.SetGauge(PerfCounter.JobArraysPooled, JobManager.JobArraysPooled);
         PerfStore.SetGauge(PerfCounter.MeshOutputsPooled, JobManager.MeshOutputsPooled);
+        PerfStore.SetGauge(PerfCounter.IoInFlight, StorageIoStats.InFlight);
 
         PerfStore.SampleTotal(PerfCounter.SectionPoolMisses, ChunkPool.CreatedSections);
         PerfStore.SampleTotal(PerfCounter.DataPoolMisses, ChunkPool.CreatedData);
         PerfStore.SampleTotal(PerfCounter.JobArrayMisses, JobManager.JobArraysAllocated);
         PerfStore.SampleTotal(PerfCounter.MeshOutputMisses, JobManager.MeshOutputsAllocated);
         PerfStore.SampleTotal(PerfCounter.SaveBufferMisses, SerializationBufferPool.TotalCreated);
+
+        SampleJobTotals(PerfJobType.Generation, PerfCounter.GenerationCompleted, PerfCounter.GenerationLatencyUs, PerfCounter.GenerationBusyUs);
+        SampleJobTotals(PerfJobType.Lighting, PerfCounter.LightCompleted, PerfCounter.LightLatencyUs, PerfCounter.LightBusyUs);
+        SampleJobTotals(PerfJobType.Meshing, PerfCounter.MeshCompleted, PerfCounter.MeshLatencyUs, PerfCounter.MeshBusyUs);
+        SampleJobTotals(PerfJobType.Fluids, PerfCounter.FluidCompleted, PerfCounter.FluidLatencyUs, PerfCounter.FluidBusyUs);
+        SampleJobTotals(PerfJobType.FluidSoundScan, PerfCounter.FluidSoundScanCompleted, PerfCounter.FluidSoundScanLatencyUs,
+            PerfCounter.FluidSoundScanBusyUs);
+        PerfStore.SampleTotal(PerfCounter.UntimedJobs, JobManager.UntimedJobs);
+
+        PerfStore.SampleTotal(PerfCounter.DiskLoadHits, StorageIoStats.LoadHits);
+        PerfStore.SampleTotal(PerfCounter.DiskLoadMisses, StorageIoStats.LoadMisses);
+        PerfStore.SampleTotal(PerfCounter.DiskReadUs, StorageIoStats.ReadMicros);
+        PerfStore.SampleTotal(PerfCounter.DeserializeUs, StorageIoStats.DeserializeMicros);
+        PerfStore.SampleTotal(PerfCounter.DiskLoadBytes, StorageIoStats.LoadBytes);
+        PerfStore.SampleTotal(PerfCounter.DiskSaves, StorageIoStats.Saves);
+        PerfStore.SampleTotal(PerfCounter.SerializeUs, StorageIoStats.SerializeMicros);
+        PerfStore.SampleTotal(PerfCounter.DiskWriteUs, StorageIoStats.WriteMicros);
+        PerfStore.SampleTotal(PerfCounter.DiskSaveBytes, StorageIoStats.SaveBytes);
+        PerfStore.SampleTotal(PerfCounter.IoQueueWaitUs, StorageIoStats.QueueWaitMicros);
+        PerfStore.SampleTotal(PerfCounter.IoBackgroundOps, StorageIoStats.BackgroundOps);
+    }
+
+    /// <summary>Samples one job type's running totals into its per-frame completed, latency and busy counts.</summary>
+    private void SampleJobTotals(PerfJobType type, PerfCounter completed, PerfCounter latencyUs, PerfCounter busyUs)
+    {
+        PerfStore.SampleTotal(completed, JobManager.JobsCompleted(type));
+        PerfStore.SampleTotal(latencyUs, JobManager.JobLatencyMicros(type));
+        PerfStore.SampleTotal(busyUs, JobManager.JobBusyMicros(type));
     }
 
     // --- JOB-RELATED METHODS ---

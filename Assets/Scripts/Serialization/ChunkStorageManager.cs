@@ -130,7 +130,10 @@ namespace Serialization
 #if UNITY_INCLUDE_INSTRUMENTATION
             if (TryConsumeInjection(ref s_injectedZeroLengthSerializes)) return 0;
 #endif
-            return ChunkSerializer.Serialize(source, buffer, algorithm);
+            long start = StorageIoStats.Stamp();
+            int length = ChunkSerializer.Serialize(source, buffer, algorithm);
+            StorageIoStats.RecordSerialize(start);
+            return length;
         }
 
         /// <summary>Resets the CP-1 save counters on each play-mode entry (safe when domain reload is disabled).</summary>
@@ -191,37 +194,51 @@ namespace Serialization
             bool logSaveDiagnostics = World.Instance.settings.enableSaveSystemDiagnosticLogs;
 #endif
             // Run I/O on background thread
-            return await Task.Run(() =>
+            long submitted = StorageIoStats.BeginQueued();
+            try
             {
-                // CP-3 instrumented-build fault seam — a thrown load fault must surface as a FAULTED task (retry),
-                // never as the null "not on disk" result (which would regenerate over saved data).
-                ThrowIfInjectedLoadFault();
-
-                (Vector2Int regionCoord, int lx, int lz) = _codec.ChunkVoxelPosToRegionAddress(chunkVoxelPos);
-                RegionFile region = GetRegion(regionCoord);
-
-                (byte[] data, CompressionAlgorithm algorithm) = region.LoadChunkData(lx, lz);
-                if (data == null)
+                return await Task.Run(() =>
                 {
+                    StorageIoStats.RecordQueueWait(submitted);
+
+                    // CP-3 instrumented-build fault seam — a thrown load fault must surface as a FAULTED task (retry),
+                    // never as the null "not on disk" result (which would regenerate over saved data).
+                    ThrowIfInjectedLoadFault();
+
+                    long readStart = StorageIoStats.Stamp();
+                    (Vector2Int regionCoord, int lx, int lz) = _codec.ChunkVoxelPosToRegionAddress(chunkVoxelPos);
+                    RegionFile region = GetRegion(regionCoord);
+
+                    (byte[] data, CompressionAlgorithm algorithm) = region.LoadChunkData(lx, lz);
+                    StorageIoStats.RecordRead(readStart, data?.Length ?? 0, data != null);
+                    if (data == null)
+                    {
 #if UNITY_INCLUDE_INSTRUMENTATION
-                    if (logSaveDiagnostics)
-                        Debug.Log($"[LoadChunkAsync] Chunk at voxelPos {chunkVoxelPos} not on disk -> Will be generated");
+                        if (logSaveDiagnostics)
+                            Debug.Log($"[LoadChunkAsync] Chunk at voxelPos {chunkVoxelPos} not on disk -> Will be generated");
 #endif
-                    return null;
-                }
+                        return null;
+                    }
 
-                // Deserialize (Expensive CPU, kept on background thread)
-                ChunkData chunk = ChunkSerializer.Deserialize(data, algorithm, chunkVoxelPos);
+                    // Deserialize (Expensive CPU, kept on background thread)
+                    long deserializeStart = StorageIoStats.Stamp();
+                    ChunkData chunk = ChunkSerializer.Deserialize(data, algorithm, chunkVoxelPos);
+                    StorageIoStats.RecordDeserialize(deserializeStart);
 
-                if (chunk == null)
-                {
-                    Debug.LogWarning($"[LoadChunkAsync] Chunk at voxelPos {chunkVoxelPos} deserialization failed -> Will be (re-)generated");
+                    if (chunk == null)
+                    {
+                        Debug.LogWarning($"[LoadChunkAsync] Chunk at voxelPos {chunkVoxelPos} deserialization failed -> Will be (re-)generated");
 
-                    return null;
-                }
+                        return null;
+                    }
 
-                return chunk;
-            });
+                    return chunk;
+                });
+            }
+            finally
+            {
+                StorageIoStats.EndQueued(submitted);
+            }
         }
 
         /// <summary>
@@ -305,6 +322,7 @@ namespace Serialization
             long seq = NextSaveSequence();
 
             ChunkSaveResult result;
+            long submitted = 0L;
             try
             {
                 // Check token before expensive work
@@ -317,8 +335,11 @@ namespace Serialization
                     ChunkSaveResult taskResult = ChunkSaveResult.Canceled;
 
                     // 4. Offload serialization of the isolated snapshot to Thread Pool
+                    submitted = StorageIoStats.BeginQueued();
                     await Task.Run(() =>
                     {
+                        StorageIoStats.RecordQueueWait(submitted);
+
                         // Serialize
                         int length = SerializeWithInjection(snapshot, buffer, algorithm);
                         if (length <= 0)
@@ -368,6 +389,7 @@ namespace Serialization
             {
                 // Always return the buffer to the pool
                 SerializationBufferPool.Return(buffer);
+                StorageIoStats.EndQueued(submitted);
             }
 
             // Snapshot disposition — exactly once per path (any thread — staged entries are drained on the
@@ -783,8 +805,10 @@ namespace Serialization
             ThrowIfInjectedSaveFault();
             ThrowIfInjectedTooLargeSave();
 
+            long start = StorageIoStats.Stamp();
             (Vector2Int regionCoord, int lx, int lz) = _codec.ChunkVoxelPosToRegionAddress(chunkVoxelPos);
             GetRegion(regionCoord).SaveChunkData(lx, lz, buffer, length, algorithm);
+            StorageIoStats.RecordWrite(start, length);
         }
 
         // -------------------------------------------------------------------------

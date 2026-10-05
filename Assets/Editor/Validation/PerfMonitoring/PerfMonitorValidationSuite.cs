@@ -18,7 +18,8 @@ namespace Editor.Validation.PerfMonitoring
     /// <see cref="PerfStore"/>'s tier gating, frame boundary and shutdown, and the
     /// <see cref="WorldFrameProfiler"/> facade's slot mapping and bit-identical published values. The Frame-tier
     /// scenarios (B11–B19: GC readings, frame-timing back-fill, hitch detection) live in the <c>.Frame</c> part, and the
-    /// coverage scenarios (B20 on: the unattributed remainder and the counters) in the <c>.Coverage</c> part.
+    /// coverage scenarios (B20–B23: the unattributed remainder and the counters) in the <c>.Coverage</c> part, and the
+    /// worker scenarios (B24 on: job timing, per-job samples and storage I/O) in the <c>.Workers</c> part.
     /// <para>
     /// Timing <i>values</i> are not asserted beyond "zero" versus "positive" — wall-clock durations are not
     /// deterministic. Every scenario that touches the static store starts and ends from
@@ -87,6 +88,13 @@ namespace Editor.Validation.PerfMonitoring
                 new Scenario("B21 Counters: gauges hold, per-frame counts reset each commit, running totals re-baseline", RunB21CounterSemantics),
                 new Scenario("B22 Counter columns live with the slot columns; exact window statistics over a gauge", RunB22CounterColumnsAndStats),
                 new Scenario("B23 Hitch records carry per-row counters, oldest first across the ring wrap", RunB23HitchRecordCounters),
+                new Scenario("B24 Timing pool: distinct zeroed records, exhaustion runs untimed and is counted, return recycles", RunB24TimingPool),
+                new Scenario("B25 A timed generation chain counts every link — each column, the worm carver, filter and scan", RunB25GenerationChainLinks),
+                new Scenario("B26 Sample ring: holds every sample below capacity, the newest past it, none after Clear", RunB26SampleRing),
+                new Scenario("B27 Job samples: Systems only, latency for every job, busy time only for timed jobs, reset with the counters", RunB27JobSamples),
+                new Scenario("B28 Storage I/O: a save, a hit and a miss counted exactly at Systems, nothing below, in-flight balanced", RunB28StorageIoCounters),
+                new Scenario("B29 Worker utilization: busy time over workers × wall time, summed over the counter frames only", RunB29WorkerUtilization),
+                new Scenario("B30 Fluid jobs: a timed fluid tick and a timed fluid sound scan each time one link; untimed writes nothing", RunB30FluidJobLinks),
             };
             return ValidationSuiteRunner.Execute("Performance Monitor", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }

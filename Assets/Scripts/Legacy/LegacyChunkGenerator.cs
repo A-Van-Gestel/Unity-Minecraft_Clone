@@ -73,9 +73,11 @@ namespace Legacy
         /// <remarks>
         /// The legacy generator runs no active-voxel scan pass, so it leaves
         /// <see cref="GenerationJobData.ActiveVoxels"/> uncreated and ignores
-        /// <paramref name="activeVoxelPool"/> (the consume site falls back to the bitmask scan).
+        /// <paramref name="activeVoxelPool"/> (the consume site falls back to the bitmask scan). It also ignores
+        /// <paramref name="timer"/>: the legacy job is frozen, so its execution is never timed.
         /// </remarks>
-        public GenerationJobData ScheduleGeneration(ChunkCoord coord, Helpers.ActiveVoxelListPool activeVoxelPool = null)
+        public GenerationJobData ScheduleGeneration(ChunkCoord coord, Helpers.ActiveVoxelListPool activeVoxelPool = null,
+            JobBusyTimer timer = default)
         {
             Vector2Int chunkVoxelPos = coord.ToVoxelOrigin();
 

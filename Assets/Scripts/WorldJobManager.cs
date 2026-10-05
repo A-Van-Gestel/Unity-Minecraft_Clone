@@ -6,6 +6,7 @@ using Benchmarks;
 using Data;
 using Data.JobData;
 using Data.WorldTypes;
+using Diagnostics;
 using Helpers;
 using Jobs;
 using Jobs.BurstData;
@@ -111,6 +112,115 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
 
     /// <summary>Mesh outputs retained by the mesh output pool, ready to rent.</summary>
     public int MeshOutputsPooled => _meshOutputPool.PooledCount;
+
+    #endregion
+
+    #region Job Timing
+
+    // Jobs scheduled while the monitor's slots record carry a busy-time record and a schedule timestamp. The pool is
+    // freed only in Dispose, after this manager's jobs complete, so a tier change never frees a record still written;
+    // a job from outside this manager may rent here only if it is completed before Dispose.
+    private readonly PerfJobTimingPool _timingPool = new PerfJobTimingPool();
+    private readonly long[] _jobsCompleted = new long[PerfStore.JobTypeCount];
+    private readonly long[] _jobLatencyTicks = new long[PerfStore.JobTypeCount];
+    private readonly long[] _jobBusyProfilerTicks = new long[PerfStore.JobTypeCount];
+    private readonly long[] _jobLinks = new long[PerfStore.JobTypeCount];
+
+    /// <summary>Timed jobs of a type whose result the main thread has consumed, as a running total.</summary>
+    /// <param name="type">The job type.</param>
+    /// <returns>The total.</returns>
+    public long JobsCompleted(PerfJobType type) => _jobsCompleted[(int)type];
+
+    /// <summary>Summed latency — schedule to result consumed — of a type's timed jobs, in microseconds, as a running total.</summary>
+    /// <param name="type">The job type.</param>
+    /// <returns>The total.</returns>
+    public long JobLatencyMicros(PerfJobType type) => PerfStore.TicksToMicros(_jobLatencyTicks[(int)type]);
+
+    /// <summary>Summed worker execute time of a type's timed jobs, in microseconds, as a running total.</summary>
+    /// <param name="type">The job type.</param>
+    /// <returns>The total.</returns>
+    public long JobBusyMicros(PerfJobType type) => PerfStore.ProfilerTicksToMicros(_jobBusyProfilerTicks[(int)type]);
+
+    /// <summary>
+    /// Timed executions of a type's jobs, as a running total: every mesh job times two links, and every lighting, fluid
+    /// and fluid-sound-scan job one, so a ratio to <see cref="JobsCompleted"/> other than that reveals an unwired job.
+    /// </summary>
+    /// <param name="type">The job type.</param>
+    /// <returns>The total.</returns>
+    public long JobLinks(PerfJobType type) => _jobLinks[(int)type];
+
+    /// <summary>
+    /// Whether a completed job may need <see cref="EndJobTiming"/>: slots are recording, or a record is still rented. Lets
+    /// a removal skip its job lookup at the lower tiers; a job left without a record by a full pool, completing after the
+    /// tier dropped, then goes unrecorded.
+    /// </summary>
+    private bool MayHoldTimedJobs => PerfStore.SlotsActive || _timingPool.RentedCount > 0;
+
+    /// <summary>Jobs that ran without a busy-time record because every record was rented, as a running total.</summary>
+    public long UntimedJobs => _timingPool.UntimedTotal;
+
+    /// <summary>
+    /// Rents a busy-time record and stamps the schedule time for a job about to be scheduled, while the performance
+    /// monitor's slots record; otherwise leaves the job untimed.
+    /// </summary>
+    /// <param name="timer">The timer to give every job in the chain; untimed when this returns 0.</param>
+    /// <param name="scheduleTimestamp">The schedule time, or 0 when untimed.</param>
+    /// <returns>The record handle for the job's data, or 0.</returns>
+    public int BeginJobTiming(out JobBusyTimer timer, out long scheduleTimestamp)
+    {
+        timer = default;
+        scheduleTimestamp = 0L;
+        if (!PerfStore.SlotsActive) return 0;
+
+        scheduleTimestamp = Stopwatch.GetTimestamp();
+        return _timingPool.Rent(out timer);
+    }
+
+    /// <summary>
+    /// Records a job whose result the main thread has consumed and returns its busy-time record. A job with no timed
+    /// execution (pool exhausted, or a generator whose jobs carry no timer) adds its latency only.
+    /// </summary>
+    /// <param name="type">The job's type.</param>
+    /// <param name="timingRecord">The job's record handle; 0 when it had none.</param>
+    /// <param name="scheduleTimestamp">The job's schedule time; 0 when it was untimed, which records nothing.</param>
+    public void EndJobTiming(PerfJobType type, int timingRecord, long scheduleTimestamp)
+    {
+        if (scheduleTimestamp == 0L) return;
+
+        long latency = Stopwatch.GetTimestamp() - scheduleTimestamp;
+        long busy = 0L;
+        long links = 0L;
+        if (timingRecord != 0)
+        {
+            _timingPool.Read(timingRecord, out busy, out links);
+            _timingPool.Return(timingRecord);
+        }
+
+        RecordJobCompletion(type, latency, busy, links);
+    }
+
+    /// <summary>Returns a record without recording its job — for a job that was never scheduled, or never consumed.</summary>
+    /// <param name="timingRecord">The record handle from <see cref="BeginJobTiming"/>; 0 is a no-op.</param>
+    public void CancelJobTiming(int timingRecord) => _timingPool.Return(timingRecord);
+
+    /// <summary>
+    /// Records a consumed job into its type's running totals and per-job samples, from a busy-time record already read
+    /// and released — the entry point for a job whose owner keeps its own record.
+    /// </summary>
+    /// <param name="type">The job's type.</param>
+    /// <param name="latencyTicks">Schedule to result consumed, in <see cref="Stopwatch"/> ticks.</param>
+    /// <param name="busyProfilerTicks">The job's accumulated execute time, on the profiler clock.</param>
+    /// <param name="links">The job's timed executions; 0 records latency only.</param>
+    public void RecordJobCompletion(PerfJobType type, long latencyTicks, long busyProfilerTicks, long links)
+    {
+        int t = (int)type;
+        _jobsCompleted[t]++;
+        _jobLatencyTicks[t] += latencyTicks;
+        _jobLinks[t] += links;
+        if (links > 0) _jobBusyProfilerTicks[t] += busyProfilerTicks;
+
+        PerfStore.RecordJob(type, latencyTicks, busyProfilerTicks, links > 0);
+    }
 
     #endregion
 
@@ -501,7 +611,12 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         if (_world.worldData.TryGetChunk(chunkVoxelPos, out ChunkData data) && data.IsPopulated)
             return;
 
-        GenerationJobData jobData = _chunkGenerator.ScheduleGeneration(chunkCoord, _activeVoxelListPool);
+        // A throw below may leave part of the chain scheduled with the timer, so its record is never returned:
+        // reused, it would collect a stray job's writes.
+        int timingRecord = BeginJobTiming(out JobBusyTimer timer, out long scheduleTimestamp);
+        GenerationJobData jobData = _chunkGenerator.ScheduleGeneration(chunkCoord, _activeVoxelListPool, timer);
+        jobData.TimingRecord = timingRecord;
+        jobData.ScheduleTimestamp = scheduleTimestamp;
         GenerationJobs.Add(chunkCoord, jobData);
     }
 
@@ -586,6 +701,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
             SectionData = sectionData,
             TargetEpoch = chunk.ChunkData.LifecycleEpoch,
         };
+        jobData.TimingRecord = BeginJobTiming(out JobBusyTimer timer, out jobData.ScheduleTimestamp);
         try
         {
             jobData.Map = RentAndFillVoxelMap(chunkCoord.ToVoxelOrigin());
@@ -628,6 +744,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                 FullCubeContactShadows = _world.settings.fullBlockContactShadows,
                 ClipBounds = MeshClipBounds.Disabled,
                 Output = jobData.Output,
+                Timer = timer,
             };
 
             // MR-5: chain the chunk-space → section-space post-process onto the mesh job so the rewrite +
@@ -645,6 +762,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                 LightData = jobData.Output.LightData,
                 InterleavedStream3 = jobData.Output.InterleavedStream3,
                 SectionHeight = ChunkMath.SECTION_SIZE,
+                Timer = timer,
             };
 
             // POOLING: Input buffers are returned to _jobArrayPool in ProcessMeshJobs after
@@ -672,6 +790,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
             jobData.Handle.Complete();
             _meshOutputPool.Return(jobData.Output); // MR-6: return-or-dispose (Return no-ops on uncreated)
             ReleaseMeshingJobInputs(jobData);
+            _timingPool.Return(jobData.TimingRecord);
             throw;
         }
 
@@ -863,6 +982,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         // If anything below throws, the catch releases every buffer acquired so far
         // (Return/Dispose skip uncreated entries), so the pool never leaks.
         LightingJobData jobData = new LightingJobData { UsesPooledBuffers = usePooledBuffers };
+        jobData.TimingRecord = BeginJobTiming(out JobBusyTimer timer, out jobData.ScheduleTimestamp);
         try
         {
             jobData.Input = new LightingJobInputData
@@ -973,6 +1093,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                 PullBackClaims = jobData.PullBackClaims,
                 IsStable = jobData.IsStable,
                 PerformEdgeCheck = performEdgeCheck,
+                Timer = timer,
             };
             // P-2 Layer 1: wire the worker-thread gather's sources (center + 8 neighbors) in one place.
             job.SetGatherSources(neighbors, jobData.Map, jobData.LightMap);
@@ -988,6 +1109,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
             // (Complete() on a default handle is a no-op).
             jobData.Handle.Complete();
             ReleaseLightingJobData(jobData);
+            _timingPool.Return(jobData.TimingRecord);
             throw;
         }
     }
@@ -1349,6 +1471,12 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
 
         foreach (ChunkCoord chunkCoord in _completedGenJobs)
         {
+            if (MayHoldTimedJobs)
+            {
+                GenerationJobData finished = GenerationJobs[chunkCoord];
+                EndJobTiming(PerfJobType.Generation, finished.TimingRecord, finished.ScheduleTimestamp);
+            }
+
             GenerationJobs.Remove(chunkCoord);
 
             // The job's removal is what flips AreNeighborsDataReady for the 8 neighbors — wake any
@@ -1466,6 +1594,12 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     /// <inheritdoc />
     void IMeshCompletionHost.RemoveJob(ChunkCoord key)
     {
+        if (MayHoldTimedJobs)
+        {
+            MeshingJobData finished = MeshJobs[key];
+            EndJobTiming(PerfJobType.Meshing, finished.TimingRecord, finished.ScheduleTimestamp);
+        }
+
         MeshJobs.Remove(key);
         UntrackMeshJobTarget(key); // MP-4 probe: same lifetime as the job entry.
     }
@@ -1691,6 +1825,12 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     /// <inheritdoc />
     void IJobCompletionDriver<ChunkCoord>.RemoveAndPromote(ChunkCoord key)
     {
+        if (MayHoldTimedJobs)
+        {
+            LightingJobData finished = LightingJobs[key];
+            EndJobTiming(PerfJobType.Lighting, finished.TimingRecord, finished.ScheduleTimestamp);
+        }
+
         LightingJobs.Remove(key);
 
         // Completion is the last event in an AreNeighborsReadyAndLit unblock chain (the neighbor flags it
@@ -2206,6 +2346,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         _jobArrayPool.Dispose();
         _meshOutputPool.Dispose();
         _activeVoxelListPool.Dispose();
+        _timingPool.Dispose();
 
         _chunkGenerator?.Dispose();
     }

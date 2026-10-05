@@ -349,7 +349,8 @@ namespace Jobs.Generators
         }
 
         /// <inheritdoc />
-        public GenerationJobData ScheduleGeneration(ChunkCoord coord, ActiveVoxelListPool activeVoxelPool = null)
+        public GenerationJobData ScheduleGeneration(ChunkCoord coord, ActiveVoxelListPool activeVoxelPool = null,
+            JobBusyTimer timer = default)
         {
             Vector2Int chunkVoxelPos = coord.ToVoxelOrigin();
 
@@ -400,6 +401,7 @@ namespace Jobs.Generators
                     FeatureFlags = FeatureFlags,
                     OutputWormMask = wormMask,
                     Telemetry = wormTelemetry,
+                    Timer = timer,
                 };
 
                 wormHandle = wormJob.Schedule(default);
@@ -443,6 +445,7 @@ namespace Jobs.Generators
                 WormMask = wormMask,
                 OutputCaveMask = caveMask,
                 OutputPreCaveBlockIDs = preCaveBlockIDs,
+                Timer = timer,
             };
 
             JobHandle terrainHandle = job.ScheduleParallelByRef(VoxelData.ChunkWidth * VoxelData.ChunkWidth, 8, wormHandle);
@@ -460,6 +463,7 @@ namespace Jobs.Generators
                     PreCaveBlockIDs = preCaveBlockIDs,
                     VoxelMap = outputMap,
                     BlockTypes = _blockTypesJobData,
+                    Timer = timer,
                 };
 
                 handle = filterJob.Schedule(terrainHandle);
@@ -487,6 +491,7 @@ namespace Jobs.Generators
                 VoxelMap = outputMap,
                 BlockTypes = _blockTypesJobData,
                 ActiveVoxels = activeVoxels,
+                Timer = timer,
             };
             handle = activeVoxelScanJob.Schedule(handle);
 

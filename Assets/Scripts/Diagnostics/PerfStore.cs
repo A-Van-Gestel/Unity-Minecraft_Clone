@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics;
+using Unity.Profiling.LowLevel.Unsafe;
 using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 #if ENABLE_PROFILER
@@ -58,7 +59,12 @@ namespace Diagnostics
     /// slot columns: gauges set with <see cref="SetGauge"/> hold their level until set again, while per-frame counts
     /// added by <see cref="SampleTotal"/> are zeroed by every commit.
     /// </para>
-    /// <para>Main thread only. Native memory is freed on application quit and before an Editor assembly reload.</para>
+    /// <para>
+    /// <b>Job samples.</b> At <see cref="PerfTier.Systems"/> and above, <see cref="RecordJob"/> keeps the latency and busy
+    /// time of the newest completed jobs per <see cref="PerfJobType"/> — per job, not per frame — for exact per-job
+    /// percentiles.
+    /// </para>
+    /// <para>Main thread only; <see cref="SlotsActive"/> may also be read from worker threads to gate their counting. Native memory is freed on application quit and before an Editor assembly reload.</para>
     /// </summary>
     public static class PerfStore
     {
@@ -74,13 +80,30 @@ namespace Diagnostics
         /// <summary>The first per-frame count; every <see cref="PerfCounter"/> before it is a gauge.</summary>
         public const PerfCounter FirstPerFrameCount = PerfCounter.SectionPoolMisses;
 
+        /// <summary>Number of <see cref="PerfJobType"/> values.</summary>
+        public const int JobTypeCount = (int)PerfJobType.Count;
+
+        /// <summary>Completed jobs per type whose latency and busy time are held for per-job statistics.</summary>
+        public const int JobSampleCapacity = 1024;
+
         private const double MILLISECONDS_PER_SECOND = 1000.0;
+        private const double MICROSECONDS_PER_SECOND = 1000000.0;
+        private const double NANOSECONDS_PER_MILLISECOND = 1000000.0;
+        private const double NANOSECONDS_PER_MICROSECOND = 1000.0;
+        private const double MICROSECONDS_PER_MILLISECOND = 1000.0;
 
         /// <summary>Oldest row a late frame timing is matched against; timings arrive a few frames after their frame.</summary>
         private const int FRAME_TIMING_MAX_AGE = 16;
 
         [NoAutoStaticsCleanup] // immutable
         private static readonly double s_tickToMs = MILLISECONDS_PER_SECOND / Stopwatch.Frequency;
+
+        [NoAutoStaticsCleanup] // immutable
+        private static readonly double s_tickToMicros = MICROSECONDS_PER_SECOND / Stopwatch.Frequency;
+
+        /// <summary>Nanoseconds per <see cref="ProfilerUnsafeUtility.Timestamp"/> tick, the clock jobs time themselves on.</summary>
+        [NoAutoStaticsCleanup] // immutable
+        private static readonly double s_profilerTickToNs = CreateProfilerTickToNs();
 
         /// <summary>Per-slot stopwatch ticks accumulated since the last <see cref="CommitFrame"/> or <see cref="ClearSlots"/>.</summary>
         [NoAutoStaticsCleanup] // contents cleared in DomainReset
@@ -175,6 +198,14 @@ namespace Diagnostics
         [NoAutoStaticsCleanup] // reset in DomainReset
         private static bool s_isWorldFrameOpen;
 
+        /// <summary>Per-type latency of the newest completed jobs, in milliseconds; exists at <see cref="PerfTier.Systems"/> and above.</summary>
+        [NoAutoStaticsCleanup] // reset in DomainReset
+        private static PerfSampleRing[] s_jobLatencyMs;
+
+        /// <summary>Per-type busy time of the newest completed jobs whose execution was timed, in milliseconds; exists with <see cref="s_jobLatencyMs"/>.</summary>
+        [NoAutoStaticsCleanup] // reset in DomainReset
+        private static PerfSampleRing[] s_jobBusyMs;
+
         /// <summary>The current tier.</summary>
         public static PerfTier Tier => s_tier;
 
@@ -244,6 +275,7 @@ namespace Diagnostics
             s_tier = tier;
             RefreshSlotsActive();
             ApplyFrameTierResources();
+            ApplyJobSamples();
 
             if (s_ring == null) return;
 
@@ -364,15 +396,102 @@ namespace Diagnostics
         }
 
         /// <summary>
-        /// Zeroes every counter and forgets every running-total baseline. For a monitor starting on a new world, whose
-        /// gauges would otherwise hold the previous world's levels until first set.
+        /// Zeroes every counter, forgets every running-total baseline and empties the job samples. For a monitor starting
+        /// on a new world, whose gauges would otherwise hold the previous world's levels until first set.
         /// </summary>
         public static void ResetCounters()
         {
             Array.Clear(s_counterValues, 0, CounterCount);
             Array.Clear(s_lastTotals, 0, CounterCount);
             Array.Clear(s_hasTotal, 0, CounterCount);
+
+            if (s_jobLatencyMs == null) return;
+
+            for (int i = 0; i < JobTypeCount; i++)
+            {
+                s_jobLatencyMs[i].Clear();
+                s_jobBusyMs[i].Clear();
+            }
         }
+
+        /// <summary>
+        /// Holds one completed job's latency and, when its execution was timed, its busy time for per-job statistics.
+        /// A no-op below <see cref="PerfTier.Systems"/>.
+        /// </summary>
+        /// <param name="type">The job's type.</param>
+        /// <param name="latencyTicks">Schedule to result consumed, in <see cref="Stopwatch"/> ticks.</param>
+        /// <param name="busyProfilerTicks">Worker execute time summed over the job's chain, in <see cref="ProfilerUnsafeUtility.Timestamp"/> ticks.</param>
+        /// <param name="hasBusy">Whether the execution was timed; an untimed job adds latency only.</param>
+        public static void RecordJob(PerfJobType type, long latencyTicks, long busyProfilerTicks, bool hasBusy)
+        {
+            if (s_jobLatencyMs == null) return;
+
+            s_jobLatencyMs[(int)type].Add((float)(latencyTicks * s_tickToMs));
+            if (hasBusy) s_jobBusyMs[(int)type].Add((float)(busyProfilerTicks * s_profilerTickToNs / NANOSECONDS_PER_MILLISECOND));
+        }
+
+        /// <summary>Exact statistics of the held jobs' latency — schedule to result consumed — in milliseconds.</summary>
+        /// <param name="type">The job type.</param>
+        /// <returns>The summary; empty when no job is held.</returns>
+        public static PerfWindowSummary SummarizeJobLatencyMs(PerfJobType type) =>
+            PerfWindowStats.Summarize(s_statsScratch, s_jobLatencyMs?[(int)type].CopyTo(s_statsScratch) ?? 0);
+
+        /// <summary>Exact statistics of the held jobs' worker busy time, in milliseconds, over the jobs whose execution was timed.</summary>
+        /// <param name="type">The job type.</param>
+        /// <returns>The summary; empty when no timed job is held.</returns>
+        public static PerfWindowSummary SummarizeJobBusyMs(PerfJobType type) =>
+            PerfWindowStats.Summarize(s_statsScratch, s_jobBusyMs?[(int)type].CopyTo(s_statsScratch) ?? 0);
+
+        /// <summary>Sums one counter over the held frames that carry counter values.</summary>
+        /// <param name="counter">The counter.</param>
+        /// <returns>The sum; 0 when no frame carries counters.</returns>
+        public static long SumCounter(PerfCounter counter)
+        {
+            int frames = s_ring?.SlotFrameCount ?? 0;
+            long sum = 0;
+            for (int age = 0; age < frames; age++)
+                sum += s_ring.GetCounter(age, counter);
+            return sum;
+        }
+
+        /// <summary>Sums wall time over the held frames that carry counter values — the frames <see cref="SumCounter"/> covers.</summary>
+        /// <returns>The milliseconds; 0 when no frame carries counters.</returns>
+        public static double SumCounterFramesWallMs()
+        {
+            int frames = s_ring?.SlotFrameCount ?? 0;
+            double sum = 0;
+            for (int age = 0; age < frames; age++)
+                sum += s_ring.GetFrame(age).WallMs;
+            return sum;
+        }
+
+        /// <summary>
+        /// The share of the job workers' time the timed jobs kept busy over the held frames that carry counters:
+        /// their busy time over workers × wall time. Busy time is charged to the frame its job's result was consumed in, so
+        /// only a window much longer than a job is meaningful, and a single frame can exceed 1.
+        /// </summary>
+        /// <param name="workerCount">The job worker threads.</param>
+        /// <returns>The fraction, or NaN when no frame carries counters or there are no workers.</returns>
+        public static double WorkerUtilization(int workerCount)
+        {
+            double wallMs = SumCounterFramesWallMs();
+            if (wallMs <= 0.0 || workerCount <= 0) return double.NaN;
+
+            long busyUs = SumCounter(PerfCounter.GenerationBusyUs) + SumCounter(PerfCounter.LightBusyUs)
+                          + SumCounter(PerfCounter.MeshBusyUs) + SumCounter(PerfCounter.FluidBusyUs)
+                          + SumCounter(PerfCounter.FluidSoundScanBusyUs);
+            return busyUs / MICROSECONDS_PER_MILLISECOND / (workerCount * wallMs);
+        }
+
+        /// <summary>Converts <see cref="Stopwatch"/> ticks to whole microseconds.</summary>
+        /// <param name="ticks">The ticks.</param>
+        /// <returns>The microseconds, truncated.</returns>
+        public static long TicksToMicros(long ticks) => (long)(ticks * s_tickToMicros);
+
+        /// <summary>Converts <see cref="ProfilerUnsafeUtility.Timestamp"/> ticks to whole microseconds.</summary>
+        /// <param name="ticks">The ticks.</param>
+        /// <returns>The microseconds, truncated.</returns>
+        public static long ProfilerTicksToMicros(long ticks) => (long)(ticks * s_profilerTickToNs / NANOSECONDS_PER_MICROSECOND);
 
         /// <summary>Zeroes a contiguous range of slot accumulators.</summary>
         /// <param name="firstSlot">Index of the first slot.</param>
@@ -593,6 +712,33 @@ namespace Diagnostics
             RegisterShutDown();
         }
 
+        /// <summary>Creates the job sample rings at <see cref="PerfTier.Systems"/> and above, and drops them below.</summary>
+        private static void ApplyJobSamples()
+        {
+            if (s_tier < PerfTier.Systems || s_isShutDown)
+            {
+                s_jobLatencyMs = null;
+                s_jobBusyMs = null;
+                return;
+            }
+
+            if (s_jobLatencyMs != null) return;
+
+            s_jobLatencyMs = new PerfSampleRing[JobTypeCount];
+            s_jobBusyMs = new PerfSampleRing[JobTypeCount];
+            for (int i = 0; i < JobTypeCount; i++)
+            {
+                s_jobLatencyMs[i] = new PerfSampleRing(JobSampleCapacity);
+                s_jobBusyMs[i] = new PerfSampleRing(JobSampleCapacity);
+            }
+        }
+
+        private static double CreateProfilerTickToNs()
+        {
+            ProfilerUnsafeUtility.TimestampConversionRatio ratio = ProfilerUnsafeUtility.TimestampToNanosecondsConversionRatio;
+            return ratio.Denominator != 0 ? (double)ratio.Numerator / ratio.Denominator : 0.0;
+        }
+
         private static void ReleaseFrameTierResources()
         {
             s_hitches?.Dispose();
@@ -636,6 +782,8 @@ namespace Diagnostics
             ReleaseFrameTierResources();
             s_ring?.Dispose();
             s_ring = null;
+            s_jobLatencyMs = null;
+            s_jobBusyMs = null;
         }
 
 #if ENABLE_PROFILER

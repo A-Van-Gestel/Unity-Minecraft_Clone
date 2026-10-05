@@ -1,5 +1,7 @@
 using System;
+using System.Diagnostics;
 using Data;
+using Diagnostics;
 using Helpers;
 using Jobs;
 using Jobs.Data;
@@ -36,12 +38,22 @@ namespace Audio
         /// <summary>Offset from a section's low corner to its center, used for the distance ordering.</summary>
         private const int SECTION_HALF = ChunkMath.SECTION_SIZE / 2;
 
+        /// <summary>Scans in flight at once: <see cref="Begin"/> refuses while one is running, so one timing record suffices.</summary>
+        private const int MAX_SCANS_IN_FLIGHT = 1;
+
         private NativeArray<uint> _sections;
         private NativeArray<BlockTypeJobData> _palette;
         private NativeArray<int3> _sectionOrigins;
         private NativeArray<FluidEmitterBin> _bins;
         private JobHandle _handle;
         private bool _allocated;
+
+        // The scan can still be running when the world tears down, so its busy-time record lives here, freed only
+        // after the scan completes, rather than in the world's pool; the result goes to the scanned world's job totals.
+        private readonly PerfJobTimingPool _timingPool = new PerfJobTimingPool(MAX_SCANS_IN_FLIGHT);
+        private WorldJobManager _timingReceiver;
+        private int _timingRecord;
+        private long _scheduleTimestamp;
 
         // Nearest-first candidate selection, kept sorted by distance as candidates are offered so no sort
         // (and no comparer allocation) is needed afterwards.
@@ -103,6 +115,14 @@ namespace Audio
 
             if (!CopyPalette(world)) return false;
 
+            JobBusyTimer timer = default;
+            if (PerfStore.SlotsActive && world.JobManager != null)
+            {
+                _timingReceiver = world.JobManager;
+                _scheduleTimestamp = Stopwatch.GetTimestamp();
+                _timingRecord = _timingPool.Rent(out timer);
+            }
+
             _handle = new FluidEmitterScanJob
             {
                 Sections = _sections,
@@ -112,6 +132,7 @@ namespace Audio
                 ListenerVoxel = listener,
                 BinOrigin = BinOrigin,
                 Bins = _bins,
+                Timer = timer,
             }.Schedule();
 
             IsScanning = true;
@@ -128,6 +149,26 @@ namespace Audio
             _handle.Complete();
             IsScanning = false;
             HasResult = true;
+            EndTiming(true);
+        }
+
+        /// <summary>Reports the completed scan to the world it scanned, when it was timed, and frees its record.</summary>
+        /// <param name="record">False when the scan is being discarded rather than consumed.</param>
+        private void EndTiming(bool record)
+        {
+            if (_scheduleTimestamp != 0L && record)
+            {
+                long busy = 0L;
+                long links = 0L;
+                if (_timingRecord != 0) _timingPool.Read(_timingRecord, out busy, out links);
+                _timingReceiver.RecordJobCompletion(PerfJobType.FluidSoundScan, Stopwatch.GetTimestamp() - _scheduleTimestamp,
+                    busy, links);
+            }
+
+            _timingPool.Return(_timingRecord);
+            _timingRecord = 0;
+            _scheduleTimestamp = 0L;
+            _timingReceiver = null;
         }
 
         /// <summary>Completes any in-flight scan and frees the native scratch.</summary>
@@ -139,6 +180,8 @@ namespace Audio
                 IsScanning = false;
             }
 
+            EndTiming(false);
+            _timingPool.Dispose();
             if (!_allocated) return;
 
             _sections.Dispose();

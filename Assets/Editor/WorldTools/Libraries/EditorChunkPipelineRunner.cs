@@ -86,15 +86,16 @@ namespace Editor.WorldTools.Libraries
         /// Schedules a chunk generation job for the given coordinate.
         /// </summary>
         /// <param name="coord">The chunk coordinate to generate.</param>
+        /// <param name="timer">A busy-time timer given to every job in the chain; untimed by default.</param>
         /// <returns>The generation job data containing the handle and output containers.</returns>
-        public GenerationJobData ScheduleGeneration(ChunkCoord coord)
+        public GenerationJobData ScheduleGeneration(ChunkCoord coord, JobBusyTimer timer = default)
         {
             _generator.FeatureFlags = FeatureFlags;
             if (SeaLevelOverride.HasValue)
                 _generator.SeaLevel = SeaLevelOverride.Value;
             _generator.TrunkWormEnabledOverride = TrunkWormOverride;
             _generator.EnableTelemetry = EnableTelemetry;
-            return _generator.ScheduleGeneration(coord);
+            return _generator.ScheduleGeneration(coord, null, timer);
         }
 
         /// <summary>

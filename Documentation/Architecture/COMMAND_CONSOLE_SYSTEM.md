@@ -604,7 +604,7 @@ alias `/profiler`. Future monitor controls (export) are meant to become sub-comm
 |----------------------|----------------------------------------------------------------------------------------------|
 | `/perf`              | Reports whether the capability probe is running, else the last probe's summary and report path |
 | `/perf probe`        | Starts `Diagnostics.EngineApiProbe` (~120 frames, one deliberate `GC.Collect`)                 |
-| `/perf stats`        | Worst, p99, p50 and mean wall/CPU frame time over `PerfStore`'s ring, plus allocated KB per frame over the frames without a collection and the collections held; at the Frame tier, GPU/render-thread/present-wait time (or why they are n/a) and the hitch count; at the Systems tier, the avg/p99/worst of every slot that recorded time, costliest first, the others on one line, a warning when the unattributed remainder went negative (overlapping slots), and every counter's avg/p99/max |
+| `/perf stats`        | Worst, p99, p50 and mean wall/CPU frame time over `PerfStore`'s ring, plus allocated KB per frame over the frames without a collection and the collections held; at the Frame tier, GPU/render-thread/present-wait time (or why they are n/a) and the hitch count; at the Systems tier, the avg/p99/worst of every slot that recorded time, costliest first, the others on one line, a warning when the unattributed remainder went negative (overlapping slots), and every counter's avg/p99/max; then the job workers' utilization, each timed job type's per-job latency and busy time (p50/p99/worst), and chunk disk I/O — operations, MB/s and the average time per operation (added by PM-4, 2026-10-05; confirmed in an IL2CPP Master build) |
 | `/perf hitches`      | At the Frame tier and above, the held hitch records, newest first: worst wall time and threshold, slow-frame count, GC-correlation, the worst frame's CPU/GPU/present-wait time and, at Systems, its top three slots and non-zero counters (added 2026-10-04; confirmed in an IL2CPP Master build; counters added by PM-3, 2026-10-04, also confirmed in an IL2CPP Master build) |
 | `/perf tier [name]`  | Reads the monitor tier, or sets `Settings.perfMonitorTier` and raises `OnSettingChanged` — the same live-apply path as the Settings dropdown |
 
@@ -621,6 +621,9 @@ Benchmark tab's **Run Engine API Probe** action, which also works from the main 
 
 ## Document History
 
+* **v1.24** - §8.6: PM-4's `/perf stats` additions confirmed in an IL2CPP Master build (2026-10-05).
+* **v1.23** - §8.6: `/perf stats` adds worker utilization, per-job latency and busy time per timed job type, and chunk disk I/O
+  (PM-4, 2026-10-05). No new command; Command Console suite green in `Validate All`.
 * **v1.22** - §8.6: PM-3's `/perf` additions confirmed in an IL2CPP Master build (2026-10-04).
 * **v1.21** - §8.6: `/perf stats` lists only the slots that recorded time, warns on a negative remainder and prints the
   counters; `/perf hitches` adds the worst frame's counters (PM-3, 2026-10-04). No new command; Command Console suite 57/57.

@@ -72,8 +72,11 @@ namespace Jobs.Generators
         /// the pool instead of disposing it. When null (editor / preview / benchmark paths) the list is
         /// freshly allocated and freed by <see cref="GenerationJobData.Dispose"/>. Generators that do not run
         /// the active-voxel scan (e.g. the legacy generator) ignore it.</param>
+        /// <param name="timer">The performance monitor's busy-time timer, given to every job in the chain; the default
+        /// leaves the chain untimed. A generator whose jobs carry no timer ignores it.</param>
         /// <returns>A <see cref="GenerationJobData"/> containing the job handle and output containers.</returns>
-        GenerationJobData ScheduleGeneration(ChunkCoord coord, global::Helpers.ActiveVoxelListPool activeVoxelPool = null);
+        GenerationJobData ScheduleGeneration(ChunkCoord coord, global::Helpers.ActiveVoxelListPool activeVoxelPool = null,
+            JobBusyTimer timer = default);
 
         /// <summary>
         /// Synchronous main-thread voxel query. Used by World.GetHighestVoxel and spawn-point logic.

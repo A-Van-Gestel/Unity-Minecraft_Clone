@@ -51,6 +51,9 @@ namespace Diagnostics
         /// <summary>Mesh outputs idle in the mesh output pool, ready to rent.</summary>
         MeshOutputsPooled,
 
+        /// <summary>Background chunk loads and saves submitted and not yet resumed on their caller.</summary>
+        IoInFlight,
+
         /// <summary>Sections the section pool had to create this frame (a pool miss).</summary>
         SectionPoolMisses,
 
@@ -65,6 +68,87 @@ namespace Diagnostics
 
         /// <summary>Serialization buffers the save-buffer pool had to allocate this frame.</summary>
         SaveBufferMisses,
+
+        /// <summary>Timed generation jobs whose result was consumed this frame.</summary>
+        GenerationCompleted,
+
+        /// <summary>Summed latency of those generation jobs — schedule to result consumed — in microseconds.</summary>
+        GenerationLatencyUs,
+
+        /// <summary>Summed worker execute time of those generation jobs, in microseconds.</summary>
+        GenerationBusyUs,
+
+        /// <summary>Timed lighting jobs whose result was consumed this frame.</summary>
+        LightCompleted,
+
+        /// <summary>Summed latency of those lighting jobs, in microseconds.</summary>
+        LightLatencyUs,
+
+        /// <summary>Summed worker execute time of those lighting jobs, in microseconds.</summary>
+        LightBusyUs,
+
+        /// <summary>Timed mesh jobs whose result was consumed this frame.</summary>
+        MeshCompleted,
+
+        /// <summary>Summed latency of those mesh jobs, in microseconds.</summary>
+        MeshLatencyUs,
+
+        /// <summary>Summed worker execute time of those mesh jobs, in microseconds.</summary>
+        MeshBusyUs,
+
+        /// <summary>Jobs scheduled untimed this frame because every busy-time record was in use.</summary>
+        UntimedJobs,
+
+        /// <summary>Fluid tick jobs whose result was drained this frame.</summary>
+        FluidCompleted,
+
+        /// <summary>Summed latency of those fluid jobs — schedule to drained — in microseconds.</summary>
+        FluidLatencyUs,
+
+        /// <summary>Summed worker execute time of those fluid jobs, in microseconds.</summary>
+        FluidBusyUs,
+
+        /// <summary>Fluid sound scans whose result was read this frame.</summary>
+        FluidSoundScanCompleted,
+
+        /// <summary>Summed latency of those scans, in microseconds.</summary>
+        FluidSoundScanLatencyUs,
+
+        /// <summary>Summed worker execute time of those scans, in microseconds.</summary>
+        FluidSoundScanBusyUs,
+
+        /// <summary>Chunk loads that found the chunk on disk this frame.</summary>
+        DiskLoadHits,
+
+        /// <summary>Chunk loads that found nothing on disk this frame — the chunk is generated instead.</summary>
+        DiskLoadMisses,
+
+        /// <summary>Time spent reading region files for loads, hits and misses alike, in microseconds.</summary>
+        DiskReadUs,
+
+        /// <summary>Time spent decompressing and deserializing loaded chunks, in microseconds.</summary>
+        DeserializeUs,
+
+        /// <summary>Compressed payload bytes read this frame.</summary>
+        DiskLoadBytes,
+
+        /// <summary>Chunk payloads written to region files this frame, from every save path.</summary>
+        DiskSaves,
+
+        /// <summary>Time spent serializing and compressing chunks for saving, in microseconds.</summary>
+        SerializeUs,
+
+        /// <summary>Time spent writing payloads into region files, in microseconds.</summary>
+        DiskWriteUs,
+
+        /// <summary>Compressed payload bytes written this frame.</summary>
+        DiskSaveBytes,
+
+        /// <summary>Time background loads and saves waited for a ThreadPool thread, in microseconds.</summary>
+        IoQueueWaitUs,
+
+        /// <summary>Background loads and saves that started on a ThreadPool thread this frame — the operations <see cref="IoQueueWaitUs"/> covers.</summary>
+        IoBackgroundOps,
 
         /// <summary>Number of counters; not a counter.</summary>
         Count,

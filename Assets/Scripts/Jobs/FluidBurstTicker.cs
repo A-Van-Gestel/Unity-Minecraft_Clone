@@ -1,6 +1,7 @@
 using System;
 using Data;
 using Helpers;
+using Jobs.Data;
 using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
@@ -132,13 +133,15 @@ namespace Jobs
         /// <param name="tickCounter">The current tick salt (<c>World.TickCounter</c>) for the viscosity RNG.</param>
         /// <param name="blockTypes">The global block-type job blob.</param>
         /// <param name="worldData">The chunk store used to resolve the 8 neighbor snapshots (missing → sentinel/void).</param>
+        /// <param name="timer">The performance monitor's busy-time timer for the job; untimed by default.</param>
         /// <returns>The scheduled job's handle, or <c>default</c> when the chunk has no active fluids.</returns>
-        public JobHandle ScheduleFluids(ChunkData cd, int tickCounter, NativeArray<BlockTypeJobData> blockTypes, WorldData worldData)
+        public JobHandle ScheduleFluids(ChunkData cd, int tickCounter, NativeArray<BlockTypeJobData> blockTypes, WorldData worldData,
+            JobBusyTimer timer = default)
         {
             if (!PrepareFluidJob(cd, worldData))
                 return default;
 
-            return BuildJob(cd, tickCounter, blockTypes).Schedule();
+            return BuildJob(cd, tickCounter, blockTypes, timer).Schedule();
         }
 
         /// <summary>
@@ -216,7 +219,8 @@ namespace Jobs
         }
 
         /// <summary>Builds the fluid job over the prepared snapshot + neighbor halo + indices and this ticker's outputs.</summary>
-        private FluidTickJob BuildJob(ChunkData cd, int tickCounter, NativeArray<BlockTypeJobData> blockTypes) =>
+        private FluidTickJob BuildJob(ChunkData cd, int tickCounter, NativeArray<BlockTypeJobData> blockTypes,
+            JobBusyTimer timer = default) =>
             new FluidTickJob
             {
                 CenterVoxels = _snapshot,
@@ -234,6 +238,7 @@ namespace Jobs
                 Mods = _mods,
                 NowInactive = _inactive,
                 ModsPerSource = _modsPerSource,
+                Timer = timer,
             };
 
         /// <summary>Lazily allocates the reusable persistent scratch on first use.</summary>

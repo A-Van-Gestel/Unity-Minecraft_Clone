@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
 using Diagnostics;
+using Unity.Jobs.LowLevel.Unsafe;
 using Unity.Scripting.LifecycleManagement;
 
 namespace Commands
@@ -28,6 +29,10 @@ namespace Commands
         private const string COUNT_FORMAT = "0.#";
         private const int SLOT_NAME_WIDTH = 20;
         private const int FRAME_LABEL_WIDTH = 7;
+        private const string PERCENT_FORMAT = "P1";
+        private const double MILLISECONDS_PER_SECOND = 1000.0;
+        private const double MICROSECONDS_PER_MILLISECOND = 1000.0;
+        private const double BYTES_PER_MEGABYTE = 1024.0 * 1024.0;
 
         [NoAutoStaticsCleanup] // immutable table
         private static readonly string[] s_aliases = { "profiler" };
@@ -117,7 +122,10 @@ namespace Commands
             return text.ToString();
         }
 
-        /// <summary>Prints wall and CPU frame statistics, then per-slot statistics sorted by average cost, then the counters.</summary>
+        /// <summary>
+        /// Prints wall and CPU frame statistics, then per-slot statistics sorted by average cost, then the counters, the job
+        /// workers and chunk disk I/O.
+        /// </summary>
         /// <returns>The readout.</returns>
         private static CommandResult Stats()
         {
@@ -185,8 +193,73 @@ namespace Commands
             }
 
             AddCounterLines(lines);
+            AddWorkerLines(lines);
+            AddDiskLines(lines);
             return new CommandResult(lines.ToArray());
         }
+
+        /// <summary>Adds the job workers' utilization over the counter frames and each timed job type's per-job latency and busy time.</summary>
+        private static void AddWorkerLines(List<ConsoleLine> lines)
+        {
+            int workers = JobsUtility.JobWorkerCount;
+            double utilization = PerfStore.WorkerUtilization(workers);
+            lines.Add(new ConsoleLine(ConsoleLineSeverity.Info, double.IsNaN(utilization)
+                ? $"Workers: {workers} job threads, no utilization yet"
+                : $"Workers: timed jobs kept {utilization.ToString(PERCENT_FORMAT, CultureInfo.InvariantCulture)} of {workers} " +
+                  $"job threads busy over the last {PerfStore.SlotFramesRecorded} frames"));
+
+            for (int i = 0; i < PerfStore.JobTypeCount; i++)
+            {
+                PerfJobType type = (PerfJobType)i;
+                string label = type.ToString().PadRight(SLOT_NAME_WIDTH);
+                PerfWindowSummary latency = PerfStore.SummarizeJobLatencyMs(type);
+                if (latency.Count == 0)
+                {
+                    lines.Add(new ConsoleLine(ConsoleLineSeverity.Info, $"  {label} no timed job completed yet"));
+                    continue;
+                }
+
+                PerfWindowSummary busy = PerfStore.SummarizeJobBusyMs(type);
+                string busyText = busy.Count == 0
+                    ? "busy n/a (untimed)"
+                    : $"busy {Ms(busy.P50)} / {Ms(busy.P99)} / {Ms(busy.Max)}";
+                lines.Add(new ConsoleLine(ConsoleLineSeverity.Info,
+                    $"  {label} last {latency.Count} jobs, p50 / p99 / worst ms: latency {Ms(latency.P50)} / {Ms(latency.P99)} / " +
+                    $"{Ms(latency.Max)}, {busyText}"));
+            }
+
+            long untimed = PerfStore.SumCounter(PerfCounter.UntimedJobs);
+            if (untimed > 0)
+            {
+                lines.Add(new ConsoleLine(ConsoleLineSeverity.Warning,
+                    $"  {untimed} jobs ran untimed because every busy-time record was in use; utilization reads low."));
+            }
+        }
+
+        /// <summary>Adds chunk disk I/O over the counter frames: operations, throughput and the average time per operation.</summary>
+        private static void AddDiskLines(List<ConsoleLine> lines)
+        {
+            double seconds = PerfStore.SumCounterFramesWallMs() / MILLISECONDS_PER_SECOND;
+            if (seconds <= 0.0) return;
+
+            long hits = PerfStore.SumCounter(PerfCounter.DiskLoadHits);
+            long misses = PerfStore.SumCounter(PerfCounter.DiskLoadMisses);
+            long saves = PerfStore.SumCounter(PerfCounter.DiskSaves);
+            lines.Add(new ConsoleLine(ConsoleLineSeverity.Info,
+                $"Disk over {Ms((float)seconds)} s: {hits} loads found on disk, {misses} not; {saves} saves; " +
+                $"{MegabytesPerSecond(PerfStore.SumCounter(PerfCounter.DiskLoadBytes), seconds)} MB/s read, " +
+                $"{MegabytesPerSecond(PerfStore.SumCounter(PerfCounter.DiskSaveBytes), seconds)} MB/s written"));
+            lines.Add(new ConsoleLine(ConsoleLineSeverity.Info,
+                $"  avg ms per operation: read {AverageMs(PerfCounter.DiskReadUs, hits + misses)}, " +
+                $"deserialize {AverageMs(PerfCounter.DeserializeUs, hits)}, serialize {AverageMs(PerfCounter.SerializeUs, saves)}, " +
+                $"write {AverageMs(PerfCounter.DiskWriteUs, saves)}, ThreadPool wait {AverageMs(PerfCounter.IoQueueWaitUs, PerfStore.SumCounter(PerfCounter.IoBackgroundOps))}"));
+        }
+
+        /// <summary>A microsecond counter's sum over the counter frames divided by an operation count, as milliseconds.</summary>
+        private static string AverageMs(PerfCounter microseconds, long operations) =>
+            operations > 0 ? Ms((float)(PerfStore.SumCounter(microseconds) / MICROSECONDS_PER_MILLISECOND / operations)) : "n/a";
+
+        private static string MegabytesPerSecond(long bytes, double seconds) => Ms((float)(bytes / BYTES_PER_MEGABYTE / seconds));
 
         /// <summary>Adds every counter's statistics over the frames that carry counter values.</summary>
         private static void AddCounterLines(List<ConsoleLine> lines)

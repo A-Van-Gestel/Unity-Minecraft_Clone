@@ -1,6 +1,6 @@
 # Engine Scaling Performance Roadmap
 
-**Version:** 1.11  
+**Version:** 1.12  
 **Date:** 2026-10-02  
 **Status:** In progress — `ES-1`, `ES-2` and `ES-6.1` shipped (2026-10-02); ES-0's GC.Alloc attribution captured
 (2026-10-03, §2.2.1 — added `ES-26`/`ES-27`; PM-1's smoke capture added the `ES-28` quick win); the rest is a near-to-far horizon, not
@@ -324,7 +324,10 @@ PM-6; the bullets below are what ES needs from it.
   Editor reading: a 1 500-block teleport's crossing frame spent 496 ms in `Unload` and 16 ms in `ViewDistance`. First Master
   reading, one Systems benchmark run: the 200 m/s phase's hitches are led by `Tick` (32–104 ms) and `LightMerge`
   (15–36 ms), and a 135 ms frame after it by `Unload` at 96.5 ms — `PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md` §7.4; one
-  build, not yet a ranking.)
+  build, not yet a ranking.) (PM-4, 2026-10-05, confirmed in an IL2CPP Master build: the `Tick`-led 200 m/s hitches track
+  the fluid tick's job count — every hitch record with more than 200 fluid chunk jobs had a 46–160 ms `Tick` and 170–399 ms
+  of fluid worker time, three Systems runs — with the main-thread prepare and drain the inferred larger share; §7.5. No ES
+  item owns the fluid tick's fan-out yet.)
 - A once-per-launch **drain stamp** (P-4's tail-inclusive drain predicate): ms to `_isWorldLoaded`, to
   drained, to frame time within 1.25× median for 2 s — splits the 30 s into before/after handoff.
 - One Development-build (not deep-profiling) Profiler capture of a 200 m/s generation flight with
@@ -600,7 +603,7 @@ constants + migration change. Prerequisites: ES-13, ES-18, ES-19.
 
 | Phase | Scope | Effort | Depends on | Status |
 |---|---|:---:|---|---|
-| **ES-0 — Measure** | Spike-visible capture, drain stamp, crossing slots, GC.Alloc capture | 🟢 | — | GC.Alloc capture ✅ 2026-10-03 (§2.2.1); PM-1 store ✅ 2026-10-03; PM-2 frame tier ✅ 2026-10-04 (Master-confirmed); PM-3 crossing slots + remainder + counters ✅ 2026-10-04 (Master-confirmed); rest via PM-6 |
+| **ES-0 — Measure** | Spike-visible capture, drain stamp, crossing slots, GC.Alloc capture | 🟢 | — | GC.Alloc capture ✅ 2026-10-03 (§2.2.1); PM-1 store ✅ 2026-10-03; PM-2 frame tier ✅ 2026-10-04 (Master-confirmed); PM-3 crossing slots + remainder + counters ✅ 2026-10-04 (Master-confirmed); PM-4 job/I-O counters ✅ 2026-10-05 (Master-confirmed); rest via PM-6 |
 | **ES-1 — No frame-paced load** | Completion counter at `World.cs:1064` — execution packet §7.1 | 🟢 | — | ✅ 2026-10-02 (in-game) |
 | **ES-2 — Calibration** | Robust OM-1 lighting probe — execution packet §7.1 | 🟢 | — | ✅ 2026-10-02 (in-game) |
 | **ES-3 — Loading mode** | SU-1 + SU-2, pooled/banded/shared startup snapshots | 🟡 | ES-0 | — |
@@ -993,6 +996,8 @@ saving is inferred from step 1's re-entry leg, not re-measured.
 
 ## Document History
 
+* **v1.12** - ES-0 slot bullet + plan row: PM-4 confirmed in an IL2CPP Master build (2026-10-05) — the `Tick`-led 200 m/s
+  hitches track the fluid tick's job count; no ES item owns that fan-out yet.
 * **v1.11** - ES-0 slot bullet + plan row: PM-3 confirmed in an IL2CPP Master build (2026-10-04), with the first Master
   reading of the 200 m/s (`Tick`- and `LightMerge`-led) and post-phase (`Unload`-led) hitches.
 * **v1.10** - ES-0 slot bullet + plan row: PM-3's coverage code landed (2026-10-04, Master build check pending) — a slot

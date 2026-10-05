@@ -1,11 +1,11 @@
 # Performance Monitor & Logger Overhaul Design
 
-**Version:** 1.7  
+**Version:** 1.9  
 **Date:** 2026-10-02  
 **Status:** In progress — PM-0 ✅ complete (2026-10-03, Master answers in §8); PM-1 ✅ complete (2026-10-03, §7.2;
 confirmed in an IL2CPP Master build); PM-2 ✅ complete (2026-10-04, §7.3; confirmed in an IL2CPP Master build); PM-3 ✅
-complete (2026-10-04, §7.4; confirmed in an IL2CPP Master build); PM-4…PM-7 not started. PM-0's answers reshaped
-PM-2/PM-4 (§8).  
+complete (2026-10-04, §7.4; confirmed in an IL2CPP Master build); PM-4 ✅ complete (2026-10-05, §7.5; confirmed in an
+IL2CPP Master build); PM-5…PM-7 not started. PM-0's answers reshaped PM-2/PM-4 (§8).  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > An opt-in, settings-driven in-game performance monitor and diagnostic logger that covers **every
@@ -312,6 +312,18 @@ resumes synchronously inside the `World.Update` slot that started the load, whic
 - **Disk I/O:** `ChunkStorageManager`/`RegionFile`/`ChunkSerializer` record read/write latency, payload
   bytes, compression time and ratio with `Interlocked` adds into cumulative counters; ThreadPool
   in-flight count likewise.
+- *PM-4 (2026-10-05), as built:* jobs do not write a begin/end pair. Each job given a `JobBusyTimer` adds its execute
+  time and one link to a record shared by its whole chain, with `Interlocked` writes, because the parallel terrain job's
+  256 columns and every link of a chain write the same record. Records come from a `PerfJobTimingPool` owned by
+  `WorldJobManager` and freed only after every job has completed. Five job types are timed: generation, lighting,
+  meshing, the fluid tick (one job per chunk) and the fluid sound scan. The scan can outlive a world teardown, so it keeps
+  its own one-record pool. Latency runs from schedule until the main thread has
+  consumed the result, so a job held back by a per-frame budget counts as waiting. Each job type has per-frame counts
+  (completed, latency µs, busy µs) and a per-job sample ring of the newest 1 024 jobs. Utilization is computed over the
+  held window only. Disk I/O records read, deserialize, serialize (compression included — the two run interleaved
+  through one stream) and write time, payload bytes, and load hits versus misses (`StorageIoStats`). The compression
+  *ratio* is deferred: only compressed bytes are known. "ThreadPool depth" is the engine's own count of background
+  loads and saves in flight, plus the wait between submission and a pool thread starting each one.
 
 ### 4.5 Hitch detection and snapshots
 
@@ -418,7 +430,7 @@ public enum LogLevel : byte { Off, Error, Warning, Info, Verbose }
 | **PM-1 — Core store** | `PerfStore`, `PerfSlot`, raw per-frame ring, exact window statistics, tier setting + live apply, `WorldFrameProfiler` facade (identical `PassMsTotals`), `/perf stats` + `/perf tier` | 🟡 | PM-0 | ✅ 2026-10-03 — code + suite (§7.2); confirmed in an IL2CPP Master build |
 | **PM-2 — Frame tier** | Per-frame GC + collection flag, `FrameTiming` GPU/render/present-wait, hitch detector + snapshots | 🟡 | PM-1 | ✅ 2026-10-04 — code + suite (§7.3); confirmed in an IL2CPP Master build |
 | **PM-3 — Coverage** | Slots for every untimed `World.Update` region + unattributed remainder; non-World systems; `PerfCounter` + counter columns, with gauges for queues, in-flight jobs, pools, resident chunks (moved from PM-1); `World.cs`'s facade probes to the slotted API; the Master IL2CPP overhead A/B (moved from PM-1) | 🟡 | PM-1 | ✅ 2026-10-04 — code + suite (§7.4); confirmed in an IL2CPP Master build |
-| **PM-4 — Workers & I/O** | Job schedule→complete latency, in-job execute time, worker utilization; disk latency/bytes/compression; ThreadPool depth | 🟡 | PM-0, PM-1 | — |
+| **PM-4 — Workers & I/O** | Job schedule→complete latency, in-job execute time, worker utilization; disk latency/bytes/compression; ThreadPool depth | 🟡 | PM-0, PM-1, PM-3 | ✅ 2026-10-05 — code + suite (§7.5); confirmed in an IL2CPP Master build |
 | **PM-5 — HUD** | Systems panel, hitch list, GPU/CPU split, raw-max graph overlay; `DT-4` | 🟡 | PM-2, PM-3 | — |
 | **PM-6 — Export** | Session CSV + hitch dumps on a background writer; benchmark reports read the store, with phase-wide percentiles (an aggregate spanning more than the ring — moved from PM-1); benchmark mode forces Capture | 🟡 | PM-2 | — |
 | **PM-7 — Logger** | `EngineLog` categories/levels/rate limits/tags, migration of the 3 diagnostic flags and the 327 call sites (by category, in passes), stack-trace policy per build profile, variant-drift fix | 🟡 | — | — |
@@ -723,6 +735,134 @@ Basic, Systems, Systems, Basic, read from the reports and the run-end Player.log
   region leaves its marker open; Master compiles the markers out.
 - Counters are sampled by `World.Update`, so during the initial load they read 0.
 
+### 7.5 PM-4 execution record (2026-10-05; confirmed in an IL2CPP Master build)
+
+**Shipped.**
+- **Job timer.** `Jobs/Data/JobBusyTimer` is a blittable timer pointing at a record of busy ticks and a link count. Its
+  default value is untimed. It is a field on nine production jobs: the worm carver, the terrain job (timed per
+  column), the cave filter, the active-voxel scan, the mesh job, its post-process, the lighting job, `FluidTickJob` and
+  `FluidEmitterScanJob`. The frozen legacy generation job takes none, so its jobs record latency only.
+- **Record pool.** `Diagnostics/PerfJobTimingPool` holds 2 048 records of 16 B, allocated on the first rent. A job
+  scheduled while every record is rented runs untimed and is counted.
+- **Wiring.** `GenerationJobData`, `MeshingJobData` and `LightingJobData` carry their record and schedule timestamp.
+  `IChunkGenerator.ScheduleGeneration` takes an optional timer, and `EditorChunkPipelineRunner` passes one through.
+  `WorldJobManager` rents a record at its three schedule sites while slots record, and reads and returns it at its
+  three removal sites. Below Systems, with no record rented, a removal skips the job lookup entirely. It keeps running
+  totals per job type (completed, latency, busy, links) and frees the pool in `Dispose`, after completing every job. A generation schedule that throws keeps its record, because part of its chain
+  may already be running.
+- **Fluids.** `World.TickChunksParallel` rents a record per scheduled chunk job through `WorldJobManager.BeginJobTiming`
+  and passes the timer through `FluidBurstTicker.ScheduleFluids`. Each job is recorded once its chunk's drain has consumed
+  it. A chunk that scheduled no job, and any record a throw left unconsumed, is returned unrecorded
+  (`CancelJobTiming`). `FluidEmitterScanner` keeps a one-record pool of its own, freed in its `Dispose` after its scan
+  completes and before that method's not-allocated early return. It reports each read scan to the scanned world's
+  `WorldJobManager.RecordJobCompletion`.
+- **Store.** `PerfStore` gains `PerfJobType` (five types), per-type `PerfSampleRing`s of the newest 1 024 jobs' latency and busy time
+  (held at Systems and up, emptied by `ResetCounters`), plus `RecordJob`, `SummarizeJobLatencyMs`/`SummarizeJobBusyMs`,
+  `SumCounter`, `SumCounterFramesWallMs` and `WorkerUtilization`.
+- **Counters.** `PerfCounter` grows from 18 to 46:
+  - the gauge `IoInFlight`;
+  - per-frame completed / latency µs / busy µs for each of the five job types, and `UntimedJobs`;
+  - `DiskLoadHits`, `DiskLoadMisses`, `DiskReadUs`, `DeserializeUs`, `DiskLoadBytes`, `DiskSaves`, `SerializeUs`,
+    `DiskWriteUs`, `DiskSaveBytes`, `IoQueueWaitUs` and `IoBackgroundOps` (the operations that waited for a pool
+    thread, so the average wait excludes sync and retry saves).
+- **Disk I/O.** The totals live in `Serialization/StorageIoStats`. Read and deserialize time are taken in the background
+  body of `LoadChunkAsync`. Serialize and write time are taken in `SerializeWithInjection` and `WriteToRegion`, which
+  the sync, async and retry save paths all share.
+- **Readout.** `/perf stats` adds worker utilization, each type's per-job p50/p99/worst latency and busy time, and disk
+  operations, MB/s and average milliseconds per operation. The run-end Player.log summary carries the same lines.
+- **Benchmarks.** `PerfStore Overhead` gains the main-thread bookkeeping of one job, and the new
+  `Minecraft Clone/Benchmarks/Job Timing Overhead` A/Bs a generation chain with and without the timer.
+
+**Decisions taken at plan review:**
+1. **Busy accumulation inside the job** rather than a begin/end pair in its output (§4.4). Utilization is exact for
+   the parallel terrain job, and the default timer leaves the editor and benchmark callers unchanged.
+2. **Per-frame counters plus per-job sample rings**, for exact per-job percentiles beside the hitch-record counters.
+3. **Compression ratio deferred.** Compressed bytes and serialize time only; raw byte counts belong with `ES-26`'s
+   rewrite of the section writer.
+4. **A dedicated IL2CPP Master build** confirms PM-4 before PM-5 starts.
+
+**Verification.**
+- **Suite.** `Validate Performance Monitor` 30/30, with seven new scenarios:
+  - B24: timing pool rent, exhaustion and return;
+  - B25: a real generation chain counts every link — 257 with caves off, 259 with caves on;
+  - B26: sample-ring retention;
+  - B27: job-sample routing and tier gating;
+  - B28: a real save, a load hit and a load miss counted exactly — three background operations — nothing below Systems,
+    in-flight balanced;
+  - B29: utilization and window sums, exact, over all five types' busy time;
+  - B30: a real fluid tick job and a real fluid sound scan each time one link; untimed writes nothing.
+- **Prove-red.** Each of these went red under its mutation, and green again on restore with the file checksum
+  identical:
+  - B25: the scan job's timer unwired (256 / 258 links);
+  - B26: the ring wrapping one slot early;
+  - B28: `Stamp` ignoring the tier, misses counted as hits, and the background-operation count dropped;
+  - B29: wall time summed over every frame, and one job type (meshing, then fluids) dropped from utilization;
+  - B30: the ticker's timer unwired (0 links).
+- **Validate All:** 32/32 suites, 800 baselines. The fluid parallel-determinism check (9 chunks × 6 concurrent rounds) stays
+  byte-identical to its serial baselines.
+- **Editor micro-benchmark** (Mono, three sequential runs on a machine under other load, so treat the figures as
+  indicative): a whole Systems frame costs 3.6–4.1 µs (PM-3: 3.4–3.6 µs, with 18 counters); `CommitFrame` at Systems
+  744–1 591 ns (the high figure from one noisy run); one job's main-thread bookkeeping 74–85 ns; 0 collections in every
+  case. The generation chain timed against untimed (best of 5 rounds × 100 chunks, three runs) differed by −90, +54 and
+  +61 µs on ≈ 10 ms per chunk, so the worker-side cost of the timer is below that noise.
+- **Editor Play-mode smoke** (new world, seed 4242, Systems tier, player moved to voxel (1500, 140, 1500) and back):
+  - Every job's links matched its chain exactly: 259.000 per generation job, 1.000 per lighting job and 2.000 per mesh
+    job, over 729, 2 312 and 1 773 jobs; none ran untimed.
+  - The outbound trip counted 729 load misses and 841 saves; the return trip 729 hits and no misses, at an average of
+    0.21 ms read, 0.75 ms deserialize, 0.63 ms serialize, 0.91 ms write and 0.10 ms ThreadPool wait.
+  - The return's crossing hitch record (191.8 ms, led by `Unload` at 138.8 ms) carried 761 operations in flight, 725
+    saves and 455 ms of serialization in that one frame.
+  - Utilization read 4.6 % of 15 job threads over the return window.
+  - Six back-to-back tier switches logged nothing, and leaving Play mode logged no leak.
+  - Generation busy time read p50 31 ms per chunk. In the Editor, with many chunks sharing contended threads, that is
+    not a cost figure; the Master build gives it.
+- **Fluid Play-mode smoke** (a second new world at seed 4242, five floating water sources placed near the player):
+  - 459 fluid tick jobs and 40 fluid sound scans, each at exactly 1.000 link per job, none untimed.
+  - Fluid jobs read p50 0.13 ms busy and 1.6 ms latency. Sound scans read p50 0.02 ms busy, with latency p50 4.7 ms and
+    p99 32 ms; the scan is consumed on a later frame.
+  - Leaving Play mode logged no error or leak.
+
+**Left for later:**
+- Busy time is charged to the frame in which the job's result is consumed. One frame's utilization can therefore
+  exceed 100 %, and only the window figure is reported.
+- Utilization covers the five timed job types only. The cloud pattern job (rare, completed where it is scheduled) and
+  Unity's own jobs are not counted, so it is the engine's share of the workers, not their total load.
+- No per-job split of latency into queue wait, execution and completion lag; the v2 swimlanes below need begin/end
+  stamps for that.
+- Jobs completed during the initial load reach the per-job samples but not the counters, whose first sample takes their
+  totals as its baseline.
+- The 2 048-record pool timed every job at view distance 10; larger view distances are unmeasured. A full pool runs jobs
+  untimed, counts them in `UntimedJobs`, and `/perf stats` warns that utilization reads low.
+
+**Master player confirmation (2026-10-05).** One `Windows - Production` build (IL2CPP **Master**, non-development, D3D11;
+Burst AOT, so the timer's `Interlocked` writes through a raw pointer compile in all nine jobs), six unattended Flow A runs
+(generation 200 m/s + loading 50 m/s, `-mc-mute -mc-quit`) in the order Basic, Systems, Systems, Basic, Basic, Systems —
+all exit 0, no exception logged — read from the reports and the run-end Player.log summaries:
+- **Every job type records in Master.** Over each Systems run's last 2 048 frames (the ≈ 4 s after the loading pass),
+  with no job untimed: per-job busy p50 — generation 12.4–12.8 ms (p99 ≈ 23 ms), lighting 0.36–0.37 ms, meshing
+  1.36–1.37 ms, fluid tick 0.26–0.28 ms, fluid sound scan under 0.01 ms; latency p50 — generation 49–52 ms, lighting
+  5.3–5.6 ms, meshing 4.6–5.0 ms, fluid tick 9.0–9.7 ms, sound scan 1.4–1.7 ms (p99 79–92 ms, worst 351–379 ms, for a
+  scan that works for under 0.1 ms). Generation's busy time fits the roadmap's measured saturation throughput: ≈ 650
+  chunks/s across 15 job threads is ≈ 23 ms of worker time per chunk. Utilization read 1.0–1.3 % over that quiet window,
+  and the disk lines 351–378 load hits at 0.23–0.30 ms read, 0.04 ms deserialize and 0.02 ms ThreadPool wait.
+- **The 200 m/s `Tick` hitches are the fluid tick.** All three Systems runs' hitch records are mostly led by `Tick` (31
+  records), and their size tracks the tick's fluid job count: every record with more than 200 fluid chunk jobs (seven,
+  222–282 jobs) had a 46–160 ms `Tick` and 170–399 ms of fluid worker time, and 26–36 ms `Tick` hitches had 73–135 jobs.
+  `Tick` runs well above that worker time spread over 15 threads (110 ms against ≈ 27 ms in one record), so the
+  per-chunk main-thread prepare (snapshot and neighbor-halo fill) and drain look like the larger share *(inferred — no
+  slot splits them yet)*. A few `Tick` hitches (26–38 ms) had 7–14 fluid jobs and under 1 ms of fluid worker time, so
+  other tick work contributes too.
+- **Overhead A/B: no frame-level difference.** Average CPU per phase, Basic against Systems: the 200 m/s phase 39.6 / 39.9
+  / 39.0 ms against 39.3 / 39.2 / 39.3 ms, the ensure sweep 1.3 ms in all six, the 50 m/s loading pass 1.3 / 1.3 / 1.3
+  against 1.3 / 1.2 / 1.2 ms. *Unexplained:* the run-end window's CPU p50 read **higher** at Basic (1.19 / 1.11 / 1.12 ms)
+  than at Systems (0.82 / 0.81 / 0.97 ms), where PM-3's runs read 0.77–0.80 ms at both. Basic runs strictly less PM-4
+  code and the phase averages agree, so this is not PM-4 overhead; whether it is a tier-dependent measurement effect (the
+  Frame tier's frame-time recorders) or machine load is open.
+
+**Corrections found while planning:** §4.4's "long pair in its output struct" became a shared busy-time record. §7's
+PM-4 row lists PM-3 as a dependency, since its counters build on PM-3's counter API. "ThreadPool depth" is measured by
+the engine's own in-flight count and submission wait, not a ThreadPool API.
+
 ### Extension roadmap
 
 | Version | Extension |
@@ -793,6 +933,14 @@ Answers 1–4 come from `EngineApiProbe_2026-10-03_13-52-20.log`: a `Windows - P
 
 ## Document History
 
+* **v1.9** - **PM-4 complete** (2026-10-05): confirmed in an IL2CPP Master build — all five job types and the disk counters
+  record in Master, the Basic-vs-Systems A/B shows no frame-level difference, and the 200 m/s `Tick` hitches are
+  attributed to the fluid tick's fan-out (§7.5); status line, plan row and §7.5 heading flipped from "Master build check
+  pending".
+* **v1.8** - **PM-4 code landed** (2026-10-05, §7.5; IL2CPP Master build check pending): in-job busy-time accumulation
+  through `JobBusyTimer` and `PerfJobTimingPool` for generation, lighting, meshing, the fluid tick and the fluid sound
+  scan, per-type job counters and per-job sample rings, worker utilization, and chunk disk I/O counters
+  (`StorageIoStats`). As-built note in §4.4; §7's PM-4 row lists PM-3 as a dependency.
 * **v1.7** - **PM-3 complete** (2026-10-04): confirmed in an IL2CPP Master build — coverage, counters and hitch-record
   counters record in Master, and the Basic-vs-Systems A/B shows no frame-level difference (§7.4); status line, plan row
   and §7.4 heading flipped from "Master build check pending".
@@ -828,4 +976,4 @@ Answers 1–4 come from `EngineApiProbe_2026-10-03_13-52-20.log`: a `Windows - P
 ---
 
 **Last Updated:** 2026-10-02  
-**Next Review:** when PM-4 starts (PM-3 complete 2026-10-04)
+**Next Review:** when PM-5 starts (PM-4 complete 2026-10-05)

@@ -1,6 +1,6 @@
 # Block Behavior Tick Architecture
 
-**Version:** 2.0  
+**Version:** 2.1  
 **Date:** 2026-07-26  
 **Status:** **Implemented (Stable)** — the whole TG-4 arc (Phases 0–4b + the Y-band optimization) is shipped,
 in-game confirmed, and its rollback flags were retired in the 2026-07-23 cleanup, so the parallel Y-band halo
@@ -68,7 +68,7 @@ World.Update()
 └─ ProcessTickUpdates()                          // World.cs:1837 — bumps _tickCounter, snapshots active chunks
    └─ TickChunksParallel(snapshot)                // World.cs:1879 — schedule-all → ScheduleBatchedJobs → complete → drain
       ├─ per chunk: rent FluidBurstTicker from DynamicPool<FluidBurstTicker>
-      │             └─ ScheduleFluids(chunkData, tickCounter, blockTypes, worldData) → JobHandle
+      │             └─ ScheduleFluids(chunkData, tickCounter, blockTypes, worldData, timer) → JobHandle
       │                ├─ acquire 9 pre-tick neighbor voxel snapshots (center + 8 horizontal)
       │                ├─ gather them into a Y-banded padded buffer on the WORKER thread
       │                └─ FluidTickJob: flow, decay, falling/waterfall reset, infinite-source
@@ -76,7 +76,8 @@ World.Update()
       └─ after JobHandle.Complete(), serially in chunk-snapshot order:
          └─ Chunk.DrainTick(ticker)               // Chunk.cs:367
             ├─ TickFamily(grassBucket, …)          // Chunk.cs:289 — grass stays MANAGED, main-thread
-            └─ ReplayFluids(ticker, fluidBucket, …)// Chunk.cs:333 — replays job mods in bucket order
+            ├─ ReplayFluids(ticker, fluidBucket, …)// Chunk.cs:333 — replays job mods in bucket order
+            └─ (after DrainTick) the job's busy-time record → WorldJobManager.EndJobTiming(Fluids, …)
 World.Update() (after all chunks ticked)
 └─ ApplyModifications()                           // unchanged: placement gate, support cascade,
                                                   //   Step-4 six-neighbor re-activation
@@ -618,6 +619,8 @@ the ones any future tick-path change must address.*
 
 ## Document History
 
+* **v2.1** - §2 call tree: at the performance monitor's Systems tier each scheduled fluid job carries a `JobBusyTimer`
+  record from `WorldJobManager`, recorded once its chunk is drained (PM-4, 2026-10-05). Line anchors not re-verified.
 * **v2.0** - **Promoted `Design/TG4_BLOCK_BEHAVIOR_DATA_SEPARATION.md` → `Architecture/BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md`
   and restructured (2026-07-26).** The TG-4 arc is complete and its flags retired, so the document was reshaped from a
   phased refactor plan into a description of the system as built: a new §2 "Current architecture" documents the shipped

@@ -34,6 +34,12 @@ namespace Jobs.Data
     {
         public JobHandle Handle;
 
+        /// <summary>The performance monitor's busy-time record for this job (a <c>PerfJobTimingPool</c> handle); 0 when untimed.</summary>
+        public int TimingRecord;
+
+        /// <summary><c>Stopwatch</c> timestamp taken when the job was scheduled; 0 when untimed.</summary>
+        public long ScheduleTimestamp;
+
         /// <summary>
         /// True when the full-volume maps (center + neighbor voxel/light maps) were rented from
         /// <c>ChunkJobArrayPool</c> and must be returned to it instead of disposed. False for

@@ -16,6 +16,12 @@ namespace Jobs.Data
     {
         public JobHandle Handle;
 
+        /// <summary>The performance monitor's busy-time record for this job (a <c>PerfJobTimingPool</c> handle); 0 when untimed.</summary>
+        public int TimingRecord;
+
+        /// <summary><c>Stopwatch</c> timestamp taken when the job was scheduled; 0 when untimed.</summary>
+        public long ScheduleTimestamp;
+
         // --- Input data (full-volume snapshots; pooled buffers in the runtime path) ---
         public NativeArray<uint> Map;
         public NativeArray<ushort> LightMap;

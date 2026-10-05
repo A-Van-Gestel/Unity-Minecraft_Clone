@@ -1,6 +1,6 @@
 # Modular World Generation & World Types
 
-**Version:** 2.7  
+**Version:** 2.8  
 **Date:** 2026-04-03  
 **Status:** Implemented (2026-05-14)  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)  
@@ -27,6 +27,11 @@ and §6.3** were re-derived from code — `World.cs`, `WorldJobManager.cs`,
 ---
 
 ## Document History
+
+### v2.8 (from v2.7) — Job timing parameter
+
+- **§2.2:** `IChunkGenerator.ScheduleGeneration` gained an optional `JobBusyTimer` (2026-10-05, performance
+  monitor `PM-4`). The standard generator hands it to all four jobs of its chain; the frozen legacy job takes none.
 
 ### v2.7 (from v2.6) — Architecture conversion
 
@@ -214,9 +219,11 @@ namespace Jobs.Generators
         /// <paramref name="activeVoxelPool"/> (TG-6): when supplied, the per-chunk active-voxel list is
         /// rented from it and flagged so the caller returns it instead of disposing; null on the
         /// editor / preview / benchmark paths.
+        /// <paramref name="timer"/>: the performance monitor's busy-time timer, given to every job in the
+        /// chain; the default leaves it untimed, and the legacy generator ignores it.
         /// </summary>
         GenerationJobData ScheduleGeneration(ChunkCoord coord,
-            global::Helpers.ActiveVoxelListPool activeVoxelPool = null);
+            global::Helpers.ActiveVoxelListPool activeVoxelPool = null, JobBusyTimer timer = default);
 
         /// <summary>Synchronous main-thread voxel query. Used by World.GetHighestVoxel and spawn-point logic.</summary>
         byte GetVoxel(Vector3Int globalPos);
