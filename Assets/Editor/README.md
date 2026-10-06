@@ -38,6 +38,7 @@ General project scope pipelines and workflow tools.
 
 - **`AtlasPacker.cs`**: Dedicated pipeline step for automatically reading custom pixel-art block textures and safely packing/stitching them into the heavily strict Unity `Texture2DArray` asset format.
 - **`GameVersionManager.cs`**: Project-management utility tool to seamlessly control build stamps, revisions, and internal version data serialization.
+- **`PlayModeReloadGuard.cs`**: Holds script compiles and reloads while the Editor is in Play mode, so code changed during play loads when Play stops; the engine's runtime state does not survive a Play-mode reload.
 
 ### 🌍 World Tools (`/WorldTools`)
 

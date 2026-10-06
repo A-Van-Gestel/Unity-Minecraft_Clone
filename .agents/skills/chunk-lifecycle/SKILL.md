@@ -43,7 +43,7 @@ After your edit, use the CodeGraph CLI via Bash (exhaustive, and cheaper than an
 
 Before instrumenting, observe the pipeline's current state (mechanics: the `unity-editor` skill):
 
-- `unity command editor_status --result-only` — play mode, and whether a compile or domain reload is in progress. `unity recompile` shows compile errors that could be blocking the pipeline.
+- `unity command editor_status --result-only` — play mode, and whether a compile or domain reload is in progress. Outside Play mode, `unity recompile` shows compile errors that could be blocking the pipeline; in Play mode it waits for Play to stop (`unity-editor` gotcha 15).
 - `unity command console --level warn --tail 50 --result-only` — pipeline-related exceptions (e.g. "chunk stuck", "meshing timeout", NullReference in job scheduling).
 - `unity command eval "<C#>"` — query pipeline state directly (e.g. count loaded chunks, check flag values on specific chunks, inspect the generation/meshing queues).
 - `find_gameobjects` + `get_serialized_fields` — locate chunk GameObjects and inspect their component state to see which pipeline stage they're stuck in.

@@ -1,6 +1,6 @@
 # Unity CLI Editor Bridge
 
-**Version:** 1.5  
+**Version:** 1.6  
 **Date:** 2026-09-27  
 **Status:** Implemented (Stable)  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production) — agent tooling, Editor only
@@ -125,6 +125,11 @@ until unity command editor_status --result-only | grep -q '"status": "ready"'; d
 
 Without a running Editor, `dotnet build` of the two project assemblies is the fallback; it cannot
 see a new `.cs` file until Unity regenerates the `.csproj` (see `CLAUDE.md`'s Execution Protocol).
+
+**Play mode holds the gate.** `Assets/Editor/ProjectUtilities/PlayModeReloadGuard.cs` locks assembly reloads from
+entering Play mode until exiting it, because the engine's runtime state does not survive a Play-mode reload. Unity then
+defers the compile too: with a source change pending, `unity recompile` prints nothing and blocks until Play mode stops,
+and `editor_status` reports `compiling` throughout. With no change pending it returns `up_to_date` at once.
 
 ---
 
@@ -266,6 +271,8 @@ bridge installed is `61480be4`.
 
 ## Document History
 
+* **v1.6** - §3: Play mode holds the compile gate — `PlayModeReloadGuard` locks reloads while the Editor plays, so
+  `unity recompile` blocks on a pending change until Play stops (2026-10-06).
 * **v1.5** - §6: `ProfilerCapture.ConnectToPlayer`, for the `perf-benchmark` skill's player-capture recipe (2026-10-03).
 * **v1.4** - §2/§6: `ProfilerQueries.GcCallstacks` (GC.Alloc bytes by resolved call stack, every thread) and
   `ProfilerCapture.cs` (arm with call stacks, auto-stop after a phase marker, hook reinstalled after a domain

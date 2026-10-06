@@ -149,5 +149,11 @@ images, never to a saved file.
     Unity's own `error CS…` lines in `Logs/Editor.log`, not `dotnet build`: it cannot see a `.cs` file
     the `.csproj` does not list yet and reports green for it. Fix them, then have the user leave Safe
     Mode or restart the Editor.
+15. **Play mode holds compiles and reloads.** `Editor/ProjectUtilities/PlayModeReloadGuard` locks assembly
+    reloads from entering Play mode until exiting it, because the engine's runtime state does not survive a
+    Play-mode reload. With a source change pending, `unity recompile` prints nothing and blocks until Play mode
+    stops, then completes about 2 s later, and `editor_status` reports `compiling` the whole time. Stop Play
+    mode first (with the user's consent), or edit only after leaving it; with no change pending it returns
+    `up_to_date` at once.
 
 </gotchas>
