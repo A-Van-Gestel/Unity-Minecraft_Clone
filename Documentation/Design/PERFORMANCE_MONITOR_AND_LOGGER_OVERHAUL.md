@@ -1,11 +1,12 @@
 # Performance Monitor & Logger Overhaul Design
 
-**Version:** 1.12  
+**Version:** 1.13  
 **Date:** 2026-10-02  
 **Status:** In progress — PM-0 ✅ complete (2026-10-03, Master answers in §8); PM-1 ✅ complete (2026-10-03, §7.2;
 confirmed in an IL2CPP Master build); PM-2 ✅ complete (2026-10-04, §7.3; confirmed in an IL2CPP Master build); PM-3 ✅
 complete (2026-10-04, §7.4; confirmed in an IL2CPP Master build); PM-4 ✅ complete (2026-10-05, §7.5; confirmed in an
-IL2CPP Master build); PM-8 ✅ complete (2026-10-05, §7.6; confirmed in an IL2CPP Master build); PM-5…PM-7 not started.
+IL2CPP Master build); PM-8 ✅ complete (2026-10-05, §7.6; confirmed in an IL2CPP Master build); PM-6 ✅ complete
+(2026-10-06, §7.7; confirmed in an IL2CPP Master build); PM-5 and PM-7 not started.
 PM-0's answers reshaped PM-2/PM-4 (§8).  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
@@ -153,6 +154,11 @@ records the same as Basic and Capture the same as Systems; the tooltip says so. 
 *PM-2 (2026-10-04):* per-frame GC allocation and collections record at **every** tier, Basic included — the heap read
 already ran every frame, so Basic adds one `GC.CollectionCount` call; Frame adds the frame timings and the hitch
 detector. A Basic row is 40 B (12 B at PM-1; the table's "8 B" never matched the code).
+*PM-6 (2026-10-06):* Capture now writes the session files (§4.7). Benchmark mode does **not** force Capture: it raises
+the tier to **at least Frame** through `PerfStore.TierFloor`, which the report's hitch and GPU columns need, and keeps a
+higher tier set in the settings file or by `-mc-set`. Forcing Capture would have written ≈ 0.4 MB/s through every
+loading pass and removed the per-run tier choice the PM-3/PM-4 overhead A/Bs relied on; a Basic benchmark arm is no
+longer possible. The floor never touches the `Settings` object, so a menu-launched run cannot save it into the file.
 
 ### 3.3 Relationship to the existing instruments
 
@@ -381,6 +387,37 @@ public enum LogLevel : byte { Off, Error, Warning, Info, Verbose }
 - **HUD:** a Systems panel sorted by slot cost (avg / p99 / max), the unattributed remainder, GPU vs CPU
   split, a hitch list, and graphs overlaying raw max on the smoothed line. `DT-4`'s allocation leftovers
   are fixed in the same pass so the HUD stops polluting its own GC reading.
+- *PM-6 (2026-10-06), as built:*
+  - **Final rows.** A row stops changing at `PerfStore.RowFinalAge` (17) frames old: frame timings arrive late and
+    `SampleFrameTiming` writes rows up to 16 frames old after each commit. Each commit hands that one row to the phase
+    recorder and the session exporter, so both see every frame exactly once, timings included.
+  - **Phase statistics.** `PerfPhaseRecorder` routes rows to phases by frame index (`[first, end)`), gathers the six
+    frame fields in native lists — no managed allocation as a long phase grows — and computes exact p50/p99/worst/mean
+    in place (`PerfWindowStats`' native overload) when the first row past a phase's end arrives. Frame fields only; no
+    per-slot phase statistics (decision 4, §7.7). `BenchmarkMetricsCollector` owns one per run, counts hitch frames per
+    phase from the detector, and fills `PhaseMetrics.FrameStats` when recording stops; `BenchmarkController` waits
+    `RowFinalAge` + 1 frames after the last phase so its final frames count.
+  - **Report.** A "Performance Monitor" block (tier, and the hitch thresholds as the detector applies them), raw worst frame / hitch frames / collections in
+    the overall summary, and a "Frame Health (every frame)" table per group: frames, wall p50/p99/worst, CPU p50/p99, GC
+    p99, collections, hitches, GPU p99. The averaged columns stay. The hitch thresholds joined
+    `OverlayBenchmarkSettingsFromDisk`.
+  - **Session files** (Capture, while a world's `PerformanceMonitor` is enabled): `persistentDataPath/PerfLogs/
+    PerfSession_<yyyy-MM-dd_HH-mm-ss-fff>.csv`, one row per frame — 9 frame columns, then every slot (`<Slot>_ms`) and
+    every counter — ASCII, invariant formatting, an empty cell where a frame has no value. A new part (`_part02`, …)
+    every 64 MB; at 1 GB the session stops writing and warns; no file is ever deleted (settings-file fields
+    `perfCapturePartMb`, `perfCaptureSessionMb`). Each closed hitch record becomes
+    `<session>_hitch<NNN>_frame<F>.csv`: a `# hitch …` summary line (frame, threshold, worst, hitch frames,
+    GC-correlated, top slots), the session header plus a `mark` column, and the window's rows with `hitch` / `worst`
+    marks.
+  - **Writer.** `PerfSessionExporter` copies rows on the main thread into 16 pooled 256-row blocks (a full pool drops
+    rows or a hitch window and counts them rather than allocating) and formats them on a dedicated below-normal background thread — not
+    the ThreadPool, where chunk loads and saves queue. Rows format without allocating, because the store's allocation
+    figure is process-wide; opening a file allocates. A write failure stops the session's export and is reported once;
+    leaving Capture, a world unload, quit and an Editor reload close the session after writing its newest rows, waiting
+    at most 2 s for the writer. `/perf stats` prints the session file, frames, megabytes, hitch files and anything not
+    written.
+  - **Not as specified:** the files stay under `persistentDataPath` on Android too (`BenchmarkEnvironment`'s MediaStore
+    route takes a whole file, not a stream — pull them with adb); log mirroring into the session file is PM-7's.
 
 ### 4.8 Ownership and threading
 
@@ -409,6 +446,8 @@ the check. Whether a system has had a performance *analysis* pass is a different
 | Hitch records | Frame (slot times and counters at Systems) | `PerfHitchDetector` | — |
 | `World.Update` remainder | Systems | `PerfSlot.WorldUnattributed` | `World.Update` only — no whole-frame remainder |
 | Memory | always-on history only | `PerformanceMonitor` (`Profiler.GetTotal*Memory`, managed heap) | not in `PerfStore`'s frame rows or hitch records |
+| Whole-phase statistics (PM-6) | every tier; benchmarks run at Frame or above | `PerfPhaseRecorder`, fed each final row | frame fields only — slots and counters per phase are in the session file |
+| Session and hitch files (PM-6) | Capture | `PerfSessionExporter` | rows and hitch records lost to a full block pool, the size cap or a write failure are counted, not written |
 
 **Main thread — slots (Systems tier, or forced).** Inside `World.Update` the slots are disjoint, so with the remainder
 they sum to the bracket:
@@ -483,7 +522,7 @@ non-chunk files (`level.dat`, pending modifications, pending lighting) are not c
 | Main menu and loading scenes | `PerformanceMonitor` lives in the World scene, so they record no frames | not filed |
 | The initial load's counters | sampled in `World.Update`, so they read 0 until it ends | not filed |
 | Per-job latency split (queue wait, execution, completion lag) | latency is one figure | v2 swimlanes (extension roadmap) |
-| Phase-wide statistics and export | everything reads the last 2 048 frames | **PM-6** |
+| Per-slot and per-counter statistics over a whole phase | the report's phase statistics cover the frame fields; slots and counters per phase need the session file | not filed — PM-6 decision 4 |
 | Log volume and cost | — | **PM-7** |
 | Small or debug per-frame code: `ChunkLoadAnimation` (one per chunk), `VoxelRigidbody.Update`/`LateUpdate`, `TerrainGenDebugOverlay`, `CreditsMenuController`, the benchmark harness scripts | negligible or tooling | not filed — low value |
 | Untimed jobs: `CloudPatternJob`, `VoxelVisualizerJob`, the legacy generation job's busy time | — | not filed — low value |
@@ -545,7 +584,7 @@ The counters and their sources are the body of `World.SamplePerfCounters`.
 | **PM-3 — Coverage** | Slots for every untimed `World.Update` region + unattributed remainder; non-World systems; `PerfCounter` + counter columns, with gauges for queues, in-flight jobs, pools, resident chunks (moved from PM-1); `World.cs`'s facade probes to the slotted API; the Master IL2CPP overhead A/B (moved from PM-1) | 🟡 | PM-1 | ✅ 2026-10-04 — code + suite (§7.4); confirmed in an IL2CPP Master build |
 | **PM-4 — Workers & I/O** | Job schedule→complete latency, in-job execute time, worker utilization; disk latency/bytes/compression; ThreadPool depth | 🟡 | PM-0, PM-1, PM-3 | ✅ 2026-10-05 — code + suite (§7.5); confirmed in an IL2CPP Master build |
 | **PM-5 — HUD** | Systems panel, hitch list, GPU/CPU split, raw-max graph overlay; `DT-4` | 🟡 | PM-2, PM-3 | — |
-| **PM-6 — Export** | Session CSV + hitch dumps on a background writer; benchmark reports read the store, with phase-wide percentiles (an aggregate spanning more than the ring — moved from PM-1); benchmark mode forces Capture | 🟡 | PM-2 | — |
+| **PM-6 — Export** | Session CSV + hitch dumps on a background writer; benchmark reports read the store, with phase-wide percentiles (an aggregate spanning more than the ring — moved from PM-1); benchmark mode forces Capture | 🟡 | PM-2 | ✅ 2026-10-06 — code + suite (§7.7); confirmed in an IL2CPP Master build; benchmarks raise the tier to Frame instead of forcing Capture |
 | **PM-7 — Logger** | `EngineLog` categories/levels/rate limits/tags, migration of the 3 diagnostic flags and the 327 call sites (by category, in passes), stack-trace policy per build profile, variant-drift fix | 🟡 | — | — |
 | **PM-8 — Behavior-tick breakdown** | Execution packet §7.6. Split the `Tick` slot's main-thread time into its parts — active-chunk snapshot, per-chunk fluid prepare, scheduling, the `Complete()` wait, and the drain (grass tick, fluid replay) — with per-tick fluid chunk and snapshot-byte counts | 🟢 | PM-3, PM-4 | ✅ 2026-10-05 — code + suite (§7.6); confirmed in an IL2CPP Master build |
 
@@ -1057,6 +1096,96 @@ three unattended Flow A runs (generation 200 m/s + loading 50 m/s, `-mc-set perf
 **Corrections found while planning:** the packet's verified facts cited `305604fb` plus the uncommitted PM-4 work, which
 has since landed as `3ea2fc09`; its line references still held.
 
+### 7.7 PM-6 execution record (2026-10-06; confirmed in an IL2CPP Master build)
+
+**Goal.** Benchmark reports carry exact per-frame statistics over every frame of each phase, and the Capture tier writes
+the store to disk, so an unattended player run is read from files rather than from the Player.log summary.
+
+**Shipped** (as built in §4.7):
+- **Final rows and phase statistics.** `PerfStore.RowFinalAge`, `PerfStore.PhaseRecorder`, `PerfPhaseRecorder` and
+  `PerfPhaseSummary`; `PerfWindowStats` gains a native-array overload over the same selection; `PerfFrameField.Count`.
+- **Report.** `PhaseMetrics.FrameStats` / `HasFrameStats` / `HitchFrames`; the Performance Monitor block, the overall
+  frame-health lines and a Frame Health table per group in `BenchmarkReportGenerator`; the hitch thresholds in
+  `OverlayBenchmarkSettingsFromDisk`.
+- **Tier floor.** `PerfStore.TierFloor`: the tier in force is the one set, raised to the floor. `BenchmarkController`
+  raises it to Frame before its settle wait and clears it in `OnDestroy`.
+- **Export.** `PerfSessionExporter` and `PerfExportBlock`; `PerfStore.ConfigureExport` / `Exporter`, opened and closed
+  with the tier, the folder (`PerformanceMonitor` sets `PerfLogs` while enabled) and shutdown; `PerfFrameRing.CopySlotRow`
+  / `CopyCounterRow`; the settings-file fields `perfCapturePartMb` / `perfCaptureSessionMb`; a Capture line in
+  `/perf stats`; the Capture tooltip and `PerfTier.Capture` describe the files.
+- **`StringBuilderFormat.AppendInteger`.** `StringBuilder.Append(int/long)` builds a string on Unity's runtime (1–2
+  collections and ≈ 24 MB over 10⁶ calls in the Editor), so `AppendFixed`, `AppendIntPadded`, `AppendBytes` and
+  `AppendElapsedTime` allocated despite their documented contract. Their digits are now written as characters, with
+  identical output; the HUD and debug-screen paths that use them stop allocating too.
+- **Benchmark.** `Minecraft Clone/Benchmarks/Capture Export Overhead` writes a 200 000-frame session with every slot and
+  counter set, beside a 16 B-per-frame control.
+
+**Decisions taken at plan review:**
+1. **Benchmarks raise the tier to Frame**, keeping a higher one, instead of forcing Capture (§3.2).
+2. **The drain stamp stays out of PM-6** — it is ES-0's own remaining item (roadmap ES-0).
+3. **Full-rate session files, capped**: a new part every 64 MB, writing stops at 1 GB, nothing deleted.
+4. **Frame-level phase statistics only**; per-slot statistics per phase live in the session file.
+
+**Verification.**
+- **Suite.** `Validate Performance Monitor` 37/37, with six new scenarios:
+  - B32: rows reach a phase only once final, a timing that arrives at age 16 included, routed by frame index; `Close`
+    and the domain reset;
+  - B33: 5 000 frames — more than the ring — against a sorted copy of every frame;
+  - B34: the tier floor raises, keeps and restores;
+  - B35: a session's CSV parsed back cell by cell, header count included, only frames since it opened;
+  - B36: a hitch file's name, summary line, 151 rows oldest first and marks;
+  - B37: parts each with a header, the session cap counting what it drops, and a write failure that stops cleanly and
+    counts the hitch record it loses.
+- **Prove-red.** Each went red under its mutation and green again with the file checksum identical: B32 — rows final
+  one frame early, and a boundary row routed to the earlier phase; B33 — samples capped at the ring length; B34 — the
+  floor ignored; B35 — a column dropped, NaN written as a number, and the newest rows not written on close (B37 red too);
+  B36 — hitch rows shifted by one; B37 — the cap ignored. The first B32 draft took its ages from `RowFinalAge` itself and
+  survived the first mutation; it now derives them from the back-fill limit B13 pins.
+- **Validate All:** 32/32 suites, 807 baselines.
+- **Allocation** (`Capture Export Overhead`, Editor Mono): the first run gave 26 collections over 200 000 rows — the
+  `Append(number)` garbage above, from the writer thread. After `AppendInteger`: 0 collections and 276 KB of heap growth
+  (≈ 1.4 B per row, less than any object), against 7.9 MB for the control; `CommitFrame` at Capture ≈ 1.1–1.2 µs; the
+  writer ≈ 121 000 rows/s.
+- **Editor benchmark smoke** (6 s phases, 50 and 200 m/s, loading 100 m/s): every Frame Health row has worst ≥ p99 ≥ p50,
+  frames × mean wall time matches each phase's duration (109 frames over 6 s at 200 m/s), and the one-frame transition
+  phase has a row where the averaged columns read 0.
+- **Editor Capture smoke:** a Capture benchmark, then six tier switches. Four session files (the run's and one per return
+  to Capture) and 46 hitch files, all 96 columns, no frame gap inside a session, no row dropped; leaving Play mode closed
+  the last session and logged no error or leak.
+
+**Review follow-ups (same day, after the Master runs):** a lost hitch window is counted (`HitchesDropped`, warned by
+`/perf stats`) — a full block pool, the size cap or a failure dropped it silently; and the report prints the hitch
+thresholds the detector applies (`PerfHitchDetector.ResolveMinMs` / `ResolveMedianFactor`), not invalid settings-file
+values it replaced. B37's new check went red with the count removed and green again on restore, the checksum identical.
+The Master runs predate both and were not repeated.
+
+**Master player confirmation (2026-10-06).** One `Windows - Production` build (IL2CPP **Master**, non-development,
+D3D11), four unattended Flow A runs (generation 200 m/s + loading 50 m/s, `-mc-mute -mc-quit`) in the order Frame,
+Capture, Frame, Capture — the first and third at the benchmark's own floor, the others with `-mc-set
+perfMonitorTier=Capture` — all exit 0, no exception or export warning logged:
+- **The report reads the store.** Every run's tables say "Monitor detail: Frame" or "Capture", and each phase has its
+  frame count, exact percentiles and GPU p99 (12–18 ms at 200 m/s). The 200 m/s phase: 690 / 1 091 / 1 052 / 1 066 frames,
+  wall p99 78–93 ms, worst 144–154 ms, 104–110 collections and 111–160 hitch frames, where its averaged Peak Wall column
+  reads 56–59 ms.
+- **The files are complete in Master.** The Capture runs wrote one session file each — 145 997 and 92 513 rows, every
+  frame from 3 to the last, 96 columns, no gap — so the quit-time close wrote the newest rows, plus 20 and 22 hitch files,
+  none malformed. 7 % and 20 % of rows have no GPU time: timings that never arrived, the larger share in the fourth run,
+  whose GPU p99 tripled in the ensure sweep (outside load, *inferred*).
+- **No attributable cost.** Loading-pass CPU p50 read 0.6 / 1.1 ms at Frame and 0.9 / 0.8 ms at Capture; 200 m/s average
+  CPU 45.4 / 41.1 at Frame against 41.1 / 40.0 ms at Capture. The spread between the two Frame runs exceeds any Capture
+  difference.
+
+**Left for later:**
+- Frame-level phase statistics only (decision 4); per-slot ones per phase come from the session file.
+- The last frames of a hitch file and of a closed session can lack GPU time: rows are copied before their timings arrive.
+- A hitch file or part file allocates when opened (a few hundred bytes, on the writer thread).
+- No tool reads the session files yet; `Tools/Python/tabulate_tick_hitches.py` still reads Player.log.
+- The received / matched frame-timing count beside a reported GPU time (§7.3) is still PM-5's.
+
+**Corrections found while planning:** §3.2's "benchmark mode forces Capture" would have removed the per-run tier choice
+the PM-3/PM-4 A/Bs used; §4.7's reuse of `BenchmarkEnvironment`'s MediaStore route cannot stream; the scaling roadmap's
+ES-0 row sent "the rest" to PM-6, but the drain stamp was never in PM-6's scope.
+
 ### Extension roadmap
 
 | Version | Extension |
@@ -1127,6 +1256,12 @@ Answers 1–4 come from `EngineApiProbe_2026-10-03_13-52-20.log`: a `Windows - P
 
 ## Document History
 
+* **v1.13** - **PM-6 complete** (2026-10-06, §7.7; confirmed in an IL2CPP Master build): benchmark reports carry exact
+  per-frame statistics over every frame of each phase (`PerfPhaseRecorder`, fed each row once final at
+  `PerfStore.RowFinalAge`), benchmarks raise the tier to Frame through `PerfStore.TierFloor` instead of forcing Capture,
+  and Capture streams a session CSV plus one file per hitch from a background writer (`PerfSessionExporter`).
+  `StringBuilderFormat.AppendInteger` makes the helper's zero-allocation claim true. As-built notes in §3.2 and §4.7;
+  §4.9 coverage map updated.
 * **v1.12** - **PM-8 complete** (2026-10-05, §7.6; confirmed in an IL2CPP Master build): the `Tick` slot split into six
   timed parts plus fluid-chunk, snapshot-KB, grass-voxel and ticker-pool-miss counts (`PerfTickTotals`, ten new
   counters), a "Tick split" readout and "Tick led by" on hitch records. Master: the 200 m/s `Tick` hitches are the fluid
@@ -1179,5 +1314,5 @@ Answers 1–4 come from `EngineApiProbe_2026-10-03_13-52-20.log`: a `Windows - P
 
 ---
 
-**Last Updated:** 2026-10-05  
-**Next Review:** when PM-5 starts (PM-8 complete 2026-10-05)
+**Last Updated:** 2026-10-06  
+**Next Review:** when PM-5 starts (PM-6 complete 2026-10-06)

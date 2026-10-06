@@ -19,7 +19,8 @@ namespace Editor.Validation.PerfMonitoring
     /// <see cref="WorldFrameProfiler"/> facade's slot mapping and bit-identical published values. The Frame-tier
     /// scenarios (B11–B19: GC readings, frame-timing back-fill, hitch detection) live in the <c>.Frame</c> part, and the
     /// coverage scenarios (B20–B23: the unattributed remainder and the counters) in the <c>.Coverage</c> part, and the
-    /// worker scenarios (B24 on: job timing, per-job samples and storage I/O) in the <c>.Workers</c> part.
+    /// worker scenarios (B24–B30: job timing, per-job samples and storage I/O) in the <c>.Workers</c> part, the tick
+    /// breakdown (B31) in the <c>.Tick</c> part, and the export scenarios (B32 on: phase statistics, the tier floor and export) in the <c>.Export</c> part.
     /// <para>
     /// Timing <i>values</i> are not asserted beyond "zero" versus "positive" — wall-clock durations are not
     /// deterministic. Every scenario that touches the static store starts and ends from
@@ -96,6 +97,12 @@ namespace Editor.Validation.PerfMonitoring
                 new Scenario("B29 Worker utilization: busy time over workers × wall time, summed over the counter frames only", RunB29WorkerUtilization),
                 new Scenario("B30 Fluid jobs: a timed fluid tick and a timed fluid sound scan each time one link; untimed writes nothing", RunB30FluidJobLinks),
                 new Scenario("B31 Tick breakdown: a real tick times each part within its call, counts exactly, maps to its counters; nothing below Systems", RunB31TickBreakdown),
+                new Scenario("B32 Phase routing: rows reach phases only when final, late timings included, by frame index; Close and reset", RunB32PhaseRouting),
+                new Scenario("B33 Phase statistics span more frames than the ring and match a sorted copy of every frame", RunB33PhaseStatsBeyondRing),
+                new Scenario("B34 Tier floor: raises a lower tier, keeps a higher one, clearing restores the tier last set", RunB34TierFloor),
+                new Scenario("B35 Session CSV: opens at Capture with a folder, one row per frame since, every cell parsed back exactly", RunB35SessionCsv),
+                new Scenario("B36 Hitch file: one per record, summary line, the window's rows oldest first, hitch and worst rows marked", RunB36HitchFile),
+                new Scenario("B37 Export limits: parts each with a header, the session cap counts what it drops, a write failure stops cleanly and counts the hitch it loses", RunB37ExportLimits),
             };
             return ValidationSuiteRunner.Execute("Performance Monitor", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }
@@ -372,10 +379,11 @@ namespace Editor.Validation.PerfMonitoring
 
         #region Helpers
 
-        /// <summary>Runs a scenario against a freshly reset store, then resets again and restores the tier, force flag and hitch thresholds.</summary>
+        /// <summary>Runs a scenario against a freshly reset store, then resets again and restores the tier, tier floor, force flag and hitch thresholds.</summary>
         private static bool WithFreshStore(Func<bool> scenario)
         {
             PerfTier tier = PerfStore.Tier;
+            PerfTier floor = PerfStore.TierFloor;
             bool forced = PerfStore.ForceSlots;
             float hitchMinMs = PerfStore.HitchMinMs;
             float hitchMedianFactor = PerfStore.HitchMedianFactor;
@@ -389,6 +397,7 @@ namespace Editor.Validation.PerfMonitoring
                 InvokeStorePrivate("DomainReset");
                 PerfStore.SetHitchThresholds(hitchMinMs, hitchMedianFactor);
                 PerfStore.SetTier(tier);
+                PerfStore.TierFloor = floor;
                 PerfStore.ForceSlots = forced;
             }
         }

@@ -64,6 +64,15 @@ namespace Diagnostics
     /// time of the newest completed jobs per <see cref="PerfJobType"/> — per job, not per frame — for exact per-job
     /// percentiles.
     /// </para>
+    /// <para>
+    /// <b>Final rows.</b> A row stops changing once it is <see cref="RowFinalAge"/> frames old. Each commit passes that row
+    /// to <see cref="PhaseRecorder"/>, so statistics over spans longer than the ring see every frame once, timings included.
+    /// </para>
+    /// <para>
+    /// <b>Capture.</b> At <see cref="PerfTier.Capture"/>, while <see cref="ConfigureExport"/> has set a folder, a
+    /// <see cref="PerfSessionExporter"/> writes each final row and each closed hitch record to disk. Leaving the tier,
+    /// clearing the folder, quitting or reloading closes the session after writing its newest rows.
+    /// </para>
     /// <para>Main thread only; <see cref="SlotsActive"/> may also be read from worker threads to gate their counting. Native memory is freed on application quit and before an Editor assembly reload.</para>
     /// </summary>
     public static class PerfStore
@@ -92,8 +101,17 @@ namespace Diagnostics
         private const double NANOSECONDS_PER_MICROSECOND = 1000.0;
         private const double MICROSECONDS_PER_MILLISECOND = 1000.0;
 
+        /// <summary>Session file names sort by start time; milliseconds keep two sessions in one second apart.</summary>
+        private const string SESSION_TIMESTAMP_FORMAT = "yyyy-MM-dd_HH-mm-ss-fff";
+
         /// <summary>Oldest row a late frame timing is matched against; timings arrive a few frames after their frame.</summary>
         private const int FRAME_TIMING_MAX_AGE = 16;
+
+        /// <summary>
+        /// Age, right after a commit, at which a row is final: <see cref="SampleFrameTiming"/> runs after each commit and
+        /// writes rows up to <c>FRAME_TIMING_MAX_AGE</c> old, so a row one frame older can no longer change.
+        /// </summary>
+        public const int RowFinalAge = FRAME_TIMING_MAX_AGE + 1;
 
         [NoAutoStaticsCleanup] // immutable
         private static readonly double s_tickToMs = MILLISECONDS_PER_SECOND / Stopwatch.Frequency;
@@ -137,6 +155,13 @@ namespace Diagnostics
 
         [NoAutoStaticsCleanup] // reset in DomainReset
         private static PerfTier s_tier;
+
+        /// <summary>The tier last passed to <see cref="SetTier"/>, before <see cref="TierFloor"/> raises it.</summary>
+        [NoAutoStaticsCleanup] // reset in DomainReset
+        private static PerfTier s_requestedTier;
+
+        [NoAutoStaticsCleanup] // reset in DomainReset
+        private static PerfTier s_tierFloor;
 
         [NoAutoStaticsCleanup] // reset in DomainReset
         private static bool s_forceSlots;
@@ -206,8 +231,39 @@ namespace Diagnostics
         [NoAutoStaticsCleanup] // reset in DomainReset
         private static PerfSampleRing[] s_jobBusyMs;
 
-        /// <summary>The current tier.</summary>
+        [NoAutoStaticsCleanup] // reset in DomainReset
+        private static PerfPhaseRecorder s_phaseRecorder;
+
+        /// <summary>The session being written at <see cref="PerfTier.Capture"/>; null when none.</summary>
+        [NoAutoStaticsCleanup] // reset in DomainReset
+        private static PerfSessionExporter s_exporter;
+
+        /// <summary>Where Capture sessions are written; null while sessions are not allowed.</summary>
+        [NoAutoStaticsCleanup] // reset in DomainReset
+        private static string s_exportDirectory;
+
+        [NoAutoStaticsCleanup] // reset in DomainReset
+        private static long s_exportPartMaxBytes;
+
+        [NoAutoStaticsCleanup] // reset in DomainReset
+        private static long s_exportSessionMaxBytes;
+
+        /// <summary>The tier in force: the one last set, raised to <see cref="TierFloor"/>.</summary>
         public static PerfTier Tier => s_tier;
+
+        /// <summary>
+        /// The lowest tier in force regardless of the tier set, for a run whose report needs that tier's data. Independent
+        /// of the set tier, so a higher one is kept and clearing the floor (back to <see cref="PerfTier.Basic"/>) restores it.
+        /// </summary>
+        public static PerfTier TierFloor
+        {
+            get => s_tierFloor;
+            set
+            {
+                s_tierFloor = value;
+                SetTier(s_requestedTier);
+            }
+        }
 
         /// <summary>The hitch detector, or null below <see cref="PerfTier.Frame"/>.</summary>
         public static PerfHitchDetector Hitches => s_hitches;
@@ -253,6 +309,34 @@ namespace Diagnostics
             }
         }
 
+        /// <summary>
+        /// Receives every row once it is final (<see cref="RowFinalAge"/>), one per commit, at every tier; null for none.
+        /// The store does not own it: whoever sets it disposes it, after clearing this property.
+        /// </summary>
+        public static PerfPhaseRecorder PhaseRecorder
+        {
+            get => s_phaseRecorder;
+            set => s_phaseRecorder = value;
+        }
+
+        /// <summary>The session being written at <see cref="PerfTier.Capture"/>, or null.</summary>
+        public static PerfSessionExporter Exporter => s_exporter;
+
+        /// <summary>
+        /// Sets where <see cref="PerfTier.Capture"/> sessions are written, opening one now if the tier is Capture and none is
+        /// open; a null directory closes the open session and opens no more. Each session gets its own files.
+        /// </summary>
+        /// <param name="directory">The folder for session files, or null.</param>
+        /// <param name="partMaxBytes">Bytes after which a session continues in a new part file.</param>
+        /// <param name="sessionMaxBytes">Bytes after which a session writes nothing more.</param>
+        public static void ConfigureExport(string directory, long partMaxBytes, long sessionMaxBytes)
+        {
+            s_exportDirectory = directory;
+            s_exportPartMaxBytes = partMaxBytes;
+            s_exportSessionMaxBytes = sessionMaxBytes;
+            RefreshExport();
+        }
+
         /// <summary>Whether slot probes are recording (tier at least <see cref="PerfTier.Systems"/>, or <see cref="ForceSlots"/>).</summary>
         public static bool SlotsActive => s_slotsActive;
 
@@ -263,12 +347,15 @@ namespace Diagnostics
         public static int SlotFramesRecorded => s_ring?.SlotFrameCount ?? 0;
 
         /// <summary>
-        /// Applies a tier, allocating or freeing the ring's slot columns, the hitch detector and the frame-timing
-        /// reader to match. Leaving <see cref="PerfTier.Frame"/> discards the held hitch records.
+        /// Applies a tier, raised to <see cref="TierFloor"/>, allocating or freeing the ring's slot columns, the hitch
+        /// detector and the frame-timing reader to match. Leaving <see cref="PerfTier.Frame"/> discards the held hitch records.
         /// </summary>
-        /// <param name="tier">The tier to apply.</param>
-        public static void SetTier(PerfTier tier)
+        /// <param name="requestedTier">The tier to apply.</param>
+        public static void SetTier(PerfTier requestedTier)
         {
+            s_requestedTier = requestedTier;
+            PerfTier tier = requestedTier > s_tierFloor ? requestedTier : s_tierFloor;
+
             // Totals sampled before the counter columns existed would span every frame since; start over instead.
             if (tier >= PerfTier.Systems && s_tier < PerfTier.Systems) Array.Clear(s_hasTotal, 0, CounterCount);
 
@@ -276,6 +363,7 @@ namespace Diagnostics
             RefreshSlotsActive();
             ApplyFrameTierResources();
             ApplyJobSamples();
+            RefreshExport();
 
             if (s_ring == null) return;
 
@@ -538,10 +626,12 @@ namespace Diagnostics
             };
             RecordGc(ref frame, readings.HeapBytes, readings.GcCollectionCount);
             s_ring.Commit(frame, s_slotTicks, s_tickToMs, s_counterValues);
+            if (s_phaseRecorder != null && s_ring.Count > RowFinalAge) s_phaseRecorder.Add(s_ring.GetFrame(RowFinalAge));
 
             Array.Clear(s_slotTicks, 0, SlotCount);
             Array.Clear(s_counterValues, (int)FirstPerFrameCount, CounterCount - (int)FirstPerFrameCount);
             s_hitches?.OnFrameCommitted(s_ring);
+            s_exporter?.OnFrameCommitted(s_ring, s_hitches);
         }
 
         /// <summary>
@@ -630,6 +720,8 @@ namespace Diagnostics
         {
             DisposeNative();
             s_tier = PerfTier.Basic;
+            s_requestedTier = PerfTier.Basic;
+            s_tierFloor = PerfTier.Basic;
             s_forceSlots = false;
             s_slotsActive = false;
             s_isShutDown = false;
@@ -645,6 +737,10 @@ namespace Diagnostics
             s_worldFrameStartSlotTicks = 0;
             s_isWorldFrameOpen = false;
             s_negativeRemainderFrames = 0;
+            s_phaseRecorder = null;
+            s_exportDirectory = null;
+            s_exportPartMaxBytes = 0;
+            s_exportSessionMaxBytes = 0;
             Array.Clear(s_slotTicks, 0, SlotCount);
             Array.Clear(s_publishedMs, 0, SlotCount);
             ResetCounters();
@@ -779,11 +875,40 @@ namespace Diagnostics
 #if UNITY_EDITOR
             AssemblyReloadEvents.beforeAssemblyReload -= ShutDown;
 #endif
+            CloseExport();
             ReleaseFrameTierResources();
             s_ring?.Dispose();
             s_ring = null;
             s_jobLatencyMs = null;
             s_jobBusyMs = null;
+        }
+
+        /// <summary>Opens a session when the tier is Capture, a directory is set and none is open; closes the open one otherwise.</summary>
+        private static void RefreshExport()
+        {
+            bool isWanted = s_tier >= PerfTier.Capture && s_exportDirectory != null && !s_isShutDown;
+            if (!isWanted)
+            {
+                CloseExport();
+                return;
+            }
+
+            if (s_exporter != null) return;
+
+            int lastFrameIndex = s_ring != null && s_ring.Count > 0 ? s_ring.GetFrame(0).FrameIndex : int.MinValue;
+            string sessionName = PerfSessionExporter.FilePrefix + DateTime.Now.ToString(SESSION_TIMESTAMP_FORMAT);
+            s_exporter = new PerfSessionExporter(s_exportDirectory, sessionName, s_exportPartMaxBytes, s_exportSessionMaxBytes,
+                SlotCount, CounterCount, lastFrameIndex, s_hitches);
+            RegisterShutDown();
+        }
+
+        /// <summary>Closes the open session, writing its newest rows first while the ring still holds them.</summary>
+        private static void CloseExport()
+        {
+            if (s_exporter == null) return;
+
+            s_exporter.Close(s_ring);
+            s_exporter = null;
         }
 
 #if ENABLE_PROFILER

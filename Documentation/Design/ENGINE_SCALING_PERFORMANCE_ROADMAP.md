@@ -1,6 +1,6 @@
 # Engine Scaling Performance Roadmap
 
-**Version:** 1.13  
+**Version:** 1.14  
 **Date:** 2026-10-02  
 **Status:** In progress — `ES-1`, `ES-2` and `ES-6.1` shipped (2026-10-02); ES-0's GC.Alloc attribution captured
 (2026-10-03, §2.2.1 — added `ES-26`/`ES-27`; PM-1's smoke capture added the `ES-28` quick win); the rest is a near-to-far horizon, not
@@ -315,6 +315,12 @@ PM-6; the bullets below are what ES needs from it.
   with `/perf stats` / `/perf hitches`, and logged to Player.log when an automated run ends. First Master reading, one
   Systems-tier run: the 200 m/s traversal's hitch frames (34–52 ms) are led by the `Tick` slot at 26–38 ms, the initial
   load's by `LightMerge` and `Tick` — `PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md` §7.3; one run, not yet a ranking.)
+  (PM-6, 2026-10-06, confirmed in an IL2CPP Master build: **the benchmark report now carries this per phase** — a
+  "Frame Health (every frame)" table with exact wall p50/p99/worst, CPU p50/p99, GC p99, collections, hitch frames and
+  GPU p99 over every frame of each phase, beside the averaged columns. Benchmarks run at the Frame tier at least; with
+  `-mc-set perfMonitorTier=Capture` every frame and every hitch window is also written to `persistentDataPath/PerfLogs`.
+  First Master reading, four runs: the 200 m/s phase's worst frame is 144–154 ms and its p99 78–93 ms, where the
+  averaged Peak Wall column reads 56–59 ms — §7.7.)
 - Slots for `CheckViewDistance`, `UnloadChunks`, `ApplyModifications`, the disk-hit populate
   continuation and every other untimed `World.Update` region, plus an unattributed remainder. (PM-3, 2026-10-04, confirmed
   in an IL2CPP Master build: every `World.Update` region has a slot — `ViewDistance`, `Unload` and nine more —
@@ -333,7 +339,9 @@ PM-6; the bullets below are what ES needs from it.
   (12–46 ms) share the time, with the replay at 4–10 ms; a third of the `Tick`-led records are the managed grass tick
   instead, 19–27 ms at 44–69 k active grass voxels — §7.6. No ES item owns either fix yet.)
 - A once-per-launch **drain stamp** (P-4's tail-inclusive drain predicate): ms to `_isWorldLoaded`, to
-  drained, to frame time within 1.25× median for 2 s — splits the 30 s into before/after handoff.
+  drained, to frame time within 1.25× median for 2 s — splits the 30 s into before/after handoff. *(2026-10-06: the
+  remaining ES-0 item. No PM phase owns it — PM-6 covered export only — and it touches the startup pipeline, so it
+  needs the `chunk-lifecycle` skill. Not started.)*
 - One Development-build (not deep-profiling) Profiler capture of a 200 m/s generation flight with
   GC.Alloc callstacks, to attribute the ~142 KB/chunk. ✅ 2026-10-03 — 127.4 KB per generated chunk, 77 % one
   span copy in the save serializer (§2.2.1, ES-26). Re-run with `ProfilerCapture.ArmAutoStop` +
@@ -607,7 +615,7 @@ constants + migration change. Prerequisites: ES-13, ES-18, ES-19.
 
 | Phase | Scope | Effort | Depends on | Status |
 |---|---|:---:|---|---|
-| **ES-0 — Measure** | Spike-visible capture, drain stamp, crossing slots, GC.Alloc capture | 🟢 | — | GC.Alloc capture ✅ 2026-10-03 (§2.2.1); PM-1 store ✅ 2026-10-03; PM-2 frame tier ✅ 2026-10-04 (Master-confirmed); PM-3 crossing slots + remainder + counters ✅ 2026-10-04 (Master-confirmed); PM-4 job/I-O counters ✅ 2026-10-05 (Master-confirmed); PM-8 tick breakdown ✅ 2026-10-05 (Master-confirmed); rest via PM-6 |
+| **ES-0 — Measure** | Spike-visible capture, drain stamp, crossing slots, GC.Alloc capture | 🟢 | — | GC.Alloc capture ✅ 2026-10-03 (§2.2.1); PM-1 store ✅ 2026-10-03; PM-2 frame tier ✅ 2026-10-04 (Master-confirmed); PM-3 crossing slots + remainder + counters ✅ 2026-10-04 (Master-confirmed); PM-4 job/I-O counters ✅ 2026-10-05 (Master-confirmed); PM-8 tick breakdown ✅ 2026-10-05 (Master-confirmed); PM-6 per-phase frame stats + Capture export ✅ 2026-10-06 (Master-confirmed); drain stamp open, unowned |
 | **ES-1 — No frame-paced load** | Completion counter at `World.cs:1064` — execution packet §7.1 | 🟢 | — | ✅ 2026-10-02 (in-game) |
 | **ES-2 — Calibration** | Robust OM-1 lighting probe — execution packet §7.1 | 🟢 | — | ✅ 2026-10-02 (in-game) |
 | **ES-3 — Loading mode** | SU-1 + SU-2, pooled/banded/shared startup snapshots | 🟡 | ES-0 | — |
@@ -1000,6 +1008,10 @@ saving is inferred from step 1's re-entry leg, not re-measured.
 
 ## Document History
 
+* **v1.14** - ES-0 bullet + plan row: PM-6 confirmed in an IL2CPP Master build (2026-10-06) — benchmark reports carry
+  exact per-phase frame statistics (worst / p99 / hitches / collections / GPU) and Capture writes session and hitch
+  files. The plan row no longer sends "the rest" of ES-0 to PM-6: the drain stamp was never in PM-6's scope and is the
+  remaining, unowned ES-0 item.
 * **v1.13** - ES-0 slot bullet + plan row: PM-8 confirmed in an IL2CPP Master build (2026-10-05) — the 200 m/s `Tick`
   hitches are the fluid prepare's voxel-map copies and the wait for the fluid jobs, plus the managed grass tick; no ES item
   owns either fix yet.
@@ -1049,5 +1061,5 @@ saving is inferred from step 1's re-entry leg, not re-measured.
 
 ---
 
-**Last Updated:** 2026-10-05  
+**Last Updated:** 2026-10-06  
 **Next Review:** when ES-26 is scored against the ES-0 capture or ES-25's rendering baseline lands, or before any ES phase starts

@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Diagnostics;
+using System.IO;
 using Diagnostics;
 using Helpers;
 using Unity.Profiling.LowLevel.Unsafe;
@@ -25,7 +26,7 @@ using UnityEngine.Profiling;
 /// Every frame's raw wall and CPU ticks, heap size and collection count are also committed to
 /// <see cref="PerfStore"/>, which keeps the unsmoothed per-frame history this class's moving averages cannot, and
 /// which then samples the frame timings; this class also applies the <see cref="Settings.perfMonitorTier"/> setting
-/// to it on enable and live on change.
+/// to it on enable and live on change, and lets it write Capture sessions to the PerfLogs folder while enabled.
 /// </para>
 /// </summary>
 /// <remarks>
@@ -237,6 +238,9 @@ public class PerformanceMonitor : MonoBehaviour
     private void OnDisable()
     {
         SettingsManager.OnSettingChanged -= HandleSettingChanged;
+
+        // A Capture session spans one world; the next world's monitor opens a new one.
+        if (Instance == this) PerfStore.ConfigureExport(null, 0, 0);
     }
 
     private void Start()
@@ -252,12 +256,20 @@ public class PerformanceMonitor : MonoBehaviour
             ApplyStoreSettings();
     }
 
-    /// <summary>Applies the hitch thresholds (settings-file only, so read with the tier) and the tier to <see cref="PerfStore"/>.</summary>
+    /// <summary>
+    /// Applies the hitch thresholds and Capture file sizes (settings-file only, so read with the tier), the tier, and
+    /// the Capture folder to <see cref="PerfStore"/>.
+    /// </summary>
     private static void ApplyStoreSettings()
     {
         Settings settings = SettingsManager.LoadSettings();
         PerfStore.SetHitchThresholds(settings.perfHitchMinMs, settings.perfHitchMedianFactor);
         PerfStore.SetTier(settings.perfMonitorTier);
+
+        int partMb = settings.perfCapturePartMb > 0 ? settings.perfCapturePartMb : PerfSessionExporter.DefaultPartMb;
+        int sessionMb = settings.perfCaptureSessionMb > 0 ? settings.perfCaptureSessionMb : PerfSessionExporter.DefaultSessionMb;
+        PerfStore.ConfigureExport(Path.Combine(Application.persistentDataPath, PerfSessionExporter.FolderName),
+            partMb * PerfSessionExporter.BytesPerMegabyte, sessionMb * PerfSessionExporter.BytesPerMegabyte);
     }
 
     private void OnDestroy()

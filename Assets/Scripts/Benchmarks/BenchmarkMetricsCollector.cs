@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Diagnostics;
 using UnityEngine;
 
 namespace Benchmarks
@@ -7,7 +8,8 @@ namespace Benchmarks
     /// <summary>
     /// Accumulated performance statistics for a single benchmark phase (e.g., one speed tier
     /// within the generation or loading pass). Populated from <see cref="PerformanceMonitor"/>
-    /// snapshots received via the <see cref="PerformanceMonitor.OnMetricsSampled"/> event.
+    /// snapshots received via the <see cref="PerformanceMonitor.OnMetricsSampled"/> event, plus exact per-frame
+    /// statistics from <see cref="PerfStore"/> (<see cref="FrameStats"/>), filled in when recording stops.
     /// </summary>
     public struct PhaseMetrics
     {
@@ -76,6 +78,15 @@ namespace Benchmarks
 
         /// <summary>Peak total memory (native + managed) in MB.</summary>
         public double PeakTotalMemMb;
+
+        /// <summary>Whether <see cref="FrameStats"/> holds the phase's per-frame statistics.</summary>
+        public bool HasFrameStats;
+
+        /// <summary>Exact statistics of every frame of the phase — raw, unlike the averaged columns above.</summary>
+        public PerfPhaseSummary FrameStats;
+
+        /// <summary>Frames over the hitch threshold during the phase; −1 when no hitch detector ran through it.</summary>
+        public int HitchFrames;
     }
 
     /// <summary>
@@ -83,7 +94,8 @@ namespace Benchmarks
     /// and accumulates per-phase statistics during a benchmark run. Not a MonoBehaviour — instantiated
     /// by <see cref="BenchmarkController"/> and disposed when the benchmark completes.
     /// <para>The event handler performs pure arithmetic with zero allocations. All storage is
-    /// pre-allocated in the constructor.</para>
+    /// pre-allocated in the constructor, and the per-frame statistics in native lists that
+    /// <see cref="StartRecording"/> creates.</para>
     /// </summary>
     public class BenchmarkMetricsCollector
     {
@@ -119,6 +131,12 @@ namespace Benchmarks
         private bool _isRecording;
         private PerformanceMonitor _cachedMonitor;
 
+        /// <summary>The store's per-frame statistics for each phase, in the order the phases began; null when not recording.</summary>
+        private PerfPhaseRecorder _phaseRecorder;
+
+        private PerfHitchDetector _hitchDetectorAtStart;
+        private int _hitchFramesAtStart;
+
         /// <summary>
         /// Read-only access to all completed phase results.
         /// </summary>
@@ -148,14 +166,20 @@ namespace Benchmarks
 
             _cachedMonitor = PerformanceMonitor.Instance;
             _cachedMonitor.OnMetricsSampled += OnMetricsSampled;
+            _phaseRecorder = new PerfPhaseRecorder(_completedPhases.Capacity);
+            PerfStore.PhaseRecorder = _phaseRecorder;
             _isRecording = true;
         }
 
         /// <summary>
-        /// Unsubscribes from the performance monitor event. Safe to call multiple times.
-        /// Ends any active phase before unsubscribing.
+        /// Unsubscribes from the performance monitor event and adds each phase's per-frame statistics to its result.
+        /// Safe to call multiple times. Ends any active phase before unsubscribing.
         /// Uses the cached reference from <see cref="StartRecording"/> to safely unsubscribe
         /// even if <see cref="PerformanceMonitor.Instance"/> has been destroyed.
+        /// <para>
+        /// A row reaches the statistics <see cref="PerfStore.RowFinalAge"/> frames after its frame, so a caller that wants
+        /// the last phase's final frames counted waits that many frames after ending it.
+        /// </para>
         /// </summary>
         public void StopRecording()
         {
@@ -169,6 +193,7 @@ namespace Benchmarks
                 _cachedMonitor.OnMetricsSampled -= OnMetricsSampled;
 
             _cachedMonitor = null;
+            ApplyFrameStats();
         }
 
         /// <summary>
@@ -207,6 +232,12 @@ namespace Benchmarks
             _totalMemSum = 0;
             _totalMemPeak = 0;
 
+            // The detector tests each frame at its commit, which comes after this call in the same frame, so the delta
+            // covers the same frames as the recorder's phase.
+            _phaseRecorder?.BeginPhase(Time.frameCount);
+            _hitchDetectorAtStart = PerfStore.Hitches;
+            _hitchFramesAtStart = _hitchDetectorAtStart?.HitchFrames ?? 0;
+
             _hasActivePhase = true;
         }
 
@@ -219,6 +250,13 @@ namespace Benchmarks
             if (!_hasActivePhase) return;
 
             float duration = Time.realtimeSinceStartup - _phaseStartTime;
+            _phaseRecorder?.EndPhase(Time.frameCount);
+
+            // A detector replaced mid-phase (a tier change) restarted its count, so the phase has no figure.
+            PerfHitchDetector detector = PerfStore.Hitches;
+            int hitchFrames = detector != null && detector == _hitchDetectorAtStart
+                ? detector.HitchFrames - _hitchFramesAtStart
+                : -1;
 
             _completedPhases.Add(new PhaseMetrics
             {
@@ -246,9 +284,31 @@ namespace Benchmarks
                 PeakManagedMemMb = _managedMemPeak,
                 AvgTotalMemMb = _sampleCount > 0 ? _totalMemSum / _sampleCount : 0,
                 PeakTotalMemMb = _totalMemPeak,
+
+                HitchFrames = hitchFrames,
             });
 
             _hasActivePhase = false;
+        }
+
+        /// <summary>Closes the phase recorder, copies each phase's statistics into its result, then detaches and frees it.</summary>
+        private void ApplyFrameStats()
+        {
+            if (_phaseRecorder == null) return;
+
+            _phaseRecorder.Close();
+            int phases = Math.Min(_phaseRecorder.CompletedCount, _completedPhases.Count);
+            for (int i = 0; i < phases; i++)
+            {
+                PhaseMetrics phase = _completedPhases[i];
+                phase.FrameStats = _phaseRecorder.GetCompleted(i);
+                phase.HasFrameStats = true;
+                _completedPhases[i] = phase;
+            }
+
+            if (PerfStore.PhaseRecorder == _phaseRecorder) PerfStore.PhaseRecorder = null;
+            _phaseRecorder.Dispose();
+            _phaseRecorder = null;
         }
 
         /// <summary>

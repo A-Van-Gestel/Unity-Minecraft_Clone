@@ -1,6 +1,8 @@
 using System;
 using System.Diagnostics;
+using System.IO;
 using System.Reflection;
+using System.Threading;
 using Data;
 using Data.WorldTypes;
 using Diagnostics;
@@ -22,7 +24,8 @@ namespace Editor.Benchmarking
     /// includes a <c>ProfilerMarker</c> begin/end that Master players compile out — an upper bound for them.
     /// Resets the store before and after, so it discards the session's history ring.
     /// Run from <b>Minecraft Clone → Benchmarks → PerfStore Overhead</b>; the worker-side cost of timing a generation
-    /// chain from <b>Minecraft Clone → Benchmarks → Job Timing Overhead</b>.
+    /// chain from <b>Minecraft Clone → Benchmarks → Job Timing Overhead</b>; a Capture session's cost and allocation from
+    /// <b>Minecraft Clone → Benchmarks → Capture Export Overhead</b>.
     /// </summary>
     public static class PerfStoreProbeBenchmark
     {
@@ -46,6 +49,25 @@ namespace Editor.Benchmarking
         private const int GENERATION_GRID_WIDTH = 10;
         private const int GENERATION_ROUNDS = 5;
         private const double MICROSECONDS_PER_MILLISECOND = 1e3;
+        private const double MILLISECONDS_PER_SECOND = 1e3;
+
+        /// <summary>Rows in the measured Capture session — about 80 MB of CSV, deleted afterward.</summary>
+        private const int EXPORT_ROWS = 200_000;
+
+        private const int EXPORT_WARMUP_ROWS = 4096;
+        private const long EXPORT_SESSION_BYTES = 1L << 32;
+
+        /// <summary>Rows per block the exporter hands its writer (its pool's block size).</summary>
+        private const int EXPORT_BLOCK_ROWS = 256;
+
+        /// <summary>How far commits may run ahead of the writer: half its block pool, so no row is dropped.</summary>
+        private const int EXPORT_MAX_LAG_ROWS = EXPORT_BLOCK_ROWS * 8;
+
+        /// <summary>Slot and frame times with several digits, so formatting takes its full path.</summary>
+        private const long EXPORT_SLOT_TICKS = 12_345;
+
+        private const long EXPORT_WALL_TICKS = 41_667;
+        private const int CONTROL_BYTES = 16;
 
         /// <summary>Runs every measurement and logs one line per case.</summary>
         [MenuItem("Minecraft Clone/Benchmarks/PerfStore Overhead")]
@@ -125,6 +147,112 @@ namespace Editor.Benchmarking
             {
                 runner.Dispose();
             }
+        }
+
+        /// <summary>
+        /// Writes a Capture session of <see cref="EXPORT_ROWS"/> frames, every slot and counter set, to a temporary folder,
+        /// and logs the main thread's commit cost, the writer's rows per second, and the GC collections and heap growth over
+        /// the session — the writer formats on its own thread, but its garbage would land in the process-wide figures. A
+        /// control arm allocating 16 B per frame on the main thread shows what an allocating path looks like. Commits are
+        /// paced so the writer keeps up and no row is dropped.
+        /// Run from <b>Minecraft Clone → Benchmarks → Capture Export Overhead</b>.
+        /// </summary>
+        [MenuItem("Minecraft Clone/Benchmarks/Capture Export Overhead")]
+        public static void RunCaptureExportBenchmark()
+        {
+            PerfTier tier = PerfStore.Tier;
+            bool forced = PerfStore.ForceSlots;
+            float hitchMinMs = PerfStore.HitchMinMs;
+            float hitchMedianFactor = PerfStore.HitchMedianFactor;
+            try
+            {
+                ReportExport("Capture session", allocateControl: false);
+                ReportExport("Capture session + 16 B/frame control", allocateControl: true);
+            }
+            finally
+            {
+                ResetStore();
+                PerfStore.SetHitchThresholds(hitchMinMs, hitchMedianFactor);
+                PerfStore.SetTier(tier);
+                PerfStore.ForceSlots = forced;
+            }
+        }
+
+        private static void ReportExport(string label, bool allocateControl)
+        {
+            string directory = Path.Combine(Path.GetTempPath(), "PerfExportBenchmark_" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                ResetStore();
+                PerfStore.SetTier(PerfTier.Capture);
+                PerfStore.ConfigureExport(directory, EXPORT_SESSION_BYTES, EXPORT_SESSION_BYTES);
+                PerfSessionExporter exporter = PerfStore.Exporter;
+
+                // The warmup opens the file and JIT-compiles both threads' paths, outside the measured window.
+                int frame = CommitCaptureFrames(exporter, 0, EXPORT_WARMUP_ROWS, false, out _);
+                WaitForWriter(exporter, frame - PerfStore.RowFinalAge);
+
+                int collectionsBefore = GC.CollectionCount(0);
+                long heapBefore = GC.GetTotalMemory(false);
+                Stopwatch stopwatch = Stopwatch.StartNew();
+                frame = CommitCaptureFrames(exporter, frame, EXPORT_ROWS, allocateControl, out long commitTicks);
+                WaitForWriter(exporter, frame - PerfStore.RowFinalAge);
+                stopwatch.Stop();
+                long heapDeltaKb = (GC.GetTotalMemory(false) - heapBefore) / BYTES_PER_KILOBYTE;
+                int collections = GC.CollectionCount(0) - collectionsBefore;
+
+                double commitNs = commitTicks * (NANOSECONDS_PER_MILLISECOND * MILLISECONDS_PER_SECOND / Stopwatch.Frequency) / EXPORT_ROWS;
+                double rowsPerSecond = EXPORT_ROWS / stopwatch.Elapsed.TotalSeconds;
+                long megabytes = exporter.BytesWritten / PerfSessionExporter.BytesPerMegabyte;
+                PerfStore.ConfigureExport(null, 0, 0);
+                Debug.Log($"[BENCHMARK] {label}: CommitFrame {commitNs:F0} ns/frame, writer {rowsPerSecond:N0} rows/s, " +
+                          $"{collections} GC collections, heap Δ {heapDeltaKb} KB over {EXPORT_ROWS} rows " +
+                          $"({megabytes} MB written, {exporter.RowsDropped} dropped)");
+            }
+            finally
+            {
+                PerfStore.ConfigureExport(null, 0, 0);
+                if (Directory.Exists(directory)) Directory.Delete(directory, true);
+            }
+        }
+
+        /// <summary>
+        /// Commits frames with every slot and counter set, waiting whenever the writer falls more than a block pool behind.
+        /// </summary>
+        /// <returns>The frame index after the last one committed.</returns>
+        private static int CommitCaptureFrames(PerfSessionExporter exporter, int firstFrame, int count, bool allocateControl,
+            out long commitTicks)
+        {
+            commitTicks = 0;
+            long[] slotTicks = (long[])typeof(PerfStore).GetField("s_slotTicks", BindingFlags.NonPublic | BindingFlags.Static)?.GetValue(null)
+                               ?? throw new MissingFieldException(nameof(PerfStore), "s_slotTicks");
+            for (int frame = firstFrame; frame < firstFrame + count; frame++)
+            {
+                for (int slot = 0; slot < PerfStore.SlotCount; slot++)
+                    slotTicks[slot] = EXPORT_SLOT_TICKS + frame + slot;
+                SampleCounters(frame);
+                byte[] control = allocateControl ? new byte[CONTROL_BYTES] : null;
+                GC.KeepAlive(control);
+
+                long start = Stopwatch.GetTimestamp();
+                PerfStore.CommitFrame(new PerfFrameReadings { WallTicks = EXPORT_WALL_TICKS + frame, CpuTicks = EXPORT_WALL_TICKS, FrameIndex = frame });
+                commitTicks += Stopwatch.GetTimestamp() - start;
+
+                if (frame % EXPORT_BLOCK_ROWS == 0) WaitForWriter(exporter, frame - EXPORT_MAX_LAG_ROWS);
+            }
+
+            return firstFrame + count;
+        }
+
+        /// <summary>
+        /// Waits until the writer has written the whole blocks among the first <paramref name="rows"/> rows — a partial block
+        /// is not handed over until it fills — sleeping between checks, which allocates nothing.
+        /// </summary>
+        private static void WaitForWriter(PerfSessionExporter exporter, long rows)
+        {
+            long target = rows / EXPORT_BLOCK_ROWS * EXPORT_BLOCK_ROWS;
+            while (exporter.RowsWritten + exporter.RowsDropped < target)
+                Thread.Sleep(1);
         }
 
         /// <summary>Generates <see cref="GENERATION_CHUNKS"/> chunks one at a time, each completed before the next.</summary>

@@ -120,9 +120,20 @@ namespace Diagnostics
         /// <param name="medianFactor">Multiple of the recent median above which a frame is a hitch.</param>
         public void SetThresholds(float minMs, float medianFactor)
         {
-            _minMs = minMs > 0f && !float.IsInfinity(minMs) ? minMs : DefaultMinMs;
-            _medianFactor = medianFactor >= 1f && !float.IsInfinity(medianFactor) ? medianFactor : DefaultMedianFactor;
+            _minMs = ResolveMinMs(minMs);
+            _medianFactor = ResolveMedianFactor(medianFactor);
         }
+
+        /// <summary>The minimum threshold a detector applies for a requested one: the value when positive and finite, else <see cref="DefaultMinMs"/>.</summary>
+        /// <param name="minMs">The requested minimum, in milliseconds.</param>
+        /// <returns>The minimum applied.</returns>
+        public static float ResolveMinMs(float minMs) => minMs > 0f && !float.IsInfinity(minMs) ? minMs : DefaultMinMs;
+
+        /// <summary>The median factor a detector applies for a requested one: the value when at least 1 and finite, else <see cref="DefaultMedianFactor"/>.</summary>
+        /// <param name="medianFactor">The requested multiple of the median.</param>
+        /// <returns>The factor applied.</returns>
+        public static float ResolveMedianFactor(float medianFactor) =>
+            medianFactor >= 1f && !float.IsInfinity(medianFactor) ? medianFactor : DefaultMedianFactor;
 
         /// <summary>Allocates the per-slot and per-counter blocks; a no-op when already allocated.</summary>
         public void AllocateSlotBlock()

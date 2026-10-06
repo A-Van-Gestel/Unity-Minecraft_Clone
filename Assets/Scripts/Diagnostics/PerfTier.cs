@@ -16,7 +16,7 @@ namespace Diagnostics
         /// <summary>Adds a per-frame time for every <see cref="PerfSlot"/>.</summary>
         Systems = 2,
 
-        /// <summary>Records the same as <see cref="Systems"/>.</summary>
+        /// <summary>Adds a session file of every frame and a file per hitch, written to disk in the background.</summary>
         Capture = 3,
     }
 }

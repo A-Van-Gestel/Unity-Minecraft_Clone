@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Globalization;
 using Data;
 using Data.Enums;
+using Diagnostics;
 using Helpers;
 using Launch;
 using Unity.Profiling;
@@ -187,6 +188,10 @@ namespace Benchmarks
             Application.targetFrameRate = -1;
             _frameRateOverridden = true;
 
+            // The report's hitch and GPU columns need the Frame tier; a higher tier chosen for the run is kept. Raised
+            // before the settle wait, so the hitch detector's median baseline exists when the first phase begins.
+            PerfStore.TierFloor = PerfTier.Frame;
+
             BuildWaypoints(settings);
 
             if (_generationWaypoints.Count < 2)
@@ -271,6 +276,11 @@ namespace Benchmarks
             yield return RunLoadingPass();
 
             _totalStopwatch.Stop();
+
+            // The last phase's final frames reach the per-frame statistics only once their late timings are in.
+            for (int i = 0; i <= PerfStore.RowFinalAge; i++)
+                yield return null;
+
             _metricsCollector.StopRecording();
 
             // Close the final telemetry phase BEFORE the report reads CompletedPhases — an open phase is
@@ -303,6 +313,7 @@ namespace Benchmarks
             PipelineTelemetry.EndPhase();
             PipelineTelemetry.Enabled = false;
             WorldFrameProfiler.Enabled = false;
+            PerfStore.TierFloor = PerfTier.Basic;
 
             // Same reasoning for the coverage tracker: a run aborted before the freeze would otherwise stay
             // armed for the rest of the session, charging every ordinary world session a lookup per populated

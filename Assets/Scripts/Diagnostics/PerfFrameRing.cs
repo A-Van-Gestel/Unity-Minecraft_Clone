@@ -278,6 +278,27 @@ namespace Diagnostics
             }
         }
 
+        /// <summary>Copies one held frame's slot columns into a managed buffer.</summary>
+        /// <param name="age">0 for the newest frame, up to <see cref="SlotFrameCount"/> − 1.</param>
+        /// <param name="destination">The receiving buffer.</param>
+        /// <param name="destinationStart">Index of the first float written; the row takes slot-count floats.</param>
+        public void CopySlotRow(int age, float[] destination, int destinationStart)
+        {
+            if ((uint)age >= (uint)_slotFrameCount) throw new ArgumentOutOfRangeException(nameof(age));
+            NativeArray<float>.Copy(_slotMs, IndexOfAge(age) * _slotCount, destination, destinationStart, _slotCount);
+        }
+
+        /// <summary>Copies one held frame's counter columns into a managed buffer.</summary>
+        /// <param name="age">0 for the newest frame, up to <see cref="SlotFrameCount"/> − 1.</param>
+        /// <param name="destination">The receiving buffer.</param>
+        /// <param name="destinationStart">Index of the first int written; the row takes counter-count ints.</param>
+        public void CopyCounterRow(int age, int[] destination, int destinationStart)
+        {
+            if ((uint)age >= (uint)_slotFrameCount) throw new ArgumentOutOfRangeException(nameof(age));
+            if (_counterCount == 0) return;
+            NativeArray<int>.Copy(_counterValues, IndexOfAge(age) * _counterCount, destination, destinationStart, _counterCount);
+        }
+
         /// <summary>Copies one counter for the frames that carry counter columns, newest first, as floats for window statistics.</summary>
         /// <param name="counter">The counter.</param>
         /// <param name="destination">Receives up to its length of values.</param>
@@ -323,7 +344,12 @@ namespace Diagnostics
             return index < 0 ? index + _capacity : index;
         }
 
-        private static bool TryReadField(in PerfFrame frame, PerfFrameField field, out float value)
+        /// <summary>Reads one field of a frame, reporting whether the frame has a value for it (see <see cref="CopyField"/>).</summary>
+        /// <param name="frame">The frame.</param>
+        /// <param name="field">The field.</param>
+        /// <param name="value">The value; meaningless when the method returns false.</param>
+        /// <returns>True when the frame has a value for the field.</returns>
+        public static bool TryReadField(in PerfFrame frame, PerfFrameField field, out float value)
         {
             switch (field)
             {

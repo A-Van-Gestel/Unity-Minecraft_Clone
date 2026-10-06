@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Text;
+using Diagnostics;
 using UnityEngine;
 
 namespace Benchmarks
@@ -63,6 +64,7 @@ namespace Benchmarks
             AppendConfiguration(sb, generationSpeeds, loadingSpeeds, timePerPhase, routeGeometry,
                 generationWaypointCount, loadingWaypointCount, savedVSyncCount, savedTargetFrameRate);
             pipelineSettings.AppendTo(sb);
+            AppendMonitorConfiguration(sb);
             AppendOverallSummary(sb, collector.CompletedPhases, totalDuration);
             AppendGroupedPhases(sb, collector.CompletedPhases);
 
@@ -171,6 +173,22 @@ namespace Benchmarks
                               : "  ** the loading pass GENERATED the remainder. **"));
         }
 
+        /// <summary>
+        /// The performance monitor's settings for the run: its tier decides which per-frame columns exist, and the hitch
+        /// thresholds — as the detector applies them, invalid settings replaced by the defaults — decide what the Hitches
+        /// column counts, so two reports compare only when these match.
+        /// </summary>
+        /// <param name="sb">The report builder.</param>
+        private static void AppendMonitorConfiguration(StringBuilder sb)
+        {
+            sb.AppendLine("<b>=== Performance Monitor ===</b>");
+            sb.AppendLine($"Monitor detail:      {PerfStore.Tier} (benchmarks run at Frame or above)");
+            sb.AppendLine($"Hitch threshold:     over {PerfHitchDetector.ResolveMinMs(PerfStore.HitchMinMs):0.##} ms or " +
+                          $"{PerfHitchDetector.ResolveMedianFactor(PerfStore.HitchMedianFactor):0.##} x the " +
+                          $"median of the last {PerfHitchDetector.BaselineFrames} frames, whichever is higher");
+            sb.AppendLine();
+        }
+
         private static void AppendOverallSummary(StringBuilder sb, IReadOnlyList<PhaseMetrics> phases, TimeSpan totalDuration)
         {
             sb.AppendLine("<b>=== Overall Summary ===</b>");
@@ -236,7 +254,47 @@ namespace Benchmarks
             sb.AppendLine($"Min CPU FPS:         {overallMinCpuFps:F1}");
             sb.AppendLine($"Avg Total Memory:    {avgTotalMem:F1} MB");
             sb.AppendLine($"Peak Total Memory:   {overallPeakTotalMem:F1} MB");
+            AppendOverallFrameHealth(sb, phases);
             sb.AppendLine();
+        }
+
+        /// <summary>The raw worst frame, hitch frames and collections across every phase with per-frame statistics.</summary>
+        /// <param name="sb">The report builder.</param>
+        /// <param name="phases">The completed phases.</param>
+        private static void AppendOverallFrameHealth(StringBuilder sb, IReadOnlyList<PhaseMetrics> phases)
+        {
+            float worstWallMs = 0f;
+            string worstPhase = null;
+            int frames = 0;
+            int collections = 0;
+            int hitchFrames = 0;
+            bool hitchesMeasured = true;
+
+            foreach (PhaseMetrics phase in phases)
+            {
+                if (!phase.HasFrameStats) continue;
+
+                frames += phase.FrameStats.FrameCount;
+                collections += phase.FrameStats.GcCollections;
+                if (phase.HitchFrames < 0) hitchesMeasured = false;
+                else hitchFrames += phase.HitchFrames;
+
+                if (phase.FrameStats.Wall.Count == 0 || phase.FrameStats.Wall.Max <= worstWallMs) continue;
+
+                worstWallMs = phase.FrameStats.Wall.Max;
+                worstPhase = $"{phase.GroupName} {phase.PhaseName}";
+            }
+
+            if (frames == 0)
+            {
+                sb.AppendLine("Per-frame stats:     not recorded");
+                return;
+            }
+
+            sb.AppendLine($"Frames recorded:     {frames:N0} (every frame, unsmoothed)");
+            sb.AppendLine($"Worst frame (wall):  {worstWallMs:F1} ms in {worstPhase}");
+            sb.AppendLine($"Hitch frames:        {(hitchesMeasured ? hitchFrames.ToString("N0") : "n/a (the hitch detector was reset)")}");
+            sb.AppendLine($"GC collections:      {collections:N0}");
         }
 
         private static void AppendGroupedPhases(StringBuilder sb, IReadOnlyList<PhaseMetrics> phases)
@@ -310,6 +368,8 @@ namespace Benchmarks
                 perfTable.AppendTo(sb);
                 sb.AppendLine();
 
+                AppendFrameHealth(sb, groupName, group);
+
                 // --- FPS Section ---
                 sb.AppendLine($"<b>=== {groupName} — FPS ===</b>");
                 var fpsTable = new ReportTable("Phase", "Avg Wall FPS", "Min Wall FPS", "Avg CPU FPS", "Min CPU FPS");
@@ -369,6 +429,45 @@ namespace Benchmarks
                 gcTable.AppendTo(sb);
                 sb.AppendLine();
             }
+        }
+
+        /// <summary>
+        /// One group's exact per-frame statistics: every frame of each phase, unlike the averaged Peak columns. GC is the
+        /// heap growth of frames without a collection; GPU is over the frames whose timing arrived.
+        /// </summary>
+        /// <param name="sb">The report builder.</param>
+        /// <param name="groupName">The group's name.</param>
+        /// <param name="group">The group's phases.</param>
+        private static void AppendFrameHealth(StringBuilder sb, string groupName, List<PhaseMetrics> group)
+        {
+            sb.AppendLine($"<b>=== {groupName} — Frame Health (every frame) ===</b>");
+            var table = new ReportTable("Phase", "Frames", "Wall p50", "Wall p99", "Worst", "CPU p50", "CPU p99",
+                "GC p99", "GCs", "Hitches", "GPU p99");
+            foreach (PhaseMetrics phase in group)
+            {
+                if (!phase.HasFrameStats)
+                {
+                    table.AddRow(phase.PhaseName, "not recorded");
+                    continue;
+                }
+
+                PerfPhaseSummary stats = phase.FrameStats;
+                table.AddRow(
+                    phase.PhaseName,
+                    $"{stats.FrameCount:N0}",
+                    $"{stats.Wall.P50:F1} ms",
+                    $"{stats.Wall.P99:F1} ms",
+                    $"{stats.Wall.Max:F1} ms",
+                    $"{stats.Cpu.P50:F1} ms",
+                    $"{stats.Cpu.P99:F1} ms",
+                    stats.GcAllocKb.Count > 0 ? $"{stats.GcAllocKb.P99:F1} KB" : "n/a",
+                    $"{stats.GcCollections:N0}",
+                    phase.HitchFrames >= 0 ? $"{phase.HitchFrames:N0}" : "n/a",
+                    stats.Gpu.Count > 0 ? $"{stats.Gpu.P99:F1} ms" : "n/a");
+            }
+
+            table.AppendTo(sb);
+            sb.AppendLine();
         }
     }
 }

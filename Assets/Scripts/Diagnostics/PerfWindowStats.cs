@@ -1,4 +1,6 @@
 using System;
+using Unity.Collections;
+using Unity.Collections.LowLevel.Unsafe;
 
 namespace Diagnostics
 {
@@ -21,11 +23,42 @@ namespace Diagnostics
         /// <param name="samples">The samples; the first <paramref name="count"/> are read and permuted.</param>
         /// <param name="count">How many samples to use.</param>
         /// <returns>The summary; all zero when <paramref name="count"/> is 0.</returns>
-        public static PerfWindowSummary Summarize(float[] samples, int count)
+        public static unsafe PerfWindowSummary Summarize(float[] samples, int count)
         {
             if (count <= 0) return default;
             if (count > samples.Length) throw new ArgumentOutOfRangeException(nameof(count));
 
+            fixed (float* values = samples)
+                return Summarize(values, count);
+        }
+
+        /// <summary>Summarizes the first <paramref name="count"/> native samples. Reorders that part of the buffer.</summary>
+        /// <param name="samples">The samples; the first <paramref name="count"/> are read and permuted.</param>
+        /// <param name="count">How many samples to use.</param>
+        /// <returns>The summary; all zero when <paramref name="count"/> is 0.</returns>
+        public static unsafe PerfWindowSummary Summarize(NativeArray<float> samples, int count)
+        {
+            if (count <= 0) return default;
+            if (count > samples.Length) throw new ArgumentOutOfRangeException(nameof(count));
+
+            return Summarize((float*)samples.GetUnsafePtr(), count);
+        }
+
+        /// <summary>
+        /// Zero-based index of the nearest-rank percentile in a sorted window: rank ⌈p·n/100⌉, in integer math so
+        /// no floating-point rounding can move it.
+        /// </summary>
+        /// <param name="count">Samples in the window (at least 1).</param>
+        /// <param name="percentile">The percentile, 1–100.</param>
+        /// <returns>The index into the sorted window.</returns>
+        public static int NearestRankIndex(int count, int percentile)
+        {
+            int rank = (percentile * count + PERCENT - 1) / PERCENT;
+            return Math.Max(rank - 1, 0);
+        }
+
+        private static unsafe PerfWindowSummary Summarize(float* samples, int count)
+        {
             double sum = 0;
             float max = samples[0];
             for (int i = 0; i < count; i++)
@@ -45,21 +78,8 @@ namespace Diagnostics
             };
         }
 
-        /// <summary>
-        /// Zero-based index of the nearest-rank percentile in a sorted window: rank ⌈p·n/100⌉, in integer math so
-        /// no floating-point rounding can move it.
-        /// </summary>
-        /// <param name="count">Samples in the window (at least 1).</param>
-        /// <param name="percentile">The percentile, 1–100.</param>
-        /// <returns>The index into the sorted window.</returns>
-        public static int NearestRankIndex(int count, int percentile)
-        {
-            int rank = (percentile * count + PERCENT - 1) / PERCENT;
-            return Math.Max(rank - 1, 0);
-        }
-
         /// <summary>Hoare selection: returns the value that would sit at index <paramref name="k"/> if the window were sorted.</summary>
-        private static float Select(float[] values, int count, int k)
+        private static unsafe float Select(float* values, int count, int k)
         {
             int left = 0;
             int right = count - 1;

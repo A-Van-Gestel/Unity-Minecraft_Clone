@@ -913,7 +913,7 @@ public class Settings
              TooltipTags.BulletOptionStart + "Systems" + TooltipTags.BulletOptionEnd +
              "Adds the time each world system takes every frame.\n" +
              TooltipTags.BulletOptionStart + "Capture" + TooltipTags.BulletOptionEnd +
-             "Currently records the same as Systems.\n\n" +
+             "Also writes every frame, and every hitch, to files in the PerfLogs folder.\n\n" +
              TooltipTags.Performance + "Systems and above time the world update in detail, at a small per-frame cost.")]
     public PerfTier perfMonitorTier = PerfTier.Basic;
 
@@ -937,6 +937,8 @@ public class Settings
     /// <summary>
     /// Wall milliseconds above which a frame always counts as a hitch, at Frame detail and above. Read when the
     /// detail level is applied; a non-positive value falls back to the default.
+    /// <para>Listed in <c>SettingsManager.OverlayBenchmarkSettingsFromDisk</c>, like the next field, because a benchmark
+    /// report's hitch counts depend on both.</para>
     /// </summary>
     [Tooltip("A frame slower than this many milliseconds always counts as a hitch.")]
     public float perfHitchMinMs = PerfHitchDetector.DefaultMinMs;
@@ -947,6 +949,20 @@ public class Settings
     /// </summary>
     [Tooltip("A frame slower than this multiple of the recent median frame time counts as a hitch.")]
     public float perfHitchMedianFactor = PerfHitchDetector.DefaultMedianFactor;
+
+    /// <summary>
+    /// Megabytes after which a Capture session continues in a new part file. Read when the detail level is applied; a
+    /// non-positive value falls back to the default.
+    /// </summary>
+    [Tooltip("At Capture detail, the size in MB after which a session file continues in a new part.")]
+    public int perfCapturePartMb = PerfSessionExporter.DefaultPartMb;
+
+    /// <summary>
+    /// Megabytes across a Capture session's files after which it writes nothing more; files are never deleted. Read when
+    /// the detail level is applied; a non-positive value falls back to the default.
+    /// </summary>
+    [Tooltip("At Capture detail, the size in MB across a session's files after which it stops writing.")]
+    public int perfCaptureSessionMb = PerfSessionExporter.DefaultSessionMb;
 
     /// <summary>
     /// Returns true if the game should behave normally (Save/Load/Unload).
@@ -1371,6 +1387,10 @@ public static class SettingsManager
 
             // The monitor's tier changes what a capture costs, so an overhead A/B must be able to choose it.
             defaults.perfMonitorTier = saved.perfMonitorTier;
+
+            // The thresholds decide what the report's Hitches column counts, so both launch paths must use the same ones.
+            defaults.perfHitchMinMs = saved.perfHitchMinMs;
+            defaults.perfHitchMedianFactor = saved.perfHitchMedianFactor;
         }
         catch (Exception)
         {

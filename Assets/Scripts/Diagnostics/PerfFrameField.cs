@@ -20,5 +20,8 @@ namespace Diagnostics
 
         /// <summary><see cref="PerfFrame.PresentWaitMs"/>; only frames whose timing arrived.</summary>
         PresentWaitMs,
+
+        /// <summary>Number of fields; not a field.</summary>
+        Count,
     }
 }

@@ -161,6 +161,8 @@ namespace Commands
                     $"{PerfStore.Hitches.RecordCount} held — /perf hitches"));
             }
 
+            AddCaptureLines(lines);
+
             if (PerfStore.SlotFramesRecorded == 0)
             {
                 lines.Add(new ConsoleLine(ConsoleLineSeverity.Info,
@@ -208,6 +210,32 @@ namespace Commands
             AddWorkerLines(lines);
             AddDiskLines(lines);
             return new CommandResult(lines.ToArray());
+        }
+
+        /// <summary>Adds the Capture session's file and progress, any frames or hitch records it could not write, or why no session is open.</summary>
+        private static void AddCaptureLines(List<ConsoleLine> lines)
+        {
+            PerfSessionExporter exporter = PerfStore.Exporter;
+            if (exporter == null)
+            {
+                if (PerfStore.Tier >= PerfTier.Capture)
+                    lines.Add(new ConsoleLine(ConsoleLineSeverity.Info, "Capture: no session file — one is written while a world is loaded."));
+                return;
+            }
+
+            double megabytes = (double)exporter.BytesWritten / PerfSessionExporter.BytesPerMegabyte;
+            lines.Add(new ConsoleLine(ConsoleLineSeverity.Info,
+                $"Capture: {exporter.RowsWritten} frames, {megabytes:F1} MB, {exporter.HitchFilesWritten} hitch files — " +
+                (exporter.CurrentPath ?? "no file yet")));
+
+            if (exporter.FailureMessage != null)
+                lines.Add(new ConsoleLine(ConsoleLineSeverity.Warning, $"  Writing stopped: {exporter.FailureMessage}"));
+            else if (exporter.CapReached)
+                lines.Add(new ConsoleLine(ConsoleLineSeverity.Warning, "  The session reached its size cap; writing stopped."));
+            if (exporter.RowsDropped > 0)
+                lines.Add(new ConsoleLine(ConsoleLineSeverity.Warning, $"  {exporter.RowsDropped} frames were not written."));
+            if (exporter.HitchesDropped > 0)
+                lines.Add(new ConsoleLine(ConsoleLineSeverity.Warning, $"  {exporter.HitchesDropped} hitch records were not written."));
         }
 
         /// <summary>
