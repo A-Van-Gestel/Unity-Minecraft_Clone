@@ -14,8 +14,9 @@ namespace Jobs.BurstData
     /// Serves as a globally accessible NativeArray storage container for standard voxel mesh generation primitive data.
     /// Used directly inside Burst-compiled Job contexts to prevent expensive data layout transitions from managed memory to unmanaged memory.
     /// In the Editor the arrays live until the next assembly reload (<see cref="UnityEditor.AssemblyReloadEvents"/>), so
-    /// edit-mode tools can mesh after a play session. In a player, <see cref="UnityEngine.Application.quitting"/> only marks
-    /// them for release; <see cref="ReleaseAfterQuit"/> frees them once the jobs that read them have completed.
+    /// edit-mode tools can mesh after a play session. In a player, <see cref="UnityEngine.Application.quitting"/> frees them
+    /// at once when no <see cref="World"/> is alive; otherwise it only marks them for release, and
+    /// <see cref="ReleaseAfterQuit"/> frees them once the world's jobs that read them have completed.
     /// </summary>
     [BurstCompile]
     public class BurstVoxelData
@@ -133,7 +134,7 @@ namespace Jobs.BurstData
             // Edit-mode tools mesh with these arrays too, so the Editor frees them only before an assembly reload.
             AssemblyReloadEvents.beforeAssemblyReload += Dispose;
 #else
-            // Quit fires while mesh jobs may still be running, so it only marks the arrays for ReleaseAfterQuit.
+            // Quit fires while a world's mesh jobs may still be running, so with a world alive it only marks the arrays.
             // Unsubscribe first so a repeated Initialize never subscribes twice.
             Application.quitting -= MarkQuitting;
             Application.quitting += MarkQuitting;
@@ -151,11 +152,17 @@ namespace Jobs.BurstData
         }
 
 #if !UNITY_EDITOR
-        private static void MarkQuitting() => s_isQuitting = true;
+        private static void MarkQuitting()
+        {
+            s_isQuitting = true;
+
+            // Only a world runs the jobs that read the arrays, so with none alive nothing will call ReleaseAfterQuit.
+            if (World.Instance == null) Dispose();
+        }
 #endif
 
         // It's crucial to dispose of NativeArrays to prevent memory leaks.
-        // Called before an Editor assembly reload, and in a quitting player through ReleaseAfterQuit.
+        // Runs before an Editor assembly reload, and in a quitting player once no job can still read the arrays.
         private static void Dispose()
         {
             // Unsubscribe, so the next Initialize subscribes exactly once.
