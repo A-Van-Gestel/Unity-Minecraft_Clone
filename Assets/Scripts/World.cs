@@ -1391,206 +1391,210 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         // DiskLoadApply, while a load without persistence stays 0 here and is charged to its synchronous caller.
         long diskApplyStart = 0L;
 
-        // 1. Try Load from Disk if allowed
-        if (settings.EnablePersistence)
+        try
         {
-            ChunkData loaded = await StorageManager.LoadChunkAsync(chunkVoxelPos);
-
-            // A read that finished before its await resumes synchronously, inside the World.Update slot that started
-            // the load; that slot already counts the time, and a second slot over it would overlap.
-            if (!PerfStore.IsWorldFrameOpen) diskApplyStart = PerfStore.Begin(PerfSlot.DiskLoadApply);
-
-            // Ensure the chunk wasn't unloaded or recycled during the "await" above.
-            if (!worldData.TryGetChunk(chunkVoxelPos, out ChunkData currentData) || currentData != data
-                                                                                 || data.LifecycleEpoch != epochAtEntry)
+            // 1. Try Load from Disk if allowed
+            if (settings.EnablePersistence)
             {
-                PerfStore.End(PerfSlot.DiskLoadApply, diskApplyStart);
+                ChunkData loaded = await StorageManager.LoadChunkAsync(chunkVoxelPos);
 
-                // The chunk was unloaded. Recycle the loaded data to prevent a memory leak.
+                // A read that finished before its await resumes synchronously, inside the World.Update slot that started
+                // the load; that slot already counts the time, and a second slot over it would overlap.
+                if (!PerfStore.IsWorldFrameOpen) diskApplyStart = PerfStore.Begin(PerfSlot.DiskLoadApply);
+
+                // Ensure the chunk wasn't unloaded or recycled during the "await" above.
+                if (!worldData.TryGetChunk(chunkVoxelPos, out ChunkData currentData) || currentData != data
+                                                                                     || data.LifecycleEpoch != epochAtEntry)
+                {
+                    // The chunk was unloaded. Recycle the loaded data to prevent a memory leak.
+                    if (loaded != null)
+                    {
+                        ChunkPool.ReturnChunkData(loaded);
+                    }
+
+                    // No FP-1 disposition is stamped here (FP-7d). UnloadChunks is the only site that removes a
+                    // chunk from WorldData, and it closes the trace before this guard can ever observe the
+                    // removal — so the only arm that could still find a live trace is the pool-ABA recycle,
+                    // where the trace belongs to the SUCCESSOR placeholder for this coord. Stamping there
+                    // recorded the successor as waste and cost it its end-to-end latency sample. The discarded
+                    // load is already accounted for by the predecessor's UnloadedBeforeMeshApplied.
+                    return;
+                }
+
+
                 if (loaded != null)
                 {
-                    ChunkPool.ReturnChunkData(loaded);
+    #if UNITY_INCLUDE_INSTRUMENTATION
+                    if (logSaveDiagnostics)
+                        Debug.Log($"[LoadOrGenerateChunk] Chunk {chunkCoord} loaded successfully, calling PopulateFromSave");
+    #endif
+
+                    // Hydrate the placeholder
+                    data.PopulateFromSave(loaded);
+                    ChunkPool.ReturnChunkData(
+                        loaded); // Recycle the outer shell of the loaded data now that we've extracted its contents.
+                    // Data-only loads stay unregistered (NeedsActiveVoxelRescan) and are scanned by Chunk.Reset on
+                    // attach — scanning here would move the cost into this unbudgeted continuation.
+                    data.Chunk?.OnDataPopulated();
+
+                    // FP-1 stage stamp: terrain data is available. The disk-load arm of "populated" — the
+                    // generation arm is stamped in WorldJobManager.ProcessGenerationJobs.
+                    PipelineTelemetry.StampPopulated(chunkCoord, generated: false);
+
+                    // Becoming populated is what flips AreNeighborsDataReady for the 8 neighbors — wake any
+                    // parked light work now instead of waiting for the fail-safe scan (MT-2). The chunk's own
+                    // flags fire the staging callback from PopulateFromSave, so this is for the neighbors.
+                    _lightWork.PromoteNeighborhood(chunkVoxelPos);
+
+                    // Apply Pending Mods (Trees, etc. that spilled over)
+                    if (ModManager.TryGetModsForChunk(chunkCoord, out List<VoxelMod> pendingMods))
+                    {
+    #if UNITY_INCLUDE_INSTRUMENTATION
+                        if (logSaveDiagnostics)
+                            Debug.Log($"[LoadOrGenerateChunk] Applying {pendingMods.Count} pending mods to chunk {chunkCoord}");
+    #endif
+                        foreach (VoxelMod mod in pendingMods)
+                        {
+                            // Apply directly to data (fast)
+                            Vector3Int localVoxelPos = worldData.GetLocalVoxelPositionInChunk(mod.GlobalPosition);
+                            // We use a simplified set here or the standard ModifyVoxel
+                            // ModifyVoxel handles lighting queues automatically
+                            data.ModifyVoxel(localVoxelPos, mod);
+                        }
+                    }
+
+                    // The behavior tick's equivalent: neighbors whose seam voxels quiesced against this coord while
+                    // it was an unpopulated placeholder have no other path back into their active buckets. After the
+                    // pending-mod replay, so the gate reads the final facing slab (the generation arm's order too).
+                    WakeSeamBehaviorNeighborhood(chunkVoxelPos);
+
+                    // Restore lighting queues
+                    if (LightingStateManager.TryGetAndRemove(chunkCoord, out HashSet<Vector2Int> localCols))
+                    {
+    #if UNITY_INCLUDE_INSTRUMENTATION
+                        if (logSaveDiagnostics)
+                            Debug.Log($"[LoadOrGenerateChunk] Restoring {localCols.Count} lighting columns for chunk {chunkCoord}");
+    #endif
+
+                        HashSet<Vector2Int> globalCols = HashSetPool<Vector2Int>.Get();
+                        foreach (Vector2Int lCol in localCols)
+                        {
+                            globalCols.Add(new Vector2Int(lCol.x + chunkVoxelPos.x, lCol.y + chunkVoxelPos.y));
+                        }
+
+                        // TryGetAndRemove hands over the store's pooled set, so it is ours to release.
+                        HashSetPool<Vector2Int>.Release(localCols);
+
+                        if (worldData.SkylightRecalculationQueue.TryGetValue(chunkVoxelPos, out HashSet<Vector2Int> existingCols))
+                        {
+                            existingCols.UnionWith(globalCols);
+                            HashSetPool<Vector2Int>.Release(globalCols);
+                        }
+                        else
+                        {
+                            worldData.SkylightRecalculationQueue[chunkVoxelPos] = globalCols;
+                        }
+
+                        data.FlagLightWork();
+                    }
+
+                    // Replay pending cross-chunk blocklight modifications recorded while this chunk was
+                    // unloaded. The skylight column restore above cannot carry RGB data — without this
+                    // replay, blocklight removals (broken lamps) and uplifts that crossed into this
+                    // chunk while it was unloaded would be lost forever, leaving ghost light baked into
+                    // the saved data (Bug 08, path 1). When lighting is disabled, the store is left
+                    // untouched so the mods survive until a session with lighting enabled.
+                    if (settings.enableLighting &&
+                        LightingStateManager.TryGetAndRemovePendingBlocklight(chunkCoord, out Dictionary<Vector3Int, LightingStateManager.PendingBlocklightMod> pendingBlocklight))
+                    {
+    #if UNITY_INCLUDE_INSTRUMENTATION
+                        if (logSaveDiagnostics)
+                            Debug.Log($"[LoadOrGenerateChunk] Replaying {pendingBlocklight.Count} pending blocklight mods for chunk {chunkCoord}");
+    #endif
+
+                        foreach (KeyValuePair<Vector3Int, LightingStateManager.PendingBlocklightMod> entry in pendingBlocklight)
+                        {
+                            Vector3Int localPos = entry.Key;
+                            ushort currentLight = data.GetLightData(localPos.x, localPos.y, localPos.z);
+
+                            // Same shared decision logic as the live cross-chunk apply path
+                            // (WorldJobManager.ApplyCrossChunkLightMod).
+                            CrossChunkLightModApplier.ApplyDecision decision = CrossChunkLightModApplier.ComputeBlocklight(
+                                currentLight, entry.Value.R, entry.Value.G, entry.Value.B, entry.Value.IsRemoval);
+
+                            if (!decision.ShouldApply) continue;
+
+                            data.SetLightData(localPos.x, localPos.y, localPos.z, decision.NewLight);
+                            data.AddToBlocklightQueue(localPos, decision.OldLevel, decision.OldR, decision.OldG, decision.OldB);
+                        }
+
+                        DictionaryPool<Vector3Int, LightingStateManager.PendingBlocklightMod>.Release(pendingBlocklight);
+                    }
+
+                    // Check for initial lighting needs
+                    if (data.NeedsInitialLighting)
+                    {
+    #if UNITY_INCLUDE_INSTRUMENTATION
+                        if (logSaveDiagnostics)
+                            Debug.Log($"[LoadOrGenerateChunk] Chunk {chunkCoord} needs initial lighting. Checking neighbors...");
+    #endif
+
+                        if (AreNeighborsDataReady(chunkCoord))
+                        {
+    #if UNITY_INCLUDE_INSTRUMENTATION
+                            if (logSaveDiagnostics)
+                                Debug.Log($"[LoadOrGenerateChunk] Neighbors ready - triggering lighting for {chunkCoord}");
+    #endif
+
+                            // 1. Fill the queue (RecalculateSkylight populates the queues in data)
+                            data.RecalculateSkylight();
+
+                            // 2. Schedule the job immediately using Data overload
+                            JobManager.ScheduleLightingUpdate(data);
+
+                            // 3. Clear flag so we don't do this again.
+                            data.ClearInitialLighting();
+                        }
+                        else
+                        {
+    #if UNITY_INCLUDE_INSTRUMENTATION
+                            if (logSaveDiagnostics)
+                                Debug.Log($"[LoadOrGenerateChunk] Neighbors not ready - deferring lighting for {chunkCoord}");
+    #endif
+                        }
+                    }
+                    else
+                    {
+                        // Chunk loaded from disk with stable lighting — schedule an edge check
+                        // to validate border consistency against current neighbor state.
+                        data.FlagEdgeCheck();
+
+                        // If the chunk is loaded and doesn't need lighting updates (it's stable),
+                        // we must explicitly request the mesh rebuild here.
+                        // CheckViewDistance skipped it because IsPopulated was false at that time.
+                        if (data.Chunk != null && data.Chunk.IsActive)
+                        {
+                            RequestChunkMeshRebuild(data.Chunk);
+                        }
+                    }
+
+                    return;
                 }
 
-                // No FP-1 disposition is stamped here (FP-7d). UnloadChunks is the only site that removes a
-                // chunk from WorldData, and it closes the trace before this guard can ever observe the
-                // removal — so the only arm that could still find a live trace is the pool-ABA recycle,
-                // where the trace belongs to the SUCCESSOR placeholder for this coord. Stamping there
-                // recorded the successor as waste and cost it its end-to-end latency sample. The discarded
-                // load is already accounted for by the predecessor's UnloadedBeforeMeshApplied.
-                return;
-            }
-
-
-            if (loaded != null)
-            {
-#if UNITY_INCLUDE_INSTRUMENTATION
+    #if UNITY_INCLUDE_INSTRUMENTATION
                 if (logSaveDiagnostics)
-                    Debug.Log($"[LoadOrGenerateChunk] Chunk {chunkCoord} loaded successfully, calling PopulateFromSave");
-#endif
-
-                // Hydrate the placeholder
-                data.PopulateFromSave(loaded);
-                ChunkPool.ReturnChunkData(
-                    loaded); // Recycle the outer shell of the loaded data now that we've extracted its contents.
-                // Data-only loads stay unregistered (NeedsActiveVoxelRescan) and are scanned by Chunk.Reset on
-                // attach — scanning here would move the cost into this unbudgeted continuation.
-                data.Chunk?.OnDataPopulated();
-
-                // FP-1 stage stamp: terrain data is available. The disk-load arm of "populated" — the
-                // generation arm is stamped in WorldJobManager.ProcessGenerationJobs.
-                PipelineTelemetry.StampPopulated(chunkCoord, generated: false);
-
-                // Becoming populated is what flips AreNeighborsDataReady for the 8 neighbors — wake any
-                // parked light work now instead of waiting for the fail-safe scan (MT-2). The chunk's own
-                // flags fire the staging callback from PopulateFromSave, so this is for the neighbors.
-                _lightWork.PromoteNeighborhood(chunkVoxelPos);
-
-                // Apply Pending Mods (Trees, etc. that spilled over)
-                if (ModManager.TryGetModsForChunk(chunkCoord, out List<VoxelMod> pendingMods))
-                {
-#if UNITY_INCLUDE_INSTRUMENTATION
-                    if (logSaveDiagnostics)
-                        Debug.Log($"[LoadOrGenerateChunk] Applying {pendingMods.Count} pending mods to chunk {chunkCoord}");
-#endif
-                    foreach (VoxelMod mod in pendingMods)
-                    {
-                        // Apply directly to data (fast)
-                        Vector3Int localVoxelPos = worldData.GetLocalVoxelPositionInChunk(mod.GlobalPosition);
-                        // We use a simplified set here or the standard ModifyVoxel
-                        // ModifyVoxel handles lighting queues automatically
-                        data.ModifyVoxel(localVoxelPos, mod);
-                    }
-                }
-
-                // The behavior tick's equivalent: neighbors whose seam voxels quiesced against this coord while
-                // it was an unpopulated placeholder have no other path back into their active buckets. After the
-                // pending-mod replay, so the gate reads the final facing slab (the generation arm's order too).
-                WakeSeamBehaviorNeighborhood(chunkVoxelPos);
-
-                // Restore lighting queues
-                if (LightingStateManager.TryGetAndRemove(chunkCoord, out HashSet<Vector2Int> localCols))
-                {
-#if UNITY_INCLUDE_INSTRUMENTATION
-                    if (logSaveDiagnostics)
-                        Debug.Log($"[LoadOrGenerateChunk] Restoring {localCols.Count} lighting columns for chunk {chunkCoord}");
-#endif
-
-                    HashSet<Vector2Int> globalCols = HashSetPool<Vector2Int>.Get();
-                    foreach (Vector2Int lCol in localCols)
-                    {
-                        globalCols.Add(new Vector2Int(lCol.x + chunkVoxelPos.x, lCol.y + chunkVoxelPos.y));
-                    }
-
-                    // TryGetAndRemove hands over the store's pooled set, so it is ours to release.
-                    HashSetPool<Vector2Int>.Release(localCols);
-
-                    if (worldData.SkylightRecalculationQueue.TryGetValue(chunkVoxelPos, out HashSet<Vector2Int> existingCols))
-                    {
-                        existingCols.UnionWith(globalCols);
-                        HashSetPool<Vector2Int>.Release(globalCols);
-                    }
-                    else
-                    {
-                        worldData.SkylightRecalculationQueue[chunkVoxelPos] = globalCols;
-                    }
-
-                    data.FlagLightWork();
-                }
-
-                // Replay pending cross-chunk blocklight modifications recorded while this chunk was
-                // unloaded. The skylight column restore above cannot carry RGB data — without this
-                // replay, blocklight removals (broken lamps) and uplifts that crossed into this
-                // chunk while it was unloaded would be lost forever, leaving ghost light baked into
-                // the saved data (Bug 08, path 1). When lighting is disabled, the store is left
-                // untouched so the mods survive until a session with lighting enabled.
-                if (settings.enableLighting &&
-                    LightingStateManager.TryGetAndRemovePendingBlocklight(chunkCoord, out Dictionary<Vector3Int, LightingStateManager.PendingBlocklightMod> pendingBlocklight))
-                {
-#if UNITY_INCLUDE_INSTRUMENTATION
-                    if (logSaveDiagnostics)
-                        Debug.Log($"[LoadOrGenerateChunk] Replaying {pendingBlocklight.Count} pending blocklight mods for chunk {chunkCoord}");
-#endif
-
-                    foreach (KeyValuePair<Vector3Int, LightingStateManager.PendingBlocklightMod> entry in pendingBlocklight)
-                    {
-                        Vector3Int localPos = entry.Key;
-                        ushort currentLight = data.GetLightData(localPos.x, localPos.y, localPos.z);
-
-                        // Same shared decision logic as the live cross-chunk apply path
-                        // (WorldJobManager.ApplyCrossChunkLightMod).
-                        CrossChunkLightModApplier.ApplyDecision decision = CrossChunkLightModApplier.ComputeBlocklight(
-                            currentLight, entry.Value.R, entry.Value.G, entry.Value.B, entry.Value.IsRemoval);
-
-                        if (!decision.ShouldApply) continue;
-
-                        data.SetLightData(localPos.x, localPos.y, localPos.z, decision.NewLight);
-                        data.AddToBlocklightQueue(localPos, decision.OldLevel, decision.OldR, decision.OldG, decision.OldB);
-                    }
-
-                    DictionaryPool<Vector3Int, LightingStateManager.PendingBlocklightMod>.Release(pendingBlocklight);
-                }
-
-                // Check for initial lighting needs
-                if (data.NeedsInitialLighting)
-                {
-#if UNITY_INCLUDE_INSTRUMENTATION
-                    if (logSaveDiagnostics)
-                        Debug.Log($"[LoadOrGenerateChunk] Chunk {chunkCoord} needs initial lighting. Checking neighbors...");
-#endif
-
-                    if (AreNeighborsDataReady(chunkCoord))
-                    {
-#if UNITY_INCLUDE_INSTRUMENTATION
-                        if (logSaveDiagnostics)
-                            Debug.Log($"[LoadOrGenerateChunk] Neighbors ready - triggering lighting for {chunkCoord}");
-#endif
-
-                        // 1. Fill the queue (RecalculateSkylight populates the queues in data)
-                        data.RecalculateSkylight();
-
-                        // 2. Schedule the job immediately using Data overload
-                        JobManager.ScheduleLightingUpdate(data);
-
-                        // 3. Clear flag so we don't do this again.
-                        data.ClearInitialLighting();
-                    }
-                    else
-                    {
-#if UNITY_INCLUDE_INSTRUMENTATION
-                        if (logSaveDiagnostics)
-                            Debug.Log($"[LoadOrGenerateChunk] Neighbors not ready - deferring lighting for {chunkCoord}");
-#endif
-                    }
-                }
-                else
-                {
-                    // Chunk loaded from disk with stable lighting — schedule an edge check
-                    // to validate border consistency against current neighbor state.
-                    data.FlagEdgeCheck();
-
-                    // If the chunk is loaded and doesn't need lighting updates (it's stable),
-                    // we must explicitly request the mesh rebuild here.
-                    // CheckViewDistance skipped it because IsPopulated was false at that time.
-                    if (data.Chunk != null && data.Chunk.IsActive)
-                    {
-                        RequestChunkMeshRebuild(data.Chunk);
-                    }
-                }
-
-                PerfStore.End(PerfSlot.DiskLoadApply, diskApplyStart);
-                return;
+                    Debug.Log($"[LoadOrGenerateChunk] Chunk {chunkCoord} not on disk, scheduling generation");
+    #endif
             }
 
-#if UNITY_INCLUDE_INSTRUMENTATION
-            if (logSaveDiagnostics)
-                Debug.Log($"[LoadOrGenerateChunk] Chunk {chunkCoord} not on disk, scheduling generation");
-#endif
+            // 2. Not on disk (or Persistence disabled) -> Generate
+            JobManager.ScheduleGeneration(chunkCoord);
         }
-
-        // 2. Not on disk (or Persistence disabled) -> Generate
-        JobManager.ScheduleGeneration(chunkCoord);
-        PerfStore.End(PerfSlot.DiskLoadApply, diskApplyStart);
+        finally
+        {
+            // One close for every exit, an apply that throws included; a start of 0 is a no-op.
+            PerfStore.End(PerfSlot.DiskLoadApply, diskApplyStart);
+        }
     }
 
     /// <summary>How often (in lighting sweeps) the startup convergence diagnostics emit a log line.</summary>
