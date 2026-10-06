@@ -1,3 +1,4 @@
+using Unity.Scripting.LifecycleManagement;
 using UnityEditor;
 
 namespace Editor.ProjectUtilities
@@ -18,6 +19,7 @@ namespace Editor.ProjectUtilities
     {
         // Editor-only and true only during Play mode, when no domain reload can run, so it never outlives one.
 #pragma warning disable UDR0001
+        [NoAutoStaticsCleanup] // cleared in Unlock
         private static bool s_isLocked;
 #pragma warning restore UDR0001
 
