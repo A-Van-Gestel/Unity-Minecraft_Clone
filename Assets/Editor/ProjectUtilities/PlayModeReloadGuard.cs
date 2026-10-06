@@ -9,8 +9,8 @@ namespace Editor.ProjectUtilities
     /// them and leaves the world's systems throwing every frame.
     /// <para>
     /// The lock is taken once Play mode has been entered, after the domain reload that entering it performs, and released
-    /// as Play mode is exited, when Unity runs the compile and reload it held. Meanwhile
-    /// <see cref="EditorApplication.isCompiling"/> stays true.
+    /// once Edit mode has been entered — after the play scene's teardown has freed its native state — when Unity runs the
+    /// compile and reload it held. Meanwhile <see cref="EditorApplication.isCompiling"/> stays true.
     /// </para>
     /// </summary>
     [InitializeOnLoad]
@@ -36,7 +36,6 @@ namespace Editor.ProjectUtilities
                 case PlayModeStateChange.EnteredPlayMode:
                     Lock();
                     break;
-                case PlayModeStateChange.ExitingPlayMode:
                 case PlayModeStateChange.EnteredEditMode:
                     Unlock();
                     break;
