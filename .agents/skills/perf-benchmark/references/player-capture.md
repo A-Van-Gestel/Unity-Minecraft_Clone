@@ -65,7 +65,8 @@ if ($p.WaitForExit(900000)) { "exit $($p.ExitCode)" } else { Stop-Process -Id $p
   p50/p99/worst, CPU p50/p99, GC p99, collections, hitch frames and GPU p99 over **every** frame of the phase. A
   benchmark runs at the Frame tier at least; `-mc-set perfMonitorTier=Systems` adds per-slot times to the hitch
   records, and `=Capture` also streams every frame (every slot and counter) to
-  `persistentDataPath/PerfLogs/PerfSession_*.csv` plus one `…_hitch<NNN>_frame<F>.csv` per hitch record. Just before
+  `persistentDataPath/PerfLogs/PerfSession_*.csv` plus one `…_hitch<NNN>_frame<F>.csv` per hitch record (`python
+  Tools/Python/check_perf_session_files.py [<folder>] [--columns N]` checks their structure). Just before
   the `Run finished` line, `[Launch] Performance monitor at run end:` prints the `/perf stats` + `/perf hitches`
   readouts over the run's last 2 048 frames — the only place each hitch's slot ranking appears without Capture. The
   next launch overwrites Player.log, so copy it after each run; `python Tools/Python/tabulate_tick_hitches.py <logs…>`
