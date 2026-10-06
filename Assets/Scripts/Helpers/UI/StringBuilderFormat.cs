@@ -35,7 +35,7 @@ namespace Helpers.UI
             if (negative && (whole != 0 || frac != 0))
                 sb.Append('-');
 
-            sb.Append(whole);
+            sb.AppendInteger(whole);
 
             if (decimals <= 0)
                 return sb;
@@ -54,6 +54,23 @@ namespace Helpers.UI
             }
 
             return sb;
+        }
+
+        /// <summary>
+        /// Appends an integer in invariant decimal digits without allocating — unlike <c>StringBuilder.Append(long)</c>,
+        /// which builds a string on Unity's runtime.
+        /// </summary>
+        /// <param name="sb">The builder to append to.</param>
+        /// <param name="value">The integer to format.</param>
+        /// <returns>The same builder, to allow fluent chaining.</returns>
+        public static StringBuilder AppendInteger(this StringBuilder sb, long value)
+        {
+            if (value >= 0)
+                return AppendDigits(sb, (ulong)value);
+
+            // Negated through ulong, so long.MinValue keeps its magnitude.
+            sb.Append('-');
+            return AppendDigits(sb, (ulong)(-(value + 1)) + 1);
         }
 
         /// <summary>
@@ -91,7 +108,7 @@ namespace Helpers.UI
             for (int i = digits; i < totalWidth; i++)
                 sb.Append(' ');
 
-            return sb.Append(value);
+            return sb.AppendInteger(value);
         }
 
         /// <summary>
@@ -114,7 +131,7 @@ namespace Helpers.UI
             }
             else
             {
-                sb.Append(bytes);
+                sb.AppendInteger(bytes);
                 sb.Append(" B");
             }
 
@@ -159,11 +176,11 @@ namespace Helpers.UI
             int min = totalSec / 60;
             int sec = totalSec % 60;
 
-            sb.Append(min);
+            sb.AppendInteger(min);
             sb.Append(':');
             if (sec < 10)
                 sb.Append('0');
-            return sb.Append(sec);
+            return sb.AppendInteger(sec);
         }
 
         /// <summary>
@@ -203,6 +220,19 @@ namespace Helpers.UI
                 width += 1 + decimals;
 
             return width;
+        }
+
+        /// <summary>Appends the decimal digits of a magnitude, most significant first.</summary>
+        private static StringBuilder AppendDigits(StringBuilder sb, ulong magnitude)
+        {
+            ulong divisor = 1;
+            while (magnitude / divisor >= 10)
+                divisor *= 10;
+
+            for (; divisor > 0; divisor /= 10)
+                sb.Append((char)('0' + (int)(magnitude / divisor % 10)));
+
+            return sb;
         }
 
         /// <summary>Counts the base-10 digits in the magnitude of <paramref name="value"/>.</summary>
