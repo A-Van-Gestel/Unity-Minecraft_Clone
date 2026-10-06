@@ -1,6 +1,9 @@
 using System;
 using System.Collections.Generic;
 using Unity.Collections;
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 namespace Diagnostics
 {
@@ -13,6 +16,7 @@ namespace Diagnostics
     /// row past its end arrives, or by <see cref="Close"/>. Only one phase gathers samples at a time, into native lists that
     /// grow without managed allocation and are summarized in place. Main thread only.
     /// </para>
+    /// <para>In the Editor the lists are also freed before an assembly reload, which would otherwise leak them.</para>
     /// </summary>
     public sealed class PerfPhaseRecorder : IDisposable
     {
@@ -40,6 +44,10 @@ namespace Diagnostics
             _completed = new List<PerfPhaseSummary>(expectedPhaseCount);
             for (int i = 0; i < FIELD_COUNT; i++)
                 _samples[i] = new NativeList<float>(INITIAL_SAMPLE_CAPACITY, Allocator.Persistent);
+
+#if UNITY_EDITOR
+            AssemblyReloadEvents.beforeAssemblyReload += Dispose;
+#endif
         }
 
         /// <summary>Phases begun.</summary>
@@ -125,6 +133,9 @@ namespace Diagnostics
         {
             if (_isDisposed) return;
 
+#if UNITY_EDITOR
+            AssemblyReloadEvents.beforeAssemblyReload -= Dispose;
+#endif
             for (int i = 0; i < FIELD_COUNT; i++)
                 _samples[i].Dispose();
             _isClosed = true;
