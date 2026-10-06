@@ -2,7 +2,7 @@
 
 **Version:** 1.13  
 **Date:** 2026-07-26  
-**Status:** **Implemented (Stable)** — the v1 arc (CMD-0..3), **CMD-4 relative `~` coordinates** (§8.2), and **CMD-5 tab autocomplete + PowerShell-style inline ghost suggestion** (§8.3) are all shipped and in-game confirmed; **`/wind`** (§8.4) shipped + in-game confirmed 2026-08-10. Guarded by the `Validate Command Console` suite (**56** baselines; see [`../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md`](../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md) for live aggregate counts). Promoted from `Design/` 2026-07-26. §7 and §8.1–§8.3 are retained as **as-built records**; §8's table is the live extension roadmap — the remaining v2/v3+ rows (selectable/copyable output, chat, entity selectors, permissions) are deferred wishes, each owed a design pass when it becomes concrete.  
+**Status:** **Implemented (Stable)** — the v1 arc (CMD-0..3), **CMD-4 relative `~` coordinates** (§8.2), and **CMD-5 tab autocomplete + PowerShell-style inline ghost suggestion** (§8.3) are all shipped and in-game confirmed; **`/wind`** (§8.4) shipped + in-game confirmed 2026-08-10. Guarded by the `Validate Command Console` suite (**58** baselines; see [`../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md`](../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md) for live aggregate counts). Promoted from `Design/` 2026-07-26. §7 and §8.1–§8.3 are retained as **as-built records**; §8's table is the live extension roadmap — the remaining v2/v3+ rows (selectable/copyable output, chat, entity selectors, permissions) are deferred wishes, each owed a design pass when it becomes concrete.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > An in-game command console (Minecraft-chat-style: `T` opens a left-anchored panel with
@@ -621,6 +621,9 @@ Benchmark tab's **Run Engine API Probe** action, which also works from the main 
 
 ## Document History
 
+* **v1.25** - Status count 56 → 58 (`/sound`'s B57, and B58): `CommandTeleportTestWorld` now pins the identity origin
+  between its snapshot and restore, so B37's raw Unity positions no longer read differently after a Play session that
+  shifted the floating origin; B58 pins the fixture's isolation (2026-10-06).
 * **v1.24** - §8.6: PM-4's `/perf stats` additions confirmed in an IL2CPP Master build (2026-10-05).
 * **v1.23** - §8.6: `/perf stats` adds worker utilization, per-job latency and busy time per timed job type, and chunk disk I/O
   (PM-4, 2026-10-05). No new command; Command Console suite green in `Validate All`.

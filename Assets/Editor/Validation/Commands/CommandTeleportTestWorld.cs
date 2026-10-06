@@ -17,7 +17,9 @@ namespace Editor.Validation.Commands
     /// <para>
     /// <b>Shared-static safety:</b> teleports re-anchor <see cref="WorldOrigin"/>, which is global
     /// static state — the construction snapshot is restored in <see cref="Dispose"/> so a teleport
-    /// baseline can never leak a shifted origin into subsequent scenarios or suites.
+    /// baseline can never leak a shifted origin into subsequent scenarios or suites. In between, the
+    /// fixture pins the identity origin, so a scenario that places the player at a Unity position reads
+    /// the same voxel cell whatever origin an earlier Play session or suite left behind.
     /// <see cref="World.Instance"/> is deliberately never touched (nothing on the teleport entry
     /// path reads it in edit mode).
     /// </para>
@@ -44,10 +46,11 @@ namespace Editor.Validation.Commands
         /// <summary>An engine wired to this world's facade, with <c>/teleport</c> registered.</summary>
         public CommandEngine Engine { get; }
 
-        /// <summary>Stands up the stub world, dummy player, and a teleport-ready engine.</summary>
+        /// <summary>Pins the identity origin, then stands up the stub world, dummy player, and a teleport-ready engine.</summary>
         public CommandTeleportTestWorld()
         {
             _savedOriginChunk = WorldOrigin.OriginChunk;
+            WorldOrigin.ResetToIdentity();
 
             _worldGo = new GameObject("Command_StubWorld");
             _world = _worldGo.AddComponent<World>();

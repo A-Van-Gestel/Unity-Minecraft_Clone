@@ -18,6 +18,11 @@ namespace Editor.Validation.Commands
         /// <summary>Tolerance for Unity-space position asserts.</summary>
         private const float POSITION_EPSILON = 0.001f;
 
+        /// <summary>A non-identity origin chunk standing in for the anchor a Play session leaves behind.</summary>
+        private const int LEFTOVER_ORIGIN_CHUNK_X = 65;
+
+        private const int LEFTOVER_ORIGIN_CHUNK_Z = 5;
+
         static partial void AddTeleportScenarios(List<Scenario> scenarios)
         {
             scenarios.Add(new Scenario("B24: /teleport X Y Z — re-anchors the origin onto the destination chunk, places the player near the Unity origin, begins the hold (CMD-2)", Teleport_ValidThreeArg));
@@ -32,6 +37,39 @@ namespace Editor.Validation.Commands
             scenarios.Add(new Scenario("B45: /teleport ~ ~ surface form resolves X/Z relative; a ~-offset past the addressable limit is the wrap error (CMD-4)", Teleport_RelativeSurfaceAndOverflow));
             scenarios.Add(new Scenario("B46: /teleport with a '~' but no loaded player fails gracefully with the relative-needs-player error (CMD-4)", Teleport_RelativeNoPlayer));
             scenarios.Add(new Scenario("B47: /setblock ~ ~1 ~ resolves to the player's voxel cell (CMD-4)", SetBlock_RelativeResolve));
+            scenarios.Add(new Scenario("B58: Fixture isolation — the stub world pins the identity origin whatever an earlier session left, and restores that origin on dispose", Fixture_PinsIdentityOrigin));
+        }
+
+        /// <summary>
+        /// Starts from a shifted origin — what a Play session leaves in Edit mode — and checks the fixture still reads a
+        /// Unity position as the same voxel cell, then hands the shifted origin back.
+        /// </summary>
+        private static bool Fixture_PinsIdentityOrigin()
+        {
+            ChunkCoord sessionOrigin = WorldOrigin.OriginChunk;
+            ChunkCoord leftover = new ChunkCoord(LEFTOVER_ORIGIN_CHUNK_X, LEFTOVER_ORIGIN_CHUNK_Z);
+            try
+            {
+                WorldOrigin.SetOrigin(leftover);
+                bool ok;
+                using (CommandTeleportTestWorld stub = new CommandTeleportTestWorld())
+                {
+                    ok = Expect(WorldOrigin.IsIdentity,
+                        $"the fixture starts at the identity origin, got ({WorldOrigin.OriginChunk.X}, {WorldOrigin.OriginChunk.Z})");
+
+                    stub.PlayerTransform.position = new Vector3(10.5f, 64f, 10.5f);
+                    CommandResult where = stub.Engine.Execute("/where");
+                    ok &= Expect(where.Lines.Count == 3 && where.Lines[0].Text.Contains("Voxel: (10, 64, 10)"),
+                        $"a Unity position reads as the same voxel cell, got '{(where.Lines.Count > 0 ? where.Lines[0].Text : "")}'");
+                }
+
+                ok &= Expect(WorldOrigin.OriginChunk.Equals(leftover), "disposing restores the origin the fixture found");
+                return ok;
+            }
+            finally
+            {
+                WorldOrigin.SetOrigin(sessionOrigin);
+            }
         }
 
         private static bool Teleport_ValidThreeArg()
