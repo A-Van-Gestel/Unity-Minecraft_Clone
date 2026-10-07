@@ -55,6 +55,7 @@ Keep each wait under the shell's own timeout (agent shells commonly default to 1
 unbounded `unity job wait` blocks for the whole job, ~3.5 minutes for `Validate All`. The exit `6`
 of a bounded wait is not a failure when the message says the job keeps running; any other exit
 `6` is a real one, and `unity job status <jobId>` shows the job's `state` if in doubt.
+`unity job wait` takes no `--result-only` (`error: unknown option`, and no wait happens); leave it off.
 
 How to read a suite's output is owned by run-validation-suite.
 

@@ -111,6 +111,11 @@ Editor Play mode the same threads record as `Scripting Threads / Thread Pool Wor
   For per-method attribution use `GcCallstacks`. It needs a capture recorded with GC.Alloc call stacks on
   (`ProfilerCapture.Arm`, or the toolbar's **Call Stacks → GC.Alloc**); without them every byte lands in
   `<no callstack> under <parent>`, so check the header's `no callstack` share before reading the ranking.
+- **An ad-hoc Play-mode capture needs no marker:** `Arm`, let it run a few seconds (or drive the case between
+  frames), then `Disarm`. Recording stops but the frames stay, so `GcCallstacks` over `[-1,-1,…]` reads them;
+  pass a `tsvPath` to grep the full stack table rather than the capped ranking. Expect one
+  `<no callstack> under <sample>` row per capture holding exactly one frame's allocations of that sample:
+  the arming frame, recorded before call stacks switched on. It is not an unattributed allocator.
 - **Selecting a benchmark phase:** the generation pass records one sample per frame named
   `Benchmark.Generation.<speed>mps` (e.g. `Benchmark.Generation.200mps`); pass it as `GcCallstacks`'s
   `windowMarker`. The Profiler keeps at most 2000 frames (Preferences → Analysis → Profiler → Frame Count), and
