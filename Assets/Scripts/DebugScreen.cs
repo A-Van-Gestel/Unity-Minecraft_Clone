@@ -104,6 +104,13 @@ public class DebugScreen : MonoBehaviour
     private float[,] _perfHistory;
     private float[,] _gcHistory;
 
+    // Key binding display strings, resolved on first use after each enable rather than built on every refresh.
+    // Nothing rebinds keys at runtime, so reopening the HUD is a sufficient refresh.
+    private string _toggleFlyingKey;
+    private string _toggleNoclipKey;
+    private string _toggleHighlightKey;
+    private string _cycleVisModeKey;
+
     // --- Timers ---
     private float _textUpdateTimer;
     private float _infrequentUpdateTimer;
@@ -165,6 +172,11 @@ public class DebugScreen : MonoBehaviour
 
     private void OnEnable()
     {
+        _toggleFlyingKey = null;
+        _toggleNoclipKey = null;
+        _toggleHighlightKey = null;
+        _cycleVisModeKey = null;
+
         if (PerformanceMonitor.Instance != null)
         {
             PerformanceMonitor.Instance.OnMetricsSampled += HandleNewMetrics;
@@ -396,7 +408,7 @@ public class DebugScreen : MonoBehaviour
         {
             PerformanceMonitor perf = PerformanceMonitor.Instance;
             int wallFps = perf != null ? Mathf.RoundToInt(perf.WallFPS) : 0;
-            _topLeftBuilder.Append(wallFps).AppendLine(" fps");
+            _topLeftBuilder.AppendInteger(wallFps).AppendLine(" fps");
         }
 
         // Skip building the rest of the top-left panel for non-Full modes
@@ -407,25 +419,25 @@ public class DebugScreen : MonoBehaviour
         if (settings.debugHudShowWorldInfo)
         {
             _topLeftBuilder.AppendLine("WORLD:");
-            _topLeftBuilder.Append("XYZ: ").Append(playerVoxelCell.x)
-                .Append(" / ").Append(playerVoxelCell.y)
-                .Append(" / ").Append(playerVoxelCell.z);
+            _topLeftBuilder.Append("XYZ: ").AppendInteger(playerVoxelCell.x)
+                .Append(" / ").AppendInteger(playerVoxelCell.y)
+                .Append(" / ").AppendInteger(playerVoxelCell.z);
             _topLeftBuilder.Append(" | Eye Level: ");
             _topLeftBuilder.AppendFixed(playerPosition.y + _player.VoxelRigidbody.collisionHeight * 0.9f, 2);
             _topLeftBuilder.AppendLine();
-            _topLeftBuilder.Append("Render XYZ: ").Append(Mathf.FloorToInt(playerPosition.x))
-                .Append(" / ").Append(Mathf.FloorToInt(playerPosition.y))
-                .Append(" / ").Append(Mathf.FloorToInt(playerPosition.z));
-            _topLeftBuilder.Append(" | Origin Chunk: ").Append(WorldOrigin.OriginChunk.X)
-                .Append(" / ").Append(WorldOrigin.OriginChunk.Z);
+            _topLeftBuilder.Append("Render XYZ: ").AppendInteger(Mathf.FloorToInt(playerPosition.x))
+                .Append(" / ").AppendInteger(Mathf.FloorToInt(playerPosition.y))
+                .Append(" / ").AppendInteger(Mathf.FloorToInt(playerPosition.z));
+            _topLeftBuilder.Append(" | Origin Chunk: ").AppendInteger(WorldOrigin.OriginChunk.X)
+                .Append(" / ").AppendInteger(WorldOrigin.OriginChunk.Z);
             _topLeftBuilder.AppendLine();
             _topLeftBuilder.Append("Looking Angle H / V: ");
             _topLeftBuilder.AppendFixed(lookingDirection.x, 2);
             _topLeftBuilder.Append(" / ");
             _topLeftBuilder.AppendFixed(lookingDirection.y, 2);
             _topLeftBuilder.Append(" | Direction: ").AppendLine(GetHorizontalDirection(lookingDirection.x));
-            _topLeftBuilder.Append("Chunk: ").Append(_world.PlayerChunkCoord.X).Append(" / ").Append(_world.PlayerChunkCoord.Z).AppendLine();
-            _topLeftBuilder.Append("Seed: ").Append(_world.worldData.seed).AppendLine();
+            _topLeftBuilder.Append("Chunk: ").AppendInteger(_world.PlayerChunkCoord.X).Append(" / ").AppendInteger(_world.PlayerChunkCoord.Z).AppendLine();
+            _topLeftBuilder.Append("Seed: ").AppendInteger(_world.worldData.seed).AppendLine();
 
             AppendBiomeLine();
 
@@ -433,8 +445,8 @@ public class DebugScreen : MonoBehaviour
             WorldTimeManager clock = _world.TimeManager;
             if (clock != null)
             {
-                _topLeftBuilder.Append("Time: ").Append(clock.DayTicks).Append(" (day ").Append(clock.ElapsedDays)
-                    .Append(", darken ").Append(clock.SkyDarken).Append(')');
+                _topLeftBuilder.Append("Time: ").AppendInteger(clock.DayTicks).Append(" (day ").AppendInteger(clock.ElapsedDays)
+                    .Append(", darken ").AppendInteger(clock.SkyDarken).Append(')');
                 if (clock.IsFrozen) _topLeftBuilder.Append(" [frozen]");
                 _topLeftBuilder.AppendLine();
             }
@@ -447,9 +459,9 @@ public class DebugScreen : MonoBehaviour
         {
             _topLeftBuilder.AppendLine("PLAYER:");
             _topLeftBuilder.Append("isGrounded: ").Append(_player.IsGrounded)
-                .Append(" | isFlying (").Append(_input.GetBindingDisplayString(GameAction.ToggleFlying)).Append("): ").Append(_player.IsFlying)
-                .Append(" | isNoclipping (").Append(_input.GetBindingDisplayString(GameAction.ToggleNoclip)).Append("): ").Append(_player.IsNoclipping)
-                .Append(" | showHighlight (").Append(_input.GetBindingDisplayString(GameAction.ToggleBlockHighlight)).Append("): ").Append(_player.PlayerInteraction.showHighlightBlocks).AppendLine();
+                .Append(" | isFlying (").Append(_toggleFlyingKey ??= _input.GetBindingDisplayString(GameAction.ToggleFlying)).Append("): ").Append(_player.IsFlying)
+                .Append(" | isNoclipping (").Append(_toggleNoclipKey ??= _input.GetBindingDisplayString(GameAction.ToggleNoclip)).Append("): ").Append(_player.IsNoclipping)
+                .Append(" | showHighlight (").Append(_toggleHighlightKey ??= _input.GetBindingDisplayString(GameAction.ToggleBlockHighlight)).Append("): ").Append(_player.PlayerInteraction.showHighlightBlocks).AppendLine();
             _topLeftBuilder.Append("SPEED: Current: ");
             _topLeftBuilder.AppendFixed(_player.MoveSpeed, 1);
             _topLeftBuilder.Append(" | Flying: ");
@@ -471,20 +483,20 @@ public class DebugScreen : MonoBehaviour
             _topLeftBuilder.AppendLine("CHUNK:");
             _topLeftBuilder.Append("Active Voxels in Chunk: ");
             if (_currentChunk != null)
-                _topLeftBuilder.Append(_currentChunk.GetActiveVoxelCount());
+                _topLeftBuilder.AppendInteger(_currentChunk.GetActiveVoxelCount());
             else
                 _topLeftBuilder.Append("NULL");
             _topLeftBuilder.AppendLine();
-            _topLeftBuilder.Append("Total Active Voxels in World: ").Append(_world.GetTotalActiveVoxelsInWorld()).AppendLine();
-            _topLeftBuilder.Append("Total Active Chunks: ").Append(_world.ChunkPool.ActiveChunks).AppendLine();
-            _topLeftBuilder.Append(" ├ Chunks unused in Pool: ").Append(_world.ChunkPool.PooledChunks)
-                .Append(" | Borders unused in Pool: ").Append(_world.ChunkPool.PooledBorders).AppendLine();
-            _topLeftBuilder.Append(" └ Data unused in Pool: ").Append(_world.ChunkPool.PooledData)
-                .Append(" | Sections unused in Pool: ").Append(_world.ChunkPool.PooledSections).AppendLine();
+            _topLeftBuilder.Append("Total Active Voxels in World: ").AppendInteger(_world.GetTotalActiveVoxelsInWorld()).AppendLine();
+            _topLeftBuilder.Append("Total Active Chunks: ").AppendInteger(_world.ChunkPool.ActiveChunks).AppendLine();
+            _topLeftBuilder.Append(" ├ Chunks unused in Pool: ").AppendInteger(_world.ChunkPool.PooledChunks)
+                .Append(" | Borders unused in Pool: ").AppendInteger(_world.ChunkPool.PooledBorders).AppendLine();
+            _topLeftBuilder.Append(" └ Data unused in Pool: ").AppendInteger(_world.ChunkPool.PooledData)
+                .Append(" | Sections unused in Pool: ").AppendInteger(_world.ChunkPool.PooledSections).AppendLine();
             _topLeftBuilder.Append("Total Chunks to Build Mesh: ");
             _world.AppendMeshQueueDebugInfo(_topLeftBuilder);
             _topLeftBuilder.AppendLine();
-            _topLeftBuilder.Append("Total Voxel Modifications: ").Append(_world.GetVoxelModificationsCount()).AppendLine();
+            _topLeftBuilder.Append("Total Voxel Modifications: ").AppendInteger(_world.GetVoxelModificationsCount()).AppendLine();
         }
 
         // --- Section Info ---
@@ -526,12 +538,12 @@ public class DebugScreen : MonoBehaviour
 
         BiomeSample shown = tracker.Latest;
         _topLeftBuilder.Append("Biome: ").Append(shown.Name)
-            .Append(" (#").Append(shown.Index).Append(')');
+            .Append(" (#").AppendInteger(shown.Index).Append(')');
 
         // Only worth showing where they disagree: within a few blocks of a boundary the surface pass
         // dithers, so the block underfoot can belong to the neighboring biome.
         if (shown.SurfaceIndex != shown.Index)
-            _topLeftBuilder.Append(" | Surface: #").Append(shown.SurfaceIndex);
+            _topLeftBuilder.Append(" | Surface: #").AppendInteger(shown.SurfaceIndex);
 
         // The committed biome is what ambience and weather will act on, so show it while it lags —
         // that divergence is the dwell working, and it is exactly what a debug readout should expose.
@@ -547,38 +559,38 @@ public class DebugScreen : MonoBehaviour
         if (!_world.settings.debugHudShowChunkLifecycle) return;
 
         _middleLeftBuilder.AppendLine("CHUNK LIFECYCLE (CP-1):");
-        _middleLeftBuilder.Append("Unloaded last pass: ").Append(_world.UnloadedLastPass)
-            .Append(" (light-persisted: ").Append(_world.UnloadedLightPersisted).Append(')').AppendLine();
-        _middleLeftBuilder.Append(" └ Deferred — job: ").Append(_world.UnloadDeferJobRunning)
-            .Append(" | light: ").Append(_world.UnloadDeferLightPending)
-            .Append(" | strand: ").Append(_world.UnloadDeferWouldStrand).AppendLine();
-        _middleLeftBuilder.Append("Saves — fired: ").Append(ChunkStorageManager.SavesFired)
-            .Append(" | ok: ").Append(ChunkStorageManager.SavesCompleted)
-            .Append(" | failed: ").Append(ChunkStorageManager.SavesFailed)
-            .Append(" | retry-pending: ").Append(_world.StorageManager?.PendingFailedSaves ?? 0).AppendLine();
-        _middleLeftBuilder.Append("Deserialize failures: ").Append(ChunkSerializer.DeserializeFailures).AppendLine();
-        _middleLeftBuilder.Append("Load-arm faults (dev): ").Append(World.LoadArmFaults).AppendLine();
-        _middleLeftBuilder.Append("Stuck loading (dev): ").Append(_world.StuckLoadingChunks).AppendLine();
-        _middleLeftBuilder.Append("Skylight queue unflagged (dev) — now: ").Append(_world.SkylightQueueUnflagged)
-            .Append(" | total: ").Append(_world.SkylightQueueUnflaggedTotal).AppendLine();
-        _middleLeftBuilder.Append(" └ Non-violating — orphaned: ").Append(_world.SkylightQueueOrphaned)
-            .Append(" | unpopulated: ").Append(_world.SkylightQueueUnpopulated)
-            .Append(" (total: ").Append(_world.SkylightQueueUnpopulatedTotal).Append(')').AppendLine();
-        _middleLeftBuilder.Append("Pool destroys — chunk: ").Append(_world.ChunkPool.DestroyedChunks)
-            .Append(" | data: ").Append(_world.ChunkPool.DestroyedData)
-            .Append(" | sect: ").Append(_world.ChunkPool.DestroyedSections).AppendLine();
-        _middleLeftBuilder.Append("Pool misses — data: ").Append(_world.ChunkPool.CreatedData)
-            .Append(" | sect: ").Append(_world.ChunkPool.CreatedSections)
-            .Append(" | save buffers: ").Append(SerializationBufferPool.TotalCreated).AppendLine();
+        _middleLeftBuilder.Append("Unloaded last pass: ").AppendInteger(_world.UnloadedLastPass)
+            .Append(" (light-persisted: ").AppendInteger(_world.UnloadedLightPersisted).Append(')').AppendLine();
+        _middleLeftBuilder.Append(" └ Deferred — job: ").AppendInteger(_world.UnloadDeferJobRunning)
+            .Append(" | light: ").AppendInteger(_world.UnloadDeferLightPending)
+            .Append(" | strand: ").AppendInteger(_world.UnloadDeferWouldStrand).AppendLine();
+        _middleLeftBuilder.Append("Saves — fired: ").AppendInteger(ChunkStorageManager.SavesFired)
+            .Append(" | ok: ").AppendInteger(ChunkStorageManager.SavesCompleted)
+            .Append(" | failed: ").AppendInteger(ChunkStorageManager.SavesFailed)
+            .Append(" | retry-pending: ").AppendInteger(_world.StorageManager?.PendingFailedSaves ?? 0).AppendLine();
+        _middleLeftBuilder.Append("Deserialize failures: ").AppendInteger(ChunkSerializer.DeserializeFailures).AppendLine();
+        _middleLeftBuilder.Append("Load-arm faults (dev): ").AppendInteger(World.LoadArmFaults).AppendLine();
+        _middleLeftBuilder.Append("Stuck loading (dev): ").AppendInteger(_world.StuckLoadingChunks).AppendLine();
+        _middleLeftBuilder.Append("Skylight queue unflagged (dev) — now: ").AppendInteger(_world.SkylightQueueUnflagged)
+            .Append(" | total: ").AppendInteger(_world.SkylightQueueUnflaggedTotal).AppendLine();
+        _middleLeftBuilder.Append(" └ Non-violating — orphaned: ").AppendInteger(_world.SkylightQueueOrphaned)
+            .Append(" | unpopulated: ").AppendInteger(_world.SkylightQueueUnpopulated)
+            .Append(" (total: ").AppendInteger(_world.SkylightQueueUnpopulatedTotal).Append(')').AppendLine();
+        _middleLeftBuilder.Append("Pool destroys — chunk: ").AppendInteger(_world.ChunkPool.DestroyedChunks)
+            .Append(" | data: ").AppendInteger(_world.ChunkPool.DestroyedData)
+            .Append(" | sect: ").AppendInteger(_world.ChunkPool.DestroyedSections).AppendLine();
+        _middleLeftBuilder.Append("Pool misses — data: ").AppendInteger(_world.ChunkPool.CreatedData)
+            .Append(" | sect: ").AppendInteger(_world.ChunkPool.CreatedSections)
+            .Append(" | save buffers: ").AppendInteger(SerializationBufferPool.TotalCreated).AppendLine();
 
         // --- P-4 §3.5 panic gate + backlog signals (threshold calibration + close/drain/reopen witness) ---
         _middleLeftBuilder.Append("Gen gate: ").Append(_world.GenerationGateOpen ? "OPEN" : "CLOSED")
-            .Append(" | closes: ").Append(_world.GenerationGateCloseCount)
-            .Append(" | closed frames: ").Append(_world.GenerationGateClosedFrames).AppendLine();
-        _middleLeftBuilder.Append("Light backlog — ready: ").Append(_world.LightWorkReadyCount)
-            .Append(" | waiting: ").Append(_world.LightWorkWaitingCount).AppendLine();
-        _middleLeftBuilder.Append("Gen queue: ").Append(_world.GenerationRequestQueueCount)
-            .Append(" | in-flight: ").Append(_world.JobManager.GenerationJobs.Count).AppendLine();
+            .Append(" | closes: ").AppendInteger(_world.GenerationGateCloseCount)
+            .Append(" | closed frames: ").AppendInteger(_world.GenerationGateClosedFrames).AppendLine();
+        _middleLeftBuilder.Append("Light backlog — ready: ").AppendInteger(_world.LightWorkReadyCount)
+            .Append(" | waiting: ").AppendInteger(_world.LightWorkWaitingCount).AppendLine();
+        _middleLeftBuilder.Append("Gen queue: ").AppendInteger(_world.GenerationRequestQueueCount)
+            .Append(" | in-flight: ").AppendInteger(_world.JobManager.GenerationJobs.Count).AppendLine();
     }
 
     private void PopulateBottomLeftBuilder()
@@ -603,8 +615,8 @@ public class DebugScreen : MonoBehaviour
             else
             {
                 // --- FPS & Frame Time ---
-                _topRightBuilder.Append("CPU FPS:  ").Append(Mathf.RoundToInt(perf.CpuFPS)).AppendLine();
-                _topRightBuilder.Append("Wall FPS: ").Append(Mathf.RoundToInt(perf.WallFPS)).AppendLine();
+                _topRightBuilder.Append("CPU FPS:  ").AppendInteger(Mathf.RoundToInt(perf.CpuFPS)).AppendLine();
+                _topRightBuilder.Append("Wall FPS: ").AppendInteger(Mathf.RoundToInt(perf.WallFPS)).AppendLine();
                 _topRightBuilder.Append("CPU Time:   ").AppendMs(perf.CpuFrameTime.GetAverage()).AppendLine();
                 _topRightBuilder.Append("Wall Time:  ").AppendMs(perf.WallFrameTime.GetAverage()).AppendLine();
                 _topRightBuilder.Append("Idle/Other: ").AppendFixed(perf.IdleTimeMs, 2).Append(" ms").AppendLine();
@@ -640,7 +652,7 @@ public class DebugScreen : MonoBehaviour
                 for (int g = 0; g <= GC.MaxGeneration; g++)
                 {
                     int sessionHits = GC.CollectionCount(g) - perf.BaselineGcCounts[g];
-                    _topRightBuilder.Append("GC Gen").Append(g).Append(" Hits: ").Append(sessionHits).AppendLine();
+                    _topRightBuilder.Append("GC Gen").AppendInteger(g).Append(" Hits: ").AppendInteger(sessionHits).AppendLine();
                 }
             }
 
@@ -651,8 +663,8 @@ public class DebugScreen : MonoBehaviour
         if (settings.debugHudShowVisualization)
         {
             _topRightBuilder.AppendLine("DEBUG VISUALIZATION:");
-            _topRightBuilder.Append("Mode (").Append(_input.GetBindingDisplayString(GameAction.CycleVisMode)).Append(" to cycle): ").AppendLine(VisualizationModeToString(_world.visualizationMode));
-            _topRightBuilder.AppendLine(" └ Unused in Pool: ").Append(_world.ChunkPool.PooledVisualizers);
+            _topRightBuilder.Append("Mode (").Append(_cycleVisModeKey ??= _input.GetBindingDisplayString(GameAction.CycleVisMode)).Append(" to cycle): ").AppendLine(VisualizationModeToString(_world.visualizationMode));
+            _topRightBuilder.AppendLine(" └ Unused in Pool: ").AppendInteger(_world.ChunkPool.PooledVisualizers);
 
             _topRightBuilder.AppendLine();
         }
@@ -689,21 +701,21 @@ public class DebugScreen : MonoBehaviour
         byte uniformSky = chunkData.SectionUniformSkyLevel[sectionIndex];
         bool isCompact = uniformSky != ChunkData.UNIFORM_SKY_NONE;
 
-        _topLeftBuilder.Append("Index: ").Append(sectionIndex)
-            .Append(" (Y ").Append(sectionIndex * ChunkMath.SECTION_SIZE)
-            .Append("-").Append((sectionIndex + 1) * ChunkMath.SECTION_SIZE - 1).Append(')').AppendLine();
+        _topLeftBuilder.Append("Index: ").AppendInteger(sectionIndex)
+            .Append(" (Y ").AppendInteger(sectionIndex * ChunkMath.SECTION_SIZE)
+            .Append("-").AppendInteger((sectionIndex + 1) * ChunkMath.SECTION_SIZE - 1).Append(')').AppendLine();
 
         if (isCompact && section == null)
         {
             _topLeftBuilder.AppendLine("State: Compact (not allocated)");
-            _topLeftBuilder.Append("Uniform Sky Level: ").Append(uniformSky).AppendLine();
+            _topLeftBuilder.Append("Uniform Sky Level: ").AppendInteger(uniformSky).AppendLine();
         }
         else if (isCompact)
         {
             _topLeftBuilder.AppendLine("State: Compact (voxels only)");
-            _topLeftBuilder.Append("Uniform Sky Level: ").Append(uniformSky).AppendLine();
-            _topLeftBuilder.Append("Non-Air: ").Append(section.nonAirCount)
-                .Append(" | Opaque: ").Append(section.opaqueCount).AppendLine();
+            _topLeftBuilder.Append("Uniform Sky Level: ").AppendInteger(uniformSky).AppendLine();
+            _topLeftBuilder.Append("Non-Air: ").AppendInteger(section.nonAirCount)
+                .Append(" | Opaque: ").AppendInteger(section.opaqueCount).AppendLine();
         }
         else if (section == null)
         {
@@ -712,8 +724,8 @@ public class DebugScreen : MonoBehaviour
         else
         {
             _topLeftBuilder.AppendLine("State: Full (allocated)");
-            _topLeftBuilder.Append("Non-Air: ").Append(section.nonAirCount)
-                .Append(" | Opaque: ").Append(section.opaqueCount).AppendLine();
+            _topLeftBuilder.Append("Non-Air: ").AppendInteger(section.nonAirCount)
+                .Append(" | Opaque: ").AppendInteger(section.opaqueCount).AppendLine();
             _topLeftBuilder.Append("Empty: ").Append(BoolToYesNoString(section.IsEmpty))
                 .Append(" | Fully Solid: ").Append(BoolToYesNoString(section.IsFullySolid)).AppendLine();
         }
@@ -747,18 +759,18 @@ public class DebugScreen : MonoBehaviour
 
             // --- Always-on Information ---
             builder.Append("Name: ").AppendLine(props.blockName);
-            builder.Append("Coords: ").Append(voxelPos.x).Append(", ").Append(voxelPos.y).Append(", ").Append(voxelPos.z).AppendLine();
+            builder.Append("Coords: ").AppendInteger(voxelPos.x).Append(", ").AppendInteger(voxelPos.y).Append(", ").AppendInteger(voxelPos.z).AppendLine();
             builder.Append("Is Active: ").AppendLine(BoolToYesNoString(isVoxelActive));
             // Sky is shown twice on purpose (RF-1 §9): the stored channel is time-invariant sky
             // EXPOSURE, so under open sky it reads 15 at midnight too. "Eff" is what the time of day
             // leaves of it — the value gameplay and the shader both work from.
             int skyDarken = _world.CurrentSkyDarken;
             int effectiveSky = Math.Max(0, skylight - skyDarken);
-            builder.Append("Light (SkyExp/Block/Max): ").Append(skylight).Append(" / ").Append(blocklight)
-                .Append(" / ").Append(Math.Max(skylight, blocklight)).AppendLine();
-            builder.Append("Light Eff (Sky/Max): ").Append(effectiveSky).Append(" / ")
-                .Append(Math.Max(effectiveSky, blocklight))
-                .Append("  (darken ").Append(skyDarken).Append(')').AppendLine();
+            builder.Append("Light (SkyExp/Block/Max): ").AppendInteger(skylight).Append(" / ").AppendInteger(blocklight)
+                .Append(" / ").AppendInteger(Math.Max(skylight, blocklight)).AppendLine();
+            builder.Append("Light Eff (Sky/Max): ").AppendInteger(effectiveSky).Append(" / ")
+                .AppendInteger(Math.Max(effectiveSky, blocklight))
+                .Append("  (darken ").AppendInteger(skyDarken).Append(')').AppendLine();
             builder.Append("Meta: 0x").AppendHex2(state.Meta).AppendLine();
 
             // --- Context-Specific Information ---
@@ -766,7 +778,7 @@ public class DebugScreen : MonoBehaviour
             {
                 // For fluids, show fluid-related properties.
                 builder.Append("Fluid Level: ")
-                    .Append(BurstVoxelMetadataUtility.DecodeFluidLevel(state.Meta)).AppendLine();
+                    .AppendInteger(BurstVoxelMetadataUtility.DecodeFluidLevel(state.Meta)).AppendLine();
             }
             else
             {
@@ -780,7 +792,7 @@ public class DebugScreen : MonoBehaviour
                             MetadataSchema.Axis3, state.Meta, defaultMeta);
                         byte axis = BurstVoxelMetadataUtility.DecodeAxis3(normalizedMeta);
 
-                        builder.Append("Axis: ").Append(AxisToString(axis)).Append(" (").Append(axis).Append(')');
+                        builder.Append("Axis: ").Append(AxisToString(axis)).Append(" (").AppendInteger(axis).Append(')');
                         if (normalizedMeta != state.Meta)
                         {
                             builder.Append(" [normalized]");
@@ -792,12 +804,12 @@ public class DebugScreen : MonoBehaviour
 
                     case MetadataSchema.HorizontalOnly:
                         builder.Append("Yaw: ")
-                            .Append(BurstVoxelMetadataUtility.DecodeHorizontalOnly(state.Meta)).AppendLine();
+                            .AppendInteger(BurstVoxelMetadataUtility.DecodeHorizontalOnly(state.Meta)).AppendLine();
                         break;
 
                     default:
                         builder.Append("Orientation: ")
-                            .Append(state.GetOrientation(props.metadataSchema)).AppendLine();
+                            .AppendInteger(state.GetOrientation(props.metadataSchema)).AppendLine();
                         break;
                 }
             }

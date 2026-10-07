@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Text;
 using Data;
+using Helpers.UI;
 
 namespace Helpers
 {
@@ -174,11 +175,11 @@ namespace Helpers
                     active++;
             }
 
-            sb.Append(_count).Append(" total\n")
-                .Append(" └ Active: ").Append(active)
-                .Append(", Inactive: ").Append(inactive)
-                .Append(", Destroyed: ").Append(destroyed)
-                .Append(", Null: ").Append(nullCount);
+            sb.AppendInteger(_count).Append(" total\n")
+                .Append(" └ Active: ").AppendInteger(active)
+                .Append(", Inactive: ").AppendInteger(inactive)
+                .Append(", Destroyed: ").AppendInteger(destroyed)
+                .Append(", Null: ").AppendInteger(nullCount);
         }
 
         /// <summary>Rents a slot from the free-list, growing the backing arrays if exhausted.</summary>
