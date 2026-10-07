@@ -284,6 +284,9 @@ public class DebugScreen : MonoBehaviour
         if (_gcMemoryGraph != null) _gcMemoryGraph.gameObject.SetActive(showPerf);
         _middleRightText.gameObject.SetActive(isFull);
         _bottomRightText.gameObject.SetActive(isFull);
+
+        // Hidden graphs take no samples, so a graph shown again resumes from the monitor's history, not a stale ring.
+        if (showPerf) SyncGraphsWithHistory();
     }
 
 
