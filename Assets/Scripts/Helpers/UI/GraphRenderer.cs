@@ -1,4 +1,8 @@
+using System;
+using System.Globalization;
+using System.Text;
 using TMPro;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -49,7 +53,9 @@ namespace Helpers.UI
         [Tooltip("A TextMeshPro object to use as a template for the legend labels.")]
         public TMP_Text legendLabelTemplate;
 
-        [Tooltip("String format for the Y-axis labels.")]
+        [Tooltip("String format for the Y-axis labels: optional text, then {0:F<decimals>} with 0 to 6 decimals, " +
+                 "then optional text, with no other braces (e.g. \"{0:F1} ms\"). Any other format still works, but " +
+                 "allocates a string per label update.")]
         public string yFormat = "{0:F1} ms";
 
         [Header("X-Axis (Time)")]
@@ -74,6 +80,29 @@ namespace Helpers.UI
         private TMP_Text[] _legendLabels;
         private TMP_Text[] _xAxisLabels;
 
+        // The Y labels are rewritten every sample while the axis rescales, so they are built without allocating
+        // from yFormat parsed once into prefix, decimals and suffix.
+        private readonly StringBuilder _labelBuilder = new StringBuilder();
+        private bool _isYFormatParsed;
+        private string _yPrefix;
+        private string _ySuffix;
+        private int _yDecimals;
+        private double _yDecimalScale;
+
+        /// <summary>Each Y label's value as shown, in units of its last decimal, so an unchanged label is skipped.</summary>
+        private long[] _shownGridValues;
+
+        private const string FORMAT_ARGUMENT_OPEN = "{0:F";
+        private const long NO_SHOWN_VALUE = long.MinValue;
+        private const double DECIMAL_BASE = 10.0;
+
+        // A float holds about 7 significant digits, so more decimals show only noise; the cap also keeps the
+        // shown-value key (value x 10^decimals) far inside a long.
+        private const int MAX_PARSED_DECIMALS = 6;
+
+        [NoAutoStaticsCleanup] // immutable table
+        private static readonly char[] s_braces = { '{', '}' };
+
         /// <summary>
         /// Initializes the graph setup by pre-allocating the history ring buffer and generating text UI labels based on the given configuration.
         /// </summary>
@@ -87,8 +116,42 @@ namespace Helpers.UI
             _headIndex = 0;
             _isInitialized = true;
 
+            ParseYFormat();
             InitializeLabels();
+            RefreshXAxisText();
             SetVerticesDirty();
+        }
+
+        /// <summary>
+        /// Splits <see cref="yFormat"/> into the parts <see cref="SetGridLabel"/> appends. A format outside the
+        /// supported shape (brace-free text around one <c>{0:F&lt;n&gt;}</c>, n ≤ <see cref="MAX_PARSED_DECIMALS"/>)
+        /// falls back to <see cref="string.Format(IFormatProvider, string, object)"/>.
+        /// </summary>
+        private void ParseYFormat()
+        {
+            _isYFormatParsed = false;
+            int open = yFormat.IndexOf(FORMAT_ARGUMENT_OPEN, StringComparison.Ordinal);
+            int close = open < 0 ? -1 : yFormat.IndexOf('}', open);
+            int digitsStart = open + FORMAT_ARGUMENT_OPEN.Length;
+
+            // Any other brace is an escape ("{{", "}}") or a second argument, which only string.Format renders.
+            if (close > digitsStart &&
+                int.TryParse(yFormat.Substring(digitsStart, close - digitsStart), NumberStyles.None,
+                    CultureInfo.InvariantCulture, out int decimals) &&
+                decimals <= MAX_PARSED_DECIMALS &&
+                yFormat.IndexOfAny(s_braces, 0, open) < 0 &&
+                yFormat.IndexOfAny(s_braces, close + 1) < 0)
+            {
+                _yPrefix = yFormat.Substring(0, open);
+                _ySuffix = yFormat.Substring(close + 1);
+                _yDecimals = decimals;
+                _yDecimalScale = Math.Pow(DECIMAL_BASE, decimals);
+                _isYFormatParsed = true;
+                return;
+            }
+
+            Debug.LogWarning($"GraphRenderer '{name}': yFormat \"{yFormat}\" is not \"text{{0:F<0-{MAX_PARSED_DECIMALS}>}}text\" " +
+                             "with brace-free text; its labels allocate a string per update.", this);
         }
 
         private void InitializeLabels()
@@ -114,6 +177,9 @@ namespace Helpers.UI
 
                     _gridLabels[i] = lbl;
                 }
+
+                _shownGridValues = new long[totalGridLines];
+                Array.Fill(_shownGridValues, NO_SHOWN_VALUE);
 
                 // 2. Create X-Axis Time Labels
                 int totalXLabels = xGridLineCount + 2;
@@ -183,10 +249,10 @@ namespace Helpers.UI
         }
 
         /// <summary>
-        /// Injects a pre-populated history buffer and syncs the graph to a specific head index.
+        /// Copies a pre-populated history into the graph's own buffer and syncs the graph to a specific head index.
         /// Useful when the graph was disabled but data was still being recorded elsewhere, allowing it to instantly snap to the correct layout on awake.
         /// </summary>
-        /// <param name="history">The 2D history float array structured as [lineIndex, historySampleIndex].</param>
+        /// <param name="history">The 2D history float array structured as [lineIndex, historySampleIndex]; the caller keeps ownership and may reuse it.</param>
         /// <param name="headIndex">The currently active ring buffer head index to continue appending from.</param>
         /// <param name="inputSampleRate">The data poll rate in seconds to correctly configure the X-Axis timeline labels.</param>
         public void InjectHistory(float[,] history, int headIndex, float inputSampleRate)
@@ -202,7 +268,7 @@ namespace Helpers.UI
                 return;
             }
 
-            _history = history;
+            Array.Copy(history, _history, history.Length);
             _headIndex = headIndex;
             sampleRate = inputSampleRate;
 
@@ -221,44 +287,8 @@ namespace Helpers.UI
 
             _currentVisualMaxY = absoluteMax * 1.1f;
 
-            // Update Dynamic Y-Axis Labels
-            if (_gridLabels != null)
-            {
-                float rectHeight = rectTransform.rect.height - padding.y * 2 - bottomLegendSpace;
-                int totalGridLines = gridLineCount + 1;
-
-                for (int i = 0; i < totalGridLines; i++)
-                {
-                    float fraction = (float)(i + 1) / totalGridLines;
-                    float val = _currentVisualMaxY * fraction;
-
-                    _gridLabels[i].text = string.Format(yFormat, val);
-
-                    float py = padding.y + bottomLegendSpace + fraction * rectHeight;
-                    _gridLabels[i].rectTransform.anchoredPosition = new Vector2(padding.x - 5f, py);
-                }
-            }
-
-            // Update Dynamic X-Axis Labels
-            if (_xAxisLabels != null)
-            {
-                float graphWidth = rectTransform.rect.width - padding.x * 2;
-                int totalXLabels = xGridLineCount + 2;
-                float fullTimeSpan = _historySize * sampleRate;
-
-                for (int i = 0; i < totalXLabels; i++)
-                {
-                    float fraction = (float)i / (totalXLabels - 1);
-                    float px = padding.x + fraction * graphWidth;
-
-                    // Hang slightly beneath the bottom rendered line of the graph
-                    _xAxisLabels[i].rectTransform.anchoredPosition = new Vector2(px, padding.y + bottomLegendSpace - 2f);
-
-                    float timeVal = -fullTimeSpan + fraction * fullTimeSpan;
-                    _xAxisLabels[i].text = string.Format(xFormat, timeVal);
-                }
-            }
-
+            RefreshXAxisText();
+            UpdateAxisLabels();
             SetVerticesDirty();
         }
 
@@ -297,7 +327,16 @@ namespace Helpers.UI
             // Anti-Jitter Smoothing
             _currentVisualMaxY = absoluteMax >= _currentVisualMaxY ? absoluteMax : Mathf.Lerp(_currentVisualMaxY, absoluteMax, 0.1f);
 
-            // Update Dynamic Y-Axis Labels
+            UpdateAxisLabels();
+            SetVerticesDirty();
+        }
+
+        /// <summary>
+        /// Places the Y and X axis labels for the current rect (it can change size between samples) and rewrites
+        /// each Y label whose shown value changed with the axis ceiling.
+        /// </summary>
+        private void UpdateAxisLabels()
+        {
             if (_gridLabels != null)
             {
                 float rectHeight = rectTransform.rect.height - padding.y * 2 - bottomLegendSpace;
@@ -306,21 +345,17 @@ namespace Helpers.UI
                 for (int i = 0; i < totalGridLines; i++)
                 {
                     float fraction = (float)(i + 1) / totalGridLines;
-                    float val = _currentVisualMaxY * fraction;
-
-                    _gridLabels[i].text = string.Format(yFormat, val);
+                    SetGridLabel(i, _currentVisualMaxY * fraction);
 
                     float py = padding.y + bottomLegendSpace + fraction * rectHeight;
                     _gridLabels[i].rectTransform.anchoredPosition = new Vector2(padding.x - 5f, py);
                 }
             }
 
-            // Update Dynamic X-Axis Labels
             if (_xAxisLabels != null)
             {
                 float graphWidth = rectTransform.rect.width - padding.x * 2;
                 int totalXLabels = xGridLineCount + 2;
-                float fullTimeSpan = _historySize * sampleRate;
 
                 for (int i = 0; i < totalXLabels; i++)
                 {
@@ -329,13 +364,44 @@ namespace Helpers.UI
 
                     // Hang slightly beneath the bottom rendered line of the graph
                     _xAxisLabels[i].rectTransform.anchoredPosition = new Vector2(px, padding.y + bottomLegendSpace - 2f);
-
-                    float timeVal = -fullTimeSpan + fraction * fullTimeSpan;
-                    _xAxisLabels[i].text = string.Format(xFormat, timeVal);
                 }
             }
+        }
 
-            SetVerticesDirty();
+        private void SetGridLabel(int index, float value)
+        {
+            TMP_Text label = _gridLabels[index];
+            if (!_isYFormatParsed)
+            {
+                label.text = string.Format(CultureInfo.InvariantCulture, yFormat, value);
+                return;
+            }
+
+            long shown = (long)Math.Round(value * _yDecimalScale, MidpointRounding.AwayFromZero);
+            if (shown == _shownGridValues[index]) return;
+            _shownGridValues[index] = shown;
+
+            _labelBuilder.Clear();
+            _labelBuilder.Append(_yPrefix).AppendFixed(value, _yDecimals).Append(_ySuffix);
+            label.SetText(_labelBuilder);
+        }
+
+        /// <summary>
+        /// Writes the X-axis time labels. They depend only on the history length and sample rate, so they change
+        /// when the graph is initialized or a history is injected, never per sample.
+        /// </summary>
+        private void RefreshXAxisText()
+        {
+            if (_xAxisLabels == null) return;
+
+            int totalXLabels = xGridLineCount + 2;
+            float fullTimeSpan = _historySize * sampleRate;
+            for (int i = 0; i < totalXLabels; i++)
+            {
+                float fraction = (float)i / (totalXLabels - 1);
+                float timeVal = -fullTimeSpan + fraction * fullTimeSpan;
+                _xAxisLabels[i].text = string.Format(CultureInfo.InvariantCulture, xFormat, timeVal);
+            }
         }
 
         protected override void OnPopulateMesh(VertexHelper vh)

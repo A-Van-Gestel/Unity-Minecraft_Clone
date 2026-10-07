@@ -98,6 +98,12 @@ public class DebugScreen : MonoBehaviour
     // Graphics API name is constant for the session; cache it once to avoid per-refresh enum ToString() garbage.
     private string _graphicsApiName;
 
+    // Reused for every metrics sample and every history sync, so feeding the graphs allocates nothing.
+    private readonly float[] _perfSamples = new float[2];
+    private readonly float[] _gcSamples = new float[1];
+    private float[,] _perfHistory;
+    private float[,] _gcHistory;
+
     // --- Timers ---
     private float _textUpdateTimer;
     private float _infrequentUpdateTimer;
@@ -204,10 +210,17 @@ public class DebugScreen : MonoBehaviour
         if (CurrentMode is DebugMode.Performance or DebugMode.Full)
         {
             if (_perfGraph != null && _perfGraph.gameObject.activeSelf)
-                _perfGraph.AddSamples(new[] { snapshot.CpuTimeMs, snapshot.WallTimeMs });
+            {
+                _perfSamples[0] = snapshot.CpuTimeMs;
+                _perfSamples[1] = snapshot.WallTimeMs;
+                _perfGraph.AddSamples(_perfSamples);
+            }
 
             if (_gcMemoryGraph != null && _gcMemoryGraph.gameObject.activeSelf)
-                _gcMemoryGraph.AddSamples(new[] { snapshot.GcAllocKb });
+            {
+                _gcSamples[0] = snapshot.GcAllocKb;
+                _gcMemoryGraph.AddSamples(_gcSamples);
+            }
         }
     }
 
@@ -218,25 +231,25 @@ public class DebugScreen : MonoBehaviour
 
         if (_perfGraph != null && _perfGraph.gameObject.activeSelf)
         {
-            float[,] perfHistory = new float[2, perf.HistorySize];
+            _perfHistory ??= new float[2, perf.HistorySize];
             for (int i = 0; i < perf.HistorySize; i++)
             {
-                perfHistory[0, i] = perf.MetricsHistory[i].CpuTimeMs;
-                perfHistory[1, i] = perf.MetricsHistory[i].WallTimeMs;
+                _perfHistory[0, i] = perf.MetricsHistory[i].CpuTimeMs;
+                _perfHistory[1, i] = perf.MetricsHistory[i].WallTimeMs;
             }
 
-            _perfGraph.InjectHistory(perfHistory, perf.HistoryHeadIndex, perf.HistoryPollRate);
+            _perfGraph.InjectHistory(_perfHistory, perf.HistoryHeadIndex, perf.HistoryPollRate);
         }
 
         if (_gcMemoryGraph != null && _gcMemoryGraph.gameObject.activeSelf)
         {
-            float[,] gcHistory = new float[1, perf.HistorySize];
+            _gcHistory ??= new float[1, perf.HistorySize];
             for (int i = 0; i < perf.HistorySize; i++)
             {
-                gcHistory[0, i] = perf.MetricsHistory[i].GcAllocKb;
+                _gcHistory[0, i] = perf.MetricsHistory[i].GcAllocKb;
             }
 
-            _gcMemoryGraph.InjectHistory(gcHistory, perf.HistoryHeadIndex, perf.HistoryPollRate);
+            _gcMemoryGraph.InjectHistory(_gcHistory, perf.HistoryHeadIndex, perf.HistoryPollRate);
         }
     }
 
