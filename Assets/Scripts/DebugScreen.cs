@@ -516,7 +516,7 @@ public class DebugScreen : MonoBehaviour
             .Append(" (#").Append(shown.Index).Append(')');
 
         // Only worth showing where they disagree: within a few blocks of a boundary the surface pass
-        // dithers, so the block underfoot can belong to the neighbouring biome.
+        // dithers, so the block underfoot can belong to the neighboring biome.
         if (shown.SurfaceIndex != shown.Index)
             _topLeftBuilder.Append(" | Surface: #").Append(shown.SurfaceIndex);
 
