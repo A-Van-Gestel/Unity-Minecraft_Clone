@@ -1,8 +1,8 @@
 # Performance Improvements Report
 
-**Version:** 1.11  
-**Date:** 2026-10-02  
-**Status:** **Open backlog.** 31 items open, 30 complete, 1 deferred (⏸️), plus 10 not-yet-audited systems
+**Version:** 1.12  
+**Date:** 2026-10-07  
+**Status:** **Open backlog.** 31 items open, 31 complete, 1 deferred (⏸️), plus 10 not-yet-audited systems
 listed as `AC-*` audit tasks (§ Audit coverage gaps). Completed items keep their ✅
 row in the master summary table; their detail sections live in
 [`../Archived/PERFORMANCE_IMPROVEMENTS_COMPLETED.md`](../Archived/PERFORMANCE_IMPROVEMENTS_COMPLETED.md).
@@ -259,7 +259,8 @@ plus the standalone test files (`VoxelMetadataUtilityTests`, `FastNoiseLiteTests
 | DT-1 | Debug visualization refresh has no per-frame budget (full-world burst on toggle, per-edit rescans) |   🟢   |  🟢  |   ⚪⁶   |  ✅  |  ✅  |
 | DT-2 | `VisualizerChunkData` per-update Persistent container churn + `ToArray()`/bounds per apply         |   🟢   |  🟢  |   ⚪⁶   |  ✅  |  ✅  |
 | DT-3 | Visualization update-set fed on every voxel edit even when the mode is `None`                      |   🟢   |  🟢  |   ⚪⁶   |  ✅  |  ✅  |
-| DT-4 | Debug HUD/overlay allocation leftovers post-MT-3 (graph sample arrays, label `Format`, IMGUI)      |   🟢   |  🟢  |   ⚪⁶   |  ✅  |  ✅  |
+| DT-4 ✅ | Debug HUD/overlay allocation leftovers post-MT-3 (graph sample arrays, label `Format`, IMGUI)    |   🟢   |  🟢  |   ⚪⁶   |  ✅  |  ✅  |
+| DT-5 | F8 terrain overlay still on IMGUI — label strings allocate per cell crossed (move to uGUI/TMP)     |   🟡   |  🟢  |   ⚪⁶   |  ✅  |  ✅  |
 
 > ⁶ ⚪ by definition (debug-only) — but these directly protect **measurement fidelity**: DT-1/DT-2
 > make the lighting/fluid visualization modes usable *while* profiling the systems they visualize,
@@ -1215,9 +1216,9 @@ shapes for free when this lands.
 > **Baseline note (what is already right — keep these patterns):** `ChunkBorderVisualizer` builds
 > **one static shared mesh** for all chunks (submesh-split topologies, uploaded + non-readable) — the
 > model citizen of this section. `TerrainGenDebugOverlay` time-slices its minimap regeneration
-> (512 px/frame) and early-outs when inactive. `VoxelVisualizer` meshes in a Burst job with pooled
-> `VisualizerChunkData` GameObjects. `DebugScreen` post-MT-3 is zero-alloc with mode-gated
-> components, throttled text/infrequent-data refresh, and is fully `SetActive(false)` when hidden.
+> (512 px/frame) and is disabled while hidden. `VoxelVisualizer` meshes in a Burst job with pooled
+> `VisualizerChunkData` GameObjects. `DebugScreen` post-DT-4 is zero-alloc (TMP's Editor-only string copy
+> aside) with mode-gated components, throttled text/infrequent-data refresh, and is fully `SetActive(false)` when hidden.
 > The findings below are the gaps left around those good bones. Note for GS-5: the culled-section
 > wireframe overlay its §8 verification plan calls for should be built on this system — DT-1/DT-2
 > are worth landing first so that overlay is usable at full view distance.
@@ -1278,22 +1279,36 @@ containers** (5 `NativeHashMap` + 3 `NativeList`, `VisualizerChunkData.PrepareJo
 
 ---
 
-### DT-4. Debug HUD/overlay allocation leftovers post-MT-3
+### DT-5. F8 terrain overlay still on IMGUI
 
-**Observed:** MT-3 made the `DebugScreen` text refresh zero-alloc, but three neighbors missed the pass: (1) `DebugScreen.HandleNewMetrics` allocates two temp `float[]`s per metrics sample (`new[] { snapshot.CpuTimeMs, ... }`, ~20 Hz while the perf panel is visible — allocations that appear **in the GC graph being displayed**); (2) `GraphRenderer` label refreshes go through
-`string.Format(yFormat, …)` / `string.Format(xFormat, …)` per label (`GraphRenderer.cs` lines 235/258/311/334); (3) `TerrainGenDebugOverlay.OnGUI` builds interpolated strings per IMGUI event (layout + repaint ≥2×/frame while active) for its ~10 labels. Related always-on note:
-`PerformanceMonitor` samples its phase stopwatches every frame regardless of HUD visibility — **this is deliberate and must stay**: the history ring buffer is what makes a hitch that happened *while the HUD was closed* still visible when it is opened afterwards (`SyncGraphsWithHistory` →
-`InjectHistory`). Cost is ~µs/frame, accepted by design — do not gate it on HUD visibility.
+**Observed:** After `DT-4`, `TerrainGenDebugOverlay` builds its label strings only when the readout changes,
+but IMGUI's `GUI.Label` takes only a `string`. A player moving with the overlay open still allocates a few
+small strings per voxel cell crossed, and per progress percent while the minimap regenerates. Standing still
+costs more: `GUI.Label(Rect, string, …)` itself allocates on every call in Unity 6 (`GUIContent.Temp` copies
+the text through `String.Concat` in its `textWithWhitespace` setter, and `GUIStyle.Internal_DrawContent`
+allocates too), ≈ 1.8 KB per frame in DT-4's Editor capture (2026-10-07). Its labels also format with the OS
+culture (`62,12` on an `nl-BE` machine), unlike the HUD's invariant digits. The overlay
+also draws outside the UI bands: IMGUI paints over the pause menu, and it scales itself through its own
+`GetGuiScale` copy of `UIScaleController`'s multipliers.
 
-**Recommendation:** Give `GraphRenderer.AddSamples` a fixed-arity overload (or a reused sample buffer); route graph labels through the shared `StringBuilderFormat` helpers MT-3 created (and only on value change — grid labels rarely change); convert the overlay's static labels to cached strings
+**Recommendation:** Move the whole overlay to uGUI/TMP, so `OnGUI` and `GetGuiScale` go away.
+- Canvas on the overlay's own GameObject via `RuntimeUIFactory.ConfigureCanvas(…, UIBandId.Hud)`, plus
+  `UIScaleController` (the `ToastManager` pattern) and `CanvasGroup.blocksRaycasts = false`. Built on the
+  first F8 press, when `Camera.main` exists.
+- The minimap becomes a `RawImage` and the crosshair two `Image`s; the black 0.75 backdrop stays a flat
+  `Image`.
+- One TMP text with rich-text tags for the header, value and label styles, filled from a `StringBuilder`
+  through `SetText` when the readout changes.
 
-+ `StringBuilderFormat` for the dynamic ones (or migrate the panel off IMGUI onto the DebugScreen's TMP stack). `PerformanceMonitor`'s always-on sampling is out of scope (deliberate, see above).
+Follow the `game-ui` skill. Verify with `capture_game_view` and `Minecraft Clone/Dev/Validate UI Band
+Layers`, because a new canvas joins the Hud band. Side effect: the Menus band then covers the overlay.
 
 > **Impact Analysis:**
-> - **Effort:** 🟢 Low — MT-3's helpers already exist; this is finishing the sweep.
-> - **Risk:** 🟢 Low.
-> - **Benefit:** ⚪ — the perf HUD stops polluting its own GC metric; overlay sessions stop adding
->   IMGUI noise to captures.
+> - **Effort:** 🟡 Medium — a code-built panel replacing ~70 lines of IMGUI, plus band placement.
+> - **Risk:** 🟢 Low — a debug overlay; worldgen authoring is its only user.
+> - **Benefit:** ⚪ — the overlay stops allocating every frame, allocates nothing while moving in a player
+>   (TMP's Editor-only string sync aside), and joins the band
+>   order like every other HUD surface.
 > - **Seed/Save:** ✅ / ✅.
 
 ---
@@ -1492,6 +1507,13 @@ inherit a one-click `Validate All` that also flags stale-code runs automatically
 project's Document History convention, so they record what the commits changed rather than
 contemporaneous notes.*
 
+* **v1.12** - **`DT-4` executed and closed; `DT-5` filed** (2026-10-06/07). The packet corrects the entry's "MT-3 made
+  the text refresh zero-alloc" premise (about 60 `Append(int)` calls and 4 binding lookups per refresh) and
+  records the four decisions taken at plan review. The overlay's move to uGUI/TMP was split out as `DT-5`;
+  `DT-4` caches the IMGUI strings instead. Steps 1–6 executed the same day (execution record: graph path
+  464.5 → 0.0 B per steady sample; TMP's Editor-only string sync is the remaining floor). The Play-mode proof
+  (2026-10-07) passed for the HUD; the F8 overlay still allocates inside IMGUI's `GUI.Label` while standing still,
+  now recorded under `DT-5`. `DT-4` is ✅ and its detail section, packet included, moved to the archive.
 * **v1.11** - **`AC-10` partly measured** (2026-10-04): PM-3's slots put `BiomeTracker.Tick`, `AdvanceWorldTime`,
   `UpdateTeleportHold` and the in-world UI scripts at ≤ 0.15 ms worst — nothing to file; `DebugScreen`, the open console and
   the main-menu UI remain unmeasured.

@@ -1,7 +1,7 @@
 # Performance Monitor & Logger Overhaul Design
 
-**Version:** 1.13  
-**Date:** 2026-10-02  
+**Version:** 1.14  
+**Date:** 2026-10-06  
 **Status:** In progress — PM-0 ✅ complete (2026-10-03, Master answers in §8); PM-1 ✅ complete (2026-10-03, §7.2;
 confirmed in an IL2CPP Master build); PM-2 ✅ complete (2026-10-04, §7.3; confirmed in an IL2CPP Master build); PM-3 ✅
 complete (2026-10-04, §7.4; confirmed in an IL2CPP Master build); PM-4 ✅ complete (2026-10-05, §7.5; confirmed in an
@@ -45,7 +45,8 @@ read-only `unity command eval`. Unity 6000.6 APIs (`ProfilerRecorder`, `Profiler
   `PipelineTelemetry` chunk traces and the `WorldFrameProfiler` slots those captures depend on; their
   numbers must stay comparable across PM-1.
 - [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](PERFORMANCE_IMPROVEMENTS_REPORT.md) — `DT-4` (HUD allocation
-  leftovers) is folded into PM-5.
+  leftovers) ran ahead of PM-5 as its own item and closed 2026-10-07 (its archived entry in
+  `Archived/PERFORMANCE_IMPROVEMENTS_COMPLETED.md`).
 - [`../Architecture/DATA_DRIVEN_SETTINGS_UI.md`](../Architecture/DATA_DRIVEN_SETTINGS_UI.md) — the
   `[SettingField]` reflection UI that hosts the tier and log-level controls.
 
@@ -385,8 +386,10 @@ public enum LogLevel : byte { Off, Error, Warning, Info, Verbose }
 - **Benchmark reports** read percentiles, hitch counts and GC flags from the store, adding the
   worst-frame / p99 / hitch / collection columns they lack today (old columns kept for continuity).
 - **HUD:** a Systems panel sorted by slot cost (avg / p99 / max), the unattributed remainder, GPU vs CPU
-  split, a hitch list, and graphs overlaying raw max on the smoothed line. `DT-4`'s allocation leftovers
-  are fixed in the same pass so the HUD stops polluting its own GC reading.
+  split, a hitch list, and graphs overlaying raw max on the smoothed line. `DT-4` already removed the
+  existing HUD's allocations ahead of this pass; new panels keep to that, checked with `Minecraft Clone/Benchmarks/
+  Debug HUD Allocations`. In the Editor a changed TMP text always allocates its string (TMP syncs it under
+  `#if UNITY_EDITOR`), so a panel is allocation-free in the Editor only while its text is unchanged.
 - *PM-6 (2026-10-06), as built:*
   - **Final rows.** A row stops changing at `PerfStore.RowFinalAge` (17) frames old: frame timings arrive late and
     `SampleFrameTiming` writes rows up to 16 frames old after each commit. Each commit hands that one row to the phase
@@ -583,7 +586,7 @@ The counters and their sources are the body of `World.SamplePerfCounters`.
 | **PM-2 — Frame tier** | Per-frame GC + collection flag, `FrameTiming` GPU/render/present-wait, hitch detector + snapshots | 🟡 | PM-1 | ✅ 2026-10-04 — code + suite (§7.3); confirmed in an IL2CPP Master build |
 | **PM-3 — Coverage** | Slots for every untimed `World.Update` region + unattributed remainder; non-World systems; `PerfCounter` + counter columns, with gauges for queues, in-flight jobs, pools, resident chunks (moved from PM-1); `World.cs`'s facade probes to the slotted API; the Master IL2CPP overhead A/B (moved from PM-1) | 🟡 | PM-1 | ✅ 2026-10-04 — code + suite (§7.4); confirmed in an IL2CPP Master build |
 | **PM-4 — Workers & I/O** | Job schedule→complete latency, in-job execute time, worker utilization; disk latency/bytes/compression; ThreadPool depth | 🟡 | PM-0, PM-1, PM-3 | ✅ 2026-10-05 — code + suite (§7.5); confirmed in an IL2CPP Master build |
-| **PM-5 — HUD** | Systems panel, hitch list, GPU/CPU split, raw-max graph overlay; `DT-4` | 🟡 | PM-2, PM-3 | — |
+| **PM-5 — HUD** | Systems panel, hitch list, GPU/CPU split, raw-max graph overlay (`DT-4` ran ahead of it, 2026-10-06) | 🟡 | PM-2, PM-3 | — |
 | **PM-6 — Export** | Session CSV + hitch dumps on a background writer; benchmark reports read the store, with phase-wide percentiles (an aggregate spanning more than the ring — moved from PM-1); benchmark mode forces Capture | 🟡 | PM-2 | ✅ 2026-10-06 — code + suite (§7.7); confirmed in an IL2CPP Master build; benchmarks raise the tier to Frame instead of forcing Capture |
 | **PM-7 — Logger** | `EngineLog` categories/levels/rate limits/tags, migration of the 3 diagnostic flags and the 327 call sites (by category, in passes), stack-trace policy per build profile, variant-drift fix | 🟡 | — | — |
 | **PM-8 — Behavior-tick breakdown** | Execution packet §7.6. Split the `Tick` slot's main-thread time into its parts — active-chunk snapshot, per-chunk fluid prepare, scheduling, the `Complete()` wait, and the drain (grass tick, fluid replay) — with per-tick fluid chunk and snapshot-byte counts | 🟢 | PM-3, PM-4 | ✅ 2026-10-05 — code + suite (§7.6); confirmed in an IL2CPP Master build |
@@ -1256,6 +1259,8 @@ Answers 1–4 come from `EngineApiProbe_2026-10-03_13-52-20.log`: a `Windows - P
 
 ## Document History
 
+* **v1.14** - `DT-4` taken out of PM-5 (2026-10-06): it ran ahead as its own item (the archived DT-4 execution
+  record), and §4.7 notes the Editor-only TMP string allocation any new HUD panel will meet.
 * **v1.13** - **PM-6 complete** (2026-10-06, §7.7; confirmed in an IL2CPP Master build): benchmark reports carry exact
   per-frame statistics over every frame of each phase (`PerfPhaseRecorder`, fed each row once final at
   `PerfStore.RowFinalAge`), benchmarks raise the tier to Frame through `PerfStore.TierFloor` instead of forcing Capture,

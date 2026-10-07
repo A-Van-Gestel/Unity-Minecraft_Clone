@@ -1,7 +1,7 @@
 # Open Work Index
 
-**Version:** 1.19  
-**Date:** 2026-09-17  
+**Version:** 1.20  
+**Date:** 2026-10-07  
 **Status:** **Open backlog.** A pointer map, not a tracker — rows are added and removed as docs
 gain or lose open work, never as individual items move.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production) — documentation only
@@ -64,7 +64,7 @@ would put the same item on the map twice and mis-sort the doc.
 
 | Area | Owning document | ID space | Open work |
 |---|---|---|---|
-| **Performance (master backlog)** | [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](PERFORMANCE_IMPROVEMENTS_REPORT.md) | `MR-` `LI-` `TG-` `P-` `GS-` … | 31 items open, 30 complete, 1 deferred ⏸️, plus `AC-1`…`AC-10` — systems not yet audited, listed as pickup tasks. Completed detail is archived; rows stay in the master table |
+| **Performance (master backlog)** | [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](PERFORMANCE_IMPROVEMENTS_REPORT.md) | `MR-` `LI-` `TG-` `P-` `GS-` … | 31 items open, 31 complete, 1 deferred ⏸️, plus `AC-1`…`AC-10` — systems not yet audited, listed as pickup tasks. Completed detail is archived; rows stay in the master table |
 | **World generation features** | [`WORLDGEN_FEATURE_IMPROVEMENTS_REPORT.md`](WORLDGEN_FEATURE_IMPROVEMENTS_REPORT.md) | `TF-` | Open backlog; the combined ranked TF/RF roadmap is at the end of that doc |
 | **Lighting & rendering features** | [`LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md`](LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md) | `RF-` | Open backlog. Performance counterparts (`LI-`, `GS-`) live in the performance report |
 | **Volumetric & ray-traced effects** | [`VOLUMETRIC_AND_RAYTRACED_EFFECTS_REPORT.md`](VOLUMETRIC_AND_RAYTRACED_EFFECTS_REPORT.md) | `VX-` | Open backlog. `VX-3` on `VX-5` is the named replacement for the submersion box |
@@ -139,6 +139,8 @@ doc, not to grow an item row here.
 
 ## Document History
 
+* **v1.20** - Performance row updated (2026-10-07): 31 items open, 31 complete — `DT-4` closed, and `DT-5` (move
+  the F8 terrain overlay to uGUI/TMP) filed from it.
 * **v1.19** - `PM-*` row updated (2026-10-06): `PM-6` complete, confirmed in an IL2CPP Master build; `PM-5` and
   `PM-7` not started.
 * **v1.18** - `PM-*` row updated (2026-10-05): `PM-4` and `PM-8` complete, both confirmed in an IL2CPP Master build;

@@ -1461,3 +1461,210 @@ validation suite (21 scenarios at ship: floor-div/local/region sweeps over ±204
 >   GPUs is the whole value. Variant stripping measured at +7 KB (nothing) and the "bandwidth savings" from
 >   MSAA were never available: MSAA was already inert in game, so exposing it can only add cost.
 > - **Seed/Save:** ✅ / ✅.
+
+---
+
+## Debug Tooling
+
+### DT-4. ✅ DONE (2026-10-07) — Debug HUD/overlay allocation leftovers post-MT-3
+
+> **Closed:** the debug HUD allocates nothing in Performance and Full mode outside TMP's Editor-only string
+> copy, which player builds compile out (Editor benchmark and Play-mode capture in the execution record
+> below). The **Observed** paragraph's "MT-3 made the `DebugScreen` text refresh zero-alloc" was wrong; the
+> packet's corrections list what MT-3 had missed. The F8 overlay's remaining allocations are IMGUI's own
+> (`GUI.Label`) and belong to `DT-5`.
+
+**Observed:** MT-3 made the `DebugScreen` text refresh zero-alloc, but three neighbors missed the pass: (1) `DebugScreen.HandleNewMetrics` allocates two temp `float[]`s per metrics sample (`new[] { snapshot.CpuTimeMs, ... }`, ~20 Hz while the perf panel is visible — allocations that appear **in the GC graph being displayed**); (2) `GraphRenderer` label refreshes go through
+`string.Format(yFormat, …)` / `string.Format(xFormat, …)` per label (`GraphRenderer.cs` lines 235/258/311/334); (3) `TerrainGenDebugOverlay.OnGUI` builds interpolated strings per IMGUI event (layout + repaint ≥2×/frame while active) for its ~10 labels. Related always-on note:
+`PerformanceMonitor` samples its phase stopwatches every frame regardless of HUD visibility — **this is deliberate and must stay**: the history ring buffer is what makes a hitch that happened *while the HUD was closed* still visible when it is opened afterwards (`SyncGraphsWithHistory` →
+`InjectHistory`). Cost is ~µs/frame, accepted by design — do not gate it on HUD visibility.
+
+**Recommendation:** Give `GraphRenderer.AddSamples` a fixed-arity overload (or a reused sample buffer); route graph labels through the shared `StringBuilderFormat` helpers MT-3 created (and only on value change — grid labels rarely change); convert the overlay's static labels to cached strings
+
++ `StringBuilderFormat` for the dynamic ones (or migrate the panel off IMGUI onto the DebugScreen's TMP stack). `PerformanceMonitor`'s always-on sampling is out of scope (deliberate, see above).
+
+> **Impact Analysis:**
+> - **Effort:** 🟢 Low — MT-3's helpers already exist; this is finishing the sweep.
+> - **Risk:** 🟢 Low.
+> - **Benefit:** ⚪ — the perf HUD stops polluting its own GC metric; overlay sessions stop adding
+>   IMGUI noise to captures.
+> - **Seed/Save:** ✅ / ✅.
+
+#### DT-4 execution packet (2026-10-06)
+
+Fact sweep done at `56f956d9`; **re-verify every anchor before coding** (paths, not line numbers).
+Ships ahead of PM-5 as its own item: PM-5's new panels build on an allocation-free HUD and reuse this
+item's benchmark.
+
+**Goal.** With the debug HUD open in any mode (FPS / Performance / Full), and with the F8 terrain overlay
+open while standing still, the HUD and overlay allocate no managed memory.
+
+**Corrections found while planning.**
+- The **Observed** paragraph's "MT-3 made the `DebugScreen` text refresh zero-alloc" is false. About 60
+  `StringBuilder.Append(int/long)` calls in `DebugScreen`'s `Populate*Builder` methods allocate on Unity
+  Mono (≈ 24 B each, measured 2026-10-06; that measurement added `StringBuilderFormat.AppendInteger`).
+  So do 4 `InputManager.GetBindingDisplayString` calls per refresh, through `GameAction.ToString()` plus
+  a new display string. Even FPS-only mode allocates (`.Append(wallFps)`).
+- Two more allocation sites: `DebugScreen.SyncGraphsWithHistory` allocates two `float[,]` per HUD open,
+  and `GraphRenderer.InjectHistory` keeps the caller's array as its buffer, so the one allocated in
+  `Initialize` becomes garbage.
+- The GC graph's `World.unity` override labels its axis `{0:F1} kb/s`; the value is KB **per frame**
+  (a moving average of `GC.GetTotalMemory` deltas).
+- Two pre-existing defects ride along (decision 4):
+  - Going FPS-only → Performance shows a stale graph: `HandleNewMetrics` skips samples in FPS-only mode,
+    and only `OnEnable` re-syncs.
+  - The F8 overlay keeps an `OnGUI` that returns early, created on the first F8 press and never removed.
+
+**Decisions taken at plan review.**
+1. **Sweep every HUD mode.** Numeric `.Append(x)` → `.AppendInteger(x)`; binding display strings cached
+   in `OnEnable`. The project has no rebinding code, so they are fixed for a session.
+2. **Parse `yFormat` once.** `Initialize` parses `{0:F<n>}<suffix>` (prefix allowed) into decimals and
+   suffix; Y labels then go through `AppendFixed` and `TMP_Text.SetText(StringBuilder)` and are skipped
+   when the rounded value has not changed. A format the parser cannot handle keeps `string.Format`, with
+   one warning. No prefab or scene change for formatting; the tooltip documents the subset. X-label text
+   is set only in `Initialize`/`InjectHistory` (its value never changes in `AddSamples`), while positions
+   still update every sample.
+3. **The overlay stays on IMGUI and caches its strings.** `Update` rebuilds the label strings only when
+   `_currentInfo` or the integer progress percent changes; `OnGUI` only draws them. Static labels become
+   constants, and `Toggle` sets `enabled = _isActive`, so a hidden overlay has no `OnGUI`. Moving still
+   allocates a few strings per cell crossed, because IMGUI takes only `string`. The move to uGUI/TMP that
+   would remove those is filed as `DT-5`.
+4. **Both ride-along fixes go in, as separate commits.** `SetMode` re-syncs the graphs when they become
+   visible (allocation-free once `InjectHistory` copies in place). The GC graph override becomes
+   `{0:F1} KB`, set through the Editor (`SerializedObject` + scene save), never by editing the YAML.
+
+**Plan.**
+1. **Benchmark first.** `Assets/Editor/Benchmarking/DebugHudAllocationBenchmark.cs`, menu
+   *Minecraft Clone/Benchmarks/Debug HUD Allocations*, copying `PerfStoreProbeBenchmark`'s
+   `CollectionCount` + `GetTotalMemory` pattern.
+   - It instantiates the real `Assets/Prefabs/Debug/Graph Renderer.prefab` under a Canvas in a preview
+     scene, closed in `finally`.
+   - 10⁶ `AddSamples` calls with **rising** values ≥ 1.0 apart, so every Y label changes on every call.
+     Without that, the value-change skip would make the test pass while doing nothing. Then decaying
+     values, then steady ones.
+   - Asserts the final top-label text.
+   - Control: `sb.Append(12345)`.
+   - **Gate:** red on the code as it is now. As built, the benchmark measures bytes per call with the
+     Profiler counter, not collection counts (execution record).
+2. **GraphRenderer + DebugScreen sample path** (decision 2):
+   - reused `float[]` sample buffers;
+   - `InjectHistory` copies into `_history` from one scratch buffer per graph in `DebugScreen`;
+   - the duplicated label block in `AddSamples`/`InjectHistory` becomes one private method.
+   - **Gate:** steady samples read 0.0 B/call, changing labels read no more than the TMP floor case, the
+     control reads > 0, and the label check passes.
+3. **DebugScreen sweep** (decision 1). A wrong substitution (`bool`/`float` into `AppendInteger`) does not
+   compile. **Gate:** clean recompile; Rider `lint_files` on the edited files.
+4. **Overlay string caching** (decision 3).
+5. **Graph re-sync on mode switch** (decision 4).
+6. **GC graph unit label** (decision 4). Check `git status` of `World.unity` first, diff it after saving,
+   and compare `guid:` counts before and after.
+7. **Play-mode proof (needs the user's go-ahead).** After the change only: steps 2–6 landed before a
+   "before" capture was taken, so the benchmark's A/B (execution record) stands in for it.
+   - **Into a world:** Play on `MainMenu`, then set `Data.WorldLaunchState` `WorldName`, a fixed `Seed`, and
+     `IsNewGame = true`, and `SceneManager.LoadScene("Scenes/World", LoadSceneMode.Single)`, as
+     `WorldSelectMenu` does. A new world is always at the current save version, so the AOT migration that
+     this path skips is not needed. In Play mode the idle Editor status is `"playing"`, not `"ready"`
+     (`unity-editor` skill).
+   - **HUD and overlay:** `World.Instance.ToggleDebugScreen()` cycles Off → FPS → Performance → Full;
+     `DebugScreen.SetMode` sets a mode directly. For F8, `TerrainGenDebugOverlay.Toggle()` on the instance
+     `Player` creates on its first F8 press, or on one added with `AddComponent` + `SetPlayer`. To move,
+     teleport the player with `Helpers.WorldOrigin.VoxelToUnity` between capture frames.
+   - **Capture:** `Tools/UnityCli/Profiler/ProfilerCapture.cs` arms, stops and saves;
+     `ProfilerQueries.GcCallstacks` on `"Main Thread"` attributes allocations per call site
+     (`unity-editor` `references/profiler.md`). Capture Performance mode, Full mode, and Full mode with F8
+     on, each standing still and then moving.
+   - **Pass:**
+     - Under `DebugScreen.`, `GraphRenderer.` and `MeshBuildQueue.AppendDebugInfo`, the only allocations are
+       TMP's Editor string sync (`TMP_Text.SetText` → `InternalTextBackingArrayToString`), which is
+       expected in the Editor and absent in players.
+     - No `Int32`/`Int64.ToString`, `String.Format`, `float[]` or `InputManager.GetBindingDisplayString`
+       frames.
+     - `TerrainGenDebugOverlay`: nothing while standing still. While moving, only `BuildInfoLabels`'
+       strings, which are by design (`DT-5`).
+     - ES-28's UI-pass allocations still show up, proving the capture sees allocations.
+   - Also `capture_game_view` of the graphs (labels like `7.5 ms`, the GC axis in `KB`) and the overlay.
+8. **`docs-sync`:**
+   - this entry → shipped, with its **Observed** claim corrected;
+   - `PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md`'s "folded into PM-5" line, its PM-5 row and §4.7 note
+     that DT-4 shipped ahead of PM-5.
+
+**Commits** (each one compiles):
+1. benchmark;
+2. GraphRenderer + sample buffers;
+3. DebugScreen sweep;
+4. overlay;
+5. graph re-sync;
+6. unit label.
+
+Docs fold into the last code commit.
+
+**Assumptions** (outcomes in the execution record below).
+- `TMP_Text.SetText(StringBuilder)` does not allocate. **Wrong in the Editor only**: every non-string
+  `SetText` overload, `char[]` and the format overloads included, runs `#if UNITY_EDITOR m_text =
+  InternalTextBackingArrayToString();` (`TMP_Text.cs` in `com.unity.ugui`). So a changed TMP label always
+  allocates its string in the Editor, and never in a player. No overload avoids it.
+- `GraphRenderer` and its TMP labels run in a preview scene under a bare Canvas. **Held.**
+- `GetTerrainDebugInfo` does not allocate on a cell change. The capture taken while moving tests it; if it
+  does allocate, report it rather than widen the scope. **Held**: no `GetTerrainDebugInfo` frame in the
+  2026-10-07 capture while moving.
+
+**Not doing.**
+- Zeroing the GC graph. It is a process-wide `GC.GetTotalMemory` delta, so ES-28 (≈ 0.75 KB/frame) and
+  worker-thread allocations stay in it.
+- PM-5's new panels.
+- `BenchmarkHUD`, and `HelpMenuController`, which allocates only while the menu is open.
+- Gating `PerformanceMonitor`'s sampling (deliberate, see above).
+- An IL2CPP/Master build: this is debug-only, and the Editor measurement settles it.
+
+**Execution record (2026-10-06; steps 1–6 done; step 7's Play-mode proof 2026-10-07).**
+- **Benchmark method.** `Debug HUD Allocations` reads managed bytes per call from the Profiler counter
+  `GC Allocated In Frame` (`ProfilerRecorder.CurrentValue`), which is exact across a synchronous Editor call:
+  its control reads 32.0 B per `StringBuilder.Append(int)`. `GC.CollectionCount` plus `GC.GetTotalMemory`
+  proved unusable at this scale: the heap-size reading missed allocations that reuse just-freed memory, and
+  read the control as 0.0 B/call. The first run after a recompile carries one-time initialization; judge the
+  second.
+- **Graph path, Editor, B per `AddSamples` call** (before → after; "before" is `HEAD`'s `GraphRenderer`
+  swapped back in temporarily, checksum-restored):
+
+  | Case                                   | Before | After | TMP's Editor-only floor |
+  |----------------------------------------|-------:|------:|------------------------:|
+  | Steady (no label changes)              |  464.5 |   0.0 |                       — |
+  | Spike and decay (a few label changes)  |  474.6 |  58.3 |                       — |
+  | Rising (all 4 Y labels change)         |  495.6 | 374.3 |                   388.4 |
+
+  After the change, what remains is only TMP's Editor string sync for labels that changed, so a player
+  allocates nothing. The label check now passes. Labels format with invariant digits (`7.5 ms`); before,
+  they followed the OS culture (`7,5 ms` on an `nl-BE` machine), unlike every other HUD number.
+- **DebugScreen sweep.** 75 numeric `Append` calls → `AppendInteger`, plus 5 in
+  `MeshBuildQueue.AppendDebugInfo`, which fills the HUD's mesh-queue line. Method: convert every non-literal
+  `.Append(x)`, add a temporary `[Obsolete(error)]` `AppendInteger(char)` overload so a `char`, which would
+  silently widen to `long`, fails to compile, then revert exactly the sites the compiler rejected (14
+  `string`, 4 `bool`, no `char`). Binding display strings resolve once per enable. In the Editor each panel
+  refresh still allocates one string per changed TMP text (the floor above).
+- **Overlay.** Label strings are built when the readout or the progress percent changes; the component is
+  disabled while hidden. The progress label is now a truncated integer percent (`Generating... 45%`).
+- **Ride-alongs.** `SetMode` re-syncs the graphs when it shows them. The `World.unity` GC graph override
+  reads `{0:F1} KB`: a one-line scene diff, saved by opening the scene additively, with the `guid:` count
+  unchanged (748).
+- **Play-mode proof (2026-10-07).** A new world (seed 12345), `ProfilerCapture.Arm` → `Disarm` around each
+  case, `ProfilerQueries.GcCallstacks` on `"Main Thread"`. Six cases: Performance, Full, and Full with F8,
+  each standing still (~4 s) and moving (16 one-voxel steps).
+  - **HUD: pass.** Under `DebugScreen.`, `GraphRenderer.` and `MeshBuildQueue.AppendDebugInfo` the only
+    allocations are TMP's Editor string sync (`SetText` → `InternalTextBackingArrayToString` and its
+    `String` constructor): ≈ 0.2 KB per refresh in Performance mode, ≈ 4.3 KB in Full mode, where the
+    long text panels change on every refresh. No `Int32`/`Int64.ToString`, `String.Format`, `float[]` or
+    `GetBindingDisplayString` frame in any case. One `<no callstack>` row per capture is the arming frame:
+    its size is exactly one refresh's TMP sync.
+  - **ES-28's UI pass shows up in every case** (`UIBlurChain.Record`, `UIBandLayers.SortingValueOf`,
+    `UIBandCompositePass`; ≈ 0.75 KB per frame), so the capture sees allocations.
+  - **Overlay: the code passes, the goal does not.** Moving allocates only in `BuildInfoLabels` (once per
+    cell crossed), by design. But standing still, `OnGUI` still allocates ≈ 1.8 KB per frame inside
+    Unity's IMGUI: `GUI.Label(Rect, string, …)` calls `GUIContent.Temp`, whose `textWithWhitespace` setter
+    copies the string through `String.Concat` on every call, and `GUIStyle.Internal_DrawContent` allocates
+    on top. Cached strings cannot avoid it; leaving IMGUI does (`DT-5`).
+  - `capture_game_view`: CPU graph axis `5.0 ms … 1.2 ms`, GC axis `15.5 KB … 3.9 KB`, overlay drawn.
+- **Review fixes (2026-10-07).** The `yFormat` parser takes its allocation-free path only for brace-free text
+  around one `{0:F<n>}` with at most 6 decimals. Escaped braces and longer precisions fall back to
+  `string.Format`; at `F7` the fast path printed float noise (`3.3935001` against `3.3935000`). The benchmark's
+  label check now compares every Y label of 8 formats (4 parsed, 4 fallback) with invariant `string.Format`, and
+  a mismatch logs an error. Reverting the parser to its earlier rule failed 11 labels.
