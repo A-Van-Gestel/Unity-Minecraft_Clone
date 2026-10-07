@@ -39,6 +39,22 @@ namespace DebugVisualizations
         private int _lastInfoGX;
         private int _lastInfoGZ;
 
+        // IMGUI takes only strings and calls OnGUI at least twice a frame, so the labels are built when their
+        // values change (a new cell's readout, the next progress percent) and OnGUI only draws them.
+        private string _biomeLabel;
+        private string _blendedHeightLabel;
+        private string _borderFadeLabel;
+        private string _densityLabel;
+        private string _densityAmplitudeLabel;
+        private string _blendLabel;
+        private string _progressLabel;
+        private int _shownProgressPercent;
+        private readonly string _sliceLabel = $"Slice Y: {DENSITY_SLICE_Y} (Scroll to change)";
+
+        private const string PANEL_HEADER = "TERRAIN GENERATION";
+        private const string CONTROLS_HINT = "F8: Toggle | Alt+F8: Cycle Mode";
+        private const int PERCENT = 100;
+
         private static readonly Vector2 s_baseResolution = new Vector2(1920, 1080);
 
         private GUIStyle _boxStyle;
@@ -60,12 +76,16 @@ namespace DebugVisualizations
         /// </summary>
         public void SetPlayer(Player player) => _player = player;
 
+        // Disabled while hidden: an enabled OnGUI is still invoked for every IMGUI event, even when it returns at once.
+        private void Awake() => enabled = _isActive;
+
         /// <summary>
         /// Toggles the overlay on/off.
         /// </summary>
         public void Toggle()
         {
             _isActive = !_isActive;
+            enabled = _isActive;
             if (_isActive)
             {
                 StartGeneration();
@@ -105,6 +125,7 @@ namespace DebugVisualizations
                 _currentInfo = world.JobManager.GetTerrainDebugInfo(gx, gz);
                 _lastInfoGX = gx;
                 _lastInfoGZ = gz;
+                BuildInfoLabels();
             }
 
             const int halfSpan = TEXTURE_SIZE * BLOCKS_PER_PIXEL / 2;
@@ -132,6 +153,7 @@ namespace DebugVisualizations
                     _renderMode, biomeCount, DENSITY_SLICE_Y, _pixelBuffer);
 
                 _currentPixelIndex += batch;
+                RefreshProgressLabel();
 
                 if (_currentPixelIndex >= totalPixels)
                 {
@@ -140,6 +162,29 @@ namespace DebugVisualizations
                     _isGenerating = false;
                 }
             }
+        }
+
+        private void BuildInfoLabels()
+        {
+            if (!_currentInfo.IsValid) return;
+
+            _biomeLabel = $"Biome: {_currentInfo.BiomeName} [{_currentInfo.BiomeIndex}]";
+            _blendedHeightLabel = $"Blended Height: {_currentInfo.BlendedTerrainHeight:F2}";
+            _borderFadeLabel = $"Border Fade: {_currentInfo.BorderFade:F4}";
+            _densityLabel = _currentInfo.Enable3DDensity ? "3D Density: ON" : "3D Density: OFF";
+            _densityAmplitudeLabel =
+                $"Density Amp: {_currentInfo.DensityAmplitude:F1}  Effective: {_currentInfo.EffectiveDensityAmplitude:F2}";
+            _blendLabel = $"Blend Radius: {_currentInfo.BlendRadius:F2}  Weight: {_currentInfo.BlendWeight:F2}";
+        }
+
+        private void RefreshProgressLabel()
+        {
+            const int totalPixels = TEXTURE_SIZE * TEXTURE_SIZE;
+            int percent = _currentPixelIndex * PERCENT / totalPixels;
+            if (percent == _shownProgressPercent) return;
+
+            _shownProgressPercent = percent;
+            _progressLabel = $"Generating... {percent}%";
         }
 
         private void StartGeneration()
@@ -154,6 +199,8 @@ namespace DebugVisualizations
             EnsureTexture();
             _currentPixelIndex = 0;
             _isGenerating = true;
+            _shownProgressPercent = -1;
+            RefreshProgressLabel();
         }
 
         private void EnsureTexture()
@@ -223,9 +270,7 @@ namespace DebugVisualizations
 
                 if (_isGenerating)
                 {
-                    float progress = (float)_currentPixelIndex / (TEXTURE_SIZE * TEXTURE_SIZE);
-                    GUI.Label(new Rect(mapX, mapY + MAP_DISPLAY_SIZE + 24, MAP_DISPLAY_SIZE, 20),
-                        $"Generating... {progress:P0}", _labelStyle);
+                    GUI.Label(new Rect(mapX, mapY + MAP_DISPLAY_SIZE + 24, MAP_DISPLAY_SIZE, 20), _progressLabel, _labelStyle);
                 }
             }
 
@@ -240,29 +285,27 @@ namespace DebugVisualizations
                 GUI.Box(new Rect(panelX - 4, panelY - 4, PANEL_WIDTH + 8, panelH + 8), GUIContent.none, _boxStyle);
 
                 float y = panelY;
-                GUI.Label(new Rect(panelX, y, PANEL_WIDTH, lineH), "TERRAIN GENERATION", _headerStyle);
+                GUI.Label(new Rect(panelX, y, PANEL_WIDTH, lineH), PANEL_HEADER, _headerStyle);
                 y += lineH + 2;
-                GUI.Label(new Rect(panelX, y, PANEL_WIDTH, lineH), $"Biome: {_currentInfo.BiomeName} [{_currentInfo.BiomeIndex}]", _valueStyle);
+                GUI.Label(new Rect(panelX, y, PANEL_WIDTH, lineH), _biomeLabel, _valueStyle);
                 y += lineH;
-                GUI.Label(new Rect(panelX, y, PANEL_WIDTH, lineH), $"Blended Height: {_currentInfo.BlendedTerrainHeight:F2}", _labelStyle);
+                GUI.Label(new Rect(panelX, y, PANEL_WIDTH, lineH), _blendedHeightLabel, _labelStyle);
                 y += lineH;
-                GUI.Label(new Rect(panelX, y, PANEL_WIDTH, lineH), $"Border Fade: {_currentInfo.BorderFade:F4}", _labelStyle);
+                GUI.Label(new Rect(panelX, y, PANEL_WIDTH, lineH), _borderFadeLabel, _labelStyle);
                 y += lineH;
-                GUI.Label(new Rect(panelX, y, PANEL_WIDTH, lineH), $"3D Density: {(_currentInfo.Enable3DDensity ? "ON" : "OFF")}", _labelStyle);
+                GUI.Label(new Rect(panelX, y, PANEL_WIDTH, lineH), _densityLabel, _labelStyle);
                 y += lineH;
-                GUI.Label(new Rect(panelX, y, PANEL_WIDTH, lineH),
-                    $"Density Amp: {_currentInfo.DensityAmplitude:F1}  Effective: {_currentInfo.EffectiveDensityAmplitude:F2}", _labelStyle);
+                GUI.Label(new Rect(panelX, y, PANEL_WIDTH, lineH), _densityAmplitudeLabel, _labelStyle);
                 y += lineH;
-                GUI.Label(new Rect(panelX, y, PANEL_WIDTH, lineH),
-                    $"Blend Radius: {_currentInfo.BlendRadius:F2}  Weight: {_currentInfo.BlendWeight:F2}", _labelStyle);
+                GUI.Label(new Rect(panelX, y, PANEL_WIDTH, lineH), _blendLabel, _labelStyle);
                 y += lineH + 4;
 
-                GUI.Label(new Rect(panelX, y, PANEL_WIDTH, lineH), "F8: Toggle | Alt+F8: Cycle Mode", _labelStyle);
+                GUI.Label(new Rect(panelX, y, PANEL_WIDTH, lineH), CONTROLS_HINT, _labelStyle);
 
                 if (_renderMode == TerrainDebugRenderMode.CombinedDensitySlice)
                 {
                     y += lineH;
-                    GUI.Label(new Rect(panelX, y, PANEL_WIDTH, lineH), $"Slice Y: {DENSITY_SLICE_Y} (Scroll to change)", _labelStyle);
+                    GUI.Label(new Rect(panelX, y, PANEL_WIDTH, lineH), _sliceLabel, _labelStyle);
                 }
             }
 
