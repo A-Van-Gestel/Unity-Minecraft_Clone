@@ -61,7 +61,7 @@ these items are ⚪ *because they only cost while a developer is debugging* — 
 `DebugScreen` + `PerformanceMonitor` + `GraphRenderer` HUD stack, `TerrainGenDebugOverlay`, and
 `ChunkBorderVisualizer` (clean — see the section's baseline note).
 
-**Audit scope note (sixth pass, 2026-07-02):** the `ET-*` (Editor Tooling) section covers the in-editor world tools at the user's request — deep on `Assets/Editor/WorldTools/` (the
+**Audit scope note (sixth pass, 2026-07-02):** the `ET-*` (Editor Tooling) section covers the in-editor world tools, since several of them run the production generation/lighting/meshing jobs — deep on `Assets/Editor/WorldTools/` (the
 `ChunkPreview3DWindow` + `WorldGenPreviewWindow` stacks and `EditorChunkPipelineRunner`, which drive the *production* generation/lighting/meshing jobs plus their own managed preview paths — and run under Mono with no IL2CPP boost for the managed halves), quick on the rest. The quick pass came back largely clean: `BlockIconGenerator`/`AtlasPacker`/`StructurePreviewWindow`/`CaveDensityAnalyzer`/
 `BiomeConfigValidator` are on-demand tools using sane patterns (PreviewRenderUtility, real pipeline jobs, dirty-flag-gated validation); the only recurring-cost nit is
 `WorldGenPreviewWindow.PollForAssetChanges` stat-ing a file timestamp every editor-update tick (throttle to ~0.5 s when convenient). **The validation suites are deliberately excluded — they are their own future audit pass.** Production-parity scoreboard for the 3D preview: MR-2 ✅ (shares

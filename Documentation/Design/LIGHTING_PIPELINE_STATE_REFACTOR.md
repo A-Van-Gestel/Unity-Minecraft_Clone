@@ -1230,7 +1230,8 @@ future measurement there: because the pass is ceiling-saturated at speed, a real
 
 - **Scope as executed:** the whole Phase B §3.8.2.2 rename — ~480 identifiers across ~55 files — plus the
   casing normalization to one word. The phase was filed as a 🟢 one-method rename; the audit that opened it
-  found the rename it was deferring to had never happened, and the user chose to finish it here.
+  found the rename it was deferring to had never happened. It was finished here rather than re-filed: §3.8.2
+  already read Implemented, so a half-done rename behind that stamp would mislead every later reader.
 - **Gate:** universal gate + both build targets + a shader-compile check. **Serialization:** no chunk-format migration — `ChunkSerializer` writes queues positionally and
   `DebugVisualizationMode` serializes as an `int`. **But one Unity-YAML field key did move:**
   `[SerializeField] _skyLightOverDay` → `_skylightOverDay`. Handled by reserialize-and-diff rather than

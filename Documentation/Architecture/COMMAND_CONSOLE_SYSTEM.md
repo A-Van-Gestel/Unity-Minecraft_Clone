@@ -456,8 +456,9 @@ The pure core (`CommandEngine.Complete`) and the ghost derivation (`CommandEngin
 suite-pinned; the UI (ghost overlay, key wiring) is in-game confirmed per §7. Execution deltas from
 the plan below, for the record:
 
-- **Inline ghost suggestion added mid-implementation** (user request 2026-07-19), *reversing* the
-  original "candidates list into history instead — no ghost-text widget" out-of-scope call. Delivered
+- **Inline ghost suggestion added mid-implementation** (2026-07-19), *reversing* the original
+  "candidates list into history instead — no ghost-text widget" out-of-scope call: Tab alone shows
+  nothing until pressed, while the gray suffix previews the completion before it is accepted. Delivered
   as a pure `CommandEngine.Suggest(input)` (returns the gray suffix only for a single unambiguous
   candidate; ambiguous/empty/fully-typed → empty, so the multi-match Tab behavior is untouched) driving
   a non-interactive TMP overlay that renders `<transparent>typed</transparent><gray>suffix</gray>` so
@@ -698,7 +699,7 @@ Benchmark tab's **Run Engine API Probe** action, which also works from the main 
   non-interactive TMP overlay (`<transparent>typed</transparent><gray>suffix</gray>` for caret
   alignment), accepted by **Tab / RightArrow / End** (new `ConsoleAcceptSuggestion` UI-map action,
   caret-at-end guarded), suite →**52** (B52). The ghost **reverses** the original out-of-scope
-  "no ghost-text widget" call (user request); the long-line alignment guard is deferred until it
+  "no ghost-text widget" call, so a completion is previewed before Tab accepts it; the long-line alignment guard is deferred until it
   overflows. Decisions closed 2026-07-19: simple completer signature, end-of-input-only caret,
   Tab+RightArrow/End accept. Multi-match behavior unchanged (common prefix + candidate list). Validate
   All 275/275 across 10 suites. §7 CMD-5 row + §8 v2 row + §8.3 + §1 non-goal all flipped to ✅ — the

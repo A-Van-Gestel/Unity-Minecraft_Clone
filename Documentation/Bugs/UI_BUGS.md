@@ -191,9 +191,9 @@ softness as a fraction of the screen — a single-resolution capture cannot obse
 ## 07. Dropdown Popup Template Is Too Short For Long Option Lists
 
 **Severity:** Improvement (cosmetic) — **open, not started**  
-**Status:** **Reported 2026-09-07, filed at the user's request** while fixing a separate clipping defect
-in the same prefab. The list is now correctly clipped and scrollable, so this is a comfort issue, not a
-correctness one — the user noted the taller popup "should be its own backlog item".  
+**Status:** **Reported 2026-09-07** while fixing a separate clipping defect in the same prefab, and filed
+apart from that fix: the list is now correctly clipped and scrollable, so the taller popup is a comfort
+issue, not a correctness one.  
 **Files:** `Assets/Prefabs/UI/Components/Dropdown.prefab` (`Template` height)
 
 > Numbered **07**, not 06: `_FIXED_BUGS.md` already carries an archived `UI_BUGS #06` that twelve
