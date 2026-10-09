@@ -83,22 +83,22 @@ read-only `unity command eval`. Unity 6000.6 APIs (`ProfilerRecorder`, `Profiler
 
 ## 2. Current state
 
-| Area | State | Anchor |
-|---|---|---|
-| `PerformanceMonitor` | Always on by design: `Stopwatch` dual-hook phase times, wall time, GC alloc from `GC.GetTotalMemory` deltas, native/managed memory; history ring of 200 snapshots (10 s × 20 Hz) | `PerformanceMonitor.cs:26–377` |
-| Smoothing | **Every recorded CPU/wall value is a 30-frame mean**; snapshots copy smoothed values at 20 Hz, so no individual frame is ever stored; the timer reset drops remainders, so real sampling falls below 20 Hz at low FPS | `:30, :109–136, :327–339` |
-| GC allocation | 60-frame mean of `max(0, Δheap)` — **a collection frame records 0** and its allocation is lost; a 1 MB burst reads ≈17 KB; worker-thread allocation is charged to the main frame | `:31, :314–321` |
-| GC collections | Session counts on the HUD only; Boehm reports `MaxGeneration = 0`; no per-frame flag, no duration, not in benchmark reports | `DebugScreen.cs:605–623` |
-| Benchmark "Peak/Min" | Extremes of the smoothed 20 Hz snapshots — not frame peaks; no p99, worst-frame or hitch count | `BenchmarkMetricsCollector.cs:254–283` |
-| `WorldFrameProfiler` | 10 `Stopwatch` slots inside `World.Update`; last frame only; enabled only by benchmark harnesses; no HUD | `Benchmarks/WorldFrameProfiler.cs:43–244` |
-| Untimed regions in `World.Update` | `AdvanceWorldTime`, `BiomeTracker.Tick`, `ShiftOrigin`, `UpdateTeleportHold`, both `CheckViewDistance` sites (incl. `UnloadChunks`), border toggle, `HandleVisualization`, `DrainGenerationRequests`, `DrainFailedSaveRetries`, `ChunkPool.Update`, the CP-1 scan — and no unattributed remainder | `World.cs:2551–2619, 2637, 2950–2964` |
-| Systems with no timing at all | Physics (`VoxelRigidbody`, only buried in FixedUpdate), audio directors, clouds, sky/day-night, UI/HUD (incl. `DebugScreen` itself), `VoxelVisualizer`, disk I/O latency/bytes/compression, ThreadPool depth, job worker time, GPU/render thread | grep |
-| Pools | `ChunkPoolManager` counts on the HUD; **`ChunkJobArrayPool` and `MeshOutputPool` expose no counters** | — |
-| Profiler APIs | No `ProfilerRecorder`/`FrameTimingManager` use; 3 `ProfilerMarker`s (Profiler-only); **`enableFrameTimingStats: 0`** in `ProjectSettings.asset:162` and live | — |
-| Instrumentation variant drift | CP-1/LP-1/MP-1 probes are gated on `UNITY_INCLUDE_INSTRUMENTATION`, but comments say "dev/editor builds only"; the `Windows - Development` profile uses the default Release variant, so the probes are **compiled out of Development builds** while their "(dev)" HUD rows read 0 and the save-diagnostics toggle is shown but inert. Only `Windows - Profiler` (Checked variant) has them | `World.cs:1185, 1190, 3471`; build profiles |
-| Logging | 327 runtime `Debug.Log*` sites (150 Log / 74 Warning / 103 Error); no central logger or `logMessageReceived` subscriber; tags mixed (system, method, class, backlog-ID, untagged); only 3 sites honor `enableDiagnosticLogs`, ~10 `enableWaterDiagnosticLogs`, save diagnostics double-gated (flag + `UNITY_INCLUDE_INSTRUMENTATION`) | census |
-| Stack traces | Player settings: **Error = None, Assert/Warning/Log/Exception = ScriptOnly** — every `Log`/`Warning` in a player walks the managed stack (expensive in IL2CPP), while errors carry none (the reverse of the useful choice) | `ProjectSettings.asset:57` (live) |
-| Settings hosting | `[SettingField(tab)]` + `DebugOnly`, `SubHeader`, `DisabledWhen`; live apply via `SettingsManager.OnSettingChanged`; the **DebugScreen** tab is player-facing; benchmark cold-launch only copies a whitelist (`OverlayBenchmarkSettingsFromDisk`) | `SettingsManager.cs:1003–1039, 1279–1305` |
+| Area                              | State                                                                                                                                                                                                                                                                                                                                                                                      | Anchor                                      |
+|-----------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------|
+| `PerformanceMonitor`              | Always on by design: `Stopwatch` dual-hook phase times, wall time, GC alloc from `GC.GetTotalMemory` deltas, native/managed memory; history ring of 200 snapshots (10 s × 20 Hz)                                                                                                                                                                                                           | `PerformanceMonitor.cs:26–377`              |
+| Smoothing                         | **Every recorded CPU/wall value is a 30-frame mean**; snapshots copy smoothed values at 20 Hz, so no individual frame is ever stored; the timer reset drops remainders, so real sampling falls below 20 Hz at low FPS                                                                                                                                                                      | `:30, :109–136, :327–339`                   |
+| GC allocation                     | 60-frame mean of `max(0, Δheap)` — **a collection frame records 0** and its allocation is lost; a 1 MB burst reads ≈17 KB; worker-thread allocation is charged to the main frame                                                                                                                                                                                                           | `:31, :314–321`                             |
+| GC collections                    | Session counts on the HUD only; Boehm reports `MaxGeneration = 0`; no per-frame flag, no duration, not in benchmark reports                                                                                                                                                                                                                                                                | `DebugScreen.cs:605–623`                    |
+| Benchmark "Peak/Min"              | Extremes of the smoothed 20 Hz snapshots — not frame peaks; no p99, worst-frame or hitch count                                                                                                                                                                                                                                                                                             | `BenchmarkMetricsCollector.cs:254–283`      |
+| `WorldFrameProfiler`              | 10 `Stopwatch` slots inside `World.Update`; last frame only; enabled only by benchmark harnesses; no HUD                                                                                                                                                                                                                                                                                   | `Benchmarks/WorldFrameProfiler.cs:43–244`   |
+| Untimed regions in `World.Update` | `AdvanceWorldTime`, `BiomeTracker.Tick`, `ShiftOrigin`, `UpdateTeleportHold`, both `CheckViewDistance` sites (incl. `UnloadChunks`), border toggle, `HandleVisualization`, `DrainGenerationRequests`, `DrainFailedSaveRetries`, `ChunkPool.Update`, the CP-1 scan — and no unattributed remainder                                                                                          | `World.cs:2551–2619, 2637, 2950–2964`       |
+| Systems with no timing at all     | Physics (`VoxelRigidbody`, only buried in FixedUpdate), audio directors, clouds, sky/day-night, UI/HUD (incl. `DebugScreen` itself), `VoxelVisualizer`, disk I/O latency/bytes/compression, ThreadPool depth, job worker time, GPU/render thread                                                                                                                                           | grep                                        |
+| Pools                             | `ChunkPoolManager` counts on the HUD; **`ChunkJobArrayPool` and `MeshOutputPool` expose no counters**                                                                                                                                                                                                                                                                                      | —                                           |
+| Profiler APIs                     | No `ProfilerRecorder`/`FrameTimingManager` use; 3 `ProfilerMarker`s (Profiler-only); **`enableFrameTimingStats: 0`** in `ProjectSettings.asset:162` and live                                                                                                                                                                                                                               | —                                           |
+| Instrumentation variant drift     | CP-1/LP-1/MP-1 probes are gated on `UNITY_INCLUDE_INSTRUMENTATION`, but comments say "dev/editor builds only"; the `Windows - Development` profile uses the default Release variant, so the probes are **compiled out of Development builds** while their "(dev)" HUD rows read 0 and the save-diagnostics toggle is shown but inert. Only `Windows - Profiler` (Checked variant) has them | `World.cs:1185, 1190, 3471`; build profiles |
+| Logging                           | 327 runtime `Debug.Log*` sites (150 Log / 74 Warning / 103 Error); no central logger or `logMessageReceived` subscriber; tags mixed (system, method, class, backlog-ID, untagged); only 3 sites honor `enableDiagnosticLogs`, ~10 `enableWaterDiagnosticLogs`, save diagnostics double-gated (flag + `UNITY_INCLUDE_INSTRUMENTATION`)                                                      | census                                      |
+| Stack traces                      | Player settings: **Error = None, Assert/Warning/Log/Exception = ScriptOnly** — every `Log`/`Warning` in a player walks the managed stack (expensive in IL2CPP), while errors carry none (the reverse of the useful choice)                                                                                                                                                                 | `ProjectSettings.asset:57` (live)           |
+| Settings hosting                  | `[SettingField(tab)]` + `DebugOnly`, `SubHeader`, `DisabledWhen`; live apply via `SettingsManager.OnSettingChanged`; the **DebugScreen** tab is player-facing; benchmark cold-launch only copies a whitelist (`OverlayBenchmarkSettingsFromDisk`)                                                                                                                                          | `SettingsManager.cs:1003–1039, 1279–1305`   |
 
 ---
 
@@ -138,12 +138,12 @@ Pipeline Backpressure suite.
 
 #### Option B — Four tiers, one setting ✅ **CHOSEN**
 
-| Tier | Adds | Intended use |
-|---|---|---|
-| **0 — Basic** (default) | Today's always-on `PerformanceMonitor` **unchanged**, plus a raw per-frame wall/CPU ring (8 B/frame) feeding worst-frame/p99 | Every session; costs what today costs |
-| **1 — Frame** | GC allocation per frame + collection flag, `FrameTimingManager` GPU/render-thread/present-wait, hitch detector + snapshots | "Why did that stutter?" |
-| **2 — Systems** | Every timing slot and counter (§4.2), unattributed remainder, job/I-O counters | Attribution sessions, benchmark runs |
-| **3 — Capture** | Session file streaming + hitch dumps to disk, log mirroring with frame numbers | Recorded investigations; benchmark mode forces this tier |
+| Tier                    | Adds                                                                                                                         | Intended use                                             |
+|-------------------------|------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------|
+| **0 — Basic** (default) | Today's always-on `PerformanceMonitor` **unchanged**, plus a raw per-frame wall/CPU ring (8 B/frame) feeding worst-frame/p99 | Every session; costs what today costs                    |
+| **1 — Frame**           | GC allocation per frame + collection flag, `FrameTimingManager` GPU/render-thread/present-wait, hitch detector + snapshots   | "Why did that stutter?"                                  |
+| **2 — Systems**         | Every timing slot and counter (§4.2), unattributed remainder, job/I-O counters                                               | Attribution sessions, benchmark runs                     |
+| **3 — Capture**         | Session file streaming + hitch dumps to disk, log mirroring with frame numbers                                               | Recorded investigations; benchmark mode forces this tier |
 
 The tier is a `Settings` enum on the **DebugScreen** tab, applied live through `OnSettingChanged`.
 Benchmark harnesses set it explicitly (as they already force `WorldFrameProfiler.Enabled`) and the
@@ -441,59 +441,59 @@ the check. Whether a system has had a performance *analysis* pass is a different
 
 **Frame level.**
 
-| Measure | Tier | Source | Not covered |
-|---|---|---|---|
-| Wall and CPU time per frame | every tier | `PerformanceMonitor`'s brackets → `CommitFrame` | time outside the brackets (wall − CPU − present wait) |
-| Managed allocation and collections | every tier | heap delta + `GC.CollectionCount` | process-wide: worker allocation lands on the main frame; a collection frame has no figure |
-| GPU, render-thread and present-wait time | Frame | `FrameTiming` via the frame-time recorders | whole frame only — no per-pass GPU time |
-| Hitch records | Frame (slot times and counters at Systems) | `PerfHitchDetector` | — |
-| `World.Update` remainder | Systems | `PerfSlot.WorldUnattributed` | `World.Update` only — no whole-frame remainder |
-| Memory | always-on history only | `PerformanceMonitor` (`Profiler.GetTotal*Memory`, managed heap) | not in `PerfStore`'s frame rows or hitch records |
-| Whole-phase statistics (PM-6) | every tier; benchmarks run at Frame or above | `PerfPhaseRecorder`, fed each final row | frame fields only — slots and counters per phase are in the session file |
-| Session and hitch files (PM-6) | Capture | `PerfSessionExporter` | rows and hitch records lost to a full block pool, the size cap or a write failure are counted, not written |
+| Measure                                  | Tier                                         | Source                                                          | Not covered                                                                                                |
+|------------------------------------------|----------------------------------------------|-----------------------------------------------------------------|------------------------------------------------------------------------------------------------------------|
+| Wall and CPU time per frame              | every tier                                   | `PerformanceMonitor`'s brackets → `CommitFrame`                 | time outside the brackets (wall − CPU − present wait)                                                      |
+| Managed allocation and collections       | every tier                                   | heap delta + `GC.CollectionCount`                               | process-wide: worker allocation lands on the main frame; a collection frame has no figure                  |
+| GPU, render-thread and present-wait time | Frame                                        | `FrameTiming` via the frame-time recorders                      | whole frame only — no per-pass GPU time                                                                    |
+| Hitch records                            | Frame (slot times and counters at Systems)   | `PerfHitchDetector`                                             | —                                                                                                          |
+| `World.Update` remainder                 | Systems                                      | `PerfSlot.WorldUnattributed`                                    | `World.Update` only — no whole-frame remainder                                                             |
+| Memory                                   | always-on history only                       | `PerformanceMonitor` (`Profiler.GetTotal*Memory`, managed heap) | not in `PerfStore`'s frame rows or hitch records                                                           |
+| Whole-phase statistics (PM-6)            | every tier; benchmarks run at Frame or above | `PerfPhaseRecorder`, fed each final row                         | frame fields only — slots and counters per phase are in the session file                                   |
+| Session and hitch files (PM-6)           | Capture                                      | `PerfSessionExporter`                                           | rows and hitch records lost to a full block pool, the size cap or a write failure are counted, not written |
 
 **Main thread — slots (Systems tier, or forced).** Inside `World.Update` the slots are disjoint, so with the remainder
 they sum to the bracket:
 
-| Slot(s) | Covers |
-|---|---|
-| `Tick` | `ProcessTickUpdates`: active-chunk snapshot, per-chunk fluid prepare, scheduling, the `Complete()` wait, and the drain (grass tick, fluid replay) — split by the `Tick*` counters below |
-| `Apply` | `ApplyModifications` |
-| `LightMerge`, `LightStagingDrain`, `LightFailSafeScan`, `LightSchedule`, `LightQueueProbe` | the lighting passes; `LightQueueProbe` exists only in instrumented builds |
-| `MeshProcess`, `MeshSchedule` | completed-mesh apply and upload; mesh-queue drain |
-| `GenerationProcess`, `GenerationAdmission` | completed-generation pass; admission of queued requests |
-| `WorldTime`, `BiomeTracker`, `OriginShift`, `TeleportHold`, `BorderToggle`, `Visualization` | the smaller `World.Update` regions, each probed around its call |
-| `ViewDistance`, `Unload` | the crossing rebuild (all three callers, including the cloud rebuild it starts) and the unload pass |
-| `SaveRetryDrain`, `ChunkPoolPrune` | one pending failed-save retry; the pools' prune (`ChunkPoolManager.Update`, a plain method) |
-| `WorldUnattributed` | the bracket minus the slots recorded inside it |
+| Slot(s)                                                                                     | Covers                                                                                                                                                                                  |
+|---------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `Tick`                                                                                      | `ProcessTickUpdates`: active-chunk snapshot, per-chunk fluid prepare, scheduling, the `Complete()` wait, and the drain (grass tick, fluid replay) — split by the `Tick*` counters below |
+| `Apply`                                                                                     | `ApplyModifications`                                                                                                                                                                    |
+| `LightMerge`, `LightStagingDrain`, `LightFailSafeScan`, `LightSchedule`, `LightQueueProbe`  | the lighting passes; `LightQueueProbe` exists only in instrumented builds                                                                                                               |
+| `MeshProcess`, `MeshSchedule`                                                               | completed-mesh apply and upload; mesh-queue drain                                                                                                                                       |
+| `GenerationProcess`, `GenerationAdmission`                                                  | completed-generation pass; admission of queued requests                                                                                                                                 |
+| `WorldTime`, `BiomeTracker`, `OriginShift`, `TeleportHold`, `BorderToggle`, `Visualization` | the smaller `World.Update` regions, each probed around its call                                                                                                                         |
+| `ViewDistance`, `Unload`                                                                    | the crossing rebuild (all three callers, including the cloud rebuild it starts) and the unload pass                                                                                     |
+| `SaveRetryDrain`, `ChunkPoolPrune`                                                          | one pending failed-save retry; the pools' prune (`ChunkPoolManager.Update`, a plain method)                                                                                             |
+| `WorldUnattributed`                                                                         | the bracket minus the slots recorded inside it                                                                                                                                          |
 
 Outside `World.Update` (a slot here may contain world work it triggers, e.g. a console teleport):
 
-| Slot | Probed in | Not covered |
-|---|---|---|
-| `DiskLoadApply` | the disk-load continuation in `World.cs` | skipped while the `World.Update` bracket is open (already counted there) |
-| `Physics` | `VoxelRigidbody.FixedUpdate` | its `Update` (step-smoothing ease) and `LateUpdate` (debug bounds) |
-| `Player` | `Player`, `PlayerInteraction` | — |
-| `AudioDirectors` | `SoundManager`, `AmbienceDirector`, `MusicScheduler`, `FluidEmitterDirector`, `PlayerFootsteps` | — |
-| `Clouds` | `Clouds.Update` | the crossing rebuild is in `ViewDistance` |
-| `Environment` | `FoliageSway`, `BorderWallRenderer` | — |
-| `DebugHud` | `DebugScreen.Update` | — |
-| `Ui` | `ConsoleUI`, `Toolbar`, `DragAndDropHandler`, `TooltipManager`, `WorldUIManager`, `SafeAreaFitter`, `TouchControls` | uGUI's own layout and canvas rebuilds |
-| `VoxelVisualizer` | `VoxelVisualizer.LateUpdate` | — |
+| Slot              | Probed in                                                                                                           | Not covered                                                              |
+|-------------------|---------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------|
+| `DiskLoadApply`   | the disk-load continuation in `World.cs`                                                                            | skipped while the `World.Update` bracket is open (already counted there) |
+| `Physics`         | `VoxelRigidbody.FixedUpdate`                                                                                        | its `Update` (step-smoothing ease) and `LateUpdate` (debug bounds)       |
+| `Player`          | `Player`, `PlayerInteraction`                                                                                       | —                                                                        |
+| `AudioDirectors`  | `SoundManager`, `AmbienceDirector`, `MusicScheduler`, `FluidEmitterDirector`, `PlayerFootsteps`                     | —                                                                        |
+| `Clouds`          | `Clouds.Update`                                                                                                     | the crossing rebuild is in `ViewDistance`                                |
+| `Environment`     | `FoliageSway`, `BorderWallRenderer`                                                                                 | —                                                                        |
+| `DebugHud`        | `DebugScreen.Update`                                                                                                | —                                                                        |
+| `Ui`              | `ConsoleUI`, `Toolbar`, `DragAndDropHandler`, `TooltipManager`, `WorldUIManager`, `SafeAreaFitter`, `TouchControls` | uGUI's own layout and canvas rebuilds                                    |
+| `VoxelVisualizer` | `VoxelVisualizer.LateUpdate`                                                                                        | —                                                                        |
 
 **Worker jobs (Systems tier).**
 
-| Job | Type | Timed |
-|---|---|---|
-| `StandardWormCarverJob`, `StandardChunkGenerationJob` (per column), `CaveIsolationFilterJob`, `ActiveVoxelScanJob` | Generation | ✅ one record per chain |
-| `LegacyChunkGenerationJob` | Generation | latency only — the job is frozen |
-| `NeighborhoodLightingJob` | Lighting | ✅ |
-| `MeshGenerationJob`, `MeshPostProcessJob` | Meshing | ✅ one record per chain |
-| `FluidTickJob` | Fluids | ✅ one record per chunk |
-| `FluidEmitterScanJob` | FluidSoundScan | ✅ the scanner's own one-record pool |
-| `CloudPatternJob` | — | ❌ rare rebuild, completed where it is scheduled, inside `Clouds` / `ViewDistance` |
-| `VoxelVisualizerJob` | — | ❌ debug visualizer |
-| `TimestampProbeJob` | — | n/a — the engine API probe's own measurement |
+| Job                                                                                                                | Type           | Timed                                                                              |
+|--------------------------------------------------------------------------------------------------------------------|----------------|------------------------------------------------------------------------------------|
+| `StandardWormCarverJob`, `StandardChunkGenerationJob` (per column), `CaveIsolationFilterJob`, `ActiveVoxelScanJob` | Generation     | ✅ one record per chain                                                            |
+| `LegacyChunkGenerationJob`                                                                                         | Generation     | latency only — the job is frozen                                                   |
+| `NeighborhoodLightingJob`                                                                                          | Lighting       | ✅                                                                                 |
+| `MeshGenerationJob`, `MeshPostProcessJob`                                                                          | Meshing        | ✅ one record per chain                                                            |
+| `FluidTickJob`                                                                                                     | Fluids         | ✅ one record per chunk                                                            |
+| `FluidEmitterScanJob`                                                                                              | FluidSoundScan | ✅ the scanner's own one-record pool                                               |
+| `CloudPatternJob`                                                                                                  | —              | ❌ rare rebuild, completed where it is scheduled, inside `Clouds` / `ViewDistance` |
+| `VoxelVisualizerJob`                                                                                               | —              | ❌ debug visualizer                                                                |
+| `TimestampProbeJob`                                                                                                | —              | n/a — the engine API probe's own measurement                                       |
 
 Unity's own jobs (rendering, animation, uGUI) are invisible, so utilization is the engine's share of the workers.
 
@@ -514,21 +514,21 @@ non-chunk files (`level.dat`, pending modifications, pending lighting) are not c
 
 **Known gaps.**
 
-| Gap | Consequence | Owner |
-|---|---|---|
-| Other composite slots (`LightMerge`, `Unload`) | a hitch they lead cannot say which part | PM-8's pattern (§7.6), if their hitches warrant it — not filed |
-| Per-chunk fluid prepare distribution | the prepare is a per-frame sum, so a few heavy chunks and many light ones read alike | not filed — PM-8 decision 2 |
-| Unity's own main-thread work: uGUI layout and canvas rebuilds, the renderer features' Render Graph recording (UI band composite and blur, cloud prepass, underwater overlay), animation | in the frame's CPU time, in no slot | not filed; `AC-4` covers the UI blur's cost statically |
-| A whole-frame remainder | CPU time outside every slot and outside `World.Update` has no figure | not filed |
-| Per-pass GPU time | a GPU-bound frame cannot say which pass | `ES-25`'s rendering baseline (Frame Debugger) |
-| Memory per frame | a memory spike cannot be tied to a hitch | not filed |
-| Main menu and loading scenes | `PerformanceMonitor` lives in the World scene, so they record no frames | not filed |
-| The initial load's counters | sampled in `World.Update`, so they read 0 until it ends | not filed |
-| Per-job latency split (queue wait, execution, completion lag) | latency is one figure | v2 swimlanes (extension roadmap) |
-| Per-slot and per-counter statistics over a whole phase | the report's phase statistics cover the frame fields; slots and counters per phase need the session file | not filed — PM-6 decision 4 |
-| Log volume and cost | — | **PM-7** |
-| Small or debug per-frame code: `ChunkLoadAnimation` (one per chunk), `VoxelRigidbody.Update`/`LateUpdate`, `TerrainGenDebugOverlay`, `CreditsMenuController`, the benchmark harness scripts | negligible or tooling | not filed — low value |
-| Untimed jobs: `CloudPatternJob`, `VoxelVisualizerJob`, the legacy generation job's busy time | — | not filed — low value |
+| Gap                                                                                                                                                                                         | Consequence                                                                                              | Owner                                                          |
+|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------|----------------------------------------------------------------|
+| Other composite slots (`LightMerge`, `Unload`)                                                                                                                                              | a hitch they lead cannot say which part                                                                  | PM-8's pattern (§7.6), if their hitches warrant it — not filed |
+| Per-chunk fluid prepare distribution                                                                                                                                                        | the prepare is a per-frame sum, so a few heavy chunks and many light ones read alike                     | not filed — PM-8 decision 2                                    |
+| Unity's own main-thread work: uGUI layout and canvas rebuilds, the renderer features' Render Graph recording (UI band composite and blur, cloud prepass, underwater overlay), animation     | in the frame's CPU time, in no slot                                                                      | not filed; `AC-4` covers the UI blur's cost statically         |
+| A whole-frame remainder                                                                                                                                                                     | CPU time outside every slot and outside `World.Update` has no figure                                     | not filed                                                      |
+| Per-pass GPU time                                                                                                                                                                           | a GPU-bound frame cannot say which pass                                                                  | `ES-25`'s rendering baseline (Frame Debugger)                  |
+| Memory per frame                                                                                                                                                                            | a memory spike cannot be tied to a hitch                                                                 | not filed                                                      |
+| Main menu and loading scenes                                                                                                                                                                | `PerformanceMonitor` lives in the World scene, so they record no frames                                  | not filed                                                      |
+| The initial load's counters                                                                                                                                                                 | sampled in `World.Update`, so they read 0 until it ends                                                  | not filed                                                      |
+| Per-job latency split (queue wait, execution, completion lag)                                                                                                                               | latency is one figure                                                                                    | v2 swimlanes (extension roadmap)                               |
+| Per-slot and per-counter statistics over a whole phase                                                                                                                                      | the report's phase statistics cover the frame fields; slots and counters per phase need the session file | not filed — PM-6 decision 4                                    |
+| Log volume and cost                                                                                                                                                                         | —                                                                                                        | **PM-7**                                                       |
+| Small or debug per-frame code: `ChunkLoadAnimation` (one per chunk), `VoxelRigidbody.Update`/`LateUpdate`, `TerrainGenDebugOverlay`, `CreditsMenuController`, the benchmark harness scripts | negligible or tooling                                                                                    | not filed — low value                                          |
+| Untimed jobs: `CloudPatternJob`, `VoxelVisualizerJob`, the legacy generation job's busy time                                                                                                | —                                                                                                        | not filed — low value                                          |
 
 **Re-deriving the map** (from the repo root):
 
@@ -565,31 +565,31 @@ The counters and their sources are the body of `World.SamplePerfCounters`.
 
 ## 6. Constraint compliance checklist
 
-| Project constraint | How this design complies |
-|---|---|
-| Voxels are packed `uint`s, no per-voxel objects | Untouched — instrumentation reads counters, never voxel storage |
-| Burst jobs 100 % Burst-compatible | Jobs only write a timestamp pair into their output struct (source verified in PM-0); no managed calls added to jobs |
-| No GC / LINQ in hot paths | Enum-indexed pre-allocated arrays; no strings, delegates or scopes on probes; formatting only on the HUD's 10 Hz refresh or the export thread |
-| Pooling conventions | Hitch records and export buffers pooled; native rings allocated on tier entry only |
-| No BinaryFormatter/JSON for terrain | Logs are CSV diagnostics; the tier and levels are `Settings` config JSON |
-| BlockIDs constants, no raw IDs | No block IDs involved |
-| Statics / domain reload | Every static annotated + reset in the single `[RuntimeInitializeOnLoadMethod]` (§4.8) |
+| Project constraint                              | How this design complies                                                                                                                      |
+|-------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
+| Voxels are packed `uint`s, no per-voxel objects | Untouched — instrumentation reads counters, never voxel storage                                                                               |
+| Burst jobs 100 % Burst-compatible               | Jobs only write a timestamp pair into their output struct (source verified in PM-0); no managed calls added to jobs                           |
+| No GC / LINQ in hot paths                       | Enum-indexed pre-allocated arrays; no strings, delegates or scopes on probes; formatting only on the HUD's 10 Hz refresh or the export thread |
+| Pooling conventions                             | Hitch records and export buffers pooled; native rings allocated on tier entry only                                                            |
+| No BinaryFormatter/JSON for terrain             | Logs are CSV diagnostics; the tier and levels are `Settings` config JSON                                                                      |
+| BlockIDs constants, no raw IDs                  | No block IDs involved                                                                                                                         |
+| Statics / domain reload                         | Every static annotated + reset in the single `[RuntimeInitializeOnLoadMethod]` (§4.8)                                                         |
 
 ---
 
 ## 7. Phased implementation plan
 
-| Phase | Scope | Effort | Depends on | Status |
-|---|---|:---:|---|---|
-| **PM-0 — Verify** | Execution packet §7.1. Master-build probe: dump `ProfilerRecorderHandle.GetAvailable` + `Valid`; `FrameTimingManager` with frame-timing stats on; `GC.GetAllocatedBytesForCurrentThread` under IL2CPP; Burst timestamp source; probe cost (QPC ns) | 🟢 | — | ✅ 2026-10-03 — §8 q1–q4 answered in two Master builds |
-| **PM-1 — Core store** | `PerfStore`, `PerfSlot`, raw per-frame ring, exact window statistics, tier setting + live apply, `WorldFrameProfiler` facade (identical `PassMsTotals`), `/perf stats` + `/perf tier` | 🟡 | PM-0 | ✅ 2026-10-03 — code + suite (§7.2); confirmed in an IL2CPP Master build |
-| **PM-2 — Frame tier** | Per-frame GC + collection flag, `FrameTiming` GPU/render/present-wait, hitch detector + snapshots | 🟡 | PM-1 | ✅ 2026-10-04 — code + suite (§7.3); confirmed in an IL2CPP Master build |
-| **PM-3 — Coverage** | Slots for every untimed `World.Update` region + unattributed remainder; non-World systems; `PerfCounter` + counter columns, with gauges for queues, in-flight jobs, pools, resident chunks (moved from PM-1); `World.cs`'s facade probes to the slotted API; the Master IL2CPP overhead A/B (moved from PM-1) | 🟡 | PM-1 | ✅ 2026-10-04 — code + suite (§7.4); confirmed in an IL2CPP Master build |
-| **PM-4 — Workers & I/O** | Job schedule→complete latency, in-job execute time, worker utilization; disk latency/bytes/compression; ThreadPool depth | 🟡 | PM-0, PM-1, PM-3 | ✅ 2026-10-05 — code + suite (§7.5); confirmed in an IL2CPP Master build |
-| **PM-5 — HUD** | Systems panel, hitch list, GPU/CPU split, raw-max graph overlay (`DT-4` ran ahead of it, 2026-10-06) | 🟡 | PM-2, PM-3 | — |
-| **PM-6 — Export** | Session CSV + hitch dumps on a background writer; benchmark reports read the store, with phase-wide percentiles (an aggregate spanning more than the ring — moved from PM-1); benchmark mode forces Capture | 🟡 | PM-2 | ✅ 2026-10-06 — code + suite (§7.7); confirmed in an IL2CPP Master build; benchmarks raise the tier to Frame instead of forcing Capture |
-| **PM-7 — Logger** | `EngineLog` categories/levels/rate limits/tags, migration of the 3 diagnostic flags and the 327 call sites (by category, in passes), stack-trace policy per build profile, variant-drift fix | 🟡 | — | — |
-| **PM-8 — Behavior-tick breakdown** | Execution packet §7.6. Split the `Tick` slot's main-thread time into its parts — active-chunk snapshot, per-chunk fluid prepare, scheduling, the `Complete()` wait, and the drain (grass tick, fluid replay) — with per-tick fluid chunk and snapshot-byte counts | 🟢 | PM-3, PM-4 | ✅ 2026-10-05 — code + suite (§7.6); confirmed in an IL2CPP Master build |
+| Phase                              | Scope                                                                                                                                                                                                                                                                                                         | Effort | Depends on       | Status                                                                                                                                  |
+|------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|------------------|-----------------------------------------------------------------------------------------------------------------------------------------|
+| **PM-0 — Verify**                  | Execution packet §7.1. Master-build probe: dump `ProfilerRecorderHandle.GetAvailable` + `Valid`; `FrameTimingManager` with frame-timing stats on; `GC.GetAllocatedBytesForCurrentThread` under IL2CPP; Burst timestamp source; probe cost (QPC ns)                                                            |   🟢   | —                | ✅ 2026-10-03 — §8 q1–q4 answered in two Master builds                                                                                  |
+| **PM-1 — Core store**              | `PerfStore`, `PerfSlot`, raw per-frame ring, exact window statistics, tier setting + live apply, `WorldFrameProfiler` facade (identical `PassMsTotals`), `/perf stats` + `/perf tier`                                                                                                                         |   🟡   | PM-0             | ✅ 2026-10-03 — code + suite (§7.2); confirmed in an IL2CPP Master build                                                                |
+| **PM-2 — Frame tier**              | Per-frame GC + collection flag, `FrameTiming` GPU/render/present-wait, hitch detector + snapshots                                                                                                                                                                                                             |   🟡   | PM-1             | ✅ 2026-10-04 — code + suite (§7.3); confirmed in an IL2CPP Master build                                                                |
+| **PM-3 — Coverage**                | Slots for every untimed `World.Update` region + unattributed remainder; non-World systems; `PerfCounter` + counter columns, with gauges for queues, in-flight jobs, pools, resident chunks (moved from PM-1); `World.cs`'s facade probes to the slotted API; the Master IL2CPP overhead A/B (moved from PM-1) |   🟡   | PM-1             | ✅ 2026-10-04 — code + suite (§7.4); confirmed in an IL2CPP Master build                                                                |
+| **PM-4 — Workers & I/O**           | Job schedule→complete latency, in-job execute time, worker utilization; disk latency/bytes/compression; ThreadPool depth                                                                                                                                                                                      |   🟡   | PM-0, PM-1, PM-3 | ✅ 2026-10-05 — code + suite (§7.5); confirmed in an IL2CPP Master build                                                                |
+| **PM-5 — HUD**                     | Systems panel, hitch list, GPU/CPU split, raw-max graph overlay (`DT-4` ran ahead of it, 2026-10-06)                                                                                                                                                                                                          |   🟡   | PM-2, PM-3       | —                                                                                                                                       |
+| **PM-6 — Export**                  | Session CSV + hitch dumps on a background writer; benchmark reports read the store, with phase-wide percentiles (an aggregate spanning more than the ring — moved from PM-1); benchmark mode forces Capture                                                                                                   |   🟡   | PM-2             | ✅ 2026-10-06 — code + suite (§7.7); confirmed in an IL2CPP Master build; benchmarks raise the tier to Frame instead of forcing Capture |
+| **PM-7 — Logger**                  | `EngineLog` categories/levels/rate limits/tags, migration of the 3 diagnostic flags and the 327 call sites (by category, in passes), stack-trace policy per build profile, variant-drift fix                                                                                                                  |   🟡   | —                | —                                                                                                                                       |
+| **PM-8 — Behavior-tick breakdown** | Execution packet §7.6. Split the `Tick` slot's main-thread time into its parts — active-chunk snapshot, per-chunk fluid prepare, scheduling, the `Complete()` wait, and the drain (grass tick, fluid replay) — with per-tick fluid chunk and snapshot-byte counts                                             |   🟢   | PM-3, PM-4       | ✅ 2026-10-05 — code + suite (§7.6); confirmed in an IL2CPP Master build                                                                |
 
 **Minimal set with standalone value:** PM-0 + PM-1 + PM-2 — worst-frame, p99, hitch snapshots with GC
 and GPU attribution — answers the roadmap's "is the traversal spike GC?" question on its own. PM-7 is
@@ -1191,11 +1191,11 @@ ES-0 row sent "the rest" to PM-6, but the drain stamp was never in PM-6's scope.
 
 ### Extension roadmap
 
-| Version | Extension |
-|---|---|
-| **v2** | Per-worker job timeline (swimlanes) from the PM-4 timestamps, viewable in the HUD or exported |
-| **v2** | Remote/live view over a local socket for a second-monitor dashboard (local only) |
-| **v3+** | Automatic regression detection across saved sessions — own design doc |
+| Version | Extension                                                                                     |
+|---------|-----------------------------------------------------------------------------------------------|
+| **v2**  | Per-worker job timeline (swimlanes) from the PM-4 timestamps, viewable in the HUD or exported |
+| **v2**  | Remote/live view over a local socket for a second-monitor dashboard (local only)              |
+| **v3+** | Automatic regression detection across saved sessions — own design doc                         |
 
 ---
 
@@ -1245,15 +1245,15 @@ Answers 1–4 come from `EngineApiProbe_2026-10-03_13-52-20.log`: a `Windows - P
 
 ## 9. Rejected alternatives
 
-| Alternative | Why rejected | Date |
-|---|---|---|
-| Gate `PerformanceMonitor`'s sampling on HUD visibility | Standing decision: the always-on history is what shows a hitch that happened while the HUD was closed | 2026-07-02 |
-| `ProfilerRecorder`/`ProfilerMarker` as the core | Invalid in Release builds per the v2.1 doc; markers readable only via the Profiler (§3.1) | 2026-10-02 |
-| A single on/off toggle | Tier costs differ by orders of magnitude (§3.2) | 2026-10-02 |
-| Replacing `WorldFrameProfiler` outright | Breaks comparability of every FP/P-9/P-4 capture (§3.3) | 2026-10-02 |
-| `IDisposable` scope structs / delegates on hot-path probes | Avoidable overhead and allocation risk; explicit begin/end matches the proven `WorldFrameProfiler` pattern | 2026-10-02 |
-| Uploading telemetry | Out of scope; output stays local | 2026-10-02 |
-| Log-scale histograms for the ring's window percentiles | Bucket width (±5–12 %) adds error on top of run-to-run noise; exact selection over the ring costs nothing per frame (§4.1) | 2026-10-03 |
+| Alternative                                                | Why rejected                                                                                                               | Date       |
+|------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------|------------|
+| Gate `PerformanceMonitor`'s sampling on HUD visibility     | Standing decision: the always-on history is what shows a hitch that happened while the HUD was closed                      | 2026-07-02 |
+| `ProfilerRecorder`/`ProfilerMarker` as the core            | Invalid in Release builds per the v2.1 doc; markers readable only via the Profiler (§3.1)                                  | 2026-10-02 |
+| A single on/off toggle                                     | Tier costs differ by orders of magnitude (§3.2)                                                                            | 2026-10-02 |
+| Replacing `WorldFrameProfiler` outright                    | Breaks comparability of every FP/P-9/P-4 capture (§3.3)                                                                    | 2026-10-02 |
+| `IDisposable` scope structs / delegates on hot-path probes | Avoidable overhead and allocation risk; explicit begin/end matches the proven `WorldFrameProfiler` pattern                 | 2026-10-02 |
+| Uploading telemetry                                        | Out of scope; output stays local                                                                                           | 2026-10-02 |
+| Log-scale histograms for the ring's window percentiles     | Bucket width (±5–12 %) adds error on top of run-to-run noise; exact selection over the ring costs nothing per frame (§4.1) | 2026-10-03 |
 
 ---
 

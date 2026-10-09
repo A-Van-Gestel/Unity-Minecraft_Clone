@@ -143,22 +143,22 @@ Synchronous:    Disabled
 
 | Pattern                | Mode-averaged μs/chunk |
 |------------------------|-----------------------:|
-| `Solid`                |                  272.4 |
-| `Checkerboard`         |                 4365.4 |
-| `OrientedCubes`        |                  278.9 |
-| `OrientedCheckerboard` |                 4378.2 |
-| `Fluid`                |                 1147.4 |
-| `Transparent`          |                 5067.3 |
-| `MixedTerrain`         |                 2330.1 |
+| `Solid`                | 272.4                  |
+| `Checkerboard`         | 4365.4                 |
+| `OrientedCubes`        | 278.9                  |
+| `OrientedCheckerboard` | 4378.2                 |
+| `Fluid`                | 1147.4                 |
+| `Transparent`          | 5067.3                 |
+| `MixedTerrain`         | 2330.1                 |
 
 ## Upload reference (the "should improve ~45%" target)
 
 | Metric                | Before (60 B/vertex) |
 |-----------------------|---------------------:|
-| Vertex format         |          60 B/vertex |
-| Vertex data per chunk |             15.94 MB |
-| Upload time per chunk |            1576.0 μs |
-| Vertex upload rate    |           10113 MB/s |
+| Vertex format         | 60 B/vertex          |
+| Vertex data per chunk | 15.94 MB             |
+| Upload time per chunk | 1576.0 μs            |
+| Vertex upload rate    | 10113 MB/s           |
 
 After MR-2 the format becomes **32 B/vertex** (≈8.5 MB/chunk). At the same MB/s the per-chunk
 upload time should fall to roughly `1576 × 32/60 ≈ 840 μs`; capture an "after" file to record the

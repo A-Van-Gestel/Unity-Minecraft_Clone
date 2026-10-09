@@ -129,13 +129,13 @@ Synchronous:    Disabled
 
 | Pattern                | Mode-averaged baseline | +5% regression threshold | What it measures                                                                                               |
 |------------------------|-----------------------:|-------------------------:|----------------------------------------------------------------------------------------------------------------|
-| `Solid`                |         531.3 μs/chunk |           557.9 μs/chunk | Standard cube path, all-stone interior cull (vertex-throughput floor)                                          |
-| `Checkerboard`         |        4361.4 μs/chunk |          4579.5 μs/chunk | Standard cube worst case — every stone has 6 air neighbors → 6 faces drawn (no rotation)                       |
-| `OrientedCubes`        |         529.3 μs/chunk |           555.8 μs/chunk | Cycling orientations 0/1/4/5; rotation only exercised on boundary faces (~1.5k/chunk)                          |
-| `OrientedCheckerboard` |        4490.3 μs/chunk |          4714.8 μs/chunk | **Primary rotation hot-path detector.** Checkerboard density × cycling orientations → ~98k rotated faces/chunk |
-| `Fluid`                |        2796.9 μs/chunk |          2936.7 μs/chunk | `GenerateFluidMeshData` end-to-end with `FluidLevel4` semantics                                                |
-| `Transparent`          |        5304.7 μs/chunk |          5569.9 μs/chunk | Transparent submesh path, alternating leaves/air at Checkerboard density                                       |
-| `MixedTerrain`         |        2531.3 μs/chunk |          2657.9 μs/chunk | Realistic distribution exercising all four `MeshGenerationJob` render cases                                    |
+| `Solid`                | 531.3 μs/chunk         | 557.9 μs/chunk           | Standard cube path, all-stone interior cull (vertex-throughput floor)                                          |
+| `Checkerboard`         | 4361.4 μs/chunk        | 4579.5 μs/chunk          | Standard cube worst case — every stone has 6 air neighbors → 6 faces drawn (no rotation)                       |
+| `OrientedCubes`        | 529.3 μs/chunk         | 555.8 μs/chunk           | Cycling orientations 0/1/4/5; rotation only exercised on boundary faces (~1.5k/chunk)                          |
+| `OrientedCheckerboard` | 4490.3 μs/chunk        | 4714.8 μs/chunk          | **Primary rotation hot-path detector.** Checkerboard density × cycling orientations → ~98k rotated faces/chunk |
+| `Fluid`                | 2796.9 μs/chunk        | 2936.7 μs/chunk          | `GenerateFluidMeshData` end-to-end with `FluidLevel4` semantics                                                |
+| `Transparent`          | 5304.7 μs/chunk        | 5569.9 μs/chunk          | Transparent submesh path, alternating leaves/air at Checkerboard density                                       |
+| `MixedTerrain`         | 2531.3 μs/chunk        | 2657.9 μs/chunk          | Realistic distribution exercising all four `MeshGenerationJob` render cases                                    |
 
 ## Reading the numbers
 

@@ -106,16 +106,16 @@ demonstrated by mutation rather than argued.
 
 ## 2. Current state (what exists today)
 
-| Area | State |
-|------|-------|
-| **Sun disc colour** | `SkyboxShader.shader:143-145` — `SUN_CORE_COLOR` `(1.0, 0.97, 0.86)`, `SUN_LIMB_COLOR` `(1.0, 0.86, 0.66)`, `SUN_LIMB_DARKENING` 0.18. Composited at `:412-417`. Peak output is **exactly 1.0** and cannot exceed it: the limb term only ever scales down. |
-| **Sky gradient** | `:254` — `heightFactor` is a function of `abs(viewDir.y)` **alone**. It has zero dependence on `_SunDirection`. The air 5° from the sun is rendered identically to the air 175° from it. |
-| **Sunset horizon** | Consequence of the row above: the horizon colour is elevation-keyed, so at sunset the **entire** horizon ring warms, including the quadrant behind the player. |
-| **Sun atmosphere model** | `:416` — `lerp(sunColor, _VoxelFogColor, hazeAmount)`. This is the blend-toward-fog model the polish arc **refuted** for the moon and replaced with extinction-then-airlight (`:372`, `:392`, Architecture §4). The sun was never migrated. |
-| **Disc size** | `TimeOfDaySettings.cs:122` — `_sunAngularRadius = 1.5°`, ≈5.6× the real sun. Authored and deliberate (the tooltip says so); readability at voxel scale. Not changed by this doc. |
-| **Bloom** | `VoxelEngine-Post-Profile.asset` — `threshold 1.1`, `intensity 0.25`, `scatter 0.6`, `highQualityFiltering 0`, `clamp` at its 65472 default (effectively off). One global instance, shared with RF-3's lava and lamps. |
-| **HDR pipeline** | `VoxelEngine-URP-Asset.asset` — `m_SupportsHDR: 1`, `m_HDRColorBufferPrecision: 0` (R11G11B10), `m_MSAA: 2`, `m_ColorGradingMode: 0` (**LDR**). No tonemapper is active in either volume profile. |
-| **Screen-space lens flare** | Present in `DefaultVolumeProfile.asset` at `intensity: 0`. Drives off the bloom mip pyramid (`bloomMip: 1`), so it inherits the threshold problem below. |
+| Area                        | State                                                                                                                                                                                                                                                      |
+|-----------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Sun disc colour**         | `SkyboxShader.shader:143-145` — `SUN_CORE_COLOR` `(1.0, 0.97, 0.86)`, `SUN_LIMB_COLOR` `(1.0, 0.86, 0.66)`, `SUN_LIMB_DARKENING` 0.18. Composited at `:412-417`. Peak output is **exactly 1.0** and cannot exceed it: the limb term only ever scales down. |
+| **Sky gradient**            | `:254` — `heightFactor` is a function of `abs(viewDir.y)` **alone**. It has zero dependence on `_SunDirection`. The air 5° from the sun is rendered identically to the air 175° from it.                                                                   |
+| **Sunset horizon**          | Consequence of the row above: the horizon colour is elevation-keyed, so at sunset the **entire** horizon ring warms, including the quadrant behind the player.                                                                                             |
+| **Sun atmosphere model**    | `:416` — `lerp(sunColor, _VoxelFogColor, hazeAmount)`. This is the blend-toward-fog model the polish arc **refuted** for the moon and replaced with extinction-then-airlight (`:372`, `:392`, Architecture §4). The sun was never migrated.                |
+| **Disc size**               | `TimeOfDaySettings.cs:122` — `_sunAngularRadius = 1.5°`, ≈5.6× the real sun. Authored and deliberate (the tooltip says so); readability at voxel scale. Not changed by this doc.                                                                           |
+| **Bloom**                   | `VoxelEngine-Post-Profile.asset` — `threshold 1.1`, `intensity 0.25`, `scatter 0.6`, `highQualityFiltering 0`, `clamp` at its 65472 default (effectively off). One global instance, shared with RF-3's lava and lamps.                                     |
+| **HDR pipeline**            | `VoxelEngine-URP-Asset.asset` — `m_SupportsHDR: 1`, `m_HDRColorBufferPrecision: 0` (R11G11B10), `m_MSAA: 2`, `m_ColorGradingMode: 0` (**LDR**). No tonemapper is active in either volume profile.                                                          |
+| **Screen-space lens flare** | Present in `DefaultVolumeProfile.asset` at `intensity: 0`. Drives off the bloom mip pyramid (`bloomMip: 1`), so it inherits the threshold problem below.                                                                                                   |
 
 ### 2.1 Bloom cannot meaningfully see the sun — the arithmetic
 
@@ -342,29 +342,29 @@ aureole is at its weakest — but it is the one interaction between SN-0 and exi
 
 ## 6. Constraint compliance checklist
 
-| Project constraint | How this design complies |
-|--------------------|--------------------------|
-| Voxels are packed `uint`s, no per-voxel objects | No contact. Nothing here reads or writes voxel data. |
-| Burst jobs 100 % Burst-compatible | No contact. No job code is touched. |
-| No GC / LINQ in hot paths | No contact. No C# runs per frame that does not already run; no new globals to publish. |
-| Pooling conventions | No contact. No allocations of any kind. |
-| No BinaryFormatter/JSON for terrain | No contact. Nothing reaches disk; no save-format change, so no AOT migration step. |
-| `BlockIDs` constants, no raw IDs | No contact. No block references. |
-| No magic numbers | Every new term gets a named `static const` beside the existing `SUN_*` block, `SCREAMING_CASE` per the private-const rule, each with a why-comment in the file's established voice. |
-| `#pragma target 3.5` floor (`SHADER_CONVENTIONS.md`) | All new work is `dot`/`pow`/`exp`/`lerp` in the fragment stage. **No phase adds a varying**, so the interpolator count is unchanged. |
-| Mutable statics reset on play-mode entry | No contact. No new statics; shader `static const` is compile-time. |
+| Project constraint                                   | How this design complies                                                                                                                                                            |
+|------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Voxels are packed `uint`s, no per-voxel objects      | No contact. Nothing here reads or writes voxel data.                                                                                                                                |
+| Burst jobs 100 % Burst-compatible                    | No contact. No job code is touched.                                                                                                                                                 |
+| No GC / LINQ in hot paths                            | No contact. No C# runs per frame that does not already run; no new globals to publish.                                                                                              |
+| Pooling conventions                                  | No contact. No allocations of any kind.                                                                                                                                             |
+| No BinaryFormatter/JSON for terrain                  | No contact. Nothing reaches disk; no save-format change, so no AOT migration step.                                                                                                  |
+| `BlockIDs` constants, no raw IDs                     | No contact. No block references.                                                                                                                                                    |
+| No magic numbers                                     | Every new term gets a named `static const` beside the existing `SUN_*` block, `SCREAMING_CASE` per the private-const rule, each with a why-comment in the file's established voice. |
+| `#pragma target 3.5` floor (`SHADER_CONVENTIONS.md`) | All new work is `dot`/`pow`/`exp`/`lerp` in the fragment stage. **No phase adds a varying**, so the interpolator count is unchanged.                                                |
+| Mutable statics reset on play-mode entry             | No contact. No new statics; shader `static const` is compile-time.                                                                                                                  |
 
 ---
 
 ## 7. Phased implementation plan
 
-| Phase | Scope | Effort | Depends on |
-|-------|-------|:------:|------------|
-| **SN-0 — Aureole** ✅ **SHIPPED** | Angular forward-scatter glow around `_SunDirection`, applied to `color` before the discs (§4 ordering) **and to the sun disc by the same operator** (§7.1). Modulated by `hazeAmount` so it swells near the horizon. Guarded by **B8**, plus a repaired **B4**. | 🟢 | — |
-| **SN-1 — Per-channel extinction** ✅ **SHIPPED** | Replaced `:416`'s `lerp`-to-fog with per-channel `exp(-opticalDepth * beta)`, written as a per-channel lerp so it cannot clip. The aureole tint is now derived from the same transmitted sunlight, so glow and disc redden together (§7.2). Guarded by **B9**. | 🟢 | — |
-| **SN-2 — HDR core + bloom coupling** ❌ **BUILT AND REFUTED** | Built exactly as specified, judged in game, and **reverted in full** — shader, baseline and the bloom `clamp` alike. URP's single global bloom cannot serve both the sun and RF-3's block emitters. See §7.3. | 🟡 | — |
-| **SN-3 — Screen-space lens flare** ❌ **BLOCKED by SN-2** | URP's screen-space flare reads the bloom pyramid, so it inherits SN-2's verdict exactly. Not attempted. | 🟢 | SN-2 |
-| **SN-4 — Shader-side glare** ✅ **SHIPPED** | SN-2's successor, and what actually delivers the goal SN-2 was meant to. A third, tightest lobe on SN-0's falloff produces the sun's glare **in the skybox shader**, plus an airmass falloff for the sun's own optical depth so it stops reading orange high in the sky (§7.4). Guarded by **B10** and a new assertion in **B9**. | 🟢 | SN-0, SN-1 |
+| Phase                                                         | Scope                                                                                                                                                                                                                                                                                                                             | Effort | Depends on |
+|---------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|------------|
+| **SN-0 — Aureole** ✅ **SHIPPED**                             | Angular forward-scatter glow around `_SunDirection`, applied to `color` before the discs (§4 ordering) **and to the sun disc by the same operator** (§7.1). Modulated by `hazeAmount` so it swells near the horizon. Guarded by **B8**, plus a repaired **B4**.                                                                   |   🟢   | —          |
+| **SN-1 — Per-channel extinction** ✅ **SHIPPED**              | Replaced `:416`'s `lerp`-to-fog with per-channel `exp(-opticalDepth * beta)`, written as a per-channel lerp so it cannot clip. The aureole tint is now derived from the same transmitted sunlight, so glow and disc redden together (§7.2). Guarded by **B9**.                                                                    |   🟢   | —          |
+| **SN-2 — HDR core + bloom coupling** ❌ **BUILT AND REFUTED** | Built exactly as specified, judged in game, and **reverted in full** — shader, baseline and the bloom `clamp` alike. URP's single global bloom cannot serve both the sun and RF-3's block emitters. See §7.3.                                                                                                                     |   🟡   | —          |
+| **SN-3 — Screen-space lens flare** ❌ **BLOCKED by SN-2**     | URP's screen-space flare reads the bloom pyramid, so it inherits SN-2's verdict exactly. Not attempted.                                                                                                                                                                                                                           |   🟢   | SN-2       |
+| **SN-4 — Shader-side glare** ✅ **SHIPPED**                   | SN-2's successor, and what actually delivers the goal SN-2 was meant to. A third, tightest lobe on SN-0's falloff produces the sun's glare **in the skybox shader**, plus an airmass falloff for the sun's own optical depth so it stops reading orange high in the sky (§7.4). Guarded by **B10** and a new assertion in **B9**. |   🟢   | SN-0, SN-1 |
 
 **SN-0 alone delivers standalone value** and is the recommended first commit: it is the change that
 most directly answers "it looks like a yellow circle", it is independent of the HDR decision in
@@ -552,12 +552,12 @@ curve put the sun at 18 % of full optical depth at 30°, roughly three times too
 there:
 
 | Sun elevation | On the veiling curve | On the airmass curve |
-|---------------|---------------------|----------------------|
-| 45°           | 1.18                | **1.11**             |
-| 30°           | 1.39                | **1.16**             |
-| 20.7°         | 1.66                | **1.29**             |
-| 10.5°         | 2.09                | 1.75                 |
-| 0°            | 2.59                | 2.59 (unchanged)     |
+|---------------|----------------------|----------------------|
+| 45°           | 1.18                 | **1.11**             |
+| 30°           | 1.39                 | **1.16**             |
+| 20.7°         | 1.66                 | **1.29**             |
+| 10.5°         | 2.09                 | 1.75                 |
+| 0°            | 2.59                 | 2.59 (unchanged)     |
 
 **Accepted trade.** The disc now merges into its own glare — at noon it is only ~1.2× the sky
 immediately outside it, where before it was 2.04× against sky further out. That is correct for a
@@ -605,10 +605,10 @@ timestamp gate and that guard disagree, the guard is right.
 
 ### Extension roadmap (post-SN-3, in intended order)
 
-| Version | Extension |
-|---------|-----------|
-| **v2** | Aureole colour authored on `TimeOfDaySettings` and exposed in the Sky Editor, rather than a code constant — matches how every other sky colour is authored. |
-| **v3+** | Volumetric light shafts through the aureole — gets its own design doc, and belongs with the `VX-*` backlog rather than here. |
+| Version | Extension                                                                                                                                                   |
+|---------|-------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **v2**  | Aureole colour authored on `TimeOfDaySettings` and exposed in the Sky Editor, rather than a code constant — matches how every other sky colour is authored. |
+| **v3+** | Volumetric light shafts through the aureole — gets its own design doc, and belongs with the `VX-*` backlog rather than here.                                |
 
 **Neutral tonemapping is deliberately absent from this table.** It is not a sun extension; §3.2
 Option B records why it gets its own design doc, and §1 lists it as a scope boundary. Nothing in

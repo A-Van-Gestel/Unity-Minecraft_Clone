@@ -125,7 +125,7 @@ The following call sites still use `Unity.Mathematics.noise.snoise` instead of `
 
 | File                                            | Usage                     | Priority                                        |
 |-------------------------------------------------|---------------------------|-------------------------------------------------|
-| `StandardChunkGenerationJob.cs` (line ~250-251) | Biome boundary dithering  | Low — 2D noise, fixed frequency, no seed needed  |
+| `StandardChunkGenerationJob.cs` (line ~250-251) | Biome boundary dithering  | Low — 2D noise, fixed frequency, no seed needed |
 | `BiomeBlender.cs` (line ~80)                    | Biome blend radius wiggle | Low — 2D noise, cosmetic, no seed needed        |
 | `WorldBlendingPreviewJob.cs` (line ~191)        | Editor preview wiggle     | Low — editor-only, mirrors `BiomeBlender`       |
 

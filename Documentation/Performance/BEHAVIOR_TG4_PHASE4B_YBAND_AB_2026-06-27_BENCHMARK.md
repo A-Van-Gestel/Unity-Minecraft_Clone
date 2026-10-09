@@ -43,41 +43,41 @@ peak active voxels`.
 
 ## Result — IL2CPP player, ms/tick over 150 per-run samples
 
-| Scenario          | Leg       | Chunks | PeakActive |      mean |       min | median |    stddev |       peak | µs/voxel |
+| Scenario          | Leg       | Chunks | PeakActive | mean      | min       | median | stddev    | peak       | µs/voxel |
 |-------------------|-----------|-------:|-----------:|----------:|----------:|-------:|----------:|-----------:|---------:|
-| Fluid-Small       | managed   |      1 |        836 |     0.650 |     0.588 |  0.642 |     0.044 |      2.130 |    0.703 |
-| Fluid-Small       | halo-full |      1 |        836 |     0.266 |     0.259 |  0.262 |     0.019 |      1.077 |    0.310 |
-| Fluid-Small       | halo-band |      1 |        836 | **0.256** | **0.248** |  0.251 |     0.021 |  **1.037** |    0.297 |
-| Fluid-Medium      | managed   |      1 |       3456 |     1.745 |     1.579 |  1.742 |     0.088 |      6.803 |    0.457 |
-| Fluid-Medium      | halo-full |      1 |       3456 |     0.554 |     0.547 |  0.552 |     0.009 |      2.129 |    0.158 |
-| Fluid-Medium      | halo-band |      1 |       3456 | **0.547** | **0.538** |  0.544 |     0.011 |  **2.002** |    0.156 |
-| Fluid-Large-4ch   | managed   |      4 |      13824 |     6.714 |     6.298 |  6.689 |     0.224 |     28.481 |    0.456 |
-| Fluid-Large-4ch   | halo-full |      4 |      13824 |     2.310 |     2.233 |  2.258 |     0.210 |     14.856 |    0.162 |
-| Fluid-Large-4ch   | halo-band |      4 |      13824 | **2.217** | **2.175** |  2.210 | **0.030** |  **8.089** |    0.157 |
-| Cave-Fill-Cascade | managed   |      1 |        712 |     0.723 |     0.640 |  0.709 |     0.058 |      2.408 |    0.899 |
-| Cave-Fill-Cascade | halo-full |      1 |        712 |     0.301 |     0.279 |  0.283 |     0.048 |      1.037 |    0.391 |
-| Cave-Fill-Cascade | halo-band |      1 |        712 | **0.292** | **0.267** |  0.271 |     0.056 |      1.205 |    0.375 |
-| **Ocean-25ch**    | managed   | **25** |  **17800** |    18.008 |    17.098 | 18.046 |     0.313 |     31.906 |    0.961 |
-| **Ocean-25ch**    | halo-full | **25** |  **17800** |     7.307 |     7.192 |  7.279 |     0.135 |     21.145 |    0.404 |
-| **Ocean-25ch**    | halo-band | **25** |  **17800** | **7.005** | **6.864** |  6.966 |     0.150 | **16.046** |    0.386 |
-| Grass-Field       | managed   |      1 |        144 |     0.007 |     0.006 |  0.007 |     0.000 |      0.085 |    0.044 |
-| Grass-Field       | halo-full |      1 |        144 |     0.007 |     0.006 |  0.006 |     0.001 |      0.159 |    0.044 |
-| Grass-Field       | halo-band |      1 |        144 |     0.006 |     0.006 |  0.006 |     0.000 |      0.084 |    0.044 |
-| Mixed-Lake+Grass  | managed   |      1 |        944 |     0.717 |     0.625 |  0.708 |     0.056 |      4.623 |    0.662 |
-| Mixed-Lake+Grass  | halo-full |      1 |        944 |     0.296 |     0.289 |  0.293 |     0.012 |      1.239 |    0.306 |
-| Mixed-Lake+Grass  | halo-band |      1 |        944 | **0.289** | **0.278** |  0.282 |     0.030 |  **1.093** |    0.294 |
+| Fluid-Small       | managed   | 1      | 836        | 0.650     | 0.588     | 0.642  | 0.044     | 2.130      | 0.703    |
+| Fluid-Small       | halo-full | 1      | 836        | 0.266     | 0.259     | 0.262  | 0.019     | 1.077      | 0.310    |
+| Fluid-Small       | halo-band | 1      | 836        | **0.256** | **0.248** | 0.251  | 0.021     | **1.037**  | 0.297    |
+| Fluid-Medium      | managed   | 1      | 3456       | 1.745     | 1.579     | 1.742  | 0.088     | 6.803      | 0.457    |
+| Fluid-Medium      | halo-full | 1      | 3456       | 0.554     | 0.547     | 0.552  | 0.009     | 2.129      | 0.158    |
+| Fluid-Medium      | halo-band | 1      | 3456       | **0.547** | **0.538** | 0.544  | 0.011     | **2.002**  | 0.156    |
+| Fluid-Large-4ch   | managed   | 4      | 13824      | 6.714     | 6.298     | 6.689  | 0.224     | 28.481     | 0.456    |
+| Fluid-Large-4ch   | halo-full | 4      | 13824      | 2.310     | 2.233     | 2.258  | 0.210     | 14.856     | 0.162    |
+| Fluid-Large-4ch   | halo-band | 4      | 13824      | **2.217** | **2.175** | 2.210  | **0.030** | **8.089**  | 0.157    |
+| Cave-Fill-Cascade | managed   | 1      | 712        | 0.723     | 0.640     | 0.709  | 0.058     | 2.408      | 0.899    |
+| Cave-Fill-Cascade | halo-full | 1      | 712        | 0.301     | 0.279     | 0.283  | 0.048     | 1.037      | 0.391    |
+| Cave-Fill-Cascade | halo-band | 1      | 712        | **0.292** | **0.267** | 0.271  | 0.056     | 1.205      | 0.375    |
+| **Ocean-25ch**    | managed   | **25** | **17800**  | 18.008    | 17.098    | 18.046 | 0.313     | 31.906     | 0.961    |
+| **Ocean-25ch**    | halo-full | **25** | **17800**  | 7.307     | 7.192     | 7.279  | 0.135     | 21.145     | 0.404    |
+| **Ocean-25ch**    | halo-band | **25** | **17800**  | **7.005** | **6.864** | 6.966  | 0.150     | **16.046** | 0.386    |
+| Grass-Field       | managed   | 1      | 144        | 0.007     | 0.006     | 0.007  | 0.000     | 0.085      | 0.044    |
+| Grass-Field       | halo-full | 1      | 144        | 0.007     | 0.006     | 0.006  | 0.001     | 0.159      | 0.044    |
+| Grass-Field       | halo-band | 1      | 144        | 0.006     | 0.006     | 0.006  | 0.000     | 0.084      | 0.044    |
+| Mixed-Lake+Grass  | managed   | 1      | 944        | 0.717     | 0.625     | 0.708  | 0.056     | 4.623      | 0.662    |
+| Mixed-Lake+Grass  | halo-full | 1      | 944        | 0.296     | 0.289     | 0.293  | 0.012     | 1.239      | 0.306    |
+| Mixed-Lake+Grass  | halo-band | 1      | 944        | **0.289** | **0.278** | 0.282  | 0.030     | **1.093**  | 0.294    |
 
 ## A/B delta — halo-band vs halo-full (the Y-band's contribution, same build)
 
-| Scenario            | min full → band  |  Δ min | peak full → band     |      Δ peak | stddev full → band             |
+| Scenario            | min full → band  | Δ min  | peak full → band     | Δ peak      | stddev full → band             |
 |---------------------|------------------|-------:|----------------------|------------:|--------------------------------|
-| Fluid-Small         | 0.259 → 0.248 ms | −4.2 % | 1.08 → 1.04 ms       |      −3.7 % | 0.019 → 0.021                  |
-| Fluid-Medium        | 0.547 → 0.538 ms | −1.6 % | 2.13 → 2.00 ms       |      −6.0 % | 0.009 → 0.011                  |
+| Fluid-Small         | 0.259 → 0.248 ms | −4.2 % | 1.08 → 1.04 ms       | −3.7 %      | 0.019 → 0.021                  |
+| Fluid-Medium        | 0.547 → 0.538 ms | −1.6 % | 2.13 → 2.00 ms       | −6.0 %      | 0.009 → 0.011                  |
 | **Fluid-Large-4ch** | 2.233 → 2.175 ms | −2.6 % | **14.86 → 8.09 ms**  | **−45.6 %** | **0.210 → 0.030 (7× tighter)** |
-| Cave-Fill-Cascade   | 0.279 → 0.267 ms | −4.3 % | 1.04 → 1.21 ms       |     +16 % ⚠ | 0.048 → 0.056                  |
+| Cave-Fill-Cascade   | 0.279 → 0.267 ms | −4.3 % | 1.04 → 1.21 ms       | +16 % ⚠     | 0.048 → 0.056                  |
 | **Ocean-25ch**      | 7.192 → 6.864 ms | −4.6 % | **21.15 → 16.05 ms** | **−24.1 %** | 0.135 → 0.150                  |
-| Mixed-Lake+Grass    | 0.289 → 0.278 ms | −3.8 % | 1.24 → 1.09 ms       |     −11.8 % | 0.012 → 0.030                  |
-| Grass-Field         | 0.006 → 0.006 ms |   ~0 ⟂ | 0.16 → 0.08 ms       |     (noise) | 0.001 → 0.000                  |
+| Mixed-Lake+Grass    | 0.289 → 0.278 ms | −3.8 % | 1.24 → 1.09 ms       | −11.8 %     | 0.012 → 0.030                  |
+| Grass-Field         | 0.006 → 0.006 ms | ~0 ⟂   | 0.16 → 0.08 ms       | (noise)     | 0.001 → 0.000                  |
 
 `⟂` Grass-Field is the **control** (no fluids → the band code never runs); the flat row confirms the sweep adds no
 noise of its own. `⚠` Cave-Fill peak +16 % is noise on a tiny scenario (712 voxels, sub-1.2 ms peaks); its floor still
@@ -98,15 +98,15 @@ faster than the old managed→halo win, not slower.
 suspended-basin flood, with per-frame Tick/Apply/Mesh/Light attribution. Two runs: band **off** (`Full-band` log =
 full-height halo) vs band **on** (`Y-band` log).
 
-| Flood phase (sustained avg)  | full-height (off) |      Y-band (on) |
+| Flood phase (sustained avg)  | full-height (off) | Y-band (on)      |
 |------------------------------|------------------:|-----------------:|
-| Frame ms                     |             9.264 |            9.337 |
-| Tick ms (share of frame)     |     0.082 (0.9 %) |    0.071 (0.8 %) |
-| Mesh ms                      |             1.235 |            1.305 |
-| **Light ms (share)**         |  **6.485 (70 %)** | **6.544 (70 %)** |
-| Worst frame ms (Light share) |   35.881 (56 % L) |  34.502 (58 % L) |
-| Tick peak (max single-frame) |            17.070 |           16.887 |
-| GC/frame peak (KB)           |              1260 |              996 |
+| Frame ms                     | 9.264             | 9.337            |
+| Tick ms (share of frame)     | 0.082 (0.9 %)     | 0.071 (0.8 %)    |
+| Mesh ms                      | 1.235             | 1.305            |
+| **Light ms (share)**         | **6.485 (70 %)**  | **6.544 (70 %)** |
+| Worst frame ms (Light share) | 35.881 (56 % L)   | 34.502 (58 % L)  |
+| Tick peak (max single-frame) | 17.070            | 16.887           |
+| GC/frame peak (KB)           | 1260              | 996              |
 
 **The band is frame-invisible in-game, as expected.** The sustained flood frame is **Light-dominated (70 %)** with the
 fluid tick already at **sub-1 %** (0.07–0.08 ms) — so the band's serial copy reduction has no room to move the frame.

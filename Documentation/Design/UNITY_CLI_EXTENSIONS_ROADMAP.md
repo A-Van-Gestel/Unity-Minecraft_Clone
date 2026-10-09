@@ -28,10 +28,10 @@ migration design.
 
 ## Legend
 
-| Field       | Values                                                                                                                                         |
-|-------------|------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Effort**  | 🟢 Low (hours, localized) · 🟡 Medium (days, several files) · 🔴 High (architectural, cross-system)                                            |
-| **Risk**    | 🟢 Low (isolated, easy to verify) · 🟡 Medium (touches shared state or visual output) · 🔴 High (touches pipeline invariants or semantics)     |
+| Field       | Values                                                                                                                                          |
+|-------------|-------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Effort**  | 🟢 Low (hours, localized) · 🟡 Medium (days, several files) · 🔴 High (architectural, cross-system)                                             |
+| **Risk**    | 🟢 Low (isolated, easy to verify) · 🟡 Medium (touches shared state or visual output) · 🔴 High (touches pipeline invariants or semantics)      |
 | **Benefit** | 🟢 Core — high value or unlocks other planned work · 🟡 Situational / polish · ⚪ Minor                                                         |
 | **Seed**    | ✅ Safe — cannot change generated terrain for a given seed · ⚠️ Terrain-affecting                                                               |
 | **Save**    | ✅ Safe — no on-disk format change · ⚠️ Format — requires a save-format version bump + AOT migration step (see `serialization-migration` skill) |
@@ -40,12 +40,12 @@ migration design.
 
 ## Master summary
 
-| ID       | Item                                                        | Effort | Risk | Benefit | Seed | Save | Status |
-|----------|-------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|--------|
-| **UC-5** | Confirm the Roslyn plugins are stripped from a release build |   🟢   |  🟢  |   🟡    |  ✅  |  ✅  | ✅ 2026-09-27 |
-| **UC-6** | Headless `Validate All` via `unity run --command` / `unity test` |   🟡   |  🟢  |   🟡    |  ✅  |  ✅  | —      |
-| **UC-7** | `--runtime` inspection of a Development player              |   🟡   |  🟡  |   ⚪    |  ✅  |  ✅  | —      |
-| **UC-8** | Re-run the Project Auditor report through `audit`           |   🟢   |  🟢  |   ⚪    |  ✅  |  ✅  | —      |
+| ID       | Item                                                             | Effort | Risk | Benefit | Seed | Save | Status        |
+|----------|------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|---------------|
+| **UC-5** | Confirm the Roslyn plugins are stripped from a release build     |   🟢   |  🟢  |   🟡    |  ✅  |  ✅  | ✅ 2026-09-27 |
+| **UC-6** | Headless `Validate All` via `unity run --command` / `unity test` |   🟡   |  🟢  |   🟡    |  ✅  |  ✅  | —             |
+| **UC-7** | `--runtime` inspection of a Development player                   |   🟡   |  🟡  |   ⚪    |  ✅  |  ✅  | —             |
+| **UC-8** | Re-run the Project Auditor report through `audit`                |   🟢   |  🟢  |   ⚪    |  ✅  |  ✅  | —             |
 
 ---
 

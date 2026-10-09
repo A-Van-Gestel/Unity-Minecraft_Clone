@@ -20,10 +20,10 @@ config** as the before baseline (156 chunks × 100 runs; upload phase Checkerboa
 
 | Metric                    | Before (60 B) | After (32 B) | Δ           |
 |---------------------------|--------------:|-------------:|-------------|
-| Vertex format             |   60 B/vertex |  32 B/vertex | −47 %       |
-| Vertex data per chunk     |      15.94 MB |      8.50 MB | −46.7 %     |
+| Vertex format             | 60 B/vertex   | 32 B/vertex  | −47 %       |
+| Vertex data per chunk     | 15.94 MB      | 8.50 MB      | −46.7 %     |
 | **Upload time per chunk** | **1576.0 µs** | **676.2 µs** | **−57.1 %** |
-| Vertex upload rate        |    10113 MB/s |   12571 MB/s | +24.3 %     |
+| Vertex upload rate        | 10113 MB/s    | 12571 MB/s   | +24.3 %     |
 
 The upload time fell **more** than the 32/60 byte ratio alone predicts (~840 µs). The smaller vertex
 stride also raised effective throughput by ~24 % (better cache/DMA behaviour per `SetVertexBufferData`),
@@ -38,13 +38,13 @@ patterns that is a large, free win:
 
 | Pattern                | Before (µs/chunk) | After (µs/chunk) | Δ          | Note                              |
 |------------------------|------------------:|-----------------:|------------|-----------------------------------|
-| `Solid`                |             272.4 |            272.4 | 0.0 %      | mostly culled — write volume tiny |
-| `Checkerboard`         |            4365.4 |           3256.4 | −25.4 %    | max faces → write-bandwidth bound |
-| `OrientedCubes`        |             278.9 |            266.0 | −4.6 %     |                                   |
-| `OrientedCheckerboard` |            4378.2 |           3214.7 | −26.6 %    |                                   |
-| `Fluid`                |            1147.4 |           1221.2 | **+6.4 %** | ⚠ see below                       |
-| `Transparent`          |            5067.3 |           3737.2 | −26.2 %    |                                   |
-| `MixedTerrain`         |            2330.1 |           1621.8 | −30.4 %    |                                   |
+| `Solid`                | 272.4             | 272.4            | 0.0 %      | mostly culled — write volume tiny |
+| `Checkerboard`         | 4365.4            | 3256.4           | −25.4 %    | max faces → write-bandwidth bound |
+| `OrientedCubes`        | 278.9             | 266.0            | −4.6 %     |                                   |
+| `OrientedCheckerboard` | 4378.2            | 3214.7           | −26.6 %    |                                   |
+| `Fluid`                | 1147.4            | 1221.2           | **+6.4 %** | ⚠ see below                       |
+| `Transparent`          | 5067.3            | 3737.2           | −26.2 %    |                                   |
+| `MixedTerrain`         | 2330.1            | 1621.8           | −30.4 %    |                                   |
 
 **⚠ Fluid +6.4 % — over the 5 % "must not regress" budget, accepted.** Unlike the standard-cube path
 (whose UVs come from a cheap atlas lookup in `AddTexture`), the fluid mesher *computes* every UV

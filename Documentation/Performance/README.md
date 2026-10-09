@@ -4,10 +4,10 @@ Versioned performance numbers, captured against a specific commit on a specific 
 
 ## Two kinds of file live here
 
-| Kind | Suffix | What it is | Count |
-|------|--------|------------|-------|
-| **Baseline** | `*_BASELINE.md` | A "before" number for a system, captured so a later refactor can be shown not to regress it. Has a regression budget. | 5 |
-| **Benchmark / A-B capture** | `*_BENCHMARK.md` | A measurement taken to answer a question — usually "is this change worth shipping?" — ending in an explicit **GO / NO-GO** verdict, or in a **regime verdict** for instrumentation captures that ship no behavior change. | 26 |
+| Kind                        | Suffix           | What it is                                                                                                                                                                                                                | Count |
+|-----------------------------|------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------|
+| **Baseline**                | `*_BASELINE.md`  | A "before" number for a system, captured so a later refactor can be shown not to regress it. Has a regression budget.                                                                                                     | 5     |
+| **Benchmark / A-B capture** | `*_BENCHMARK.md` | A measurement taken to answer a question — usually "is this change worth shipping?" — ending in an explicit **GO / NO-GO** verdict, or in a **regime verdict** for instrumentation captures that ship no behavior change. | 26    |
 
 Baselines came first and the folder was originally named for them; A/B captures are now the large majority. The protocol below covers both, and the `perf-benchmark` skill owns the workflow.
 
@@ -36,74 +36,74 @@ Newest first within each arc. **Superseded** means a later capture withdrew or c
 
 ### Build configuration
 
-| Capture | Date | Status |
-|---------|------|--------|
+| Capture                                                                               | Date       | Status                                                                                                                                                                                                                                                                                                                                                                                                                          |
+|---------------------------------------------------------------------------------------|------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | [`BUILD_LEAN_PROD_IL2CPP_2026-08-15`](BUILD_LEAN_PROD_IL2CPP_2026-08-15_BENCHMARK.md) | 2026-08-15 | **GO — on build time, not runtime.** MethodOnly stacktraces + Medium stripping + Resources cleanup: build **−49 %** (~15m → 7m42s), frame-time **neutral** (mixed-sign ~1 % deltas at n = 1), all ten FP regime verdicts identical. Reserved memory consistently down; managed heap up ~2–3 % logged as a watch item. **Its "before" leg carries the pre-stamp header bug — read the ⚠ note before comparing the two headers.** |
 
 ### Chunk pipeline — FP-\* flight-profile telemetry
 
-| Capture | Date | Status |
-|---------|------|--------|
+| Capture                                                                                                   | Date       | Status                                                                                                                                                                                                                                                                                                                                                            |
+|-----------------------------------------------------------------------------------------------------------|------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | [`CHUNK_PIPELINE_FP10_..._2026-08-01`](CHUNK_PIPELINE_FP10_FLIGHT_PROFILE_IL2CPP_2026-08-01_BENCHMARK.md) | 2026-08-01 | **Current.** Six-point sweep (vd 5–32), first on FP-9b's derived route. Reproduces FP-8; supplies P-8's mechanism. **F2's inference is corrected by the P-8 capture** — admitted work was held down by a throughput ceiling, not by the gate's willingness to accept; and its high-vd rows are not a valid baseline for builds carrying FP-11a. Raw counts stand. |
-| [`CHUNK_PIPELINE_FP8_..._2026-07-31`](CHUNK_PIPELINE_FP8_FLIGHT_PROFILE_IL2CPP_2026-07-31_BENCHMARK.md) | 2026-07-31 | **Superseded for the verdict by FP-10**, but still live as FP-10's comparison baseline. Ran the pre-FP-9b route, so its values are not continued. First Release-build capture; first under §7.1 v2. |
-| [`CHUNK_PIPELINE_FP4_..._2026-07-28`](CHUNK_PIPELINE_FP4_FLIGHT_PROFILE_IL2CPP_2026-07-28_BENCHMARK.md) | 2026-07-28 | **Superseded by FP-8** — scored under §7.1 v1, which counted never-admitted requests as waste and inverted the ordering trend. Its raw counts are the input to FP-8's rescoring. |
+| [`CHUNK_PIPELINE_FP8_..._2026-07-31`](CHUNK_PIPELINE_FP8_FLIGHT_PROFILE_IL2CPP_2026-07-31_BENCHMARK.md)   | 2026-07-31 | **Superseded for the verdict by FP-10**, but still live as FP-10's comparison baseline. Ran the pre-FP-9b route, so its values are not continued. First Release-build capture; first under §7.1 v2.                                                                                                                                                               |
+| [`CHUNK_PIPELINE_FP4_..._2026-07-28`](CHUNK_PIPELINE_FP4_FLIGHT_PROFILE_IL2CPP_2026-07-28_BENCHMARK.md)   | 2026-07-28 | **Superseded by FP-8** — scored under §7.1 v1, which counted never-admitted requests as waste and inverted the ordering trend. Its raw counts are the input to FP-8's rescoring.                                                                                                                                                                                  |
 
 ### Chunk pipeline — P-8 admission-gate scaling
 
-| Capture | Date | Status |
-|---------|------|--------|
+| Capture                                                                                                             | Date       | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+|---------------------------------------------------------------------------------------------------------------------|------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | [`CHUNK_PIPELINE_P8_GATE_SCALING_IL2CPP_2026-08-01`](CHUNK_PIPELINE_P8_GATE_SCALING_IL2CPP_2026-08-01_BENCHMARK.md) | 2026-08-01 | **Current, and a NO-GO.** Ten runs on one build: seven residency-scaled view distances (5–32) plus **same-build unscaled controls** at vd 8/26/32. Refutes the fix FP-8/FP-10 ranked #1 — the backlog grows to meet whatever threshold it is given, so a 4.2× threshold moved gate closure 0.1 pt at vd 32 while completions fell 16 % and loading min FPS fell ~⅓. Identifies schedule `Quota` as the binding constraint. **Also establishes that FP-10 is no longer a valid high-vd baseline for the FP-11a build** — read its §F5 before comparing anything against FP-10 at vd ≥ 20. |
 
 ### Chunk pipeline — P-4 backpressure
 
-| Capture | Date | Status |
-|---------|------|--------|
-| [`CHUNK_PIPELINE_P4_CEILING_SCALING_IL2CPP_2026-07-23`](CHUNK_PIPELINE_P4_CEILING_SCALING_IL2CPP_2026-07-23_BENCHMARK.md) | 2026-07-23 | **GO (final)** — FPS-cap-proportional ceiling refinement. |
-| [`CHUNK_PIPELINE_P4_BACKPRESSURE_IL2CPP_2026-07-23`](CHUNK_PIPELINE_P4_BACKPRESSURE_IL2CPP_2026-07-23_BENCHMARK.md) | 2026-07-23 | **GO (final)** — confirms the screening capture on the shippable backend. |
-| [`CHUNK_PIPELINE_P4_BACKPRESSURE_2026-07-23`](CHUNK_PIPELINE_P4_BACKPRESSURE_2026-07-23_BENCHMARK.md) | 2026-07-23 | **GO (screening)** — editor Mono; superseded as a shipping result by the IL2CPP capture above, kept as the screening leg. |
+| Capture                                                                                                                   | Date       | Status                                                                                                                    |
+|---------------------------------------------------------------------------------------------------------------------------|------------|---------------------------------------------------------------------------------------------------------------------------|
+| [`CHUNK_PIPELINE_P4_CEILING_SCALING_IL2CPP_2026-07-23`](CHUNK_PIPELINE_P4_CEILING_SCALING_IL2CPP_2026-07-23_BENCHMARK.md) | 2026-07-23 | **GO (final)** — FPS-cap-proportional ceiling refinement.                                                                 |
+| [`CHUNK_PIPELINE_P4_BACKPRESSURE_IL2CPP_2026-07-23`](CHUNK_PIPELINE_P4_BACKPRESSURE_IL2CPP_2026-07-23_BENCHMARK.md)       | 2026-07-23 | **GO (final)** — confirms the screening capture on the shippable backend.                                                 |
+| [`CHUNK_PIPELINE_P4_BACKPRESSURE_2026-07-23`](CHUNK_PIPELINE_P4_BACKPRESSURE_2026-07-23_BENCHMARK.md)                     | 2026-07-23 | **GO (screening)** — editor Mono; superseded as a shipping result by the IL2CPP capture above, kept as the screening leg. |
 
 ### Lighting — LI-\* banded gather, P-2 storage
 
-| Capture | Date | Status |
-|---------|------|--------|
-| [`LIGHTING_LI2B_INGAME_IL2CPP_2026-07-11`](LIGHTING_LI2B_INGAME_IL2CPP_2026-07-11_BENCHMARK.md) | 2026-07-11 | **GO — ships default-on** (bottom band; frame-neutral in-game, priced in). |
-| [`LIGHTING_LI2B_BOTTOM_BAND_2026-07-11`](LIGHTING_LI2B_BOTTOM_BAND_2026-07-11_BENCHMARK.md) | 2026-07-11 | GO pending IL2CPP — the screening leg for the above. |
-| [`LIGHTING_LI2_INGAME_IL2CPP_2026-07-11`](LIGHTING_LI2_INGAME_IL2CPP_2026-07-11_BENCHMARK.md) | 2026-07-11 | **GO — ships default-on.** Sustained in-game frame win, not merely "not slower". |
-| [`LIGHTING_LI2_2026-07-11`](LIGHTING_LI2_2026-07-11_BENCHMARK.md) | 2026-07-11 | GO pending IL2CPP — the screening leg for the above. |
-| [`LIGHTING_P2_PHASE1_2026_06_22`](LIGHTING_P2_PHASE1_2026_06_22_BENCHMARK.md) | 2026-06-22 | Phase 1 acceptance gate **MET** — and this is what **flips LI-1 from NO-GO to GO**. |
-| [`LIGHTING_LI1_2026_06_22`](LIGHTING_LI1_2026_06_22_BENCHMARK.md) | 2026-06-21/22 | **NO-GO standalone** (gather-bound), folded into P-2 rather than dropped. Read with the file above. |
-| [`LIGHTING_RGB_PHASE2_BASELINE`](LIGHTING_RGB_PHASE2_BASELINE.md) | 2026-06-06 | Baseline. |
+| Capture                                                                                         | Date          | Status                                                                                              |
+|-------------------------------------------------------------------------------------------------|---------------|-----------------------------------------------------------------------------------------------------|
+| [`LIGHTING_LI2B_INGAME_IL2CPP_2026-07-11`](LIGHTING_LI2B_INGAME_IL2CPP_2026-07-11_BENCHMARK.md) | 2026-07-11    | **GO — ships default-on** (bottom band; frame-neutral in-game, priced in).                          |
+| [`LIGHTING_LI2B_BOTTOM_BAND_2026-07-11`](LIGHTING_LI2B_BOTTOM_BAND_2026-07-11_BENCHMARK.md)     | 2026-07-11    | GO pending IL2CPP — the screening leg for the above.                                                |
+| [`LIGHTING_LI2_INGAME_IL2CPP_2026-07-11`](LIGHTING_LI2_INGAME_IL2CPP_2026-07-11_BENCHMARK.md)   | 2026-07-11    | **GO — ships default-on.** Sustained in-game frame win, not merely "not slower".                    |
+| [`LIGHTING_LI2_2026-07-11`](LIGHTING_LI2_2026-07-11_BENCHMARK.md)                               | 2026-07-11    | GO pending IL2CPP — the screening leg for the above.                                                |
+| [`LIGHTING_P2_PHASE1_2026_06_22`](LIGHTING_P2_PHASE1_2026_06_22_BENCHMARK.md)                   | 2026-06-22    | Phase 1 acceptance gate **MET** — and this is what **flips LI-1 from NO-GO to GO**.                 |
+| [`LIGHTING_LI1_2026_06_22`](LIGHTING_LI1_2026_06_22_BENCHMARK.md)                               | 2026-06-21/22 | **NO-GO standalone** (gather-bound), folded into P-2 rather than dropped. Read with the file above. |
+| [`LIGHTING_RGB_PHASE2_BASELINE`](LIGHTING_RGB_PHASE2_BASELINE.md)                               | 2026-06-06    | Baseline.                                                                                           |
 
 ### Behavior / fluids — TG-4
 
-| Capture | Date | Status |
-|---------|------|--------|
-| [`BEHAVIOR_TG4_PHASE4B_YBAND_AB_2026-06-27`](BEHAVIOR_TG4_PHASE4B_YBAND_AB_2026-06-27_BENCHMARK.md) | 2026-06-27 | **GO** — free, byte-identical serial tick win; collapses the large-flood tail. |
-| [`BEHAVIOR_TG4_PHASE4B_HALO_AB_2026-06-24`](BEHAVIOR_TG4_PHASE4B_HALO_AB_2026-06-24_BENCHMARK.md) | 2026-06-24 | **GO** — full-height halo is a net serial win, not a cost. |
-| [`BEHAVIOR_TG4_FULLWORLD_FLUID_PARALLEL_2026-06-24`](BEHAVIOR_TG4_FULLWORLD_FLUID_PARALLEL_2026-06-24_BENCHMARK.md) | 2026-06-24 | P4a correct, win real but marginal (~6.6 ms off the dam-break spike). |
-| [`BEHAVIOR_TG4_FULLWORLD_FLUID_2026_06_23`](BEHAVIOR_TG4_FULLWORLD_FLUID_2026_06_23_BENCHMARK.md) | 2026-06-23 | Attribution gate — mesh-rebuild dominance **refuted**; the behavior tick owns the spike. |
-| [`BEHAVIOR_TG4_FLUID_TICK_2026_06_23`](BEHAVIOR_TG4_FLUID_TICK_2026_06_23_BENCHMARK.md) | 2026-06-23 | Profile gate — resolves toward TG-4's parallel direction for fluid. |
-| [`SEAM_WAKE_FLUID19_2026-07-27`](SEAM_WAKE_FLUID19_2026-07-27_BENCHMARK.md) | 2026-07-27 | **GO (screening)** for the pair-walk gate; ocean seam cost recorded, **not** gated — needs an IL2CPP fill-load capture. |
+| Capture                                                                                                             | Date       | Status                                                                                                                  |
+|---------------------------------------------------------------------------------------------------------------------|------------|-------------------------------------------------------------------------------------------------------------------------|
+| [`BEHAVIOR_TG4_PHASE4B_YBAND_AB_2026-06-27`](BEHAVIOR_TG4_PHASE4B_YBAND_AB_2026-06-27_BENCHMARK.md)                 | 2026-06-27 | **GO** — free, byte-identical serial tick win; collapses the large-flood tail.                                          |
+| [`BEHAVIOR_TG4_PHASE4B_HALO_AB_2026-06-24`](BEHAVIOR_TG4_PHASE4B_HALO_AB_2026-06-24_BENCHMARK.md)                   | 2026-06-24 | **GO** — full-height halo is a net serial win, not a cost.                                                              |
+| [`BEHAVIOR_TG4_FULLWORLD_FLUID_PARALLEL_2026-06-24`](BEHAVIOR_TG4_FULLWORLD_FLUID_PARALLEL_2026-06-24_BENCHMARK.md) | 2026-06-24 | P4a correct, win real but marginal (~6.6 ms off the dam-break spike).                                                   |
+| [`BEHAVIOR_TG4_FULLWORLD_FLUID_2026_06_23`](BEHAVIOR_TG4_FULLWORLD_FLUID_2026_06_23_BENCHMARK.md)                   | 2026-06-23 | Attribution gate — mesh-rebuild dominance **refuted**; the behavior tick owns the spike.                                |
+| [`BEHAVIOR_TG4_FLUID_TICK_2026_06_23`](BEHAVIOR_TG4_FLUID_TICK_2026_06_23_BENCHMARK.md)                             | 2026-06-23 | Profile gate — resolves toward TG-4's parallel direction for fluid.                                                     |
+| [`SEAM_WAKE_FLUID19_2026-07-27`](SEAM_WAKE_FLUID19_2026-07-27_BENCHMARK.md)                                         | 2026-07-27 | **GO (screening)** for the pair-walk gate; ocean seam cost recorded, **not** gated — needs an IL2CPP fill-load capture. |
 
 ### Chunk lifecycle — ES-\* engine scaling
 
-| Capture | Date | Status |
-|---------|------|--------|
+| Capture                                                                                                                   | Date       | Status                                                                                                                                                                                                                                                                                                                                                                                                                   |
+|---------------------------------------------------------------------------------------------------------------------------|------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | [`ENGINE_SCALING_ES0_GC_ATTRIBUTION_IL2CPP_2026-10-03`](ENGINE_SCALING_ES0_GC_ATTRIBUTION_IL2CPP_2026-10-03_BENCHMARK.md) | 2026-10-03 | **Current — attribution capture, no behavior change.** GC.Alloc call stacks over the 200 m/s phase in an IL2CPP Development (Master) player: 127.4 KB per generated chunk, 100 % attributed; 77 % is `BinaryWriter.Write(ReadOnlySpan<byte>)` copying section arrays in `ChunkSerializer.WriteSection` (ES-26), 82 % the unload save path, 80 % on ThreadPool threads. The baseline ES-26/ES-27/ES-9 are scored against. |
-| [`CHUNK_LIFECYCLE_ES6_1_RESCAN_PRICE_2026-10-02`](CHUNK_LIFECYCLE_ES6_1_RESCAN_PRICE_2026-10-02_BENCHMARK.md) | 2026-10-02 | **GO (screening)** for ES-6.1 steps 2–3 — the shipped `OnDataPopulated` rescan costs 1.56 / 1.76 ms per vd-32 crossing on land (first view / re-entry) and 42.8 / 20.1 ms on flooded chunks in the Editor, above the 0.5 ms bar on every leg. |
+| [`CHUNK_LIFECYCLE_ES6_1_RESCAN_PRICE_2026-10-02`](CHUNK_LIFECYCLE_ES6_1_RESCAN_PRICE_2026-10-02_BENCHMARK.md)             | 2026-10-02 | **GO (screening)** for ES-6.1 steps 2–3 — the shipped `OnDataPopulated` rescan costs 1.56 / 1.76 ms per vd-32 crossing on land (first view / re-entry) and 42.8 / 20.1 ms on flooded chunks in the Editor, above the 0.5 ms bar on every leg.                                                                                                                                                                            |
 
 ### Meshing — MR-\*
 
-| Capture | Date | Status |
-|---------|------|--------|
-| [`MESHING_MR6_2026_06_20_AFTER_BASELINE`](MESHING_MR6_2026_06_20_AFTER_BASELINE.md) | 2026-06-20 | After MR-6 pooling. |
+| Capture                                                                             | Date       | Status                                   |
+|-------------------------------------------------------------------------------------|------------|------------------------------------------|
+| [`MESHING_MR6_2026_06_20_AFTER_BASELINE`](MESHING_MR6_2026_06_20_AFTER_BASELINE.md) | 2026-06-20 | After MR-6 pooling.                      |
 | [`MESHING_MR2_2026_06_20_AFTER_BASELINE`](MESHING_MR2_2026_06_20_AFTER_BASELINE.md) | 2026-06-20 | After MR-2 vertex packing (60 B → 32 B). |
-| [`MESHING_MR2_2026_06_19_BASELINE`](MESHING_MR2_2026_06_19_BASELINE.md) | 2026-06-19 | The "before" for the pair above. |
+| [`MESHING_MR2_2026_06_19_BASELINE`](MESHING_MR2_2026_06_19_BASELINE.md)             | 2026-06-19 | The "before" for the pair above.         |
 
 ### Project-wide
 
-| Capture | Date | Status |
-|---------|------|--------|
+| Capture                                     | Date       | Status                                                            |
+|---------------------------------------------|------------|-------------------------------------------------------------------|
 | [`PHASE_02_BASELINE`](PHASE_02_BASELINE.md) | 2026-04-25 | Oldest capture in the folder; per-block-metadata-schemas Phase 2. |
 
 ## How to use a baseline
@@ -138,10 +138,10 @@ running player: git state is absent from a build, and no runtime managed API exp
 **Captures taken before this date carry two false header lines in player builds, and must be read
 with that in mind:**
 
-| Header line | What it printed | Why |
-|---|---|---|
+| Header line      | What it printed   | Why                                                                                                                                                                                                                                                                    |
+|------------------|-------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `Safety checks:` | `Enabled`, always | Read `BurstCompiler.Options.EnableBurstSafetyChecks`, which Burst documents as editor-only ("Does not have an impact on player mode") and whose constructor hardcodes `true`. Player AOT code was in fact compiled with the project's setting — safety checks **off**. |
-| `Configuration:` | `Release`, always | Derived from `Debug.isDebugBuild`, which only distinguishes Development from non-Development and cannot see the IL2CPP compiler configuration. Master and Release both printed `Release`. |
+| `Configuration:` | `Release`, always | Derived from `Debug.isDebugBuild`, which only distinguishes Development from non-Development and cannot see the IL2CPP compiler configuration. Master and Release both printed `Release`.                                                                              |
 
 Those captures' **measurements remain valid** — they always ran the real production configuration;
 only the header misdescribed it. Per the append-only rule the affected files are left untouched. But
@@ -155,11 +155,11 @@ Player Setting (`Debug` / `Checked` / `Instrumented` / `Release`), settable **pe
 
 This is a capture-comparability axis, not just a project setting. Measured on 6000.6.0f1:
 
-| variant | dev build | `UNITY_ENABLE_CHECKS` | `UNITY_INCLUDE_INSTRUMENTATION` | `ENABLE_PROFILER` |
-|---|---|---|---|---|
-| Checked | Y / N | ✓ / ✓ | ✓ / ✓ | ✓ / ✓ |
-| Instrumented | Y / N | – / – | ✓ / ✓ | ✓ / ✓ |
-| **Release** (default) | **Y** / N | – / – | **–** / – | ✓ / – |
+| variant               | dev build | `UNITY_ENABLE_CHECKS` | `UNITY_INCLUDE_INSTRUMENTATION` | `ENABLE_PROFILER` |
+|-----------------------|-----------|-----------------------|---------------------------------|-------------------|
+| Checked               | Y / N     | ✓ / ✓                 | ✓ / ✓                           | ✓ / ✓             |
+| Instrumented          | Y / N     | – / –                 | ✓ / ✓                           | ✓ / ✓             |
+| **Release** (default) | **Y** / N | – / –                 | **–** / –                       | ✓ / –             |
 
 > **✅ Resolved 2026-09-01 — the manual is wrong for 6000.6.0f1; the table above stands.** Unity's
 > 6.6 manual

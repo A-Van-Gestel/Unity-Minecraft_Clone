@@ -141,10 +141,10 @@ coordinates, and two 13-byte-entry light queues after the sections - and **the e
 Both fields were added during the world-v1 era without a version bump, so world version 1 covers at least two
 incompatible on-disk chunk layouts that are indistinguishable by their version byte:
 
-| Layout | Header | Trailer | Example payload | Compression |
-|---|---|---|---|---|
-| early v1 (pre-`a951b788`) | no `needsLight` | no light queues | 131,365 B | Deflate |
-| common v1 (post-`d0a015d8`) | `needsLight` | two queues | 131,374 B | LZ4 |
+| Layout                      | Header          | Trailer         | Example payload | Compression |
+|-----------------------------|-----------------|-----------------|-----------------|-------------|
+| early v1 (pre-`a951b788`)   | no `needsLight` | no light queues | 131,365 B       | Deflate     |
+| common v1 (post-`d0a015d8`) | `needsLight`    | two queues      | 131,374 B       | LZ4         |
 
 Reading a 9-byte header where the payload has 8 shifts everything after it by one byte, so the section bitmask is
 read out of the middle of section 0 and the parse runs off the end of the stream.

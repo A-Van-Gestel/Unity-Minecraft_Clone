@@ -1,13 +1,13 @@
 # FP-8 — Flight-Profile Capture (Pipeline Telemetry), IL2CPP **Release** — five-point view-distance sweep
 
-| Field           | Value                                                                                                                                                                                                                                                                                                     |
-|-----------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Captured**    | 2026-07-31 22:10:00 (vd 5), 22:20:07 (vd 8), 22:15:16 (vd 10), 22:24:20 (vd 15), 22:29:15 (vd 20)                                                                                                                                                                                                          |
-| **Branch**      | `feat/world-scaling`                                                                                                                                                                                                                                                                                      |
-| **Commit**      | **`4302b174`** ("Added: FP-7 report integrity banners…", 2026-07-31 21:52) — the last commit before every run. All five runs share build GUID `f4808cbe802345b4bb266e815af77641`, so they are **one build**, produced between 21:52 and 22:10.                                                              |
-| **Captured by** | `BenchmarkController` — **IL2CPP *Release* Build, Player, Burst on**. Five runs at **viewDistance 5 / 8 / 10 / 15 / 20**, same build, same machine, one session per run. i9-9900K / 16 threads / 64 GB / D3D11.                                                                                             |
-| **Design doc**  | [`Design/FLIGHT_PROFILE_CAPTURE.md`](../Design/FLIGHT_PROFILE_CAPTURE.md) v1.11 — this report is FP-8                                                                                                                                                                                                      |
-| **Rule**        | **§7.1 v2** (participation-weighted plurality; ordering axis at waste ≥ 20 % of *admitted* terminal traces, min 30). **Not comparable to FP-4**, which ran §7.1 v1 — see "Relationship to FP-4".                                                                                                            |
+| Field           | Value                                                                                                                                                                                                                                                                                                                                                                            |
+|-----------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Captured**    | 2026-07-31 22:10:00 (vd 5), 22:20:07 (vd 8), 22:15:16 (vd 10), 22:24:20 (vd 15), 22:29:15 (vd 20)                                                                                                                                                                                                                                                                                |
+| **Branch**      | `feat/world-scaling`                                                                                                                                                                                                                                                                                                                                                             |
+| **Commit**      | **`4302b174`** ("Added: FP-7 report integrity banners…", 2026-07-31 21:52) — the last commit before every run. All five runs share build GUID `f4808cbe802345b4bb266e815af77641`, so they are **one build**, produced between 21:52 and 22:10.                                                                                                                                   |
+| **Captured by** | `BenchmarkController` — **IL2CPP *Release* Build, Player, Burst on**. Five runs at **viewDistance 5 / 8 / 10 / 15 / 20**, same build, same machine, one session per run. i9-9900K / 16 threads / 64 GB / D3D11.                                                                                                                                                                  |
+| **Design doc**  | [`Design/FLIGHT_PROFILE_CAPTURE.md`](../Design/FLIGHT_PROFILE_CAPTURE.md) v1.11 — this report is FP-8                                                                                                                                                                                                                                                                            |
+| **Rule**        | **§7.1 v2** (participation-weighted plurality; ordering axis at waste ≥ 20 % of *admitted* terminal traces, min 30). **Not comparable to FP-4**, which ran §7.1 v1 — see "Relationship to FP-4".                                                                                                                                                                                 |
 | **Verdict**     | **ORDERING-BOUND is a LOW-view-distance phenomenon, not a universal one** — it fires on all three loading speeds at the default vd 5 (33–38 %) and fades to absent by vd 20 (12.7–14.6 %). **ADMISSION-BOUND from vd ≥ 8** and dominant from vd ≥ 10. Never readiness-bound. Throughput-bound once, on a 14-frame phase that should not have produced a verdict at all (see D1). |
 
 > **GO/NO-GO does not apply.** FP ships no behavior change (design §1 non-goals, §9 limitation 6); the
@@ -34,13 +34,13 @@ as view distance rises, the correction is largest exactly where FP-4's signal wa
 
 **Loading pass @ 200 m/s** — the same raw counts, scored both ways:
 
-| vd | abandoned | v1 waste (abandoned counted) | **v2 waste (correct)** |
-|----|-----------|------------------------------|------------------------|
-| 5  | 1         | 37.8 %                       | **37.8 %**             |
-| 8  | 550       | 41.4 %                       | **38.0 %**             |
-| 10 | 2 004     | 47.1 %                       | **36.2 %**             |
-| 15 | 6 915     | 53.0 %                       | **19.8 %**             |
-| 20 | 12 087    | 62.2 %                       | **14.6 %**             |
+| vd  | abandoned | v1 waste (abandoned counted) | **v2 waste (correct)** |
+|-----|-----------|------------------------------|------------------------|
+| 5   | 1         | 37.8 %                       | **37.8 %**             |
+| 8   | 550       | 41.4 %                       | **38.0 %**             |
+| 10  | 2 004     | 47.1 %                       | **36.2 %**             |
+| 15  | 6 915     | 53.0 %                       | **19.8 %**             |
+| 20  | 12 087    | 62.2 %                       | **14.6 %**             |
 
 The v1 column rises monotonically and peaks at 62.2 %, reproducing FP-4's reported 61.2 % high-water mark on
 a different build — good corroboration that the two captures agree on the underlying counts. The v2 column
@@ -78,33 +78,33 @@ is comparable. See D2.
 
 **50 m/s**
 
-| vd | frames  | gate closed | started | MeshApplied | Unloaded | Abandoned | InFlight | **waste** | p50 e2e | verdict          |
-|----|---------|-------------|---------|-------------|----------|-----------|----------|-----------|---------|------------------|
-| 5  | 17 803  | 0.4 %       | 2 178   | 1 323       | 722      | 0         | 133      | **33.1 %**| 1 379 ms| Healthy + ORD    |
-| 8  | 20 933  | 1.3 %       | 3 038   | 2 112       | 757      | 0         | 169      | **24.9 %**| 1 388 ms| Healthy + ORD    |
-| 10 | 12 129  | 4.4 %       | 3 758   | 2 701       | 808      | 56        | 193      | **21.8 %**| 1 403 ms| Healthy + ORD    |
-| 15 | 8 958   | 15.5 %      | 5 628   | 4 144       | 783      | 423       | 278      | **15.0 %**| 1 441 ms| Healthy          |
-| 20 | 2 190   | 37.9 %      | 7 059   | 4 828       | 746      | 1 165     | 320      | **12.7 %**| 1 982 ms| Healthy          |
+| vd  | frames | gate closed | started | MeshApplied | Unloaded | Abandoned | InFlight | **waste**  | p50 e2e  | verdict       |
+|-----|--------|-------------|---------|-------------|----------|-----------|----------|------------|----------|---------------|
+| 5   | 17 803 | 0.4 %       | 2 178   | 1 323       | 722      | 0         | 133      | **33.1 %** | 1 379 ms | Healthy + ORD |
+| 8   | 20 933 | 1.3 %       | 3 038   | 2 112       | 757      | 0         | 169      | **24.9 %** | 1 388 ms | Healthy + ORD |
+| 10  | 12 129 | 4.4 %       | 3 758   | 2 701       | 808      | 56        | 193      | **21.8 %** | 1 403 ms | Healthy + ORD |
+| 15  | 8 958  | 15.5 %      | 5 628   | 4 144       | 783      | 423       | 278      | **15.0 %** | 1 441 ms | Healthy       |
+| 20  | 2 190  | 37.9 %      | 7 059   | 4 828       | 746      | 1 165     | 320      | **12.7 %** | 1 982 ms | Healthy       |
 
 **100 m/s**
 
-| vd | frames  | gate closed | started | MeshApplied | Unloaded | Abandoned | InFlight | **waste** | p50 e2e | verdict          |
-|----|---------|-------------|---------|-------------|----------|-----------|----------|-----------|---------|------------------|
-| 5  | 14 308  | 0.0 %       | 3 790   | 2 319       | 1 338    | 0         | 133      | **35.3 %**| 692 ms  | Healthy + ORD    |
-| 8  | 16 591  | 0.0 %       | 5 194   | 3 633       | 1 380    | 12        | 169      | **26.6 %**| 700 ms  | Healthy + ORD    |
-| 10 | 9 208   | 0.0 %       | 6 161   | 4 375       | 1 433    | 20        | 333      | **23.3 %**| 711 ms  | Healthy + ORD    |
-| 15 | 6 651   | 52.0 %      | 8 059   | 5 482       | 1 544    | 626       | 407      | **20.8 %**| 822 ms  | Healthy + ORD    |
-| 20 | 1 452   | 77.5 %      | 9 962   | 5 711       | 1 137    | 2 061     | 1 053    | **14.4 %**| 2 207 ms| AdmissionBound   |
+| vd  | frames | gate closed | started | MeshApplied | Unloaded | Abandoned | InFlight | **waste**  | p50 e2e  | verdict        |
+|-----|--------|-------------|---------|-------------|----------|-----------|----------|------------|----------|----------------|
+| 5   | 14 308 | 0.0 %       | 3 790   | 2 319       | 1 338    | 0         | 133      | **35.3 %** | 692 ms   | Healthy + ORD  |
+| 8   | 16 591 | 0.0 %       | 5 194   | 3 633       | 1 380    | 12        | 169      | **26.6 %** | 700 ms   | Healthy + ORD  |
+| 10  | 9 208  | 0.0 %       | 6 161   | 4 375       | 1 433    | 20        | 333      | **23.3 %** | 711 ms   | Healthy + ORD  |
+| 15  | 6 651  | 52.0 %      | 8 059   | 5 482       | 1 544    | 626       | 407      | **20.8 %** | 822 ms   | Healthy + ORD  |
+| 20  | 1 452  | 77.5 %      | 9 962   | 5 711       | 1 137    | 2 061     | 1 053    | **14.4 %** | 2 207 ms | AdmissionBound |
 
 **200 m/s**
 
-| vd | frames  | gate closed | started | MeshApplied | Unloaded | Abandoned | InFlight | **waste** | p50 e2e | verdict              |
-|----|---------|-------------|---------|-------------|----------|-----------|----------|-----------|---------|----------------------|
-| 5  | 11 038  | 0.0 %       | 7 263   | 4 381       | 2 744    | 1         | 137      | **37.8 %**| 346 ms  | Healthy + ORD        |
-| 8  | 9 515   | 54.7 %      | 9 946   | 5 426       | 3 566    | 550       | 404      | **38.0 %**| 421 ms  | AdmissionBound + ORD |
-| 10 | 6 773   | 91.3 %      | 11 771  | 5 650       | 3 539    | 2 004     | 578      | **36.2 %**| 946 ms  | AdmissionBound + ORD |
-| 15 | 8 885   | 96.9 %      | 16 735  | 6 786       | 1 948    | 6 915     | 1 086    | **19.8 %**| 1 703 ms| AdmissionBound       |
-| 20 | 2 148   | 88.6 %      | 21 666  | 6 275       | 1 397    | 12 087    | 1 907    | **14.6 %**| 2 406 ms| AdmissionBound       |
+| vd  | frames | gate closed | started | MeshApplied | Unloaded | Abandoned | InFlight | **waste**  | p50 e2e  | verdict              |
+|-----|--------|-------------|---------|-------------|----------|-----------|----------|------------|----------|----------------------|
+| 5   | 11 038 | 0.0 %       | 7 263   | 4 381       | 2 744    | 1         | 137      | **37.8 %** | 346 ms   | Healthy + ORD        |
+| 8   | 9 515  | 54.7 %      | 9 946   | 5 426       | 3 566    | 550       | 404      | **38.0 %** | 421 ms   | AdmissionBound + ORD |
+| 10  | 6 773  | 91.3 %      | 11 771  | 5 650       | 3 539    | 2 004     | 578      | **36.2 %** | 946 ms   | AdmissionBound + ORD |
+| 15  | 8 885  | 96.9 %      | 16 735  | 6 786       | 1 948    | 6 915     | 1 086    | **19.8 %** | 1 703 ms | AdmissionBound       |
+| 20  | 2 148  | 88.6 %      | 21 666  | 6 275       | 1 397    | 12 087    | 1 907    | **14.6 %** | 2 406 ms | AdmissionBound       |
 
 `DiscardedOutOfRange`, `LoadStranded` and `Rerequested` were **0 in all 45 phases**. `LoadStranded` being zero
 is expected and no longer meaningful — FP-7d retired the stamp as structurally unreachable.
@@ -134,13 +134,13 @@ not a ramp**. The threshold as a share of the resident square runs 88.6 / 48.4 /
 
 The cost is now measured rather than inferred — chunks the player requested and never received:
 
-| vd | 50 m/s | 100 m/s | 200 m/s |
-|----|--------|---------|---------|
-| 5  | 0      | 0       | 1       |
-| 8  | 0      | 12      | 550     |
-| 10 | 56     | 20      | 2 004   |
-| 15 | 423    | 626     | 6 915   |
-| 20 | 1 165  | 2 061   | **12 087** |
+| vd  | 50 m/s | 100 m/s | 200 m/s    |
+|-----|--------|---------|------------|
+| 5   | 0      | 0       | 1          |
+| 8   | 0      | 12      | 550        |
+| 10  | 56     | 20      | 2 004      |
+| 15  | 423    | 626     | 6 915      |
+| 20  | 1 165  | 2 061   | **12 087** |
 
 At vd 20 / 200 m/s that is **55.8 % of everything requested, dropped before a single stage ran**. A fixed
 256-chunk threshold against a resident square growing as vd² is not a tuning imperfection past vd 10; it is
@@ -159,11 +159,11 @@ admission delay. Same phenomenon as F2, independently measured.
 
 `latency ≤ viewDistance × 16 ÷ speed`, against p50 end-to-end:
 
-| speed  | vd 5          | vd 8          | vd 10         | vd 15          | vd 20          |
-|--------|---------------|---------------|---------------|----------------|----------------|
-| 50 m/s | 1 379/1 600 ✅ | 1 388/2 560 ✅ | 1 403/3 200 ✅ | 1 441/4 800 ✅  | 1 982/6 400 ✅  |
-| 100 m/s| 692/800 ✅     | 700/1 280 ✅   | 711/1 600 ✅   | 822/2 400 ✅    | 2 207/3 200 ✅  |
-| 200 m/s| 346/400 ✅     | 421/640 ✅     | 946/800 ❌     | 1 703/1 200 ❌  | 2 406/1 600 ❌  |
+| speed   | vd 5           | vd 8           | vd 10          | vd 15          | vd 20          |
+|---------|----------------|----------------|----------------|----------------|----------------|
+| 50 m/s  | 1 379/1 600 ✅ | 1 388/2 560 ✅ | 1 403/3 200 ✅ | 1 441/4 800 ✅ | 1 982/6 400 ✅ |
+| 100 m/s | 692/800 ✅     | 700/1 280 ✅   | 711/1 600 ✅   | 822/2 400 ✅   | 2 207/3 200 ✅ |
+| 200 m/s | 346/400 ✅     | 421/640 ✅     | 946/800 ❌     | 1 703/1 200 ❌ | 2 406/1 600 ❌ |
 
 The criterion is met everywhere except 200 m/s at vd ≥ 10 — a falsifiable boundary for P-7/P-8 to target.
 Note vd 5 @ 200 m/s passes on p50 (346/400) but **fails on p95** (422 ms), so it is marginal even where it
@@ -188,11 +188,11 @@ reveals.
 FP-7 added `MinOrderingTerminalTraces = 30` so a handful of traces cannot produce an ordering verdict. No
 equivalent guard exists on the plurality, and three phases in this capture assert regimes from almost nothing:
 
-| Phase                                   | frames | printed verdict     |
-|-----------------------------------------|--------|---------------------|
-| vd 20 / Generation / 100 m/s            | **14** | `ThroughputBound`   |
-| vd 15 / Generation / 100 m/s            | 148    | `AdmissionBound`    |
-| vd 8 / Transition (drain + save + unload)| 333   | `AdmissionBound`    |
+| Phase                                     | frames | printed verdict   |
+|-------------------------------------------|--------|-------------------|
+| vd 20 / Generation / 100 m/s              | **14** | `ThroughputBound` |
+| vd 15 / Generation / 100 m/s              | 148    | `AdmissionBound`  |
+| vd 8 / Transition (drain + save + unload) | 333    | `AdmissionBound`  |
 
 The vd-20 case is the clearest: 14 frames, 441 traces all `InFlightAtPhaseEnd`, and `InFlightCap` "winning"
 at 50.0 % of eligible pass-frames. That is noise wearing a verdict. The transition case is worse in kind — a
@@ -219,13 +219,13 @@ those hooks live in play-mode paths.
 
 ## Ranked follow-ups
 
-| # | Item | Change vs FP-4 | Why |
-|---|------|----------------|-----|
-| **1** | **P-8 — scale panic-gate thresholds with view distance** | **promoted** (was #2) | F2: 0 → 96.9 % closure across vd 5→15, and 12 087 requests dropped before admission at vd 20 / 200 m/s. Correctness-of-intent, and it is what makes vd ≥ 10 admission-bound. |
-| **2** | **P-7 — chunk service ordering** | **demoted + re-scoped** (was #1) | F1: confirmed intrinsic at the default vd (33–38 %, gate never closes), but absent by vd 20. Target the low-vd regime; its acceptance criterion is F4's. |
-| **3** | **D1 — sample floor on the primary regime** | new | Three verdicts in this capture are unreliable. Cheap, and the ordering-axis analogue already exists. |
-| **4** | **D2 — hold generation waypoints constant across a sweep** | was a v1.8 footnote, now quantified | Scale `benchmarkRegionSize` with `LoadDistance`, or restrict generation claims to within-run. |
-| **5** | **Per-chunk CSV export** (v3+) | unchanged | The tail is still only visible in aggregate — vd 15 / gen / 50 m/s shows p50 1 023 ms against max 11 273 ms. |
+| #     | Item                                                       | Change vs FP-4                      | Why                                                                                                                                                                          |
+|-------|------------------------------------------------------------|-------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **1** | **P-8 — scale panic-gate thresholds with view distance**   | **promoted** (was #2)               | F2: 0 → 96.9 % closure across vd 5→15, and 12 087 requests dropped before admission at vd 20 / 200 m/s. Correctness-of-intent, and it is what makes vd ≥ 10 admission-bound. |
+| **2** | **P-7 — chunk service ordering**                           | **demoted + re-scoped** (was #1)    | F1: confirmed intrinsic at the default vd (33–38 %, gate never closes), but absent by vd 20. Target the low-vd regime; its acceptance criterion is F4's.                     |
+| **3** | **D1 — sample floor on the primary regime**                | new                                 | Three verdicts in this capture are unreliable. Cheap, and the ordering-axis analogue already exists.                                                                         |
+| **4** | **D2 — hold generation waypoints constant across a sweep** | was a v1.8 footnote, now quantified | Scale `benchmarkRegionSize` with `LoadDistance`, or restrict generation claims to within-run.                                                                                |
+| **5** | **Per-chunk CSV export** (v3+)                             | unchanged                           | The tail is still only visible in aggregate — vd 15 / gen / 50 m/s shows p50 1 023 ms against max 11 273 ms.                                                                 |
 
 **Not licensed by this capture:** readiness work (`AllDeclined` never dominated any phase) and in-flight/
 throughput work (the single `ThroughputBound` verdict is D1 noise).

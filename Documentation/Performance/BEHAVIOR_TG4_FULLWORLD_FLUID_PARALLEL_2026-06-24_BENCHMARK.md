@@ -25,18 +25,18 @@ Tick/Apply/Mesh/Light split. The **Tick** phase wraps `ProcessTickUpdates`, so t
 
 **Sustained flood — avg ms/frame:**
 
-| Build          | Frame |   Tick | Tick % |  Mesh | Light | Light % |
+| Build          | Frame | Tick   | Tick % | Mesh  | Light | Light % |
 |----------------|------:|-------:|-------:|------:|------:|--------:|
-| Serial (P3)    |  9.95 |  0.188 |  ~1.9% | 1.359 | 6.730 |    ~67% |
-| Parallel (P4a) |  9.56 |  0.184 |  ~1.9% | 1.331 | 6.312 |    ~66% |
-| **Δ**          | −0.39 | −0.004 |      — | −0.03 | −0.42 |       — |
+| Serial (P3)    | 9.95  | 0.188  | ~1.9%  | 1.359 | 6.730 | ~67%    |
+| Parallel (P4a) | 9.56  | 0.184  | ~1.9%  | 1.331 | 6.312 | ~66%    |
+| **Δ**          | −0.39 | −0.004 | —      | −0.03 | −0.42 | —       |
 
 **Dam-break tick spike — max single-frame Tick ms:**
 
-| Build          | Run 1 | Run 2 | Run 3 | Run 4 |             Mean | Range           |
+| Build          | Run 1 | Run 2 | Run 3 | Run 4 | Mean             | Range           |
 |----------------|------:|------:|------:|------:|-----------------:|-----------------|
-| Serial (P3)    | 145.4 | 143.1 | 141.4 | 142.8 |        **143.2** | [141.4, 145.4]  |
-| Parallel (P4a) | 140.0 | 135.9 | 135.1 | 135.4 |        **136.6** | [135.1, 140.0]  |
+| Serial (P3)    | 145.4 | 143.1 | 141.4 | 142.8 | **143.2**        | [141.4, 145.4]  |
+| Parallel (P4a) | 140.0 | 135.9 | 135.1 | 135.4 | **136.6**        | [135.1, 140.0]  |
 | **Δ**          |       |       |       |       | **−6.6 (−4.6%)** | nearly disjoint |
 
 Min FPS = 7 in both (the dam-break frame). Frame peak ≈ 150 ms (serial) vs ≈ 143 ms (parallel).

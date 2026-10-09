@@ -1,13 +1,13 @@
 # FP-4 — Flight-Profile Capture (Pipeline Telemetry), IL2CPP — view-distance sweep
 
-| Field           | Value                                                                                                                             |
-|-----------------|-----------------------------------------------------------------------------------------------------------------------------------|
-| **Captured**    | 2026-07-27 21:48:44 (vd 20), 2026-07-28 18:02:55 (vd 5), 2026-07-28 18:06:42 (vd 10)                                              |
-| **Branch**      | `feat/world-scaling`                                                                                                              |
+| Field           | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+|-----------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Captured**    | 2026-07-27 21:48:44 (vd 20), 2026-07-28 18:02:55 (vd 5), 2026-07-28 18:06:42 (vd 10)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| **Branch**      | `feat/world-scaling`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | **Commit**      | **`73de6511`** ("Added: FP-3 report section + verdict rule…", 2026-07-27 21:10) — the last commit before all three captures, and the last to touch engine code. One further commit exists between it and this report: **`bf8cd99c`** (2026-07-28 19:12), a one-line **version-string** bump in `ProjectSettings.asset` with no engine effect, landed *after* every run. Whether that edit was pending in the working tree at build time is not determinable from the logs, and it cannot affect the numbers either way. All three runs share build GUID `33b0ae23ff1d4bfaaca6ca95f44e728e`, so they are **one build**, produced between 21:10 and 21:48 on 2026-07-27. |
-| **Captured by** | `BenchmarkController` — **IL2CPP Development Build, Player, Burst on**. Three runs at **viewDistance 5 / 10 / 20**, same build GUID `33b0ae23ff1d4bfaaca6ca95f44e728e`, same machine, same session per run |
-| **Design doc**  | [`Design/FLIGHT_PROFILE_CAPTURE.md`](../Design/FLIGHT_PROFILE_CAPTURE.md) v1.8 — this report is FP-4                               |
-| **Verdict**     | **ORDERING-BOUND at every view distance** (waste 22.9–61.2 %, above the 20 % threshold in **all 9** loading phases). **ADMISSION-BOUND only from viewDistance ≥ 10**, caused by an unscaled panic-gate threshold (F5). Never throughput-bound, never readiness-bound. |
+| **Captured by** | `BenchmarkController` — **IL2CPP Development Build, Player, Burst on**. Three runs at **viewDistance 5 / 10 / 20**, same build GUID `33b0ae23ff1d4bfaaca6ca95f44e728e`, same machine, same session per run                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| **Design doc**  | [`Design/FLIGHT_PROFILE_CAPTURE.md`](../Design/FLIGHT_PROFILE_CAPTURE.md) v1.8 — this report is FP-4                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| **Verdict**     | **ORDERING-BOUND at every view distance** (waste 22.9–61.2 %, above the 20 % threshold in **all 9** loading phases). **ADMISSION-BOUND only from viewDistance ≥ 10**, caused by an unscaled panic-gate threshold (F5). Never throughput-bound, never readiness-bound.                                                                                                                                                                                                                                                                                                                                                                                                  |
 
 > **GO/NO-GO does not apply.** FP ships no behavior change (§1 non-goals, §9 limitation 5); the deliverable is
 > the **regime verdict**. Per the design doc, a capture that produces numbers but no verdict has failed.
@@ -42,17 +42,17 @@ rate — across a scripted speed sweep, now repeated at three view distances.
 Three IL2CPP Development Build runs, same build and machine, one view-distance setting each. This is a
 **characterization sweep**, not a change comparison — no baseline delta, no regression budget.
 
-| | **Run A** | **Run B** | **Run C** |
-|---|---|---|---|
-| viewDistance | **5 (default)** | **10** | **20** |
-| LoadDistance (`vd + DATA_LOAD_BUFFER 3`) | 8 | 13 | 23 |
-| Resident square | 17×17 = **289** | 27×27 = **729** | 47×47 = **2 209** |
-| Ring diameter | 272 m | 432 m | 752 m |
-| Backlog 256 as % of resident | **88.6 %** | **35.1 %** | **11.6 %** |
-| Generation waypoints | 12 | 6 | **4** |
-| Loading waypoints | 12 | 12 | 12 |
-| Avg CPU / frame | 1.2 ms | 2.2 ms | 6.6 ms |
-| Source log | `BenchmarkRun_2026-07-28_18-02-55.log` | `BenchmarkRun_2026-07-28_18-06-42.log` | `BenchmarkRun_2026-07-27_21-48-44.log` |
+|                                          | **Run A**                              | **Run B**                              | **Run C**                              |
+|------------------------------------------|----------------------------------------|----------------------------------------|----------------------------------------|
+| viewDistance                             | **5 (default)**                        | **10**                                 | **20**                                 |
+| LoadDistance (`vd + DATA_LOAD_BUFFER 3`) | 8                                      | 13                                     | 23                                     |
+| Resident square                          | 17×17 = **289**                        | 27×27 = **729**                        | 47×47 = **2 209**                      |
+| Ring diameter                            | 272 m                                  | 432 m                                  | 752 m                                  |
+| Backlog 256 as % of resident             | **88.6 %**                             | **35.1 %**                             | **11.6 %**                             |
+| Generation waypoints                     | 12                                     | 6                                      | **4**                                  |
+| Loading waypoints                        | 12                                     | 12                                     | 12                                     |
+| Avg CPU / frame                          | 1.2 ms                                 | 2.2 ms                                 | 6.6 ms                                 |
+| Source log                               | `BenchmarkRun_2026-07-28_18-02-55.log` | `BenchmarkRun_2026-07-28_18-06-42.log` | `BenchmarkRun_2026-07-27_21-48-44.log` |
 
 **Confound, stated up front: the three runs do not share a generation route.** Generation waypoint counts are
 12 / 6 / 4, so the generation pass flies a different path in each run, and cross-run *generation* comparisons
@@ -69,11 +69,11 @@ Percentiles are nearest-rank (`TraceStatistics`, pinned by B9); the verdict rule
 
 ### As produced by §7.1 v1, verbatim — all three runs
 
-| Loading phase | Run A (vd 5) | Run B (vd 10) | Run C (vd 20) |
-|---|---|---|---|
-| 50 m/s  | Healthy + **ORDERING-BOUND** (33.1 %) | Healthy + **ORDERING-BOUND** (22.9 %) | Healthy + **ORDERING-BOUND** (27.2 %) |
-| 100 m/s | Healthy + **ORDERING-BOUND** (35.3 %) | Healthy + **ORDERING-BOUND** (23.5 %) | Healthy + **ORDERING-BOUND** (29.8 %) |
-| 200 m/s | Healthy + **ORDERING-BOUND** (37.1 %) | Healthy + **ORDERING-BOUND** (46.4 %) | Healthy + **ORDERING-BOUND** (61.2 %) |
+| Loading phase | Run A (vd 5)                          | Run B (vd 10)                         | Run C (vd 20)                         |
+|---------------|---------------------------------------|---------------------------------------|---------------------------------------|
+| 50 m/s        | Healthy + **ORDERING-BOUND** (33.1 %) | Healthy + **ORDERING-BOUND** (22.9 %) | Healthy + **ORDERING-BOUND** (27.2 %) |
+| 100 m/s       | Healthy + **ORDERING-BOUND** (35.3 %) | Healthy + **ORDERING-BOUND** (23.5 %) | Healthy + **ORDERING-BOUND** (29.8 %) |
+| 200 m/s       | Healthy + **ORDERING-BOUND** (37.1 %) | Healthy + **ORDERING-BOUND** (46.4 %) | Healthy + **ORDERING-BOUND** (61.2 %) |
 
 **9 of 9 loading phases are ordering-bound.** The primary axis reads *Healthy* in all of them, which F1 shows
 is an artifact of the rule rather than a finding.
@@ -101,11 +101,11 @@ plurality.
 The single-run draft inferred "waste rises with view distance" from Run C alone. With three legs that is
 **false at moderate speed**:
 
-| Loading | vd 5 | vd 10 | vd 20 |
-|---|---|---|---|
-| 50 m/s  | **33.1 %** | 22.9 % | 27.2 % |
-| 100 m/s | **35.3 %** | 23.5 % | 29.8 % |
-| 200 m/s | 37.1 % | 46.4 % | **61.2 %** |
+| Loading | vd 5       | vd 10  | vd 20      |
+|---------|------------|--------|------------|
+| 50 m/s  | **33.1 %** | 22.9 % | 27.2 %     |
+| 100 m/s | **35.3 %** | 23.5 % | 29.8 %     |
+| 200 m/s | 37.1 %     | 46.4 % | **61.2 %** |
 
 At 50 and 100 m/s the **default** view distance is the *worst* of the three. Only at 200 m/s does waste rise
 with view distance. The unifying relation is `waste ≈ latency ÷ residence-time`, where residence ≈ ring
@@ -130,11 +130,11 @@ contesting five, and they contribute ~100 % `OutOfWork`.
 Run C's 200 m/s phase came down to **68 frames out of 27 744** (OutOfWork 50.0 % vs Quota 49.8 %) and printed
 *Healthy*. Restricted to the passes that actually hold an admission budget:
 
-| Loading 200 m/s | dominant, all four passes | dominant, scheduling passes only |
-|---|---|---|
-| Run A (vd 5)  | OutOfWork | OutOfWork 70.1 % — genuinely healthy on this axis |
-| Run B (vd 10) | OutOfWork | **Quota 51.7 %** |
-| Run C (vd 20) | OutOfWork (by 0.25 %) | **Quota 99.5 %** |
+| Loading 200 m/s | dominant, all four passes | dominant, scheduling passes only                  |
+|-----------------|---------------------------|---------------------------------------------------|
+| Run A (vd 5)    | OutOfWork                 | OutOfWork 70.1 % — genuinely healthy on this axis |
+| Run B (vd 10)   | OutOfWork                 | **Quota 51.7 %**                                  |
+| Run C (vd 20)   | OutOfWork (by 0.25 %)     | **Quota 99.5 %**                                  |
 
 The rule was not fed bad data; it aggregated good data wrongly. **§7.2 is what made this recoverable** — the
 correction needed only the printed tallies, no re-capture.
@@ -149,17 +149,17 @@ Expressing every generation-pass hop as a multiple of the boundary-crossing inte
 i.e. 16 m of travel) collapses **12 measurements across three view distances and five speeds** onto one
 structure:
 
-| Run | Speed | `enq→pop` | `pop→lit` | `lit→mesh` | **Total** |
-|---|---|---|---|---|---|
-| A (vd 5) | 10 m/s | 0.01 | **2.02** | **0.97** | **3.01** |
-| A | 20 m/s | 0.03 | 2.05 | 0.95 | 3.03 |
-| A | 50 m/s | 0.09 | 2.14 | 0.85 | 3.08 |
-| A | 100 m/s | 0.15 | 2.28 | 0.72 | 3.16 |
-| A | 200 m/s | 0.30 | 2.67 | 0.42 | 3.40 |
-| B (vd 10) | 10 m/s | 0.02 | 2.05 | 0.95 | 3.02 |
-| B | 100 m/s | 0.21 | 2.52 | 0.55 | 3.28 |
-| C (vd 20) | 10 m/s | 0.04 | 2.11 | 0.90 | 3.05 |
-| C | 50 m/s | 0.19 | 2.56 | 0.58 | 3.33 |
+| Run       | Speed   | `enq→pop` | `pop→lit` | `lit→mesh` | **Total** |
+|-----------|---------|-----------|-----------|------------|-----------|
+| A (vd 5)  | 10 m/s  | 0.01      | **2.02**  | **0.97**   | **3.01**  |
+| A         | 20 m/s  | 0.03      | 2.05      | 0.95       | 3.03      |
+| A         | 50 m/s  | 0.09      | 2.14      | 0.85       | 3.08      |
+| A         | 100 m/s | 0.15      | 2.28      | 0.72       | 3.16      |
+| A         | 200 m/s | 0.30      | 2.67      | 0.42       | 3.40      |
+| B (vd 10) | 10 m/s  | 0.02      | 2.05      | 0.95       | 3.02      |
+| B         | 100 m/s | 0.21      | 2.52      | 0.55       | 3.28      |
+| C (vd 20) | 10 m/s  | 0.04      | 2.11      | 0.90       | 3.05      |
+| C         | 50 m/s  | 0.19      | 2.56      | 0.58       | 3.33      |
 
 **`populated→lit` costs almost exactly 2 crossings and `lit→meshApplied` almost exactly 1, for a total of 3** —
 and the total is **invariant to view distance** across a 7.6× change in resident-set size (3.01 / 3.02 / 3.05
@@ -182,14 +182,14 @@ thing.
 
 At vd 5 the pipeline is fast and still wasteful. At vd 20 it is slow *and* wasteful, and the gate is why:
 
-| Loading 200 m/s | vd 5 | vd 10 | vd 20 |
-|---|---|---|---|
-| `enq→pop` p50 | 3.9 ms | 463.9 ms | **1 822.7 ms** |
-| `pop→lit` p50 | 240.6 ms | 432.9 ms | 579.3 ms |
-| `lit→mesh` p50 | 64.0 ms | 3.1 ms | 3.2 ms |
-| **total p50** | **346.6 ms** | **982.2 ms** | **2 489.6 ms** |
-| panic gate closed | **0.0 %** | 92.8 % | 96.4 % |
-| waste | 37.1 % | 46.4 % | 61.2 % |
+| Loading 200 m/s   | vd 5         | vd 10        | vd 20          |
+|-------------------|--------------|--------------|----------------|
+| `enq→pop` p50     | 3.9 ms       | 463.9 ms     | **1 822.7 ms** |
+| `pop→lit` p50     | 240.6 ms     | 432.9 ms     | 579.3 ms       |
+| `lit→mesh` p50    | 64.0 ms      | 3.1 ms       | 3.2 ms         |
+| **total p50**     | **346.6 ms** | **982.2 ms** | **2 489.6 ms** |
+| panic gate closed | **0.0 %**    | 92.8 %       | 96.4 %         |
+| waste             | 37.1 %       | 46.4 %       | 61.2 %         |
 
 Admission cost goes from **1 %** of total latency at vd 5 to **73 %** at vd 20. That entire swing is the gate.
 Meshing is never implicated anywhere: `lit→meshApplied` is 3–64 ms in every loading phase.
@@ -199,11 +199,11 @@ shipped. At vd 5 it starts 242/s and delivers 148, a far healthier 1.6.
 
 ### F4 — A thin catastrophic tail, worst at the *default* view distance
 
-| | p50 | p95 | **p99** | max |
-|---|---|---|---|---|
+|                          | p50      | p95      | **p99**       | max       |
+|--------------------------|----------|----------|---------------|-----------|
 | Run C, generation 20 m/s | 2 488 ms | 2 683 ms | **24 082 ms** | 29 706 ms |
-| Run B, generation 50 m/s | 999 ms | 1 961 ms | **6 128 ms** | 8 055 ms |
-| Run A, generation 50 m/s | 989 ms | 2 246 ms | **4 196 ms** | 5 151 ms |
+| Run B, generation 50 m/s | 999 ms   | 1 961 ms | **6 128 ms**  | 8 055 ms  |
+| Run A, generation 50 m/s | 989 ms   | 2 246 ms | **4 196 ms**  | 5 151 ms  |
 
 At Run C's 20 m/s, ~95 % of chunks land in a tight ~2.5 s cohort and **~1 % take 24–30 s**. A player sees a
 mostly-complete world with occasional holes that persist for half a minute. Tail attribution is **not
@@ -220,11 +220,11 @@ The single-run draft predicted this arithmetically. **Runs A and B test it, and 
 setting (default 256, reopen 128)**, read at `World.cs:3363` with no view-distance term in its derivation. The
 quantity it guards grows with the **square** of view distance:
 
-| viewDistance | Resident square | Backlog 256 as % of it | **Gate closed, loading 200 m/s** |
-|---|---|---|---|
-| **5 (default)** | 289 | 88.6 % | **0.0 %** (0 of 25 086 frames) |
-| **10** | 729 | 35.1 % | **92.8 %** (9 057 of 9 763) |
-| **20** | 2 209 | 11.6 % | **96.4 %** (6 687 of 6 936) |
+| viewDistance    | Resident square | Backlog 256 as % of it | **Gate closed, loading 200 m/s** |
+|-----------------|-----------------|------------------------|----------------------------------|
+| **5 (default)** | 289             | 88.6 %                 | **0.0 %** (0 of 25 086 frames)   |
+| **10**          | 729             | 35.1 %                 | **92.8 %** (9 057 of 9 763)      |
+| **20**          | 2 209           | 11.6 %                 | **96.4 %** (6 687 of 6 936)      |
 
 At the default view distance the gate **never closes once in the entire run** — 9 phases, ~380 000 sampled
 frames, zero closures. Closing would require 256 of 289 resident chunks (88.6 %) simultaneously in the
@@ -246,10 +246,10 @@ predicts.
 load range and must render before the player reaches it; the margin is `viewDistance` chunks. Expressing median
 latency as *chunks of travel* and comparing it to the view distance itself:
 
-| Loading | vd 5 | vd 10 | vd 20 |
-|---|---|---|---|
-| 50 m/s  | 4.3 ch = **0.86×VD** | 4.4 ch = 0.44×VD | 6.3 ch = 0.31×VD |
-| 100 m/s | 4.3 ch = **0.86×VD** | 4.5 ch = 0.45×VD | 13.1 ch = 0.65×VD |
+| Loading     | vd 5                 | vd 10                 | vd 20                 |
+|-------------|----------------------|-----------------------|-----------------------|
+| 50 m/s      | 4.3 ch = **0.86×VD** | 4.4 ch = 0.44×VD      | 6.3 ch = 0.31×VD      |
+| 100 m/s     | 4.3 ch = **0.86×VD** | 4.5 ch = 0.45×VD      | 13.1 ch = 0.65×VD     |
 | **200 m/s** | 4.3 ch = **0.87×VD** | 12.3 ch = **1.23×VD** | 31.1 ch = **1.56×VD** |
 
 **The ratio crosses 1.0 between vd 5 and vd 10 at 200 m/s — exactly where the operator's eye reported the

@@ -40,10 +40,10 @@ volume say so explicitly and carry a measurement gate.
 
 ## Legend
 
-| Field       | Values                                                                                                                                         |
-|-------------|------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Effort**  | 🟢 Low (hours, localized) · 🟡 Medium (days, several files) · 🔴 High (architectural, cross-system)                                            |
-| **Risk**    | 🟢 Low (isolated, easy to verify) · 🟡 Medium (touches shared state or visual output) · 🔴 High (touches pipeline invariants or semantics)     |
+| Field       | Values                                                                                                                                          |
+|-------------|-------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Effort**  | 🟢 Low (hours, localized) · 🟡 Medium (days, several files) · 🔴 High (architectural, cross-system)                                             |
+| **Risk**    | 🟢 Low (isolated, easy to verify) · 🟡 Medium (touches shared state or visual output) · 🔴 High (touches pipeline invariants or semantics)      |
 | **Benefit** | 🟢 Core — high value or unlocks other planned work · 🟡 Situational / polish · ⚪ Minor                                                         |
 | **Seed**    | ✅ Safe — cannot change generated terrain for a given seed · ⚠️ Terrain-affecting                                                               |
 | **Save**    | ✅ Safe — no on-disk format change · ⚠️ Format — requires a save-format version bump + AOT migration step (see `serialization-migration` skill) |
@@ -52,16 +52,16 @@ volume say so explicitly and carry a measurement gate.
 
 ## 1. Master summary table
 
-| ID   | Finding                                                              | Source library    | Effort | Risk | Benefit | Seed | Save |
-|------|----------------------------------------------------------------------|-------------------|:------:|:----:|:-------:|:----:|:----:|
-| TP-1 | ↪ **Filed elsewhere as `SL-1`** — technique note only, not a new item | NativeMemoryArray |   —    |  —   |    —    |  ✅   |  ✅   |
-| TP-2 | HUD numeric formatting is an approximation of `"F{n}"`, not exact     | ZString           |   🟢   |  🟢  |   ⚪    |  ✅   |  ✅   |
-| TP-3 | Interface-typed `foreach` boxes its enumerator (unaudited)            | ZLinq             |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
-| TP-4 | `async Task` state-machine/`Task` allocation on the chunk IO path     | UniTask           |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
-| TP-5 | No declarative frame-rate limiter / change-detector for UI rebuilds   | R3                |   🟡   |  🟢  |   🟡    |  ✅   |  ✅   |
-| TP-6 | No subscription-lifetime tracking for long-lived event subscribers    | R3                |   🟡   |  🟢  |   ⚪    |  ✅   |  ✅   |
-| TP-7 | Log call sites pay formatting cost before the level check             | ZLogger           |   🟡   |  🟡  |   ⚪    |  ✅   |  ✅   |
-| TP-8 | Headless CI stdout has no ANSI colorization                           | Kokuban           |   🟢   |  🟢  |   ⚪    |  ✅   |  ✅   |
+| ID   | Finding                                                               | Source library    | Effort | Risk | Benefit | Seed | Save |
+|------|-----------------------------------------------------------------------|-------------------|:------:|:----:|:-------:|:----:|:----:|
+| TP-1 | ↪ **Filed elsewhere as `SL-1`** — technique note only, not a new item | NativeMemoryArray |   —    |  —   |    —    |  ✅  |  ✅  |
+| TP-2 | HUD numeric formatting is an approximation of `"F{n}"`, not exact     | ZString           |   🟢   |  🟢  |   ⚪    |  ✅  |  ✅  |
+| TP-3 | Interface-typed `foreach` boxes its enumerator (unaudited)            | ZLinq             |   🟢   |  🟢  |   🟡    |  ✅  |  ✅  |
+| TP-4 | `async Task` state-machine/`Task` allocation on the chunk IO path     | UniTask           |   🟢   |  🟢  |   🟡    |  ✅  |  ✅  |
+| TP-5 | No declarative frame-rate limiter / change-detector for UI rebuilds   | R3                |   🟡   |  🟢  |   🟡    |  ✅  |  ✅  |
+| TP-6 | No subscription-lifetime tracking for long-lived event subscribers    | R3                |   🟡   |  🟢  |   ⚪    |  ✅  |  ✅  |
+| TP-7 | Log call sites pay formatting cost before the level check             | ZLogger           |   🟡   |  🟡  |   ⚪    |  ✅  |  ✅  |
+| TP-8 | Headless CI stdout has no ANSI colorization                           | Kokuban           |   🟢   |  🟢  |   ⚪    |  ✅  |  ✅  |
 
 **Ranking guidance:** `TP-4` is the only item here with a plausible measurable payoff, and it is
 gated on a profiler capture (§3). `TP-1`'s finding is already owned by `SL-1` in the performance
@@ -77,15 +77,15 @@ Recorded so future sessions do not re-run this evaluation. NuGetForUnity is alre
 (`Packages/manifest.json`), so *installation* is mechanically cheap for any of these — the
 rejections below are on merit, not on install friction, except where noted.
 
-| Library               | Verdict                     | Reason                                                                                                                                                                    |
-|-----------------------|-----------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **ZString**           | ❌ Rejected — already solved | Its Unity headline (zero-alloc TMP text) is already achieved by `StringBuilderFormat` + `TMP.SetText(StringBuilder)` (`DebugScreen.cs:316-350`). Its struct-builder/`ArrayPool` win is nil against long-lived `StringBuilder` fields. Residual idea → `TP-2`. |
-| **ZLinq**             | ❌ Rejected — rule is cheaper | Only 8 files import `System.Linq`, mostly editor/migration code where perf is irrelevant. The CLAUDE.md "no LINQ in hot paths" rule already covers the runtime. Residual idea → `TP-3`.                                                                        |
-| **NativeMemoryArray** | ❌ Rejected — wrong layer     | Explicitly managed-side only, so it cannot cross into `Assets/Scripts/Jobs/`; Unity.Collections 6.5 already provides Burst-native containers. The 2 GB `Array.MaxLength` ceiling it exists to break is not one we approach. Residual idea → `TP-1`.            |
-| **UniTask**           | ❌ Rejected — no fit          | Our async surface is genuine background-thread IO (`Task.Run`), where `UniTask.RunOnThreadPool` is just `Task.Run`. Its core value (replacing coroutines, awaiting `AsyncOperation`) does not apply — heavy work runs on Jobs. Unity 6.6 ships `Awaitable` for the rest. Residual idea → `TP-4`. |
+| Library               | Verdict                       | Reason                                                                                                                                                                                                                                                                                                     |
+|-----------------------|-------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **ZString**           | ❌ Rejected — already solved  | Its Unity headline (zero-alloc TMP text) is already achieved by `StringBuilderFormat` + `TMP.SetText(StringBuilder)` (`DebugScreen.cs:316-350`). Its struct-builder/`ArrayPool` win is nil against long-lived `StringBuilder` fields. Residual idea → `TP-2`.                                              |
+| **ZLinq**             | ❌ Rejected — rule is cheaper | Only 8 files import `System.Linq`, mostly editor/migration code where perf is irrelevant. The CLAUDE.md "no LINQ in hot paths" rule already covers the runtime. Residual idea → `TP-3`.                                                                                                                    |
+| **NativeMemoryArray** | ❌ Rejected — wrong layer     | Explicitly managed-side only, so it cannot cross into `Assets/Scripts/Jobs/`; Unity.Collections 6.5 already provides Burst-native containers. The 2 GB `Array.MaxLength` ceiling it exists to break is not one we approach. Residual idea → `TP-1`.                                                        |
+| **UniTask**           | ❌ Rejected — no fit          | Our async surface is genuine background-thread IO (`Task.Run`), where `UniTask.RunOnThreadPool` is just `Task.Run`. Its core value (replacing coroutines, awaiting `AsyncOperation`) does not apply — heavy work runs on Jobs. Unity 6.6 ships `Awaitable` for the rest. Residual idea → `TP-4`.           |
 | **ZLogger**           | ❌ Rejected — breaks tooling  | Routes logs away from `UnityEngine.Debug.Log`. The entire diagnostic workflow depends on that sink: the `voxel-debugging` instrument-then-read loop, `unity command console`, and tailing `<project>/Logs/Editor.log`. Redirecting 317+ call sites would silently break all of it. Residual idea → `TP-7`. |
-| **R3**                | ❌ Rejected *for now*         | Only 5 classes hold events (`SettingsManager`, `CommandEngine`, `PerformanceMonitor`, `World`, `ChunkData`) — not a subscription-leak problem worth an Rx runtime. **Reconsider if** the settings/HUD binding layer grows past ~5 more bindings. Residual ideas → `TP-5`, `TP-6`. |
-| **Kokuban**           | ❌ Rejected — already solved  | Unity's console renders rich-text tags, not ANSI escapes, so it does nothing in-editor; the validation runner already colorizes its summary. Only `-batchmode` stdout is a real niche. Residual idea → `TP-8`.                                                |
+| **R3**                | ❌ Rejected *for now*         | Only 5 classes hold events (`SettingsManager`, `CommandEngine`, `PerformanceMonitor`, `World`, `ChunkData`) — not a subscription-leak problem worth an Rx runtime. **Reconsider if** the settings/HUD binding layer grows past ~5 more bindings. Residual ideas → `TP-5`, `TP-6`.                          |
+| **Kokuban**           | ❌ Rejected — already solved  | Unity's console renders rich-text tags, not ANSI escapes, so it does nothing in-editor; the validation runner already colorizes its summary. Only `-batchmode` stdout is a real niche. Residual idea → `TP-8`.                                                                                             |
 
 ---
 

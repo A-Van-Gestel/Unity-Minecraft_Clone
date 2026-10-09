@@ -45,10 +45,10 @@ or the API — §4) takes ~54 s and regenerates all of them.
 
 ## Legend
 
-| Field       | Values                                                                                                                                         |
-|-------------|------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Effort**  | 🟢 Low (hours, localized) · 🟡 Medium (days, several files) · 🔴 High (architectural, cross-system)                                            |
-| **Risk**    | 🟢 Low (isolated, easy to verify) · 🟡 Medium (touches shared state or visual output) · 🔴 High (touches pipeline invariants or semantics)     |
+| Field       | Values                                                                                                                                          |
+|-------------|-------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Effort**  | 🟢 Low (hours, localized) · 🟡 Medium (days, several files) · 🔴 High (architectural, cross-system)                                             |
+| **Risk**    | 🟢 Low (isolated, easy to verify) · 🟡 Medium (touches shared state or visual output) · 🔴 High (touches pipeline invariants or semantics)      |
 | **Benefit** | 🟢 Core — high value or unlocks other planned work · 🟡 Situational / polish · ⚪ Minor                                                         |
 | **Seed**    | ✅ Safe — cannot change generated terrain for a given seed · ⚠️ Terrain-affecting                                                               |
 | **Save**    | ✅ Safe — no on-disk format change · ⚠️ Format — requires a save-format version bump + AOT migration step (see `serialization-migration` skill) |
@@ -61,18 +61,18 @@ or the API — §4) takes ~54 s and regenerates all of them.
 keeps its row (marked ✅) even after its detail section is archived; a declined one is marked ⛔ and
 kept so the same finding is not re-proposed from the next auditor run.
 
-| ID                | Finding                                                                                       | Effort | Risk | Benefit | Seed | Save |
-|-------------------|-----------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
-| **AU-1** ✅        | Static Batching is on with zero static objects → 7× `URP0302` SRP-Batcher conflict            |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
-| **AU-2** ✅        | 132 `UAL0010`/`UAL0013` hits: 45 runtime types lack a statics-cleanup attribute               |   🟡   |  🟡  |   🟢    |  ✅   |  ✅   |
-| **AU-3** ✅        | `CLAUDE.md`/`AGENTS.md` state Reload Domain is disabled; it is enabled (`PAS0036`)            |   🟢   |  🟢  |   🟢    |  ✅   |  ✅   |
-| **AU-4** ⛔        | Monocraft font atlases are 129 MB of the 341 MB asset payload — declined 2026-09-17           |   🟡   |  🔴  |   🟡    |  ✅   |  ✅   |
-| **AU-5** ⛔        | Music imports at Vorbis quality 1.00 → 104 MB — declined 2026-09-17                           |   🟢   |  🟡  |   🟡    |  ✅   |  ✅   |
-| **AU-6**          | 4 orphan FiraCode weight variants (~22 MB); `FiraCode.asset` itself is Monocraft's fallback    |   🟢   |  🟡  |   ⚪    |  ✅   |  ✅   |
-| **AU-7**          | 27 assets under `Assets/Resources/` — always built, always loaded (`PAA3000`)                 |   🔴   |  🟡  |   🟡    |  ✅   |  ✅   |
-| **AU-8**          | `PAS0037`: Direct3D11 precedes Direct3D12 in the Windows graphics API list                     |   🟢   |  🟡  |   🟡    |  ✅   |  ✅   |
-| **AU-9**          | `PAS0013`/`PAS0015`: both layer collision matrices have every box ticked                      |   🟢   |  🟡  |   ⚪    |  ✅   |  ✅   |
-| **AU-10**         | Settings long tail: mipmap streaming/stripping, texture quality, async upload, prebake meshes |   🟢   |  🟢  |   ⚪    |  ✅   |  ✅   |
+| ID          | Finding                                                                                       | Effort | Risk | Benefit | Seed | Save |
+|-------------|-----------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
+| **AU-1** ✅ | Static Batching is on with zero static objects → 7× `URP0302` SRP-Batcher conflict            |   🟢   |  🟢  |   🟡    |  ✅  |  ✅  |
+| **AU-2** ✅ | 132 `UAL0010`/`UAL0013` hits: 45 runtime types lack a statics-cleanup attribute               |   🟡   |  🟡  |   🟢    |  ✅  |  ✅  |
+| **AU-3** ✅ | `CLAUDE.md`/`AGENTS.md` state Reload Domain is disabled; it is enabled (`PAS0036`)            |   🟢   |  🟢  |   🟢    |  ✅  |  ✅  |
+| **AU-4** ⛔ | Monocraft font atlases are 129 MB of the 341 MB asset payload — declined 2026-09-17           |   🟡   |  🔴  |   🟡    |  ✅  |  ✅  |
+| **AU-5** ⛔ | Music imports at Vorbis quality 1.00 → 104 MB — declined 2026-09-17                           |   🟢   |  🟡  |   🟡    |  ✅  |  ✅  |
+| **AU-6**    | 4 orphan FiraCode weight variants (~22 MB); `FiraCode.asset` itself is Monocraft's fallback   |   🟢   |  🟡  |   ⚪    |  ✅  |  ✅  |
+| **AU-7**    | 27 assets under `Assets/Resources/` — always built, always loaded (`PAA3000`)                 |   🔴   |  🟡  |   🟡    |  ✅  |  ✅  |
+| **AU-8**    | `PAS0037`: Direct3D11 precedes Direct3D12 in the Windows graphics API list                    |   🟢   |  🟡  |   🟡    |  ✅  |  ✅  |
+| **AU-9**    | `PAS0013`/`PAS0015`: both layer collision matrices have every box ticked                      |   🟢   |  🟡  |   ⚪    |  ✅  |  ✅  |
+| **AU-10**   | Settings long tail: mipmap streaming/stripping, texture quality, async upload, prebake meshes |   🟢   |  🟢  |   ⚪    |  ✅  |  ✅  |
 
 ---
 
@@ -207,12 +207,12 @@ documents an explicit opt-out rather than re-homing verified behavior, exactly a
 packages use it (159 opt-outs vs 39 opt-ins). **92 members annotated across 45 files.** Reason
 tally, re-derived by grep rather than retyped:
 
-| Reason                                     | Count | Notes                                                                                   |
-|--------------------------------------------|------:|-----------------------------------------------------------------------------------------|
-| `// reset in <the type's reset method>`    |    74 | The method name varies — `DomainReset` (40), `ResetStatics` (12), `ResetSaveProbeCounters` (7), `Reset` (7), `ResetStaticState` (4), `ResetOnPlayModeEnter` (2), `ResetFloatPrecisionTripwire` (1), `ResetDeserializeProbeCounter` (1) |
-| `// contents cleared in <method>`          |     7 | `readonly` containers whose CONTENTS are the session state (6 `DomainReset`, 1 `Clear`)  |
-| `// immutable table`                       |     8 | `readonly` data built once, never mutated                                               |
-| Three specific reasons                     |     3 | the `s_generation` increment; `SectionRenderer.s_materialCombinations` (cache keyed by the `s_materialCacheVersion` its reset zeroes); `BlockBehavior.s_tMods` (per-thread, cleared before every use) |
+| Reason                                  | Count | Notes                                                                                                                                                                                                                                  |
+|-----------------------------------------|------:|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `// reset in <the type's reset method>` | 74    | The method name varies — `DomainReset` (40), `ResetStatics` (12), `ResetSaveProbeCounters` (7), `Reset` (7), `ResetStaticState` (4), `ResetOnPlayModeEnter` (2), `ResetFloatPrecisionTripwire` (1), `ResetDeserializeProbeCounter` (1) |
+| `// contents cleared in <method>`       | 7     | `readonly` containers whose CONTENTS are the session state (6 `DomainReset`, 1 `Clear`)                                                                                                                                                |
+| `// immutable table`                    | 8     | `readonly` data built once, never mutated                                                                                                                                                                                              |
+| Three specific reasons                  | 3     | the `s_generation` increment; `SectionRenderer.s_materialCombinations` (cache keyed by the `s_materialCacheVersion` its reset zeroes); `BlockBehavior.s_tMods` (per-thread, cleared before every use)                                  |
 
 **The reason must name the type's actual reset method.** The first pass wrote
 `// reset in DomainReset` everywhere and was wrong in 15 files whose reset is named something else,
@@ -426,16 +426,16 @@ and after.
 
 **What exists today**, all verified live or in `ProjectSettings`:
 
-| Rule                | Finding                                             | Assessment                                                                                                  |
-|---------------------|-----------------------------------------------------|-------------------------------------------------------------------------------------------------------------|
-| `PAS1007` ×5        | Mipmap streaming off on 5 quality levels            | Largely moot: the block atlas has `enableMipMap: 0`, so there are no mips to stream                         |
-| `PAS0019`           | Texture Quality not Full Res                        | Deliberate quality-level scaling; check only if texture quality looks wrong at Ultra                        |
-| `PAS0027`           | Mipmap Stripping disabled (`mipStripping = False`)  | Would shrink builds only for mipped textures; see above                                                     |
-| `PAS0020`/`PAS0021` | Async Upload Time Slice / Buffer Size at defaults   | Worth a look only if streaming hitches appear; both are frame-time knobs, so measured, not tidied           |
-| `PAS0007`           | Prebake Collision Meshes disabled                   | Applies to imported meshes; this project builds collision at runtime                                        |
-| `PAS0016`           | Fixed Timestep at default                           | Physics cadence is a gameplay decision, not an auditor one                                                  |
-| `PAS1004`           | IL2CPP Compiler Configuration = `Master`            | Deliberate: slowest build, fastest runtime, which is what RC captures want                                  |
-| `PAS0029`           | Splash Screen enabled                               | Not disableable on this license tier                                                                        |
+| Rule                | Finding                                            | Assessment                                                                                        |
+|---------------------|----------------------------------------------------|---------------------------------------------------------------------------------------------------|
+| `PAS1007` ×5        | Mipmap streaming off on 5 quality levels           | Largely moot: the block atlas has `enableMipMap: 0`, so there are no mips to stream               |
+| `PAS0019`           | Texture Quality not Full Res                       | Deliberate quality-level scaling; check only if texture quality looks wrong at Ultra              |
+| `PAS0027`           | Mipmap Stripping disabled (`mipStripping = False`) | Would shrink builds only for mipped textures; see above                                           |
+| `PAS0020`/`PAS0021` | Async Upload Time Slice / Buffer Size at defaults  | Worth a look only if streaming hitches appear; both are frame-time knobs, so measured, not tidied |
+| `PAS0007`           | Prebake Collision Meshes disabled                  | Applies to imported meshes; this project builds collision at runtime                              |
+| `PAS0016`           | Fixed Timestep at default                          | Physics cadence is a gameplay decision, not an auditor one                                        |
+| `PAS1004`           | IL2CPP Compiler Configuration = `Master`           | Deliberate: slowest build, fastest runtime, which is what RC captures want                        |
+| `PAS0029`           | Splash Screen enabled                              | Not disableable on this license tier                                                              |
 
 **Proposal:** no action as a group. Rows exist so a future auditor run can be diffed against a
 recorded assessment instead of re-triaged from scratch.
@@ -532,14 +532,14 @@ tightly-packed atlas would bleed between tiles. Not a finding.
 
 ## 5. Rejected alternatives
 
-| Option                                                              | Verdict                                                                                                                  | Date       |
-|---------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------|------------|
-| Regenerate the Monocraft atlases smaller (all 8, or the 7 weights)  | ⛔ Rejected — atlas regeneration renders boxy/soft at other resolutions and sizes; ~280 MB of new git blobs (`AU-4`)      | 2026-09-17 |
-| Delete the "unreferenced" Monocraft weight variants                 | ⛔ Rejected — they are not unreferenced; `Monocraft.asset`'s `m_FontWeightTable` points at all 6 and the code uses `<b>`  | 2026-09-17 |
-| Lower music Vorbis import quality to ~0.6                           | ⛔ Rejected — audible fidelity outranks ~40–50 MB (`AU-5`)                                                                | 2026-09-17 |
-| Treat the auditor's allocation counts as a performance backlog       | ⛔ Rejected — no call context, blind to Burst jobs, 15/2,590 per-frame and all gated (§3.1)                               | 2026-09-17 |
-| Fix `PAA0002` read/write textures                                    | ⛔ Rejected — editor-only assets, 0 in the build (§3.2)                                                                   | 2026-09-17 |
-| Flip Direct3D12 ahead of Direct3D11 as a settings tidy-up            | ⛔ Rejected as an unmeasured change; kept as the measured item `AU-8`                                                     | 2026-09-17 |
+| Option                                                             | Verdict                                                                                                                  | Date       |
+|--------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------|------------|
+| Regenerate the Monocraft atlases smaller (all 8, or the 7 weights) | ⛔ Rejected — atlas regeneration renders boxy/soft at other resolutions and sizes; ~280 MB of new git blobs (`AU-4`)     | 2026-09-17 |
+| Delete the "unreferenced" Monocraft weight variants                | ⛔ Rejected — they are not unreferenced; `Monocraft.asset`'s `m_FontWeightTable` points at all 6 and the code uses `<b>` | 2026-09-17 |
+| Lower music Vorbis import quality to ~0.6                          | ⛔ Rejected — audible fidelity outranks ~40–50 MB (`AU-5`)                                                               | 2026-09-17 |
+| Treat the auditor's allocation counts as a performance backlog     | ⛔ Rejected — no call context, blind to Burst jobs, 15/2,590 per-frame and all gated (§3.1)                              | 2026-09-17 |
+| Fix `PAA0002` read/write textures                                  | ⛔ Rejected — editor-only assets, 0 in the build (§3.2)                                                                  | 2026-09-17 |
+| Flip Direct3D12 ahead of Direct3D11 as a settings tidy-up          | ⛔ Rejected as an unmeasured change; kept as the measured item `AU-8`                                                    | 2026-09-17 |
 
 ---
 

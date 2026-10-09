@@ -1,11 +1,11 @@
 # Seam-Wake Pass (Fluid §19) — Gate A/B Screening
 
-| Field           | Value                                                                                                       |
-|-----------------|-------------------------------------------------------------------------------------------------------------|
-| **Captured**    | 2026-07-27                                                                                                  |
-| **Branch**      | `feat/world-scaling`                                                                                        |
-| **Commit**      | `1757abfd` + uncommitted seam-wake work                                                                     |
-| **Captured by** | `Minecraft Clone/Benchmarks/Seam Wake (Fluid 19)` (`Assets/Editor/Benchmarking/SeamWakeBenchmark.cs`), **Editor Mono**, 200 runs + 20 warm-ups per scenario |
+| Field           | Value                                                                                                                                                                                               |
+|-----------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Captured**    | 2026-07-27                                                                                                                                                                                          |
+| **Branch**      | `feat/world-scaling`                                                                                                                                                                                |
+| **Commit**      | `1757abfd` + uncommitted seam-wake work                                                                                                                                                             |
+| **Captured by** | `Minecraft Clone/Benchmarks/Seam Wake (Fluid 19)` (`Assets/Editor/Benchmarking/SeamWakeBenchmark.cs`), **Editor Mono**, 200 runs + 20 warm-ups per scenario                                         |
 | **Verdict**     | **GO (screening) for the pair-walk gate** — 13.5× on land/grass seams, y+1 widen free. **Ocean seam cost recorded, not gated: needs an IL2CPP fill-load capture before the P-4 flags are retired.** |
 
 ## What this measures (and what it does NOT)
@@ -32,19 +32,19 @@ seam column is filled per scenario; the chunk "that just populated" faces it acr
 Active buckets are cleared **outside** the timed region so each run starts from the same state
 and the reset cost is not attributed to the pass.
 
-| Leg            | Woken side (seam column)   | Populated side (facing slab)               | Gate behaviour                        |
-|----------------|----------------------------|--------------------------------------------|---------------------------------------|
-| Ocean seam     | Water y=30..62, all 16 z   | Water, same rows                            | admits every cell (water is non-solid) |
-| Land seam      | Grass row at y=40          | Stone, y=0..40                               | same-Y rejects → y+1 rejects → skip    |
-| Grass seam     | Grass row at y=40          | Stone + **Dirt at y=41** (up-diagonal target) | same-Y rejects → **y+1 admits**        |
+| Leg        | Woken side (seam column) | Populated side (facing slab)                  | Gate behaviour                         |
+|------------|--------------------------|-----------------------------------------------|----------------------------------------|
+| Ocean seam | Water y=30..62, all 16 z | Water, same rows                              | admits every cell (water is non-solid) |
+| Land seam  | Grass row at y=40        | Stone, y=0..40                                | same-Y rejects → y+1 rejects → skip    |
+| Grass seam | Grass row at y=40        | Stone + **Dirt at y=41** (up-diagonal target) | same-Y rejects → **y+1 admits**        |
 
 ## Results (µs per `WakeSeamSlab` call, editor Mono)
 
 | Scenario   | Cells scanned | Voxels woken | Mean (µs) | Min (µs) | ×4 = per population (µs) |
-|------------|---------------|--------------|-----------|----------|---------------------------|
-| Ocean seam | 2048          | 528          | 19.49     | 18.50    | 77.95                     |
-| Land seam  | 2048          | 16           | 1.44      | 1.30     | 5.78                      |
-| Grass seam | 2048          | 16           | 1.40      | 1.20     | 5.61                      |
+|------------|---------------|--------------|-----------|----------|--------------------------|
+| Ocean seam | 2048          | 528          | 19.49     | 18.50    | 77.95                    |
+| Land seam  | 2048          | 16           | 1.44      | 1.30     | 5.78                     |
+| Grass seam | 2048          | 16           | 1.40      | 1.20     | 5.61                     |
 
 ## What the numbers settle
 

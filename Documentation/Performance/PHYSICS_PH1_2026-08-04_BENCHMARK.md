@@ -29,25 +29,25 @@ onto half-slabs and full blocks, jumps including into a low ceiling, sprinting o
 
 ## 3. Results
 
-| Counter | Total | Per tick |
-|---|---:|---:|
-| Physics ticks (`CalculateVelocity` with collision) | 15,851 | — |
-| Substeps / gathers | 32,555 | 2.05 |
-| Sweeps issued | 80,691 | 5.09 |
-| **Fallbacks to a direct scan** | **0** | **0** |
-| Cells read — **after** (gathered) | 309,306 | **19.51** |
-| Cells read — **before** (counterfactual) | 644,428 | **40.66** |
-| Direct scans (`World.CheckPhysicsCollision`) | 0 | 0 |
+| Counter                                            | Total   | Per tick  |
+|----------------------------------------------------|--------:|----------:|
+| Physics ticks (`CalculateVelocity` with collision) | 15,851  | —         |
+| Substeps / gathers                                 | 32,555  | 2.05      |
+| Sweeps issued                                      | 80,691  | 5.09      |
+| **Fallbacks to a direct scan**                     | **0**   | **0**     |
+| Cells read — **after** (gathered)                  | 309,306 | **19.51** |
+| Cells read — **before** (counterfactual)           | 644,428 | **40.66** |
+| Direct scans (`World.CheckPhysicsCollision`)       | 0       | 0         |
 
 **Reduction: 2.08×** (644,428 → 309,306).
 
 Derived shape of the win:
 
-| Ratio | Value | Reading |
-|---|---:|---|
-| Sweeps per gather | **2.48** | How many sweeps each gather amortizes over — the leverage |
-| Cells per gather | 9.50 | What one gather costs |
-| Cells per sweep (counterfactual) | 7.99 | What one old scan cost |
+| Ratio                            | Value    | Reading                                                   |
+|----------------------------------|---------:|-----------------------------------------------------------|
+| Sweeps per gather                | **2.48** | How many sweeps each gather amortizes over — the leverage |
+| Cells per gather                 | 9.50     | What one gather costs                                     |
+| Cells per sweep (counterfactual) | 7.99     | What one old scan cost                                    |
 
 ## 4. Honest reading of the number
 

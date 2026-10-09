@@ -1,12 +1,12 @@
 # P9-2 — Convergent edge-check cascade, IL2CPP Release — 8-run OFF/ON sweep + a corrected vd-32 cap-24 pair
 
-| Field           | Value |
-|-----------------|-------|
-| **Captured**    | 2026-08-02 19:14 – 21:07 |
-| **Branch**      | `feat/world-scaling` (report authored at `3cceab54`) |
-| **Commit**      | Build GUID **`fc6ffa2130d646cc94c29146ca0a3802`** — carries the P9-2 fix (`93f8037d`). **All ten runs share this GUID.** Not comparable to P9-0a / P9-1 builds (§7 baseline rule) |
-| **Captured by** | `BenchmarkController` — **IL2CPP, Configuration: Release, Player, Burst on**. Ten runs, **n = 1 per configuration**. i9-9900K / 16 threads / 64 GB / D3D11 |
-| **Rule**        | **§7.1 v2**, as FP-8, FP-10, P-8, P9-0a and P9-1 |
+| Field           | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+|-----------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Captured**    | 2026-08-02 19:14 – 21:07                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| **Branch**      | `feat/world-scaling` (report authored at `3cceab54`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| **Commit**      | Build GUID **`fc6ffa2130d646cc94c29146ca0a3802`** — carries the P9-2 fix (`93f8037d`). **All ten runs share this GUID.** Not comparable to P9-0a / P9-1 builds (§7 baseline rule)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| **Captured by** | `BenchmarkController` — **IL2CPP, Configuration: Release, Player, Burst on**. Ten runs, **n = 1 per configuration**. i9-9900K / 16 threads / 64 GB / D3D11                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| **Rule**        | **§7.1 v2**, as FP-8, FP-10, P-8, P9-0a and P9-1                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | **Verdict**     | ✅ **GO — `enableConvergentEdgeCheckCascade` ships default-ON.** At the shipping cap (vd 32, `maxLightJobsPerFrame` 24): lighting amplification **6.12 → 1.86** per delivered chunk, delivery **×2.12**, p50 end-to-end **3 603 → 822 ms** against a 2 560 ms budget (**Q1 met, 0.32× of budget**), and the pipeline spends **less** main thread per second (731 → 630 ms/s) while delivering twice as much. **The rate quota stops being the binding constraint** — `Quota`-bound frames fall 94.3 % → 8.3 % and the panic gate goes from 85 % closed to fully open. Q2 fails as originally written and passes on its reworded per-delivered-chunk form (design §2). **Q4 fails at ×1.15** and is accepted as a recorded cost |
 
 > **Design home:** [`Design/CHUNK_PIPELINE_SCHEDULE_QUOTA_THROUGHPUT.md`](../Design/CHUNK_PIPELINE_SCHEDULE_QUOTA_THROUGHPUT.md)
@@ -32,49 +32,49 @@ cap-48 sweep is reported as supporting evidence for the view-distance sweep only
 
 ## Raw results — the scored pair (vd 32, loading @ 200 m/s, cap 24)
 
-| Measure | OFF | ON | ratio |
-|---------|-----|-----|-------|
-| Delivered chunks | 6 861 | **14 518** | ×2.12 |
-| Delivered/s | 228 | **482** | ×2.12 |
-| **Lighting amplification (total/chunk)** | 6.12 | **1.86** | ÷3.3 |
-| Pre-delivery amplification | 3.82 | **1.09** | ÷3.5 |
-| Mesh amplification | 1.00 | 1.00 | — |
-| Lighting schedules/s | 1 397 | 897 | ×0.64 |
-| **p50 `enqueue→MeshApplied`** | 3 603 ms | **822 ms** | ×0.23 |
-| `enqueue→populated` | 2 778 ms | 481 ms | ×0.17 |
-| `populated→lit` | 594 ms | 200 ms | ×0.34 |
-| `lit→meshApplied` | 9.7 ms | 43.1 ms | ×4.4 |
-| **`Quota`-bound frames** | 1 776 / 1 884 (94.3 %) | **73 / 883 (8.3 %)** | |
-| **Panic gate closed** | 85.2 % | **0.0 %** | |
-| Pipeline main-thread ms/s | 731.0 | **630.5** | ×0.86 |
-| **Pipeline ms per delivered chunk** | 3.21 | **1.31** | ÷2.4 |
-| Avg CPU frame | 17.6 ms | 34.5 ms | ×1.96 |
-| Min wall FPS | 24.3 | 20.5 | ×0.84 |
-| Peak total memory (run) | 4 950 MB | 5 703 MB | **×1.15** |
-| Waste | 12.0 % | 35.7 % | |
-| Tour coverage | 97.8 % ❌ | **100.0 %** ✅ | |
+| Measure                                  | OFF                    | ON                   | ratio     |
+|------------------------------------------|------------------------|----------------------|-----------|
+| Delivered chunks                         | 6 861                  | **14 518**           | ×2.12     |
+| Delivered/s                              | 228                    | **482**              | ×2.12     |
+| **Lighting amplification (total/chunk)** | 6.12                   | **1.86**             | ÷3.3      |
+| Pre-delivery amplification               | 3.82                   | **1.09**             | ÷3.5      |
+| Mesh amplification                       | 1.00                   | 1.00                 | —         |
+| Lighting schedules/s                     | 1 397                  | 897                  | ×0.64     |
+| **p50 `enqueue→MeshApplied`**            | 3 603 ms               | **822 ms**           | ×0.23     |
+| `enqueue→populated`                      | 2 778 ms               | 481 ms               | ×0.17     |
+| `populated→lit`                          | 594 ms                 | 200 ms               | ×0.34     |
+| `lit→meshApplied`                        | 9.7 ms                 | 43.1 ms              | ×4.4      |
+| **`Quota`-bound frames**                 | 1 776 / 1 884 (94.3 %) | **73 / 883 (8.3 %)** |           |
+| **Panic gate closed**                    | 85.2 %                 | **0.0 %**            |           |
+| Pipeline main-thread ms/s                | 731.0                  | **630.5**            | ×0.86     |
+| **Pipeline ms per delivered chunk**      | 3.21                   | **1.31**             | ÷2.4      |
+| Avg CPU frame                            | 17.6 ms                | 34.5 ms              | ×1.96     |
+| Min wall FPS                             | 24.3                   | 20.5                 | ×0.84     |
+| Peak total memory (run)                  | 4 950 MB               | 5 703 MB             | **×1.15** |
+| Waste                                    | 12.0 %                 | 35.7 %               |           |
+| Tour coverage                            | 97.8 % ❌              | **100.0 %** ✅       |           |
 
 ### The cap-48 view-distance sweep (runs 1–8, supporting evidence only)
 
 Loading @ 200 m/s. Frame-time columns are **not** scoreable (see Limitation 1); amplification and latency
 are, since neither depends on how the per-second work is packed into frames.
 
-| vd | delivered OFF→ON | amp OFF→ON | pre-delivery | p50 e2e OFF→ON | budget | ON vs budget |
-|----|------------------|------------|--------------|----------------|--------|--------------|
-| 10 | 5 809 → 9 106 | 6.93 → **1.44** | 3.84 → 1.19 | 802 → **358 ms** | 800 ms | **0.45×** ✅ |
-| 20 | 7 134 → 15 623 | 6.42 → **1.49** | 4.03 → 1.21 | 2 008 → **573 ms** | 1 600 ms | **0.36×** ✅ |
-| 26 | 6 955 → 11 704 | 6.39 → **1.83** | 3.94 → 1.27 | 2 854 → **1 225 ms** | 2 080 ms | **0.59×** ✅ |
-| 32 | 6 590 → 11 430 | 6.54 → **1.67** | 4.01 → 1.16 | 3 508 → **1 792 ms** | 2 560 ms | **0.70×** ✅ |
+| vd  | delivered OFF→ON | amp OFF→ON      | pre-delivery | p50 e2e OFF→ON       | budget   | ON vs budget |
+|-----|------------------|-----------------|--------------|----------------------|----------|--------------|
+| 10  | 5 809 → 9 106    | 6.93 → **1.44** | 3.84 → 1.19  | 802 → **358 ms**     | 800 ms   | **0.45×** ✅ |
+| 20  | 7 134 → 15 623   | 6.42 → **1.49** | 4.03 → 1.21  | 2 008 → **573 ms**   | 1 600 ms | **0.36×** ✅ |
+| 26  | 6 955 → 11 704   | 6.39 → **1.83** | 3.94 → 1.27  | 2 854 → **1 225 ms** | 2 080 ms | **0.59×** ✅ |
+| 32  | 6 590 → 11 430   | 6.54 → **1.67** | 4.01 → 1.16  | 3 508 → **1 792 ms** | 2 560 ms | **0.70×** ✅ |
 
 ### Generation pass @ 10 m/s — the high-amplification regime
 
 Pre-delivery amplification, the figure P9-1 measured at 6.59–6.76:
 
-| vd | OFF | ON |
-|----|-----|-----|
-| 10 | 6.36 | 2.63 |
-| 20 | 6.62 | 3.22 |
-| 26 | 6.66 | 3.47 |
+| vd          | OFF  | ON       |
+|-------------|------|----------|
+| 10          | 6.36 | 2.63     |
+| 20          | 6.62 | 3.22     |
+| 26          | 6.66 | 3.47     |
 | 32 (cap 24) | 6.72 | **3.54** |
 
 ---
@@ -146,16 +146,16 @@ and this raises the number that question is about. It belongs to whoever picks u
 
 ## Verdict against the pre-committed criteria
 
-| # | Criterion | Result |
-|---|-----------|--------|
-| **Q1** | Visibility budget ⭐ | ✅ **MET at every view distance.** Scored pair: 822 ms against 2 560 ms = **0.32×**. Sweep: 0.45× / 0.36× / 0.59× / 0.70× at vd 10/20/26/32 |
-| **Q2** | Frame time (as written) | ❌ avg CPU ×1.96, min FPS ×0.84 |
-| **Q2′** | Frame time per delivered chunk (reworded, design §2) | ✅ **3.21 → 1.31 ms per delivered chunk (÷2.4)**; absolute pipeline cost ×0.86 |
-| **Q3c** | Amplification lever moved the divisor ⭐ | ✅ (b) amp 6.12 → 1.86; (c) delivered/s ×2.12, matching the reciprocal; (d) identity closes in **both** legs (1 397 ÷ 6.12 = 228 vs 228; 897 ÷ 1.86 = 482 vs 482). (a) inapplicable — the pass left the rate-bound regime entirely (F2) |
-| **Q4** | Memory ≤ ×1.10 | ❌ **×1.15** — accepted as a recorded cost, see F6 |
-| **Q5** | Waste not scored | Recorded: 12.0 % → 35.7 % |
-| **Q6** | Coverage ≥ 99 % | ON leg **100.0 %** ✅; OFF leg 97.8 % ❌ (flatters the OFF→ON delta, but Q1's ON reading is absolute and unaffected) |
-| **Q7** | Corrections still converge | ✅ **Confirmed in-game by the product owner**: chunk generation lights correctly while flying, and **RGB blocklight converges and mixes across chunk borders** — the most defect-prone path in the engine (Bugs 12/16/17/18, fidelity C10/C12). Suites additionally green at 374 baselines |
+| #       | Criterion                                            | Result                                                                                                                                                                                                                                                                                     |
+|---------|------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Q1**  | Visibility budget ⭐                                 | ✅ **MET at every view distance.** Scored pair: 822 ms against 2 560 ms = **0.32×**. Sweep: 0.45× / 0.36× / 0.59× / 0.70× at vd 10/20/26/32                                                                                                                                                |
+| **Q2**  | Frame time (as written)                              | ❌ avg CPU ×1.96, min FPS ×0.84                                                                                                                                                                                                                                                            |
+| **Q2′** | Frame time per delivered chunk (reworded, design §2) | ✅ **3.21 → 1.31 ms per delivered chunk (÷2.4)**; absolute pipeline cost ×0.86                                                                                                                                                                                                             |
+| **Q3c** | Amplification lever moved the divisor ⭐             | ✅ (b) amp 6.12 → 1.86; (c) delivered/s ×2.12, matching the reciprocal; (d) identity closes in **both** legs (1 397 ÷ 6.12 = 228 vs 228; 897 ÷ 1.86 = 482 vs 482). (a) inapplicable — the pass left the rate-bound regime entirely (F2)                                                    |
+| **Q4**  | Memory ≤ ×1.10                                       | ❌ **×1.15** — accepted as a recorded cost, see F6                                                                                                                                                                                                                                         |
+| **Q5**  | Waste not scored                                     | Recorded: 12.0 % → 35.7 %                                                                                                                                                                                                                                                                  |
+| **Q6**  | Coverage ≥ 99 %                                      | ON leg **100.0 %** ✅; OFF leg 97.8 % ❌ (flatters the OFF→ON delta, but Q1's ON reading is absolute and unaffected)                                                                                                                                                                       |
+| **Q7**  | Corrections still converge                           | ✅ **Confirmed in-game by the product owner**: chunk generation lights correctly while flying, and **RGB blocklight converges and mixes across chunk borders** — the most defect-prone path in the engine (Bugs 12/16/17/18, fidelity C10/C12). Suites additionally green at 374 baselines |
 
 ---
 

@@ -32,13 +32,13 @@
 
 | Pattern                | Before µs/chunk | After µs/chunk | Δ      | Note                               |
 |------------------------|----------------:|---------------:|--------|------------------------------------|
-| `Solid`                |           269.2 |          269.2 | 0.0 %  | tiny write volume — pre-size moot  |
-| `Checkerboard`         |          3294.9 |         3230.8 | −1.9 % | within noise                       |
-| `OrientedCubes`        |           269.2 |          262.8 | −2.4 % | within noise                       |
-| `OrientedCheckerboard` |          3211.5 |         3064.1 | −4.6 % | high-vertex; realloc reduced       |
-| `Fluid`                |          1217.9 |         1153.8 | −5.3 % | recovers the MR-2 Fluid regression |
-| `Transparent`          |          3826.9 |         3692.3 | −3.5 % | high-vertex; realloc reduced       |
-| `MixedTerrain`         |          1634.6 |         1628.2 | −0.4 % | within noise                       |
+| `Solid`                | 269.2           | 269.2          | 0.0 %  | tiny write volume — pre-size moot  |
+| `Checkerboard`         | 3294.9          | 3230.8         | −1.9 % | within noise                       |
+| `OrientedCubes`        | 269.2           | 262.8          | −2.4 % | within noise                       |
+| `OrientedCheckerboard` | 3211.5          | 3064.1         | −4.6 % | high-vertex; realloc reduced       |
+| `Fluid`                | 1217.9          | 1153.8         | −5.3 % | recovers the MR-2 Fluid regression |
+| `Transparent`          | 3826.9          | 3692.3         | −3.5 % | high-vertex; realloc reduced       |
+| `MixedTerrain`         | 1634.6          | 1628.2         | −0.4 % | within noise                       |
 
 The high-vertex patterns (OrientedCheckerboard, Transparent, Fluid) moved most, which is the expected
 shape if pre-sizing removes some in-job reallocation/memcpy — but the +12 % upload drift means part of
@@ -61,13 +61,13 @@ Per chunk (all sections), WithDiagonals:
 
 | Pattern                | Vertices | Opaque tri-idx | Transparent tri-idx | Fluid tri-idx |
 |------------------------|---------:|---------------:|--------------------:|--------------:|
-| `Solid`                |     2048 |           3072 |                   0 |             0 |
-| `Checkerboard`         |  278 528 |        417 792 |                   0 |             0 |
-| `OrientedCubes`        |     2048 |           3072 |                   0 |             0 |
-| `OrientedCheckerboard` |  278 528 |        417 792 |                   0 |             0 |
-| `Fluid`                |     2048 |              0 |                   0 |          3072 |
-| `Transparent`          |  393 216 |              0 |             589 824 |             0 |
-| `MixedTerrain`         |  163 160 |        155 460 |              50 562 |        38 718 |
+| `Solid`                | 2048     | 3072           | 0                   | 0             |
+| `Checkerboard`         | 278 528  | 417 792        | 0                   | 0             |
+| `OrientedCubes`        | 2048     | 3072           | 0                   | 0             |
+| `OrientedCheckerboard` | 278 528  | 417 792        | 0                   | 0             |
+| `Fluid`                | 2048     | 0              | 0                   | 3072          |
+| `Transparent`          | 393 216  | 0              | 589 824             | 0             |
+| `MixedTerrain`         | 163 160  | 155 460        | 50 562              | 38 718        |
 
 **The distribution is bimodal**, not a single median: light chunks emit ~**2 048** verts; dense surface
 patterns emit **163 k–393 k**. A fixed pre-size cannot cover both without waste — but **pooling makes the
@@ -81,11 +81,11 @@ to actual concurrent peak — the lower hint is the memory-optimal choice given 
 
 ## Upload phase — unchanged by MR-6 (variance reference)
 
-| Metric                |  MR-2 after |  MR-6 after | Δ       |
+| Metric                | MR-2 after  | MR-6 after  | Δ       |
 |-----------------------|------------:|------------:|---------|
 | Vertex format         | 32 B/vertex | 32 B/vertex | —       |
-| Upload time per chunk |    676.2 µs |    756.8 µs | +11.9 % |
-| Vertex upload rate    |  12571 MB/s |  11231 MB/s | −10.7 % |
+| Upload time per chunk | 676.2 µs    | 756.8 µs    | +11.9 % |
+| Vertex upload rate    | 12571 MB/s  | 11231 MB/s  | −10.7 % |
 
 MR-6 does not touch the upload path; this delta is run-to-run variance and is the **noise floor** the
 generation comparison is read against.

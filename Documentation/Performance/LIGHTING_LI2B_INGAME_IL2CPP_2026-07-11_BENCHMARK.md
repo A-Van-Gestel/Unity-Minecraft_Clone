@@ -48,16 +48,16 @@ chunk/section borders, break + re-place cycles).
 
 ### Baseline phase — settled suspended-basin field (4 s)
 
-| Metric (per frame)     | Band OFF | Band ON |        Δ |
+| Metric (per frame)     | Band OFF | Band ON | Δ        |
 |------------------------|---------:|--------:|---------:|
-| Frame avg (ms)         |    1.439 |   1.571 | +9.2 % ⚠ |
-| Light avg (ms)         |    0.070 |   0.075 | +7.1 % ⚠ |
-| Frame peak (ms)        |   16.495 |  12.975 |  −21.3 % |
-| Light peak (ms)        |    9.507 |   9.788 |   +3.0 % |
-| Min FPS                |       61 |      77 |  **+16** |
-| GC/frame avg (KB)      |      1.0 |     0.3 |    −70 % |
-| GC/frame peak (KB)     |   1772.0 |   152.0 |    −91 % |
-| Frames rendered in 4 s |     2780 |    2547 |          |
+| Frame avg (ms)         | 1.439    | 1.571   | +9.2 % ⚠ |
+| Light avg (ms)         | 0.070    | 0.075   | +7.1 % ⚠ |
+| Frame peak (ms)        | 16.495   | 12.975  | −21.3 %  |
+| Light peak (ms)        | 9.507    | 9.788   | +3.0 %   |
+| Min FPS                | 61       | 77      | **+16**  |
+| GC/frame avg (KB)      | 1.0      | 0.3     | −70 %    |
+| GC/frame peak (KB)     | 1772.0   | 152.0   | −91 %    |
+| Frames rendered in 4 s | 2780     | 2547    |          |
 
 `⚠` The settled averages sit inside cross-run variance for this 4-second phase: the same configuration's OFF leg
 measured 1.860 ms in the LI-2 session and 1.439 ms here — a 23 % swing between two same-day sessions of the *identical*
@@ -68,16 +68,16 @@ survives the variance.
 
 ### Flood phase — 25-chunk cascade (Light-heavy worst case)
 
-| Metric (per frame)           |       Band OFF |        Band ON |          Δ |
+| Metric (per frame)           | Band OFF       | Band ON        | Δ          |
 |------------------------------|---------------:|---------------:|-----------:|
-| Frame avg (ms)               |          2.979 |          3.015 |     +1.2 % |
-| Light avg (ms)               |          0.323 |          0.331 |     +2.5 % |
-| Frame peak (ms)              |         37.165 |         37.260 |     +0.3 % |
-| Light peak (independent max) |         32.224 |         32.756 |     +1.7 % |
+| Frame avg (ms)               | 2.979          | 3.015          | +1.2 %     |
+| Light avg (ms)               | 0.323          | 0.331          | +2.5 %     |
+| Frame peak (ms)              | 37.165         | 37.260         | +0.3 %     |
+| Light peak (independent max) | 32.224         | 32.756         | +1.7 %     |
 | Worst-frame Light component  | 9.629 (25.9 %) | 8.805 (23.6 %) | **−8.6 %** |
-| Min FPS                      |             27 |             27 |          0 |
-| GC/frame avg (KB)            |            2.1 |            2.0 |            |
-| GC/frame peak (KB)           |         1396.0 |          796.0 |            |
+| Min FPS                      | 27             | 27             | 0          |
+| GC/frame avg (KB)            | 2.1            | 2.0            |            |
+| GC/frame peak (KB)           | 1396.0         | 796.0          |            |
 
 **Flood is frame-neutral** — every average and peak within ±2.5 %, min FPS identical. Expected: the flood's lighting is
 recalc-driven (bottom band 0 by rule) and BFS-bound (irreducible wave). Notably this session's OFF leg already sits at
@@ -86,16 +86,16 @@ comparisons for this pass carry ~10 %-class variance and only same-session delta
 
 ## Result — per-job, IL2CPP + Burst (noise floor; both builds run identical full-height jobs)
 
-| Job shape                 | Band OFF | Band ON |      Δ |
+| Job shape                 | Band OFF | Band ON | Δ      |
 |---------------------------|---------:|--------:|-------:|
-| Sunlight Vertical Flat    |    257.8 |   273.4 | +6.1 % |
-| Sunlight Complex Caves    |    246.1 |   261.7 | +6.3 % |
-| Sunlight Removal Covered  |    210.9 |   218.8 | +3.7 % |
-| Blocklight Simple         |    156.3 |   156.3 |  0.0 % |
-| Blocklight Stress Test    |    335.9 |   335.9 |  0.0 % |
-| Blocklight Removal Simple |    152.3 |   152.3 |  0.0 % |
-| Blocklight Removal Stress |    152.3 |   152.3 |  0.0 % |
-| Edge Check Consistency    |    246.1 |   238.3 | −3.2 % |
+| Sunlight Vertical Flat    | 257.8    | 273.4   | +6.1 % |
+| Sunlight Complex Caves    | 246.1    | 261.7   | +6.3 % |
+| Sunlight Removal Covered  | 210.9    | 218.8   | +3.7 % |
+| Blocklight Simple         | 156.3    | 156.3   | 0.0 %  |
+| Blocklight Stress Test    | 335.9    | 335.9   | 0.0 %  |
+| Blocklight Removal Simple | 152.3    | 152.3   | 0.0 %  |
+| Blocklight Removal Stress | 152.3    | 152.3   | 0.0 %  |
+| Edge Check Consistency    | 246.1    | 238.3   | −3.2 % |
 
 The harness pins `BandHeight = 128, BandMinY = 0` in both builds (see above), so this table's spread (−3…+6 %) is the
 **build/session noise floor** for identical code paths — useful as the error bar for every other IL2CPP number, and a

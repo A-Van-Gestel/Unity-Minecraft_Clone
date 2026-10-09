@@ -58,38 +58,38 @@ serialized assets, not assumed.
 
 ## ID index
 
-| ID | Scope | Where it now lives |
-|----|-------|--------------------|
-| **UB-0** | Feasibility spike: one canvas in-pipeline, one band pass, masks cleared | ⛔ Shipped nothing. Preserved on branch `spike/ub0-inpipeline-ui` (`e369f061`); its two surviving corrections are §2.4's sort criteria and global-state permission |
-| **UB-1** | `UIBandId` / `UIBandLayers`, the band sorting layers, layer assignment at creation, `UIBlurBand`'s repair pass | §2.2, §2.3, §7 (`L1`–`L4`) |
-| **UB-2** | `UIBlurChain` extracted, `UIBlurRendererFeature` absorbed, `UIBandRegistry`, the composite feature, the renderer masks, Underwater `B17` rewritten | §2.1, §2.4, §2.5, §7 |
-| **UB-3** | `World.unity` conversion: render mode, three band roots, the screen-to-canvas rewrites, off-plane Z sweep, dropdown re-banding | §2.2, §2.5, §6 |
-| **UB-4** | Tint retune against the post-processed capture | ⏸️ Paused 2026-09-07 — measured as not due (§5); the limitation it was to close was closed by `UB-3` |
-| **UB-5** | Toast flat-fallback policy deleted; cards frost unconditionally | §6, and `TOAST_NOTIFICATION_SYSTEM.md` |
-| **UB-6** | `MainMenu.unity` adoption: bands, `UIBlurClear.mat`, stencil `Mask` → `RectMask2D`, canvas camera for link hit-testing | §2.2, §5, §6, §8 |
-| **UB-7** | Validation & promotion | **Split.** The promotion is this document. The play-mode regression guard is `NS-12` in [`../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md`](../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md) |
-| **UB-8** | Occupancy reads a band's *content* rather than its root being enabled, so a declared-but-empty band leaves the walk | §2.1, §6, §7 (`L17`–`L19`), §8 |
+| ID       | Scope                                                                                                                                              | Where it now lives                                                                                                                                                                         |
+|----------|----------------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **UB-0** | Feasibility spike: one canvas in-pipeline, one band pass, masks cleared                                                                            | ⛔ Shipped nothing. Preserved on branch `spike/ub0-inpipeline-ui` (`e369f061`); its two surviving corrections are §2.4's sort criteria and global-state permission                         |
+| **UB-1** | `UIBandId` / `UIBandLayers`, the band sorting layers, layer assignment at creation, `UIBlurBand`'s repair pass                                     | §2.2, §2.3, §7 (`L1`–`L4`)                                                                                                                                                                 |
+| **UB-2** | `UIBlurChain` extracted, `UIBlurRendererFeature` absorbed, `UIBandRegistry`, the composite feature, the renderer masks, Underwater `B17` rewritten | §2.1, §2.4, §2.5, §7                                                                                                                                                                       |
+| **UB-3** | `World.unity` conversion: render mode, three band roots, the screen-to-canvas rewrites, off-plane Z sweep, dropdown re-banding                     | §2.2, §2.5, §6                                                                                                                                                                             |
+| **UB-4** | Tint retune against the post-processed capture                                                                                                     | ⏸️ Paused 2026-09-07 — measured as not due (§5); the limitation it was to close was closed by `UB-3`                                                                                       |
+| **UB-5** | Toast flat-fallback policy deleted; cards frost unconditionally                                                                                    | §6, and `TOAST_NOTIFICATION_SYSTEM.md`                                                                                                                                                     |
+| **UB-6** | `MainMenu.unity` adoption: bands, `UIBlurClear.mat`, stencil `Mask` → `RectMask2D`, canvas camera for link hit-testing                             | §2.2, §5, §6, §8                                                                                                                                                                           |
+| **UB-7** | Validation & promotion                                                                                                                             | **Split.** The promotion is this document. The play-mode regression guard is `NS-12` in [`../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md`](../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md) |
+| **UB-8** | Occupancy reads a band's *content* rather than its root being enabled, so a declared-but-empty band leaves the walk                                | §2.1, §6, §7 (`L17`–`L19`), §8                                                                                                                                                             |
 
 ---
 
 ## 1. Components
 
-| File                                                          | Role                                                                                          |
-|---------------------------------------------------------------|-----------------------------------------------------------------------------------------------|
-| `Assets/Scripts/Rendering/UIBandCompositeRendererFeature.cs`   | The producer. Walks the occupied bands, re-blurring before each one draws.                     |
-| `Assets/Scripts/Rendering/UIBlurChain.cs`                      | The Kawase chain and the `_UIBlurTexture` publish, recorded once per band.                     |
-| `Assets/Scripts/Rendering/UIBlurHistory.cs`                    | Per-camera persistent blur target, so the result is not a pooled render-graph texture.          |
-| `Assets/Scripts/UI/Blur/UIBandId.cs`                           | The four ordered bands. The enum value *is* the paint order and the walk index.                 |
-| `Assets/Scripts/UI/Blur/UIBandLayers.cs`                       | Resolves a band's sorting layer and the single `UI` GameObject layer; off-plane Z detection; the subtree content test occupancy reads. |
-| `Assets/Scripts/UI/Blur/UIBandRegistry.cs`                     | Which bands currently have content, and the walk order derived from that.                       |
-| `Assets/Scripts/UI/Blur/UIBlurBand.cs`                         | Declares a subtree as a band. One component routes the whole subtree.                           |
-| `Assets/Scripts/UI/Blur/UIBandDropdownSorting.cs`              | Keeps a `TMP_Dropdown`'s self-sorting popup inside its own band.                                |
-| `Assets/Shaders/UIBlurBlit.shader`                             | `Hidden/UI/KawaseBlur` — the kernel the chain's iterations run.                                 |
-| `Assets/Shaders/MaskedUIBlur.shader`                           | Consumer. A UI shader that samples `_UIBlurTexture` by screen UV.                               |
-| `Assets/Materials/UI/UIBlur.mat`                               | The shared tinted material (`_MultiplyColor` `0.415`).                                          |
-| `Assets/Materials/UI/UIBlurClear.mat`                          | The neutral variant (`_MultiplyColor` white) — blurs without darkening. Unreferenced today (§5). |
-| `Assets/Editor/Validation/UIBlur/`                             | The rendered-pixel consumer suite and its quad renderer.                                        |
-| `Assets/Editor/Validation/UIBands/`                            | The band-routing suite.                                                                         |
+| File                                                         | Role                                                                                                                                   |
+|--------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------|
+| `Assets/Scripts/Rendering/UIBandCompositeRendererFeature.cs` | The producer. Walks the occupied bands, re-blurring before each one draws.                                                             |
+| `Assets/Scripts/Rendering/UIBlurChain.cs`                    | The Kawase chain and the `_UIBlurTexture` publish, recorded once per band.                                                             |
+| `Assets/Scripts/Rendering/UIBlurHistory.cs`                  | Per-camera persistent blur target, so the result is not a pooled render-graph texture.                                                 |
+| `Assets/Scripts/UI/Blur/UIBandId.cs`                         | The four ordered bands. The enum value *is* the paint order and the walk index.                                                        |
+| `Assets/Scripts/UI/Blur/UIBandLayers.cs`                     | Resolves a band's sorting layer and the single `UI` GameObject layer; off-plane Z detection; the subtree content test occupancy reads. |
+| `Assets/Scripts/UI/Blur/UIBandRegistry.cs`                   | Which bands currently have content, and the walk order derived from that.                                                              |
+| `Assets/Scripts/UI/Blur/UIBlurBand.cs`                       | Declares a subtree as a band. One component routes the whole subtree.                                                                  |
+| `Assets/Scripts/UI/Blur/UIBandDropdownSorting.cs`            | Keeps a `TMP_Dropdown`'s self-sorting popup inside its own band.                                                                       |
+| `Assets/Shaders/UIBlurBlit.shader`                           | `Hidden/UI/KawaseBlur` — the kernel the chain's iterations run.                                                                        |
+| `Assets/Shaders/MaskedUIBlur.shader`                         | Consumer. A UI shader that samples `_UIBlurTexture` by screen UV.                                                                      |
+| `Assets/Materials/UI/UIBlur.mat`                             | The shared tinted material (`_MultiplyColor` `0.415`).                                                                                 |
+| `Assets/Materials/UI/UIBlurClear.mat`                        | The neutral variant (`_MultiplyColor` white) — blurs without darkening. Unreferenced today (§5).                                       |
+| `Assets/Editor/Validation/UIBlur/`                           | The rendered-pixel consumer suite and its quad renderer.                                                                               |
+| `Assets/Editor/Validation/UIBands/`                          | The band-routing suite.                                                                                                                |
 
 ---
 
@@ -170,12 +170,12 @@ band (`UIBandLayers.cs:10-19`). The split is what makes declaring a band free: a
 `overrideSorting` routes its whole subtree from one component, writing **no property on any child** and
 therefore no prefab overrides.
 
-| Band | Enum | Sorting layer | `uniqueID` |
-|:----:|------|---------------|-----------|
-| 0 | `UIBandId.Hud` | `Default` | 0 |
-| 1 | `UIBandId.Menus` | `UIBandMenus` | 1343291393 |
-| 2 | `UIBandId.Modals` | `UIBandModals` | 1343291394 |
-| 3 | `UIBandId.Notifications` | `UIBandNotifications` | 1907843371 |
+| Band | Enum                     | Sorting layer         | `uniqueID` |
+|:----:|--------------------------|-----------------------|------------|
+|  0   | `UIBandId.Hud`           | `Default`             | 0          |
+|  1   | `UIBandId.Menus`         | `UIBandMenus`         | 1343291393 |
+|  2   | `UIBandId.Modals`        | `UIBandModals`        | 1343291394 |
+|  3   | `UIBandId.Notifications` | `UIBandNotifications` | 1907843371 |
 
 Declared in `ProjectSettings/TagManager.asset` in that order, which is what `SortingLayer.value` ranks
 by and therefore what makes `L1`'s "ascends with band order" assertion meaningful.
@@ -439,24 +439,24 @@ must survive `BuildPanel` being re-entered by the UI_BUGS #04 self-heal.
 One root `Canvas` in Screen Space - Camera at `sortingOrder` 0, plus two nested band roots. Five
 sprite-less, opaque-white `Image`s share `UIBlur.mat`:
 
-| Panel                                       | Band    | Declared on          | Notes                                         |
-|---------------------------------------------|---------|----------------------|-----------------------------------------------|
-| `Toolbar`                                   | `Hud`   | root `Canvas`        | the console overlaps its left edge            |
-| `CreativeInventory`                         | `Hud`   | root `Canvas`        |                                               |
-| `PauseMenuContainer/PauseMenu`              | `Menus` | `PauseMenuContainer` | full-screen                                   |
-| `PauseMenuContainer/SettingsMenu`           | `Menus` | `PauseMenuContainer` | full-screen; a `SettingsMenu.prefab` instance |
-| `PauseMenuContainer/HelpMenu`               | `Menus` | `PauseMenuContainer` | full-screen                                   |
+| Panel                             | Band    | Declared on          | Notes                                         |
+|-----------------------------------|---------|----------------------|-----------------------------------------------|
+| `Toolbar`                         | `Hud`   | root `Canvas`        | the console overlaps its left edge            |
+| `CreativeInventory`               | `Hud`   | root `Canvas`        |                                               |
+| `PauseMenuContainer/PauseMenu`    | `Menus` | `PauseMenuContainer` | full-screen                                   |
+| `PauseMenuContainer/SettingsMenu` | `Menus` | `PauseMenuContainer` | full-screen; a `SettingsMenu.prefab` instance |
+| `PauseMenuContainer/HelpMenu`     | `Menus` | `PauseMenuContainer` | full-screen                                   |
 
 `TooltipRoot` is a third band root (`Notifications`) carrying no blurred graphic and, deliberately, no
 `GraphicRaycaster`.
 
 Four canvases are built in code, each with its own material instance (§5):
 
-| Canvas                    | Band            | `sortingOrder` | Tint    | Notes                                                    |
-|---------------------------|-----------------|---------------:|---------|----------------------------------------------------------|
-| Benchmark HUD             | `Hud`           | **-10**        | `0.7`   | below the scene canvas                                    |
-| `ConsoleUI` panel         | `Modals`        | 100            | `0.415` | matches the scene panels; covers the toolbar's left edge  |
-| Benchmark results overlay | `Modals`        | 200            | `0.15`  | terminal modal                                            |
+| Canvas                    | Band            | `sortingOrder` | Tint    | Notes                                                                                    |
+|---------------------------|-----------------|---------------:|---------|------------------------------------------------------------------------------------------|
+| Benchmark HUD             | `Hud`           | **-10**        | `0.7`   | below the scene canvas                                                                   |
+| `ConsoleUI` panel         | `Modals`        | 100            | `0.415` | matches the scene panels; covers the toolbar's left edge                                 |
+| Benchmark results overlay | `Modals`        | 200            | `0.15`  | terminal modal                                                                           |
 | `ToastCard` backdrops     | `Notifications` | 250            | derived | one instance per `ToastVariant`: `0.415` neutral lerped 35 % toward the variant's accent |
 
 Cross-band ordering is the band's, not `sortingOrder`'s — the bands draw in separate passes, in walk
@@ -522,27 +522,27 @@ Two registered suites (`ValidationSuiteRegistry.cs:94-95`), both in `Validate Al
 **`Minecraft Clone/Dev/Validate UI Band Layers` — 19 baselines.** Synthetic hierarchies, no graphics
 device, so they stay meaningful before any scene declares a band.
 
-| ID | Asserts |
-|----|---------|
-| `L1` | Every band resolves to its own declared sorting layer, distinct, ascending with band order |
-| `L2` | A band layer reaches the whole subtree, at any depth |
-| `L3` | An object created *after* its band root enabled still lands on the band layer |
-| `L4` | Attaching a pre-built hierarchy carries the layer to its children |
-| `L5` | All three renderer masks — **prepass included** — exclude the UI layer |
-| `L6` | Occupancy drives the walk order **and the capture count** |
-| `L7` | A nested band root routes its subtree through one canvas, writing nothing per object |
-| `L8` | The factory builds exactly one fully configured, banded canvas |
-| `L9` | A root band canvas routes without `overrideSorting` |
-| `L10` | The factory's canvas is visible to the band walk |
-| `L11` | A nested band canvas takes its subtree out of the parent's raycaster |
-| `L12` | A dropdown popup is re-banded onto its own band |
-| `L13` | The shared dropdown prefab carries the band sorting fixer |
-| `L14` | UI sitting off the canvas plane is detected, and the canvas root is exempt |
-| `L15` | A dropdown nested inside another prefab inherits the fixer |
-| `L16` | A band restores a root canvas that fell back to overlay |
-| `L17` | A band is occupied by its content, not by its root being enabled |
+| ID    | Asserts                                                                                            |
+|-------|----------------------------------------------------------------------------------------------------|
+| `L1`  | Every band resolves to its own declared sorting layer, distinct, ascending with band order         |
+| `L2`  | A band layer reaches the whole subtree, at any depth                                               |
+| `L3`  | An object created *after* its band root enabled still lands on the band layer                      |
+| `L4`  | Attaching a pre-built hierarchy carries the layer to its children                                  |
+| `L5`  | All three renderer masks — **prepass included** — exclude the UI layer                             |
+| `L6`  | Occupancy drives the walk order **and the capture count**                                          |
+| `L7`  | A nested band root routes its subtree through one canvas, writing nothing per object               |
+| `L8`  | The factory builds exactly one fully configured, banded canvas                                     |
+| `L9`  | A root band canvas routes without `overrideSorting`                                                |
+| `L10` | The factory's canvas is visible to the band walk                                                   |
+| `L11` | A nested band canvas takes its subtree out of the parent's raycaster                               |
+| `L12` | A dropdown popup is re-banded onto its own band                                                    |
+| `L13` | The shared dropdown prefab carries the band sorting fixer                                          |
+| `L14` | UI sitting off the canvas plane is detected, and the canvas root is exempt                         |
+| `L15` | A dropdown nested inside another prefab inherits the fixer                                         |
+| `L16` | A band restores a root canvas that fell back to overlay                                            |
+| `L17` | A band is occupied by its content, not by its root being enabled                                   |
 | `L18` | A graphic built after the band root enabled, deep and under its own sorting canvas, still occupies |
-| `L19` | A disabled graphic vacates a band, and `_alwaysOccupied` holds it in the walk regardless |
+| `L19` | A disabled graphic vacates a band, and `_alwaysOccupied` holds it in the walk regardless           |
 
 Five of these are load-bearing in a way their one-line summary hides. `L5` covers the prepass mask
 because omitting it is how the assertion passes while the misconfiguration ships. `L6` asserts the
@@ -630,17 +630,17 @@ found by playing.
 
 The standing "do not re-litigate" list.
 
-| Alternative | Why rejected | Date |
-|---|---|---|
-| **Analytic affine chain of panel rects** — register each panel's rect and `(multiply, additive, alpha)` as a global array and have the shader reconstruct its own backdrop per pixel | Reproduces a lower panel's flat tint but **never its content** — the console's text stays invisible through a toast above it, which is the exact case that makes the artifact obvious. Also axis-aligned rects only, and it needs per-panel data on a shared-material system. | 2026-09-06 |
-| **Overlay camera stack**, one URP overlay camera per band | Pays a full URP camera loop — setup, culling, graph compilation — per band, for what is a single filtered draw. Bands are cheap in the chosen design and expensive here, which inverts the cost model the whole thing depends on. Also needs per-camera suppression of the underwater and cloud features. | 2026-09-06 |
-| **Generalized flat-fallback overlap policy** — centralize overlap detection so any covered panel drops to a flat color | Removes frost instead of stacking it: correct-looking and less pretty in exactly the situations the feature exists for. | 2026-09-06 |
-| **Re-blurring the previous frame's composited back buffer** | Self-referential — a panel's backdrop would contain the panel itself from the previous frame, producing a recursive smear. No latency budget makes this correct. | 2026-09-06 |
-| **UI Toolkit's native backdrop-filter** | URP 17.6 ships the same mechanism, but it is gated on `AnyOverlayPanelHasBackdropFilter()` and only UIElements can sample the composite buffer — uGUI has no backdrop-filter API. Using it means porting the blurred surfaces to UIElements beside a mature uGUI stack, with only coarse ordering between a UIToolkit panel and the uGUI canvases. Worth revisiting if uGUI ever gains the API. | 2026-09-06 |
-| **Banding by GameObject layer** (the original mechanism, built and then replaced) | Costs a per-object `m_Layer` write on every band member, which on a prefab instance becomes a prefab override *per object* — and most of both scenes' UI is prefab instances. It also needs a repair pass on every enable to survive late-created children. A sorting layer routes the same subtree from one nested canvas with zero overrides; three `ProjectSettings` entries are the cheaper half of that trade. The `UI` layer survives for the different job in §2.3. | 2026-09-06 |
-| **Drawing UI at `RenderPassEvent.AfterRendering`** | By then URP has switched the active target to the backbuffer, which has no sampleable texture. Structural rather than a crash fix: a band drawn into the backbuffer cannot be captured by the next band's blur, so interleaving is impossible there regardless. The trap is that `activeColorTexture.IsValid()` still returns **true** — only `isActiveTargetBackBuffer` reveals it. | 2026-09-06 |
-| **Gating the base band's blur on occupancy** | Edit-mode registration does not survive domain reloads, so this silently costs every panel its blur in the editor while looking correct in play mode (§2.1). | 2026-09-06 |
-| **Relaxing `UIBlurHistory` to a render-graph texture** | The original reason — Overlay canvases sample after the graph — no longer applies now that band draws are graph passes, but the target stays persistent anyway: it was bought with a real bug in which bloom's prefilter reclaimed the pooled memory, and per-camera keying still stops a Game and a Scene view reallocating each other's target every frame. | 2026-09-06 |
+| Alternative                                                                                                                                                                          | Why rejected                                                                                                                                                                                                                                                                                                                                                                                                                                                               | Date       |
+|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------|
+| **Analytic affine chain of panel rects** — register each panel's rect and `(multiply, additive, alpha)` as a global array and have the shader reconstruct its own backdrop per pixel | Reproduces a lower panel's flat tint but **never its content** — the console's text stays invisible through a toast above it, which is the exact case that makes the artifact obvious. Also axis-aligned rects only, and it needs per-panel data on a shared-material system.                                                                                                                                                                                              | 2026-09-06 |
+| **Overlay camera stack**, one URP overlay camera per band                                                                                                                            | Pays a full URP camera loop — setup, culling, graph compilation — per band, for what is a single filtered draw. Bands are cheap in the chosen design and expensive here, which inverts the cost model the whole thing depends on. Also needs per-camera suppression of the underwater and cloud features.                                                                                                                                                                  | 2026-09-06 |
+| **Generalized flat-fallback overlap policy** — centralize overlap detection so any covered panel drops to a flat color                                                               | Removes frost instead of stacking it: correct-looking and less pretty in exactly the situations the feature exists for.                                                                                                                                                                                                                                                                                                                                                    | 2026-09-06 |
+| **Re-blurring the previous frame's composited back buffer**                                                                                                                          | Self-referential — a panel's backdrop would contain the panel itself from the previous frame, producing a recursive smear. No latency budget makes this correct.                                                                                                                                                                                                                                                                                                           | 2026-09-06 |
+| **UI Toolkit's native backdrop-filter**                                                                                                                                              | URP 17.6 ships the same mechanism, but it is gated on `AnyOverlayPanelHasBackdropFilter()` and only UIElements can sample the composite buffer — uGUI has no backdrop-filter API. Using it means porting the blurred surfaces to UIElements beside a mature uGUI stack, with only coarse ordering between a UIToolkit panel and the uGUI canvases. Worth revisiting if uGUI ever gains the API.                                                                            | 2026-09-06 |
+| **Banding by GameObject layer** (the original mechanism, built and then replaced)                                                                                                    | Costs a per-object `m_Layer` write on every band member, which on a prefab instance becomes a prefab override *per object* — and most of both scenes' UI is prefab instances. It also needs a repair pass on every enable to survive late-created children. A sorting layer routes the same subtree from one nested canvas with zero overrides; three `ProjectSettings` entries are the cheaper half of that trade. The `UI` layer survives for the different job in §2.3. | 2026-09-06 |
+| **Drawing UI at `RenderPassEvent.AfterRendering`**                                                                                                                                   | By then URP has switched the active target to the backbuffer, which has no sampleable texture. Structural rather than a crash fix: a band drawn into the backbuffer cannot be captured by the next band's blur, so interleaving is impossible there regardless. The trap is that `activeColorTexture.IsValid()` still returns **true** — only `isActiveTargetBackBuffer` reveals it.                                                                                       | 2026-09-06 |
+| **Gating the base band's blur on occupancy**                                                                                                                                         | Edit-mode registration does not survive domain reloads, so this silently costs every panel its blur in the editor while looking correct in play mode (§2.1).                                                                                                                                                                                                                                                                                                               | 2026-09-06 |
+| **Relaxing `UIBlurHistory` to a render-graph texture**                                                                                                                               | The original reason — Overlay canvases sample after the graph — no longer applies now that band draws are graph passes, but the target stays persistent anyway: it was bought with a real bug in which bloom's prefilter reclaimed the pooled memory, and per-camera keying still stops a Game and a Scene view reallocating each other's target every frame.                                                                                                              | 2026-09-06 |
 
 ---
 

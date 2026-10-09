@@ -38,13 +38,13 @@ that is not a populated, flagged chunk at that instant.
 **Measured state at the time (live editor, two samples 975 frames apart — byte-identical, so the world was
 genuinely static, not mid-settle):**
 
-| Quantity | Value |
-|---|---|
+| Quantity                                | Value             |
+|-----------------------------------------|-------------------|
 | Chunks in map / populated / unpopulated | 787 / 787 / **0** |
-| Populated chunks with lighting work | 125 |
-| Scheduler ready / parked | 0 / **125** |
-| Lighting / generation / mesh jobs | 0 / 0 / 0 |
-| Fail-safe promotions per cycle | **4–18** |
+| Populated chunks with lighting work     | 125               |
+| Scheduler ready / parked                | 0 / **125**       |
+| Lighting / generation / mesh jobs       | 0 / 0 / 0         |
+| Fail-safe promotions per cycle          | **4–18**          |
 
 Every parked position should therefore have been re-readied by the walk, leaving `PromoteAll` at 0. It was
 not. `WorldData.ChunkValues` was confirmed to be the same collection as `WorldData.Chunks`, so a

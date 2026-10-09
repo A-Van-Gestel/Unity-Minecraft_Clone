@@ -76,9 +76,9 @@ Findings are from static code review of the Standard generation pipeline
 |-------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **Effort**  | 🟢 Low (hours, localized) · 🟡 Medium (days, several files) · 🔴 High (architectural, cross-system)                                                           |
 | **Risk**    | 🟢 Low (isolated, easy to verify) · 🟡 Medium (touches shared state or visual output) · 🔴 High (touches pipeline invariants, lighting semantics, or shaders) |
-| **Benefit** | 🟢 Core — high player-facing value or unlocks other planned work · 🟡 Situational / polish · ⚪ Minor (cleanliness, enabler-only)                              |
-| **Seed**    | ✅ Safe — cannot change generated terrain for a given seed · ⚠️ Terrain-affecting — changes the terrain a given seed produces (see §"Seed-stability note")     |
-| **Save**    | ✅ Safe — no on-disk format change · ⚠️ Format — requires a save-format version bump + AOT migration step (see `serialization-migration` skill)                |
+| **Benefit** | 🟢 Core — high player-facing value or unlocks other planned work · 🟡 Situational / polish · ⚪ Minor (cleanliness, enabler-only)                             |
+| **Seed**    | ✅ Safe — cannot change generated terrain for a given seed · ⚠️ Terrain-affecting — changes the terrain a given seed produces (see §"Seed-stability note")    |
+| **Save**    | ✅ Safe — no on-disk format change · ⚠️ Format — requires a save-format version bump + AOT migration step (see `serialization-migration` skill)               |
 
 > **Benefit redefinition:** this report is a *feature* audit, so Benefit here means player-facing /
 > design value — **not** the frame-time/GC meaning used in `PERFORMANCE_IMPROVEMENTS_REPORT.md`.
@@ -90,28 +90,28 @@ Findings are from static code review of the Standard generation pipeline
 
 ### Terrain & World Generation Features
 
-| ID    | Finding                                                                                                              | Effort | Risk | Benefit | Seed | Save |
-|-------|----------------------------------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
-| TF-1  | Voronoi biome borders are near-straight lines — add selection-coordinate domain warping                              |   🟡   |  🟡  |   🟢    |  ⚠️  |  ✅   |
-| TF-2  | Biome-owned terrain height → hybrid "shared macro field + per-biome residual"                                        |   🔴   |  🔴  |   🟢    |  ⚠️  |  ✅   |
-| TF-3  | No climate model — biome placement is a uniform hash; add parameter-space selection                                  |   🔴   |  🟡  |   🟢    |  ⚠️  |  ✅   |
-| TF-4  | Multi-dimension support (registry, per-dimension storage, generator + lighting profile)                              |   🔴   |  🔴  |   🟢    |  ✅   |  ⚠️  |
-| TF-5  | Amplified world type (world-level height amplification; gated on world-scaling Tier A1)                              |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
-| TF-6  | Farlands world type (distance-ramped extreme domain warp)                                                            |   🟡   |  🟢  |   🟡    |  ✅   |  ✅   |
-| TF-7  | Rivers (world-level channel carving, Stage 1 at sea level)                                                           |   🔴   |  🟡  |   🟢    |  ⚠️  |  ✅   |
-| TF-8  | Biome-selection noise config is silently taken from `biomes[0]` — move to world type                                 |   🟢   |  🟢  |    ⚪    |  ✅   |  ✅   |
-| TF-9  | No macro world layout — add a world orchestration layer (continents, oceans, coasts)                                 |   🔴   |  🟡  |   🟢    |  ⚠️  |  ✅   |
-| TF-10 | Multi-piece / large structures (villages, ruins) — one template per grid cell today                                  |   🔴   |  🟡  |   🟢    |  ⚠️  |  ✅   |
-| TF-11 | Climate-driven surface effects: snow line, ice, biome/foliage tint (gated on TF-3)                                   |   🟡   |  🟡  |   🟢    |  ⚠️  |  ✅   |
-| TF-12 | Generation feature flags read from global Settings, not the world — persist in level.dat                             |   🟢   |  🟢  |   🟢    |  ✅   |  ⚠️  |
-| TF-13 | No worldgen version stamp — post-freeze terrain changes produce silent seams                                         |   🟢   |  🟢  |    ⚪    |  ✅   |  ⚠️  |
-| TF-14 | ✅ SHIPPED 2026-07-13 — per-world gameplay fence: persist + clamp + minimap + animated border wall (ready to archive) |   🟡   |  🟢  |   🟡    |  ✅   |  ⚠️  |
-| TF-15 | True hydraulic erosion simulation (droplet pass over the heightmap, chained after generation)                         |   🔴   |  🟡  |   🟡    |  ⚠️  |  ✅   |
-| TF-16 | Lode depth-weighting + multi-block veins — ore density is depth-flat and single-block today                           |   🟢   |  🟢  |   🟡    |  ⚠️  |  ✅   |
-| TF-17 | Trivial world types: Flat/Creative, Void, Custom Noise Playground                                                     |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
-| TF-18 | Worldgen authoring gaps: world-type split-view comparison + seed browser                                              |   🟡   |  🟢  |    ⚪    |  ✅   |  ✅   |
-| TF-19 | `Legacy.asmdef` boundary — legacy isolation is folder convention, not compile-enforced                                |   🟡   |  🟡  |    ⚪    |  ✅   |  ✅   |
-| TF-20 | `StandardChunkGenerationJob` still compiles at `FloatMode.Default` while its siblings use `Fast`                      |   🟢   |  🟡  |   🟡    |  ⚠️  |  ✅   |
+| ID    | Finding                                                                                                               | Effort | Risk | Benefit | Seed | Save |
+|-------|-----------------------------------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
+| TF-1  | Voronoi biome borders are near-straight lines — add selection-coordinate domain warping                               |   🟡   |  🟡  |   🟢    |  ⚠️  |  ✅  |
+| TF-2  | Biome-owned terrain height → hybrid "shared macro field + per-biome residual"                                         |   🔴   |  🔴  |   🟢    |  ⚠️  |  ✅  |
+| TF-3  | No climate model — biome placement is a uniform hash; add parameter-space selection                                   |   🔴   |  🟡  |   🟢    |  ⚠️  |  ✅  |
+| TF-4  | Multi-dimension support (registry, per-dimension storage, generator + lighting profile)                               |   🔴   |  🔴  |   🟢    |  ✅  |  ⚠️  |
+| TF-5  | Amplified world type (world-level height amplification; gated on world-scaling Tier A1)                               |   🟡   |  🟡  |   🟡    |  ✅  |  ✅  |
+| TF-6  | Farlands world type (distance-ramped extreme domain warp)                                                             |   🟡   |  🟢  |   🟡    |  ✅  |  ✅  |
+| TF-7  | Rivers (world-level channel carving, Stage 1 at sea level)                                                            |   🔴   |  🟡  |   🟢    |  ⚠️  |  ✅  |
+| TF-8  | Biome-selection noise config is silently taken from `biomes[0]` — move to world type                                  |   🟢   |  🟢  |   ⚪    |  ✅  |  ✅  |
+| TF-9  | No macro world layout — add a world orchestration layer (continents, oceans, coasts)                                  |   🔴   |  🟡  |   🟢    |  ⚠️  |  ✅  |
+| TF-10 | Multi-piece / large structures (villages, ruins) — one template per grid cell today                                   |   🔴   |  🟡  |   🟢    |  ⚠️  |  ✅  |
+| TF-11 | Climate-driven surface effects: snow line, ice, biome/foliage tint (gated on TF-3)                                    |   🟡   |  🟡  |   🟢    |  ⚠️  |  ✅  |
+| TF-12 | Generation feature flags read from global Settings, not the world — persist in level.dat                              |   🟢   |  🟢  |   🟢    |  ✅  |  ⚠️  |
+| TF-13 | No worldgen version stamp — post-freeze terrain changes produce silent seams                                          |   🟢   |  🟢  |   ⚪    |  ✅  |  ⚠️  |
+| TF-14 | ✅ SHIPPED 2026-07-13 — per-world gameplay fence: persist + clamp + minimap + animated border wall (ready to archive) |   🟡   |  🟢  |   🟡    |  ✅  |  ⚠️  |
+| TF-15 | True hydraulic erosion simulation (droplet pass over the heightmap, chained after generation)                         |   🔴   |  🟡  |   🟡    |  ⚠️  |  ✅  |
+| TF-16 | Lode depth-weighting + multi-block veins — ore density is depth-flat and single-block today                           |   🟢   |  🟢  |   🟡    |  ⚠️  |  ✅  |
+| TF-17 | Trivial world types: Flat/Creative, Void, Custom Noise Playground                                                     |   🟢   |  🟢  |   🟡    |  ✅  |  ✅  |
+| TF-18 | Worldgen authoring gaps: world-type split-view comparison + seed browser                                              |   🟡   |  🟢  |   ⚪    |  ✅  |  ✅  |
+| TF-19 | `Legacy.asmdef` boundary — legacy isolation is folder convention, not compile-enforced                                |   🟡   |  🟡  |   ⚪    |  ✅  |  ✅  |
+| TF-20 | `StandardChunkGenerationJob` still compiles at `FloatMode.Default` while its siblings use `Fast`                      |   🟢   |  🟡  |   🟡    |  ⚠️  |  ✅  |
 
 **TF-15..TF-19 provenance.** Migrated 2026-08-17 from
 [`../Architecture/World Generation/MODULAR_WORLD_GENERATION_&_WORLD_TYPES.md`](../Architecture/World%20Generation/MODULAR_WORLD_GENERATION_&_WORLD_TYPES.md)
@@ -1156,10 +1156,10 @@ pipeline change: a new `IChunkGenerator` plus a `WorldTypeDefinition` asset and 
 
 **Proposed design.**
 
-| Type                        | Generator                                                                                                        | Effort   |
-|-----------------------------|------------------------------------------------------------------------------------------------------------------|----------|
-| **Flat / Creative**         | Fixed heightmap (grass Y=64, dirt Y=61–63, stone below), no noise at all; `GetVoxel` is a Y comparison           | Very Low |
-| **Void**                    | Air everywhere except a small spawn platform; `GetVoxel` returns Air                                             | Trivial  |
+| Type                        | Generator                                                                                                         | Effort   |
+|-----------------------------|-------------------------------------------------------------------------------------------------------------------|----------|
+| **Flat / Creative**         | Fixed heightmap (grass Y=64, dirt Y=61–63, stone below), no noise at all; `GetVoxel` is a Y comparison            | Very Low |
+| **Void**                    | Air everywhere except a small spawn platform; `GetVoxel` returns Air                                              | Trivial  |
 | **Custom Noise Playground** | Exposes the `FastNoiseConfig` fields directly on the `WorldTypeDefinition` — pure noise-to-height, no fixed logic | Medium   |
 
 **Why Seed ✅ / Save ✅.** New `WorldTypeID` values do not alter what an existing seed generates on
@@ -1280,30 +1280,30 @@ Ordering optimizes for: player-visible value early, design-coupled items landed 
 items last. RF items are detailed in
 [`LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md`](LIGHTING_RENDERING_FEATURE_IMPROVEMENTS_REPORT.md).
 
-| Rank | Item                                        | Why here                                                                                              |
-|------|---------------------------------------------|-------------------------------------------------------------------------------------------------------|
-| 1    | ~~**RF-1** Day/night cycle~~ ✅ SHIPPED      | Done 2026-08-10 (world clock + subtractive sky term); unlocked RF-2 as predicted                      |
-| 2    | **TF-8** Selection-noise ownership          | 🟢 hours; removes an authoring landmine; prerequisite plumbing for TF-1/TF-3                          |
-| 3    | **TF-12** Per-world generation options      | 🟢 correctness fix (live determinism hole); pair with TF-13; coordinate v12 with RF-1/TF-4            |
-| 4    | **TF-13** Worldgen version stamp            | 🟢 write-only metadata that cannot be reconstructed later; same level.dat wave as TF-12               |
-| 5    | ~~**RF-2** Sky rendering~~ ✅ SHIPPED        | Done 2026-08-11 (skybox, celestial sun/moon, stars, fog); §6 ambience v2 remains, unranked polish     |
-| 6    | **TF-1** Biome border domain warp           | Biggest visible terrain win per effort; seed break acceptable while Standard is WIP                   |
-| 7    | **TF-9** World orchestration layer (v1)     | Layers 0–1 + sampler API + preview channels — opens the TF-2/3 wave and owns their world-level fields |
-| 8    | **TF-3** Climate biome selection            | Core identity feature; ship together with TF-2 (design-coupled); climate axes live in TF-9            |
-| 9    | **TF-2** Hybrid terrain ownership           | Largest terrain-quality change; ship together with TF-3; macro channels live in TF-9                  |
-| 10   | **TF-11** Climate surface effects           | The visible payoff of TF-3's climate axes; coordinate the tint channel with RF-3                      |
-| 11   | **TF-7** Rivers (Stage 1)                   | Plugs into TF-9 Layer 3; benefits from TF-2's macro field (soft dependency)                           |
-| 12   | **TF-10** Multi-piece structures            | Stage A anytime; Stage B (jigsaw + budgets) wants TF-9 Stage-2 macro grid — build together            |
-| 13   | **TF-4** Dimensions + save changes          | Parallel serialization track (no seed risk); coordinate v12 bump with RF-1's migration                |
-| 14   | **TF-6** Farlands world type                | Cheap novelty once TF-1's warp helper exists                                                          |
-| 15   | **TF-5** Amplified world type               | Gated on `WORLD_SCALING_ANALYSIS.md` Tier A1 — do not start before the height work                    |
-| 16   | ~~**TF-14** World border~~ ✅ SHIPPED        | Done 2026-07-13 (per-world fence + animated wall); pairs optionally with RF-2's fog                   |
-| 17   | **RF-7** Weather                            | Needs TF-3/TF-11's temperature axis for precipitation type; rendering rides RF-1/RF-2 machinery       |
-| 18   | **RF-4** Torch flicker                      | Polish; 🟢 shader-side, needs a Torch block authored first                                            |
+| Rank | Item                                            | Why here                                                                                                                                          |
+|------|-------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------|
+| 1    | ~~**RF-1** Day/night cycle~~ ✅ SHIPPED         | Done 2026-08-10 (world clock + subtractive sky term); unlocked RF-2 as predicted                                                                  |
+| 2    | **TF-8** Selection-noise ownership              | 🟢 hours; removes an authoring landmine; prerequisite plumbing for TF-1/TF-3                                                                      |
+| 3    | **TF-12** Per-world generation options          | 🟢 correctness fix (live determinism hole); pair with TF-13; coordinate v12 with RF-1/TF-4                                                        |
+| 4    | **TF-13** Worldgen version stamp                | 🟢 write-only metadata that cannot be reconstructed later; same level.dat wave as TF-12                                                           |
+| 5    | ~~**RF-2** Sky rendering~~ ✅ SHIPPED           | Done 2026-08-11 (skybox, celestial sun/moon, stars, fog); §6 ambience v2 remains, unranked polish                                                 |
+| 6    | **TF-1** Biome border domain warp               | Biggest visible terrain win per effort; seed break acceptable while Standard is WIP                                                               |
+| 7    | **TF-9** World orchestration layer (v1)         | Layers 0–1 + sampler API + preview channels — opens the TF-2/3 wave and owns their world-level fields                                             |
+| 8    | **TF-3** Climate biome selection                | Core identity feature; ship together with TF-2 (design-coupled); climate axes live in TF-9                                                        |
+| 9    | **TF-2** Hybrid terrain ownership               | Largest terrain-quality change; ship together with TF-3; macro channels live in TF-9                                                              |
+| 10   | **TF-11** Climate surface effects               | The visible payoff of TF-3's climate axes; coordinate the tint channel with RF-3                                                                  |
+| 11   | **TF-7** Rivers (Stage 1)                       | Plugs into TF-9 Layer 3; benefits from TF-2's macro field (soft dependency)                                                                       |
+| 12   | **TF-10** Multi-piece structures                | Stage A anytime; Stage B (jigsaw + budgets) wants TF-9 Stage-2 macro grid — build together                                                        |
+| 13   | **TF-4** Dimensions + save changes              | Parallel serialization track (no seed risk); coordinate v12 bump with RF-1's migration                                                            |
+| 14   | **TF-6** Farlands world type                    | Cheap novelty once TF-1's warp helper exists                                                                                                      |
+| 15   | **TF-5** Amplified world type                   | Gated on `WORLD_SCALING_ANALYSIS.md` Tier A1 — do not start before the height work                                                                |
+| 16   | ~~**TF-14** World border~~ ✅ SHIPPED           | Done 2026-07-13 (per-world fence + animated wall); pairs optionally with RF-2's fog                                                               |
+| 17   | **RF-7** Weather                                | Needs TF-3/TF-11's temperature axis for precipitation type; rendering rides RF-1/RF-2 machinery                                                   |
+| 18   | **RF-4** Torch flicker                          | Polish; 🟢 shader-side, needs a Torch block authored first                                                                                        |
 | 19   | ~~**RF-3** Bloom / post-processing~~ ✅ SHIPPED | Done 2026-08-12 (bloom + HDR emissive path); §1 tonemapping + §5 effects remain, unranked polish; tint-channel coordination with TF-11 still open |
-| 20   | **RF-6** SSAO ("GI")                        | Polish; drop-in URP feature                                                                           |
-| 21   | **RF-5** Animated light sources             | Polish with an architectural ceiling — budgeted block-swap animation only                             |
-| 22   | **RF-8** Animated block textures            | Polish; MC-style atlas blitting (`Graphics.CopyTexture` per tick) — zero mesh/shader/vertex contact   |
+| 20   | **RF-6** SSAO ("GI")                            | Polish; drop-in URP feature                                                                                                                       |
+| 21   | **RF-5** Animated light sources                 | Polish with an architectural ceiling — budgeted block-swap animation only                                                                         |
+| 22   | **RF-8** Animated block textures                | Polish; MC-style atlas blitting (`Graphics.CopyTexture` per tick) — zero mesh/shader/vertex contact                                               |
 
 ---
 

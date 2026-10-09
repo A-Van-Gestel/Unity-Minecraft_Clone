@@ -174,15 +174,15 @@ not `OverlayFragmentRenderer`'s. New baselines continue the suite's numbering fr
 
 ## 6. Constraint compliance
 
-| Project constraint | How this design complies |
-|---|---|
-| Voxels are packed `uint`s, no per-voxel objects | The wave is a pure function of world position and time. Nothing is stored per voxel. |
-| Burst jobs 100 % Burst-compatible | `FluidSurfaceResolver` is already static math over value types with no managed references; a time input keeps it so. |
-| No GC / LINQ in hot paths | Vertex-stage work in the shader; no per-frame allocation on the C# side. |
-| No `BinaryFormatter`/JSON for terrain | **Zero on-disk change.** Any authored wave parameters sit on `BlockType`, a ScriptableObject — not in the chunk or `level.dat` schema. |
-| `BlockIDs` constants, no raw IDs | No block is named; the fluid is whatever occupies the cell. |
-| WS-4 coordinate spaces | The wave is keyed on world position; `SurfaceY` stays in Unity space, as `EyeSubmersion` already documents. |
-| `#pragma target 4.5` shader floor | Vertex displacement adds no varying if §4.2's weight is derived rather than carried; if it is carried, `LiquidV2F` has 4 of 15 interpolators free. |
+| Project constraint                              | How this design complies                                                                                                                           |
+|-------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------|
+| Voxels are packed `uint`s, no per-voxel objects | The wave is a pure function of world position and time. Nothing is stored per voxel.                                                               |
+| Burst jobs 100 % Burst-compatible               | `FluidSurfaceResolver` is already static math over value types with no managed references; a time input keeps it so.                               |
+| No GC / LINQ in hot paths                       | Vertex-stage work in the shader; no per-frame allocation on the C# side.                                                                           |
+| No `BinaryFormatter`/JSON for terrain           | **Zero on-disk change.** Any authored wave parameters sit on `BlockType`, a ScriptableObject — not in the chunk or `level.dat` schema.             |
+| `BlockIDs` constants, no raw IDs                | No block is named; the fluid is whatever occupies the cell.                                                                                        |
+| WS-4 coordinate spaces                          | The wave is keyed on world position; `SurfaceY` stays in Unity space, as `EyeSubmersion` already documents.                                        |
+| `#pragma target 4.5` shader floor               | Vertex displacement adds no varying if §4.2's weight is derived rather than carried; if it is carried, `LiquidV2F` has 4 of 15 interpolators free. |
 
 ---
 

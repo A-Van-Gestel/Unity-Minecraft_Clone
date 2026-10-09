@@ -1,12 +1,12 @@
 # P9-1 — Attribution capture, IL2CPP Release — vd sweep 10/20/26/32 + a cap-48 A/B leg
 
-| Field           | Value                                                                                                                                                                                                                                                                                              |
-|-----------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Captured**    | 2026-08-02 13:05 – 14:22                                                                                                                                                                                                                                                                           |
-| **Branch**      | `feat/world-scaling` (report authored at `0816b584`)                                                                                                                                                                                                                                               |
-| **Commit**      | Build GUID **`496d7aeb48dd4f81871481d3dddaa68e`** — a fresh build carrying the P9-0 attribution instrument (`b5808a56` + `82aa6faa`). **All five runs share this GUID.** Not comparable to P-8 / P9-0a builds (§7 baseline rule)                                                                     |
-| **Captured by** | `BenchmarkController` — **IL2CPP, Configuration: Release, Player, Burst on**. Five runs, **n = 1 per configuration**. i9-9900K / 16 threads / 64 GB / D3D11                                                                                                                                         |
-| **Rule**        | **§7.1 v2**, as FP-8, FP-10, P-8 and P9-0a                                                                                                                                                                                                                                                         |
+| Field           | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+|-----------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Captured**    | 2026-08-02 13:05 – 14:22                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| **Branch**      | `feat/world-scaling` (report authored at `0816b584`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| **Commit**      | Build GUID **`496d7aeb48dd4f81871481d3dddaa68e`** — a fresh build carrying the P9-0 attribution instrument (`b5808a56` + `82aa6faa`). **All five runs share this GUID.** Not comparable to P-8 / P9-0a builds (§7 baseline rule)                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| **Captured by** | `BenchmarkController` — **IL2CPP, Configuration: Release, Player, Burst on**. Five runs, **n = 1 per configuration**. i9-9900K / 16 threads / 64 GB / D3D11                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| **Rule**        | **§7.1 v2**, as FP-8, FP-10, P-8 and P9-0a                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | **Verdict**     | **BASELINE — no fix was under test, so no GO/NO-GO applies to a change.** Three results carry: §3.1's rate identity is **confirmed to within 4 % across a 3.2× view-distance range**; §F4's merge attribution is **half-confirmed and quantitatively corrected** (the merge is the largest single cost centre at 26–29 % of wall, but ~40 % of the ×2-cap growth, not the ~70 % the fitted model implied); and **§3.3's mesh multiplier is refuted — pre-delivery mesh amplification is exactly 1.00 at every view distance**, which removes Option B2's mesh-side premise. §2's kill condition is **not** triggered. The cap-48 leg re-fails Q2 (×2.71 CPU, ×0.66 min FPS) on a second, independent build |
 
 > **Design home:** [`Design/CHUNK_PIPELINE_SCHEDULE_QUOTA_THROUGHPUT.md`](../Design/CHUNK_PIPELINE_SCHEDULE_QUOTA_THROUGHPUT.md)
@@ -59,18 +59,18 @@ non-measurement) → transition → loading pass (50/100/200 m/s, 30 s each).
 
 ### Loading pass @ 200 m/s — dispositions and latency
 
-| Run | vd | cap | frames | gate closed | started | abandoned | **delivered** | waste | **p50 e2e** | enq→pop | pop→lit | lit→mesh |
-|-----|----|-----|--------|-------------|---------|-----------|---------------|-------|-------------|---------|---------|----------|
-| R1  | 10 | 24  | 5 107  | 80.5 %      | 12 122  | 1 618     | **6 061**     | 37.3 %| **813 ms**  | 286 ms  | 420 ms  | 6.4 ms   |
-| R2  | 20 | 24  | 4 240  | 93.2 %      | 21 249  | 10 783    | **7 022**     | 16.5 %| **2 269 ms**| 1 611 ms| 582 ms  | 5.7 ms   |
-| R3  | 26 | 24  | 3 650  | 92.5 %      | 27 142  | 16 152    | **6 773**     | 13.9 %| **3 107 ms**| 2 354 ms| 537 ms  | 6.0 ms   |
-| R4  | 32 | 24  | 3 012  | 91.0 %      | 33 287  | 21 288    | **6 857**     | 11.2 %| **3 644 ms**| 2 976 ms| 570 ms  | 7.1 ms   |
-| R5  | 32 | 48  | 930    | **64.1 %**  | 32 445  | 18 882    | **7 564**     | 17.0 %| **3 158 ms**| 2 454 ms| 531 ms  | 14.8 ms  |
+| Run | vd  | cap | frames | gate closed | started | abandoned | **delivered** | waste  | **p50 e2e**  | enq→pop  | pop→lit | lit→mesh |
+|-----|-----|-----|--------|-------------|---------|-----------|---------------|--------|--------------|----------|---------|----------|
+| R1  | 10  | 24  | 5 107  | 80.5 %      | 12 122  | 1 618     | **6 061**     | 37.3 % | **813 ms**   | 286 ms   | 420 ms  | 6.4 ms   |
+| R2  | 20  | 24  | 4 240  | 93.2 %      | 21 249  | 10 783    | **7 022**     | 16.5 % | **2 269 ms** | 1 611 ms | 582 ms  | 5.7 ms   |
+| R3  | 26  | 24  | 3 650  | 92.5 %      | 27 142  | 16 152    | **6 773**     | 13.9 % | **3 107 ms** | 2 354 ms | 537 ms  | 6.0 ms   |
+| R4  | 32  | 24  | 3 012  | 91.0 %      | 33 287  | 21 288    | **6 857**     | 11.2 % | **3 644 ms** | 2 976 ms | 570 ms  | 7.1 ms   |
+| R5  | 32  | 48  | 930    | **64.1 %**  | 32 445  | 18 882    | **7 564**     | 17.0 % | **3 158 ms** | 2 454 ms | 531 ms  | 14.8 ms  |
 
 ### Loading pass @ 200 m/s — main-thread cost per pass (ms per second of wall clock)
 
-| Run | Tick | Apply | **LightMerge** | StagingDrain | FailSafeScan | **LightSchedule** | MeshProcess | MeshSchedule | GenProcess | **all timed** |
-|-----|------|-------|----------------|--------------|--------------|-------------------|-------------|--------------|------------|---------------|
+| Run | Tick | Apply | **LightMerge** | StagingDrain | FailSafeScan | **LightSchedule** | MeshProcess | MeshSchedule | GenProcess | **all timed**      |
+|-----|------|-------|----------------|--------------|--------------|-------------------|-------------|--------------|------------|--------------------|
 | R1  | 33.3 | 0.2   | **287.6**      | 0.4          | 0.1          | **220.6**         | 57.1        | 109.0        | 1.1        | **709.3 (70.9 %)** |
 | R2  | 38.5 | 0.1   | **280.4**      | 0.4          | 0.2          | **214.4**         | 56.7        | 103.4        | 0.8        | **694.9 (69.5 %)** |
 | R3  | 31.6 | 0.1   | **272.4**      | 0.3          | 0.2          | **218.3**         | 62.7        | 104.1        | 0.9        | **690.7 (69.1 %)** |
@@ -79,10 +79,10 @@ non-measurement) → transition → loading pass (50/100/200 m/s, 30 s each).
 
 ### Loading pass @ 200 m/s — the same costs per FRAME (ms)
 
-| Run | LightMerge | LightSchedule | MeshSchedule | MeshProcess | Tick | all timed | avg CPU frame | min wall FPS |
-|-----|-----------|---------------|--------------|-------------|------|-----------|---------------|--------------|
-| R4  | 2.603     | 2.157         | 1.019        | 0.581       | 0.450| 6.824     | 11.7 ms       | 31.6         |
-| R5  | **9.370** | **8.082**     | 2.769        | 2.077       | 1.752| 24.076    | **31.7 ms**   | **21.0**     |
+| Run | LightMerge | LightSchedule | MeshSchedule | MeshProcess | Tick  | all timed | avg CPU frame | min wall FPS |
+|-----|------------|---------------|--------------|-------------|-------|-----------|---------------|--------------|
+| R4  | 2.603      | 2.157         | 1.019        | 0.581       | 0.450 | 6.824     | 11.7 ms       | 31.6         |
+| R5  | **9.370**  | **8.082**     | 2.769        | 2.077       | 1.752 | 24.076    | **31.7 ms**   | **21.0**     |
 
 ### Loading pass @ 200 m/s — quota utilisation and stop reasons
 
@@ -106,23 +106,23 @@ non-measurement) → transition → loading pass (50/100/200 m/s, 30 s each).
 
 ### Generation pass @ 10 m/s — the §10 q4 regime (idle lighting pass, multi-second `populated→lit`)
 
-| Run | vd | `LightSchedule` `OutOfWork` | gate closed | **`populated→lit` p50** | **parked p50** | parked ÷ hop | pre-delivery light amp |
-|-----|----|-----------------------------|-------------|-------------------------|----------------|--------------|------------------------|
-| R1  | 10 | 97.0 %                      | 0.0 %       | 3 282 ms                | **1 568 ms**   | **47.8 %**   | 6.59                   |
-| R2  | 20 | 95.0 %                      | 0.0 %       | 3 343 ms                | **1 542 ms**   | **46.1 %**   | 6.68                   |
-| R3  | 26 | 93.4 %                      | 0.0 %       | 3 392 ms                | **1 516 ms**   | **44.7 %**   | 6.70                   |
-| R4  | 32 | 89.0 %                      | 0.0 %       | 3 434 ms                | **1 474 ms**   | **42.9 %**   | 6.76                   |
-| R5  | 32 | 93.0 %                      | 0.0 %       | 3 418 ms                | **1 497 ms**   | **43.8 %**   | 6.63                   |
+| Run | vd  | `LightSchedule` `OutOfWork` | gate closed | **`populated→lit` p50** | **parked p50** | parked ÷ hop | pre-delivery light amp |
+|-----|-----|-----------------------------|-------------|-------------------------|----------------|--------------|------------------------|
+| R1  | 10  | 97.0 %                      | 0.0 %       | 3 282 ms                | **1 568 ms**   | **47.8 %**   | 6.59                   |
+| R2  | 20  | 95.0 %                      | 0.0 %       | 3 343 ms                | **1 542 ms**   | **46.1 %**   | 6.68                   |
+| R3  | 26  | 93.4 %                      | 0.0 %       | 3 392 ms                | **1 516 ms**   | **44.7 %**   | 6.70                   |
+| R4  | 32  | 89.0 %                      | 0.0 %       | 3 434 ms                | **1 474 ms**   | **42.9 %**   | 6.76                   |
+| R5  | 32  | 93.0 %                      | 0.0 %       | 3 418 ms                | **1 497 ms**   | **43.8 %**   | 6.63                   |
 
 ### Tour coverage (Q6 validity gate)
 
-| Run | on disk when the loading pass starts |
-|-----|--------------------------------------|
-| R1  | **100.0 %** ✅                        |
-| R2  | **99.7 %** ✅                         |
+| Run | on disk when the loading pass starts                     |
+|-----|----------------------------------------------------------|
+| R1  | **100.0 %** ✅                                           |
+| R2  | **99.7 %** ✅                                            |
 | R3  | **98.3 %** ❌ — the loading pass generated the remainder |
 | R4  | **97.8 %** ❌ — the loading pass generated the remainder |
-| R5  | **99.1 %** ✅                         |
+| R5  | **99.1 %** ✅                                            |
 
 ---
 
@@ -158,14 +158,14 @@ simply leaves less room beside it.
 P9-0a fitted a model with one free parameter (~0.37 ms per merge) that put ~16 of +23.1 ms in the
 unbudgeted merge. Measured, on the R4 → R5 pair:
 
-| Term            | R4 ms/frame | R5 ms/frame | Δ         | share of the instrumented growth |
-|-----------------|-------------|-------------|-----------|----------------------------------|
-| **LightMerge**  | 2.603       | 9.370       | **+6.767**| **39 %**                         |
-| **LightSchedule**| 2.157      | 8.082       | **+5.925**| **34 %**                         |
-| MeshSchedule    | 1.019       | 2.769       | +1.750    | 10 %                             |
-| MeshProcess     | 0.581       | 2.077       | +1.496    | 9 %                              |
-| Tick            | 0.450       | 1.752       | +1.302    | 8 %                              |
-| **all timed**   | 6.824       | 24.076      | **+17.252**| —                               |
+| Term              | R4 ms/frame | R5 ms/frame | Δ           | share of the instrumented growth |
+|-------------------|-------------|-------------|-------------|----------------------------------|
+| **LightMerge**    | 2.603       | 9.370       | **+6.767**  | **39 %**                         |
+| **LightSchedule** | 2.157       | 8.082       | **+5.925**  | **34 %**                         |
+| MeshSchedule      | 1.019       | 2.769       | +1.750      | 10 %                             |
+| MeshProcess       | 0.581       | 2.077       | +1.496      | 9 %                              |
+| Tick              | 0.450       | 1.752       | +1.302      | 8 %                              |
+| **all timed**     | 6.824       | 24.076      | **+17.252** | —                                |
 
 **What §F4 got right:** it sized the schedule pass almost exactly (predicted +6.8 ms, measured
 +5.9 ms), and it correctly identified the merge as the largest single unattributed cost.  
@@ -224,10 +224,10 @@ chunk ahead of delivery than the high-speed loading case does.
 
 At R4 (vd 32, loading 200 m/s), of a 3 644 ms end-to-end p50:
 
-| Hop                 | p50      | share  |
-|---------------------|----------|--------|
-| `enqueue→populated` | 2 976 ms | **82 %** |
-| `populated→lit`     | 570 ms   | 16 %   |
+| Hop                 | p50      | share     |
+|---------------------|----------|-----------|
+| `enqueue→populated` | 2 976 ms | **82 %**  |
+| `populated→lit`     | 570 ms   | 16 %      |
 | `lit→meshApplied`   | 7.1 ms   | **0.2 %** |
 
 The panic gate is closed on **91 %** of frames. The chain is: quota caps the lighting drain rate →
@@ -265,15 +265,15 @@ remains unaffordable.
 Criteria are §2 of the design doc. **P9-1 tests no fix**, so Q1/Q2 are scored only for the cap-48
 leg (R5 vs R4); the rest are reported as baseline state.
 
-| #      | Criterion                    | Result                                                                                                                                    |
-|--------|------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------|
-| **Q1** | Visibility budget            | **Baseline: missed at vd 20/26/32** — 1.42× / 1.49× / 1.42× (vd 10 **meets**, 813 ms vs an 800 ms budget). R5 improves the vd-32 shortfall 1.42× → 1.23×, a ×1.15 gain, **below** the ×1.3 partial-credit bar |
-| **Q2** | **Frame time holds** ⚠️      | **R5 FAILS** — min FPS ×0.66, avg CPU ×2.71. Hard gate                                                                                     |
-| **Q3a**| Rate lever moved the ceiling | **SPLIT, as in P9-0a** — `Quota` share 98 % → 0.1 % ✅, completions ×1.10 ❌ (needs ≥ ×1.35)                                                |
-| **Q4** | Memory holds                 | ✅ peak 5 026 → 5 105 MB = **×1.02**                                                                                                       |
-| **Q5** | Waste not scored             | Recorded — loading 200 m/s waste 11.2 % → 17.0 % at cap 48, the usual direction                                                            |
-| **Q6** | Coverage ≥ 99 %              | ❌ **R3 (98.3 %) and R4 (97.8 %)**; R1/R2/R5 pass. See Limitation 1 — this hits the A/B baseline                                            |
-| **Kill condition** | Do the two **scheduling** passes consume a majority of the frame at vd ≥ 26? | **NO — 32.2 % at vd 26, 31.9 % at vd 32** (`LightSchedule` + `MeshSchedule`). The kill condition is **not** triggered and §6's levers stay open |
+| #                  | Criterion                                                                    | Result                                                                                                                                                                                                        |
+|--------------------|------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Q1**             | Visibility budget                                                            | **Baseline: missed at vd 20/26/32** — 1.42× / 1.49× / 1.42× (vd 10 **meets**, 813 ms vs an 800 ms budget). R5 improves the vd-32 shortfall 1.42× → 1.23×, a ×1.15 gain, **below** the ×1.3 partial-credit bar |
+| **Q2**             | **Frame time holds** ⚠️                                                      | **R5 FAILS** — min FPS ×0.66, avg CPU ×2.71. Hard gate                                                                                                                                                        |
+| **Q3a**            | Rate lever moved the ceiling                                                 | **SPLIT, as in P9-0a** — `Quota` share 98 % → 0.1 % ✅, completions ×1.10 ❌ (needs ≥ ×1.35)                                                                                                                  |
+| **Q4**             | Memory holds                                                                 | ✅ peak 5 026 → 5 105 MB = **×1.02**                                                                                                                                                                          |
+| **Q5**             | Waste not scored                                                             | Recorded — loading 200 m/s waste 11.2 % → 17.0 % at cap 48, the usual direction                                                                                                                               |
+| **Q6**             | Coverage ≥ 99 %                                                              | ❌ **R3 (98.3 %) and R4 (97.8 %)**; R1/R2/R5 pass. See Limitation 1 — this hits the A/B baseline                                                                                                              |
+| **Kill condition** | Do the two **scheduling** passes consume a majority of the frame at vd ≥ 26? | **NO — 32.2 % at vd 26, 31.9 % at vd 32** (`LightSchedule` + `MeshSchedule`). The kill condition is **not** triggered and §6's levers stay open                                                               |
 
 ---
 

@@ -63,16 +63,16 @@ enabled + safety checks on. **256 jobs/run × 250 runs.**
 
 µs/job (derived from ms/run ÷ 256), PRE → POST:
 
-| Scenario                  |   PRE |  POST |   Speedup   |
+| Scenario                  | PRE   | POST  |   Speedup   |
 |---------------------------|------:|------:|:-----------:|
-| Sunlight Vertical Flat    | 234.4 |  82.0 |  **2.86×**  |
-| Sunlight Complex Caves    | 238.3 |  82.0 |  **2.91×**  |
-| Sunlight Removal Covered  | 152.3 |  50.8 |  **3.00×**  |
+| Sunlight Vertical Flat    | 234.4 | 82.0  |  **2.86×**  |
+| Sunlight Complex Caves    | 238.3 | 82.0  |  **2.91×**  |
+| Sunlight Removal Covered  | 152.3 | 50.8  |  **3.00×**  |
 | Blocklight Stress Test    | 367.2 | 152.3 |  **2.41×**  |
-| Edge Check Consistency    | 187.5 |  70.3 |  **2.67×**  |
-| Blocklight Simple         |  11.7 |   7.8 |  small abs  |
-| Blocklight Removal Simple |   3.9 |   3.9 | noise floor |
-| Blocklight Removal Stress |   3.9 |   3.9 | noise floor |
+| Edge Check Consistency    | 187.5 | 70.3  |  **2.67×**  |
+| Blocklight Simple         | 11.7  | 7.8   |  small abs  |
+| Blocklight Removal Simple | 3.9   | 3.9   | noise floor |
+| Blocklight Removal Stress | 3.9   | 3.9   | noise floor |
 
 **The branch-free flat index genuinely speeds the BFS by 2.4–3× on every substantive scenario.** Wall-clock
 of the POST run was *longer* (3m51s vs 2m18s) despite faster timed numbers — that's the now-untimed gather
@@ -88,16 +88,16 @@ still costing real main-thread wall-clock.
 
 µs/job, PRE → POST:
 
-| Scenario                   |   PRE |  POST |          Δ |
+| Scenario                   | PRE   | POST  | Δ          |
 |----------------------------|------:|------:|-----------:|
-| Sunlight Vertical Flat     | 371.1 | 386.7 |   **+4 %** |
-| Sunlight Complex Caves     | 367.2 | 394.5 |   **+7 %** |
-| Sunlight Removal Covered   | 273.4 | 363.3 |  **+33 %** |
+| Sunlight Vertical Flat     | 371.1 | 386.7 | **+4 %**   |
+| Sunlight Complex Caves     | 367.2 | 394.5 | **+7 %**   |
+| Sunlight Removal Covered   | 273.4 | 363.3 | **+33 %**  |
 | Blocklight Simple          | 121.1 | 312.5 | **+158 %** |
 | **Blocklight Stress Test** | 503.9 | 468.8 | **−7 % ✓** |
 | Blocklight Removal Simple  | 113.3 | 312.5 | **+176 %** |
 | Blocklight Removal Stress  | 113.3 | 312.5 | **+176 %** |
-| Edge Check Consistency     | 312.5 | 386.7 |  **+24 %** |
+| Edge Check Consistency     | 312.5 | 386.7 | **+24 %**  |
 
 **Only the single most BFS-bound scenario (Blocklight Stress) comes out ahead, and only by 7 %.** Everything
 else regresses; the cheap scenarios catastrophically.
@@ -106,10 +106,10 @@ else regresses; the cheap scenarios catastrophically.
 
 Subtract the isolated (BFS-only) number from the full number to isolate the **prepare/gather cost**:
 
-|                                        | Isolated (BFS) |  Full |     Prepare cost |
+|                                        | Isolated (BFS) | Full  | Prepare cost     |
 |----------------------------------------|---------------:|------:|-----------------:|
-| **POST gather** (Blocklight Simple)    |            7.8 | 312.5 | **≈ 305 µs/job** |
-| **PRE 9-map prep** (Blocklight Simple) |           11.7 | 121.1 | **≈ 109 µs/job** |
+| **POST gather** (Blocklight Simple)    | 7.8            | 312.5 | **≈ 305 µs/job** |
+| **PRE 9-map prep** (Blocklight Simple) | 11.7           | 121.1 | **≈ 109 µs/job** |
 
 The POST gather copies the **whole 51 200-cell volume regardless of light content**, so every POST scenario
 sits on a hard ~80 ms / ~313 µs/job floor. That floor is **~2.6× more expensive than PRE's 9-map prep**. The

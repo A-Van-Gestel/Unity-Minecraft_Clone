@@ -63,8 +63,8 @@ by CP-4. No new findings were added — this was a fact check of the existing en
 
 `Camera.main` is cached internally since Unity 2020.1 and is no longer a performance problem. However, relying on it introduces an implicit dependency on `MainCamera` tags.
 
-| Affected Files                                                                                                                                              |
-|---------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Affected Files                                                                                                                                                                            |
+|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `World.cs`, `Player.cs`, `PlayerInteraction.cs`, `DebugScreen.cs`, `UI/GraphicsSettingsController.cs`, `Benchmarks/BenchmarkController.cs`, `Jobs/BurstData/BurstVoxelMetadataUtility.cs` |
 
 *(List re-verified 2026-07-26: the last three were missing from the original audit.)*

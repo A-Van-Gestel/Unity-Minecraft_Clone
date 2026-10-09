@@ -42,25 +42,25 @@ Two runs, same deterministic scenario, flag toggled per build. Δ is band-on rel
 
 ### Baseline phase — settled field, streaming re-light (the sustained real-world case)
 
-| Metric (per frame)     | Band OFF | Band ON |           Δ |
+| Metric (per frame)     | Band OFF | Band ON | Δ           |
 |------------------------|---------:|--------:|------------:|
-| Frame avg (ms)         |    1.860 |   1.368 | **−26.5 %** |
-| Light avg (ms)         |    0.082 |   0.060 | **−26.8 %** |
-| Frame peak (ms)        |   17.311 |  15.442 |     −10.8 % |
-| Light peak (ms)        |   12.019 |  11.982 |      −0.3 % |
-| Min FPS                |       58 |      65 |      **+7** |
-| Frames rendered in 4 s |     2151 |    2924 |       +36 % |
+| Frame avg (ms)         | 1.860    | 1.368   | **−26.5 %** |
+| Light avg (ms)         | 0.082    | 0.060   | **−26.8 %** |
+| Frame peak (ms)        | 17.311   | 15.442  | −10.8 %     |
+| Light peak (ms)        | 12.019   | 11.982  | −0.3 %      |
+| Min FPS                | 58       | 65      | **+7**      |
+| Frames rendered in 4 s | 2151     | 2924    | +36 %       |
 
 ### Flood phase — 25-chunk cascade (Light-heavy worst case)
 
-| Metric (per frame)           |        Band OFF |         Band ON |                           Δ |
+| Metric (per frame)           | Band OFF        | Band ON         | Δ                           |
 |------------------------------|----------------:|----------------:|----------------------------:|
-| Frame avg (ms)               |           3.306 |           3.104 |                  **−6.1 %** |
-| Light avg (ms)               |           0.361 |           0.327 |                  **−9.4 %** |
-| Frame peak (ms)              |          39.648 |          39.075 |                      −1.4 % |
-| Light peak (independent max) |          32.488 |          34.079 |                    +4.9 % ⚠ |
+| Frame avg (ms)               | 3.306           | 3.104           | **−6.1 %**                  |
+| Light avg (ms)               | 0.361           | 0.327           | **−9.4 %**                  |
+| Frame peak (ms)              | 39.648          | 39.075          | −1.4 %                      |
+| Light peak (independent max) | 32.488          | 34.079          | +4.9 % ⚠                    |
 | Worst-frame Light component  | 24.363 (61.4 %) | 11.185 (28.6 %) | **−54 % / share 61 %→29 %** |
-| Min FPS                      |              25 |              26 |                          +1 |
+| Min FPS                      | 25              | 26              | +1                          |
 
 `⚠` The flood **Light peak (independent max)** is the single largest Light spike across *all* frames; it is essentially
 flat (+4.9 % is inside run-to-run noise — the absolute BFS ceiling is irreducible and the band cannot shrink the wave
@@ -72,16 +72,16 @@ Tick/GC hitch) is unchanged.
 
 ## Result — per-job cost, IL2CPP + Burst (`LightingJobBenchmark`, µs/job)
 
-| Job shape                 | Band OFF | Band ON |      Δ |
+| Job shape                 | Band OFF | Band ON | Δ      |
 |---------------------------|---------:|--------:|-------:|
-| Sunlight Vertical Flat    |    246.1 |   246.1 |  0.0 % |
-| Sunlight Complex Caves    |    234.4 |   226.6 | −3.3 % |
-| Sunlight Removal Covered  |    210.9 |   203.1 | −3.7 % |
-| Blocklight Simple         |    160.2 |   152.3 | −4.9 % |
-| Blocklight Stress Test    |    300.8 |   300.8 |  0.0 % |
-| Blocklight Removal Simple |    156.3 |   152.3 | −2.6 % |
-| Blocklight Removal Stress |    160.2 |   152.3 | −4.9 % |
-| Edge Check Consistency    |    222.7 |   218.8 | −1.7 % |
+| Sunlight Vertical Flat    | 246.1    | 246.1   | 0.0 %  |
+| Sunlight Complex Caves    | 234.4    | 226.6   | −3.3 % |
+| Sunlight Removal Covered  | 210.9    | 203.1   | −3.7 % |
+| Blocklight Simple         | 160.2    | 152.3   | −4.9 % |
+| Blocklight Stress Test    | 300.8    | 300.8   | 0.0 %  |
+| Blocklight Removal Simple | 156.3    | 152.3   | −2.6 % |
+| Blocklight Removal Stress | 160.2    | 152.3   | −4.9 % |
+| Edge Check Consistency    | 222.7    | 218.8   | −1.7 % |
 
 Per-job IL2CPP wins (−2…−5 %) are more modest than the editor-Mono screening (−31…−75 %) because these fixed benchmark
 scenarios carry content up the column (wide bands) or force full-height by the column-recalc rule — the two flat/0 %

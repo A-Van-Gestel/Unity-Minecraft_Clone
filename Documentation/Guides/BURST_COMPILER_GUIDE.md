@@ -190,14 +190,14 @@ Using `Unity.Mathematics` allows Burst to **"vectorize"** operations, performing
 **What to Swap:**
 Inside your jobs and any `[BurstCompile]` methods, use the following replacements:
 
-| UnityEngine (Avoid inside loop) | Unity.Mathematics (Use this) | Why? |
-| :--- | :--- | :--- |
-| `Vector3` | `float3` | Maps directly to SIMD registers. |
-| `Vector3Int` | `int3` | Maps directly to SIMD registers. |
-| `Mathf.Sqrt()` | `math.sqrt()` | Optimized intrinsic instruction. |
-| `Mathf.Sin()` | `math.sin()` | Optimized intrinsic instruction. |
-| `Quaternion.Euler()` | `quaternion.Euler()` | Faster calculation. |
-| `quat * vec3` | `math.mul(quat, vec3)` | Explicit multiplication logic. |
+| UnityEngine (Avoid inside loop) | Unity.Mathematics (Use this) | Why?                             |
+|:--------------------------------|:-----------------------------|:---------------------------------|
+| `Vector3`                       | `float3`                     | Maps directly to SIMD registers. |
+| `Vector3Int`                    | `int3`                       | Maps directly to SIMD registers. |
+| `Mathf.Sqrt()`                  | `math.sqrt()`                | Optimized intrinsic instruction. |
+| `Mathf.Sin()`                   | `math.sin()`                 | Optimized intrinsic instruction. |
+| `Quaternion.Euler()`            | `quaternion.Euler()`         | Faster calculation.              |
+| `quat * vec3`                   | `math.mul(quat, vec3)`       | Explicit multiplication logic.   |
 
 **A Note on Conversion Overhead (Vector3 -> float3):**
 You might worry about the cost of converting your existing `transform.position` (`Vector3`) to `float3` when passing data into a job.

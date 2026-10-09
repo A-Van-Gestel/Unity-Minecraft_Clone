@@ -81,9 +81,9 @@ lighting/sky driver code. Runtime state was **verified in code, not assumed** �
 |-------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **Effort**  | 🟢 Low (hours, localized) · 🟡 Medium (days, several files) · 🔴 High (architectural, cross-system)                                                           |
 | **Risk**    | 🟢 Low (isolated, easy to verify) · 🟡 Medium (touches shared state or visual output) · 🔴 High (touches pipeline invariants, lighting semantics, or shaders) |
-| **Benefit** | 🟢 Core — high player-facing value or unlocks other planned work · 🟡 Situational / polish · ⚪ Minor                                                          |
-| **Seed**    | ✅ Safe — cannot change generated terrain for a given seed · ⚠️ Terrain-affecting                                                                              |
-| **Save**    | ✅ Safe — no on-disk format change · ⚠️ Format — requires a save-format version bump + AOT migration step (see `serialization-migration` skill)                |
+| **Benefit** | 🟢 Core — high player-facing value or unlocks other planned work · 🟡 Situational / polish · ⚪ Minor                                                         |
+| **Seed**    | ✅ Safe — cannot change generated terrain for a given seed · ⚠️ Terrain-affecting                                                                             |
+| **Save**    | ✅ Safe — no on-disk format change · ⚠️ Format — requires a save-format version bump + AOT migration step (see `serialization-migration` skill)               |
 
 > **Benefit redefinition:** as in the `TF-*` report, Benefit here means player-facing / design
 > value — **not** the frame-time/GC meaning used in `PERFORMANCE_IMPROVEMENTS_REPORT.md`.
@@ -94,18 +94,18 @@ lighting/sky driver code. Runtime state was **verified in code, not assumed** �
 
 ### Lighting & Rendering Features
 
-| ID   | Finding                                                                                   | Effort | Risk | Benefit | Seed | Save |
-|------|-------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
-| RF-1 | ~~Day/night cycle: shader support is wired & modern but nothing advances time~~ ✅ **SHIPPED** (both phases) |   🟡   |  🟢  |   🟢    |  ✅   |  ⚠️  |
-| RF-2 | ~~Sky rendering: skybox, sun/moon, stars, fog, disc detail~~ ✅ **SHIPPED**; §6 + 4 riders open |   🟡   |  🟢  |   🟢    |  ✅   |  ✅   |
-| RF-3 | ~~Bloom / post-processing: URP post stack present but disabled; no HDR emissive path~~ ✅ **SHIPPED**; §1 tonemapping + §5 effects open |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
-| RF-4 | Flickering light sources: shader-side global flicker with per-position phase              |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
-| RF-5 | Animated light sources: RGB emission already shipped; *animation* is BFS-bounded          |   🟡   |  🟡  |    ⚪    |  ✅   |  ✅   |
-| RF-6 | "Some form of GI": SSAO is the pragmatic option; colored sky-bounce rejected with reasons |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
-| RF-7 | Weather: no rain/snow of any kind; precipitation type gated on TF-3's temperature axis    |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
-| RF-8 | Animated block textures: every non-fluid tile is static — flipbook via atlas blitting     |   🟡   |  🟢  |   🟡    |  ✅   |  ✅   |
-| RF-9 | Vertex AO crushes to black at night — occlusion is baked in before the sky darkening       |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
-| RF-10 | The skylight tint gradient ships flat white — RF-1's tinting mechanism is built but unauthored |   🟢   |  🟢  |   🟡    |  ✅   |  ✅   |
+| ID    | Finding                                                                                                                                 | Effort | Risk | Benefit | Seed | Save |
+|-------|-----------------------------------------------------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
+| RF-1  | ~~Day/night cycle: shader support is wired & modern but nothing advances time~~ ✅ **SHIPPED** (both phases)                            |   🟡   |  🟢  |   🟢    |  ✅  |  ⚠️  |
+| RF-2  | ~~Sky rendering: skybox, sun/moon, stars, fog, disc detail~~ ✅ **SHIPPED**; §6 + 4 riders open                                         |   🟡   |  🟢  |   🟢    |  ✅  |  ✅  |
+| RF-3  | ~~Bloom / post-processing: URP post stack present but disabled; no HDR emissive path~~ ✅ **SHIPPED**; §1 tonemapping + §5 effects open |   🟡   |  🟡  |   🟡    |  ✅  |  ✅  |
+| RF-4  | Flickering light sources: shader-side global flicker with per-position phase                                                            |   🟢   |  🟢  |   🟡    |  ✅  |  ✅  |
+| RF-5  | Animated light sources: RGB emission already shipped; *animation* is BFS-bounded                                                        |   🟡   |  🟡  |   ⚪    |  ✅  |  ✅  |
+| RF-6  | "Some form of GI": SSAO is the pragmatic option; colored sky-bounce rejected with reasons                                               |   🟢   |  🟢  |   🟡    |  ✅  |  ✅  |
+| RF-7  | Weather: no rain/snow of any kind; precipitation type gated on TF-3's temperature axis                                                  |   🟡   |  🟡  |   🟡    |  ✅  |  ✅  |
+| RF-8  | Animated block textures: every non-fluid tile is static — flipbook via atlas blitting                                                   |   🟡   |  🟢  |   🟡    |  ✅  |  ✅  |
+| RF-9  | Vertex AO crushes to black at night — occlusion is baked in before the sky darkening                                                    |   🟡   |  🟡  |   🟡    |  ✅  |  ✅  |
+| RF-10 | The skylight tint gradient ships flat white — RF-1's tinting mechanism is built but unauthored                                          |   🟢   |  🟢  |   🟡    |  ✅  |  ✅  |
 
 ---
 
@@ -381,13 +381,13 @@ above, and the Architecture doc is authoritative.
 
 **Still open (the RF-2 remainder).** Each is deliberately deferred, not forgotten:
 
-| Item | Note |
-|------|------|
-| §6 sky ambience v2 (aurora, shooting stars) | Pure content on the shipped skybox shader. |
-| Sun appearance (aureole, sunset reddening) | **Own design: [`SUN_APPEARANCE_IMPROVEMENTS.md`](SUN_APPEARANCE_IMPROVEMENTS.md)**. `SN-0` (aureole) and `SN-1` (per-channel extinction) **shipped and confirmed in game 2026-08-15**. `SN-2` (HDR core for bloom) was **built and refuted** — reverted in full — and `SN-3` (screen-space lens flare) falls with it, because URP's one global `Bloom` sizes its halo for RF-3's block emitters and the sun wants a different answer from the same setting (that doc's §7.3). **This retires the RF-2 §6 sun-flare bullet entirely**: the answer is not a flare. Everything stays in **LDR**; the Neutral-tonemapping upgrade remains out of scope and owed its own doc. |
-| Per-biome sky color override | The editor-tool half **shipped 2026-08-12** as `Minecraft Clone/Sky Editor` (Architecture §6); only the per-biome override remains. It **needs a design pass first**: sky color is screen-wide but biomes are per-column, so something must define the boundary rule (blend over distance? sample at the camera? weight nearby columns?). Same class of question as TF-3's climate axis. Route to `create-design-doc`, not to implementation. |
-| Seasonal declination | Blocked on RF-1's curve coupling — see the Architecture doc §2.1 for why zero is load-bearing rather than lazy. |
-| Blood-moon disc tint | Waits on RF-1 §4's `SkyEvent`, which was never shipped. |
+| Item                                        | Note                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+|---------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| §6 sky ambience v2 (aurora, shooting stars) | Pure content on the shipped skybox shader.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Sun appearance (aureole, sunset reddening)  | **Own design: [`SUN_APPEARANCE_IMPROVEMENTS.md`](SUN_APPEARANCE_IMPROVEMENTS.md)**. `SN-0` (aureole) and `SN-1` (per-channel extinction) **shipped and confirmed in game 2026-08-15**. `SN-2` (HDR core for bloom) was **built and refuted** — reverted in full — and `SN-3` (screen-space lens flare) falls with it, because URP's one global `Bloom` sizes its halo for RF-3's block emitters and the sun wants a different answer from the same setting (that doc's §7.3). **This retires the RF-2 §6 sun-flare bullet entirely**: the answer is not a flare. Everything stays in **LDR**; the Neutral-tonemapping upgrade remains out of scope and owed its own doc. |
+| Per-biome sky color override                | The editor-tool half **shipped 2026-08-12** as `Minecraft Clone/Sky Editor` (Architecture §6); only the per-biome override remains. It **needs a design pass first**: sky color is screen-wide but biomes are per-column, so something must define the boundary rule (blend over distance? sample at the camera? weight nearby columns?). Same class of question as TF-3's climate axis. Route to `create-design-doc`, not to implementation.                                                                                                                                                                                                                            |
+| Seasonal declination                        | Blocked on RF-1's curve coupling — see the Architecture doc §2.1 for why zero is load-bearing rather than lazy.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Blood-moon disc tint                        | Waits on RF-1 §4's `SkyEvent`, which was never shipped.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 
 **Dependencies / ordering.** RF-1 first (needs `DayFraction`) — satisfied. Shipped as pure
 shader/scene work with no voxel pipeline contact.
@@ -619,10 +619,10 @@ varying) emission — e.g. color-cycling lamps, pulsing beacons.
 update (remove + re-spread BFS, then re-mesh) — the same cost as placing/removing a torch. Three
 approaches:
 
-| Approach                                                                      | Verdict                                                                                                                                     |
-|-------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------|
+| Approach                                                                      | Verdict                                                                                                                                      |
+|-------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------|
 | Shader-side hue-cycling of blocklight                                         | ❌ Impossible for per-source animation — per-vertex `blockRGB` is the *mixed* result of all sources; a shader shift recolors everything      |
-| Per-voxel emission metadata (via `PER_BLOCK_METADATA_SCHEMAS.md` schema bits) | Viable for *variants* (lamp brightness/color set at placement) but still needs a BFS pass per change — doesn't make animation cheaper       |
+| Per-voxel emission metadata (via `PER_BLOCK_METADATA_SCHEMAS.md` schema bits) | Viable for *variants* (lamp brightness/color set at placement) but still needs a BFS pass per change — doesn't make animation cheaper        |
 | **Block-state swap driven by the behavior tick** (recommended)                | ✅ A behavior (TG-4 tick system) swaps between pre-authored block variants (e.g. `DebugLamp12` → `13`); each swap is one normal light update |
 
 **Proposed design (budgeted block-swap animation).**
@@ -664,8 +664,8 @@ Seed/Save ✅.
 
 **Options evaluated.**
 
-| Option                                           | Verdict                                                                                                                                                                                                                                                                                                             |
-|--------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Option                                           | Verdict                                                                                                                                                                                                                                                                                                              |
+|--------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **URP SSAO renderer feature** (recommended)      | ✅ Drop-in, no pipeline changes; adds fine contact occlusion the 16³-granular vertex AO can't express; ~0.5–1 ms @1080p desktop → quality-tier-gate it (OM-1). Verify interaction with vertex AO (double-darkening — tune intensity ≤0.5)                                                                            |
 | Colored sky-bounce ("red carpet tints the room") | ❌ Rejected: requires albedo-aware re-injection seeds in the BFS **and** RGB sky light — sky is 4-bit mono by design; widening `LightData` `ushort`→`uint` doubles light memory + save format bump + touches every lighting job. Not worth it for a subtle effect; revisit only alongside a future lighting overhaul |
 | Realtime directional sun shadows (shadow maps)   | ❌ Rejected: per-voxel sky light already encodes sun occlusion (that's what the BFS computes); shadow maps would double-darken every overhang, cost heavily at voxel draw-call counts (pre-`GS-6`), and fight the art style                                                                                          |
@@ -763,10 +763,10 @@ sea-lantern-style blocks, magma crust). Routed here from the `VX-*` gap sweep (2
 
 **Analysis — where the animation can live:**
 
-| Approach                                                    | Verdict                                                                                                                                                               |
-|-------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Per-vertex "animated" flag + shader-side UV frame cycling   | ❌ Rejected — the vertex format has no spare capacity (`uv.zw` = FL sway, `Color32` reserved TF-11 + RF-3), and per-tile frame metadata would need yet another channel |
-| Re-mesh on animation tick                                   | ❌ Rejected outright — remeshing as an animation driver is the anti-pattern every report here exists to prevent                                                        |
+| Approach                                                     | Verdict                                                                                                                                                                |
+|--------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Per-vertex "animated" flag + shader-side UV frame cycling    | ❌ Rejected — the vertex format has no spare capacity (`uv.zw` = FL sway, `Color32` reserved TF-11 + RF-3), and per-tile frame metadata would need yet another channel |
+| Re-mesh on animation tick                                    | ❌ Rejected outright — remeshing as an animation driver is the anti-pattern every report here exists to prevent                                                        |
 | **Animate the atlas itself (MC's approach)** (✅ **CHOSEN**) | ✅ Frames authored as strips; a fixed tick GPU-blits the current frame into the tile's atlas slot (`Graphics.CopyTexture`). Zero vertex/mesh/shader change             |
 
 **Proposed design.**
@@ -814,11 +814,11 @@ read as solid black, losing the shape information they carry during the day. Day
 
 Measured shadow multipliers at midnight (shade curve + gamma, `MinLightLevel = 0.15`):
 
-| Vertex                | Pre-RF-1 (multiplicative) | Shipped (subtractive) |
-|-----------------------|---------------------------|-----------------------|
-| Unoccluded, open sky  | 0.1635                    | 0.0932                |
-| 30% occluded          | 0.0916                    | **0.0063 — the floor** |
-| Fully sealed (cave)   | 0.0063                    | 0.0063                |
+| Vertex               | Pre-RF-1 (multiplicative) | Shipped (subtractive)  |
+|----------------------|---------------------------|------------------------|
+| Unoccluded, open sky | 0.1635                    | 0.0932                 |
+| 30% occluded         | 0.0916                    | **0.0063 — the floor** |
+| Fully sealed (cave)  | 0.0063                    | 0.0063                 |
 
 A 30%-occluded face is now **exactly as dark as a sealed cave face**, whereas before it was as bright
 as the new model's fully-open sky. Note the floor itself is *unchanged* — `MinLightLevel` behaves
@@ -843,12 +843,12 @@ rides the meshing suite's B-series baselines.
 
 **Options (not yet evaluated — this entry is the analysis, not the decision).**
 
-| Option                                                            | Note                                                                                                                                                        |
-|-------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Move occlusion to its own vertex channel, reorder the composition | The correct fix; blocked on the RF-3/TF-11 allocation. Also makes AO strength runtime-tunable, which SS-* would benefit from                                |
+| Option                                                            | Note                                                                                                                                                                                                                |
+|-------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Move occlusion to its own vertex channel, reorder the composition | The correct fix; blocked on the RF-3/TF-11 allocation. Also makes AO strength runtime-tunable, which SS-* would benefit from                                                                                        |
 | Soften AO strength as a function of `GlobalLightLevel`            | Cannot be done in the shader (not separable from the product). Would have to be applied at **mesh time**, which makes the mesh time-dependent — rejected on sight: it reintroduces remeshing as an animation driver |
-| Compress the subtraction near zero (e.g. a soft floor)            | Shader-only and cheap, but it breaks the §9/§10 exactness — the rendered level would stop equalling the queried one, which is the whole point of §10        |
-| Accept as Minecraft-parity                                        | MC's AO is likewise more visible at night. The honest fallback if the channel never frees up; re-judge against a capture rather than from the numbers        |
+| Compress the subtraction near zero (e.g. a soft floor)            | Shader-only and cheap, but it breaks the §9/§10 exactness — the rendered level would stop equalling the queried one, which is the whole point of §10                                                                |
+| Accept as Minecraft-parity                                        | MC's AO is likewise more visible at night. The honest fallback if the channel never frees up; re-judge against a capture rather than from the numbers                                                               |
 
 **Dependencies / ordering.** Shares RF-3's vertex-channel decision; no dependency on RF-2. Nothing
 here touches the light engine, storage, or save format.
@@ -898,11 +898,11 @@ the tint multiplies only the sky contribution before the per-channel `max()` in 
 
 **Options.**
 
-| Option | Note |
-|---|---|
-| Author the skylight gradient alone | The minimum that delivers moonlit nights. Self-contained, reversible, no code |
-| Author the background/fog gradient in the same blue family | RF-1 §3's "RF-2 coordination" bullet — without it the horizon clashes with the newly-tinted terrain. Recommended as the same sitting |
-| Leave flat white | Honest only if the intent is a deliberately colorless night. Should then be recorded as a decision, because it currently reads as an oversight |
+| Option                                                     | Note                                                                                                                                           |
+|------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------|
+| Author the skylight gradient alone                         | The minimum that delivers moonlit nights. Self-contained, reversible, no code                                                                  |
+| Author the background/fog gradient in the same blue family | RF-1 §3's "RF-2 coordination" bullet — without it the horizon clashes with the newly-tinted terrain. Recommended as the same sitting           |
+| Leave flat white                                           | Honest only if the intent is a deliberately colorless night. Should then be recorded as a decision, because it currently reads as an oversight |
 
 **Dependencies / ordering.** RF-1 (shipped) supplies the mechanism and the spec; RF-2 (shipped)
 supplies the horizon colors to coordinate against. **Distinct from RF-1 §4's `SkyEvent` blood-moon

@@ -107,12 +107,12 @@ Beyond the smoothed instantaneous values, the monitor keeps a **chronological ri
 `FrameMetricSnapshot` samples, so consumers can render graphs and post-hoc summaries rather than a single
 current number.
 
-| Element                              | Role                                                                                              |
-|--------------------------------------|---------------------------------------------------------------------------------------------------|
-| `FrameMetricSnapshot` (struct)       | One sample: `CpuTimeMs`, `WallTimeMs`, `GcAllocKb`, `WallFps`, `CpuFps`, `NativeAllocMb`, `NativeReservedMb`, `ManagedMemMb`, `TotalMemMb` |
-| `MetricsHistory` / `HistoryHeadIndex` / `HistorySize` | The ring buffer and its write cursor — readers must walk it head-relative, not linearly           |
-| `_historyTimeframeSeconds` (10 s) + `_historyPollRate` (0.05 s) | `[SerializeField]` window and cadence; together they size the buffer                              |
-| `event Action<FrameMetricSnapshot> OnMetricsSampled` | Fired on every capture — the push alternative to polling the buffer                               |
+| Element                                                         | Role                                                                                                                                       |
+|-----------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------|
+| `FrameMetricSnapshot` (struct)                                  | One sample: `CpuTimeMs`, `WallTimeMs`, `GcAllocKb`, `WallFps`, `CpuFps`, `NativeAllocMb`, `NativeReservedMb`, `ManagedMemMb`, `TotalMemMb` |
+| `MetricsHistory` / `HistoryHeadIndex` / `HistorySize`           | The ring buffer and its write cursor — readers must walk it head-relative, not linearly                                                    |
+| `_historyTimeframeSeconds` (10 s) + `_historyPollRate` (0.05 s) | `[SerializeField]` window and cadence; together they size the buffer                                                                       |
+| `event Action<FrameMetricSnapshot> OnMetricsSampled`            | Fired on every capture — the push alternative to polling the buffer                                                                        |
 
 Two consumers exist today: `DebugScreen` (the HUD's history graphs) and `BenchmarkMetricsCollector`, which
 subscribes to `OnMetricsSampled` to aggregate a run's metrics for the in-world benchmark harnesses (see the

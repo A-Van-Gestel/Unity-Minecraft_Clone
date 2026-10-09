@@ -76,10 +76,10 @@ that unblocks MR-8's smooth-lighting constraint), VX-9 (heat-haze distortion), V
 
 ## Legend
 
-| Field       | Values                                                                                                                                         |
-|-------------|------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Effort**  | 🟢 Low (hours, localized) · 🟡 Medium (days, several files) · 🔴 High (architectural, cross-system)                                            |
-| **Risk**    | 🟢 Low (isolated, easy to verify) · 🟡 Medium (touches shared state or visual output) · 🔴 High (touches pipeline invariants or semantics)     |
+| Field       | Values                                                                                                                                          |
+|-------------|-------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Effort**  | 🟢 Low (hours, localized) · 🟡 Medium (days, several files) · 🔴 High (architectural, cross-system)                                             |
+| **Risk**    | 🟢 Low (isolated, easy to verify) · 🟡 Medium (touches shared state or visual output) · 🔴 High (touches pipeline invariants or semantics)      |
 | **Benefit** | 🟢 Core — high value or unlocks other planned work · 🟡 Situational / polish · ⚪ Minor                                                         |
 | **Seed**    | ✅ Safe — cannot change generated terrain for a given seed · ⚠️ Terrain-affecting                                                               |
 | **Save**    | ✅ Safe — no on-disk format change · ⚠️ Format — requires a save-format version bump + AOT migration step (see `serialization-migration` skill) |
@@ -154,17 +154,17 @@ conventions, dispatch helpers, tier fallbacks) lands with VX-1.
 
 | ID    | Finding                                                                                      | Effort | Risk | Benefit | Seed | Save |
 |-------|----------------------------------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
-| VX-0  | No "Experimental/Expensive" settings tier exists — no tooltips, no tier-gated defaults       |   🟢   |  🟢  |   🟢    |  ✅   |  ✅   |
-| VX-1  | GPU light+occupancy volume — the shared substrate every volumetric/traced item samples       |   🔴   |  🟡  |   🟢    |  ✅   |  ✅   |
-| VX-2  | Volumetric fog & god rays — raymarched scattering lit by the BFS field                       |   🔴   |  🟡  |   🟢    |  ✅   |  ✅   |
-| VX-3  | Volumetric water — depth absorption, underwater light shafts, procedural caustics            |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
-| VX-4  | Colored light through tinted voxels — per-channel BFS filters (stained glass), zero GPU cost |   🟡   |  🔴  |   🟢    |  ✅   |  ✅   |
-| VX-5  | Voxel DDA trace substrate — GPU occupancy/albedo volume + shader trace library               |   🔴   |  🟡  |   🟡    |  ✅   |  ✅   |
-| VX-6  | Voxel-traced diffuse GI — 1-bounce gather over VX-5, temporally accumulated (experimental)   |   🔴   |  🔴  |   🟡    |  ✅   |  ✅   |
-| VX-7  | Water/glass reflections — SSR first, voxel-traced upgrade via VX-5                           |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
-| VX-8  | Per-fragment voxel lighting sampled from VX-1 — smoother light, unblocks MR-8's constraint   |   🔴   |  🔴  |   🟢    |  ✅   |  ✅   |
-| VX-9  | Heat-haze / distortion media — screen-space shimmer above lava (and desert air later)        |   🟡   |  🟢  |    ⚪    |  ✅   |  ✅   |
-| VX-10 | Interactive water surface — camera-local ripple sim (rain, player wake, splashes)            |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
+| VX-0  | No "Experimental/Expensive" settings tier exists — no tooltips, no tier-gated defaults       |   🟢   |  🟢  |   🟢    |  ✅  |  ✅  |
+| VX-1  | GPU light+occupancy volume — the shared substrate every volumetric/traced item samples       |   🔴   |  🟡  |   🟢    |  ✅  |  ✅  |
+| VX-2  | Volumetric fog & god rays — raymarched scattering lit by the BFS field                       |   🔴   |  🟡  |   🟢    |  ✅  |  ✅  |
+| VX-3  | Volumetric water — depth absorption, underwater light shafts, procedural caustics            |   🟡   |  🟡  |   🟡    |  ✅  |  ✅  |
+| VX-4  | Colored light through tinted voxels — per-channel BFS filters (stained glass), zero GPU cost |   🟡   |  🔴  |   🟢    |  ✅  |  ✅  |
+| VX-5  | Voxel DDA trace substrate — GPU occupancy/albedo volume + shader trace library               |   🔴   |  🟡  |   🟡    |  ✅  |  ✅  |
+| VX-6  | Voxel-traced diffuse GI — 1-bounce gather over VX-5, temporally accumulated (experimental)   |   🔴   |  🔴  |   🟡    |  ✅  |  ✅  |
+| VX-7  | Water/glass reflections — SSR first, voxel-traced upgrade via VX-5                           |   🟡   |  🟡  |   🟡    |  ✅  |  ✅  |
+| VX-8  | Per-fragment voxel lighting sampled from VX-1 — smoother light, unblocks MR-8's constraint   |   🔴   |  🔴  |   🟢    |  ✅  |  ✅  |
+| VX-9  | Heat-haze / distortion media — screen-space shimmer above lava (and desert air later)        |   🟡   |  🟢  |   ⚪    |  ✅  |  ✅  |
+| VX-10 | Interactive water surface — camera-local ripple sim (rain, player wake, splashes)            |   🟡   |  🟡  |   🟡    |  ✅  |  ✅  |
 
 ---
 
@@ -266,11 +266,11 @@ occlusion a planned consumer, and AO is a harsher client than fog in three ways:
 **Owner steer (2026-08-09): the volume should be view-distance aware.** The honest counter is that a
 uniform-resolution volume scales **quadratically** in horizontal radius:
 
-| View distance | Volume (voxels) | `_VoxelOccupancyVolume` (R8) | `_VoxelLightVolume` (R16) | Total |
-|---------------|-----------------|-----------------------------:|--------------------------:|------:|
-| 5             | 160 × 128 × 160 | 3.1 MB                       | 6.3 MB                    | **9.4 MB** |
+| View distance | Volume (voxels) | `_VoxelOccupancyVolume` (R8) | `_VoxelLightVolume` (R16) | Total       |
+|---------------|-----------------|-----------------------------:|--------------------------:|------------:|
+| 5             | 160 × 128 × 160 | 3.1 MB                       | 6.3 MB                    | **9.4 MB**  |
 | 10 (default)  | 320 × 128 × 320 | 12.5 MB                      | 25 MB                     | **37.5 MB** |
-| 20            | 640 × 128 × 640 | 50 MB                        | 100 MB                    | **150 MB** |
+| 20            | 640 × 128 × 640 | 50 MB                        | 100 MB                    | **150 MB**  |
 
 So "just scale it with view distance" is affordable to about 10 and heavy at 20 — before counting the
 upload traffic, which grows with the same square. Three answers, none chosen here (this is a note for
@@ -699,16 +699,16 @@ but v2+ is best scheduled after RF-1 ships.
 
 ## Constraint compliance
 
-| Constraint                                 | How VX-* complies                                                                                                                                        |
-|--------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Packed-`uint` voxels, no per-voxel objects | GPU volumes are *copies* of existing packed data; no CPU-side voxel representation changes (VX-4 adds a per-BlockType field, not per-voxel state)        |
-| Burst job rules                            | Staging gathers (VX-1/VX-5) and the VX-4 BFS change are Burst jobs over native arrays; no managed types in `Assets/Scripts/Jobs/`                        |
-| No hot-path GC / pooling                   | Staging buffers pooled (`ChunkJobArrayPool` pattern); dirty-section queues pooled; render passes allocation-free per frame                               |
-| Sub-chunk meshing                          | Untouched — no vertex-format or meshing change anywhere in this report (the `Color32` stream stays reserved for TF-11 + RF-3)                            |
-| Async BFS lighting                         | VX-4 extends propagation *inside* the existing per-channel BFS with suite-proven bit-identity for neutral content; boundary/removal invariants preserved |
-| Serialization                              | Nothing on disk changes in any item — Save ✅ across the table                                                                                            |
-| WS-4 coordinate spaces                     | All volumes voxel-space toroidal, each pushing its own bounded origin term (`_LiquidNoiseOrigin` is reduced and liquid-specific); no Unity-space world coordinates stored anywhere                                     |
-| Settings via `DATA_DRIVEN_SETTINGS_UI`     | Every knob is a `SettingFieldAttribute` field; VX-0 extends the attribute rather than building bespoke UI                                                |
+| Constraint                                 | How VX-* complies                                                                                                                                                                  |
+|--------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Packed-`uint` voxels, no per-voxel objects | GPU volumes are *copies* of existing packed data; no CPU-side voxel representation changes (VX-4 adds a per-BlockType field, not per-voxel state)                                  |
+| Burst job rules                            | Staging gathers (VX-1/VX-5) and the VX-4 BFS change are Burst jobs over native arrays; no managed types in `Assets/Scripts/Jobs/`                                                  |
+| No hot-path GC / pooling                   | Staging buffers pooled (`ChunkJobArrayPool` pattern); dirty-section queues pooled; render passes allocation-free per frame                                                         |
+| Sub-chunk meshing                          | Untouched — no vertex-format or meshing change anywhere in this report (the `Color32` stream stays reserved for TF-11 + RF-3)                                                      |
+| Async BFS lighting                         | VX-4 extends propagation *inside* the existing per-channel BFS with suite-proven bit-identity for neutral content; boundary/removal invariants preserved                           |
+| Serialization                              | Nothing on disk changes in any item — Save ✅ across the table                                                                                                                     |
+| WS-4 coordinate spaces                     | All volumes voxel-space toroidal, each pushing its own bounded origin term (`_LiquidNoiseOrigin` is reduced and liquid-specific); no Unity-space world coordinates stored anywhere |
+| Settings via `DATA_DRIVEN_SETTINGS_UI`     | Every knob is a `SettingFieldAttribute` field; VX-0 extends the attribute rather than building bespoke UI                                                                          |
 
 ---
 

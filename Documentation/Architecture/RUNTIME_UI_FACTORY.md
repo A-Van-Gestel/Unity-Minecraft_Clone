@@ -59,21 +59,21 @@ shipped state, §5 the shipped phases, and §4 the resolution of the console/too
 
 ## 2. Structure
 
-| Area                             | State                                                                                                                              |
-|----------------------------------|--------------------------------------------------------------------------------------------------------------------------------------|
-| `RuntimeUIFactory`               | `Assets/Scripts/UI/Builders/`, namespace `UI.Builders`. Static; holds the primitives, the reference resolution, and the blur helpers. |
-| `RuntimeUIFactory.CreateCanvas`  | Creates a **new** canvas GameObject. `ConfigureCanvas` is the overload that adds the components to an object the caller already owns. |
-| `BenchmarkUIBuilder`             | Composition + palette only; delegates construction. Keeps both public entry points unchanged.                                       |
-| Benchmark HUD canvas             | `sortingOrder = -10` — **below** the scene UI canvas (0), so a full-screen scene panel covers it (see §5 RUF-2).                     |
-| Benchmark results canvas         | `sortingOrder = 200`; a terminal modal, deliberately above everything.                                                               |
-| `FluidStressController.cs:147`   | Calls `CreateResultsScreen` with **no** blur material — the null-fallback path is live in production, not dead defensive code.       |
-| `ConsoleUI`                      | Hosts its canvas on its own GameObject via `ConfigureCanvas` at `sortingOrder = 100`; panel backdrop goes through `ApplyBlurBackground`. |
-| `TouchControls.cs:371`           | Sets `sortingOrder = 90` directly on its own canvas — above the scene UI, below the console.                                        |
-| `ToastManager` canvas            | `sortingOrder = 250` via `ConfigureCanvas`, in the `Notifications` band — the band is what draws toasts over every other screen; the order places them above the benchmark results modal (200) within it. Safe only because every card sets `blocksRaycasts = false`. Adds `UIScaleController`, so cards honor the UI Scale setting.                                        |
-| …its blur materials              | **One instance per `ToastVariant`**, owned by the manager and destroyed in `OnDestroy` — a variant needs its own tint, but a per-*card* instance would leak one material per card the session ever built. Cards go through `ApplyBlurBackground`.                                                                    |
-| …its unconditional backdrop      | Cards always frost. The toast canvas is in the `Notifications` band, drawn last with the screen re-blurred just before it, so a card composites over whatever panel is beneath it. The manager's flat-fallback policy was deleted with the limitation that forced it.                                                  |
-| Console panel rect               | x 12–692, y 12–452 at a fixed 1920x1080 reference.                                                                                  |
-| `Toolbar` rect                   | 218x26 at scale 3, bottom-centre, y 5 → spans x ≈ 633–1287, y ≈ 15–93 in reference pixels.                                           |
+| Area                            | State                                                                                                                                                                                                                                                                                                                                |
+|---------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `RuntimeUIFactory`              | `Assets/Scripts/UI/Builders/`, namespace `UI.Builders`. Static; holds the primitives, the reference resolution, and the blur helpers.                                                                                                                                                                                                |
+| `RuntimeUIFactory.CreateCanvas` | Creates a **new** canvas GameObject. `ConfigureCanvas` is the overload that adds the components to an object the caller already owns.                                                                                                                                                                                                |
+| `BenchmarkUIBuilder`            | Composition + palette only; delegates construction. Keeps both public entry points unchanged.                                                                                                                                                                                                                                        |
+| Benchmark HUD canvas            | `sortingOrder = -10` — **below** the scene UI canvas (0), so a full-screen scene panel covers it (see §5 RUF-2).                                                                                                                                                                                                                     |
+| Benchmark results canvas        | `sortingOrder = 200`; a terminal modal, deliberately above everything.                                                                                                                                                                                                                                                               |
+| `FluidStressController.cs:147`  | Calls `CreateResultsScreen` with **no** blur material — the null-fallback path is live in production, not dead defensive code.                                                                                                                                                                                                       |
+| `ConsoleUI`                     | Hosts its canvas on its own GameObject via `ConfigureCanvas` at `sortingOrder = 100`; panel backdrop goes through `ApplyBlurBackground`.                                                                                                                                                                                             |
+| `TouchControls.cs:371`          | Sets `sortingOrder = 90` directly on its own canvas — above the scene UI, below the console.                                                                                                                                                                                                                                         |
+| `ToastManager` canvas           | `sortingOrder = 250` via `ConfigureCanvas`, in the `Notifications` band — the band is what draws toasts over every other screen; the order places them above the benchmark results modal (200) within it. Safe only because every card sets `blocksRaycasts = false`. Adds `UIScaleController`, so cards honor the UI Scale setting. |
+| …its blur materials             | **One instance per `ToastVariant`**, owned by the manager and destroyed in `OnDestroy` — a variant needs its own tint, but a per-*card* instance would leak one material per card the session ever built. Cards go through `ApplyBlurBackground`.                                                                                    |
+| …its unconditional backdrop     | Cards always frost. The toast canvas is in the `Notifications` band, drawn last with the screen re-blurred just before it, so a card composites over whatever panel is beneath it. The manager's flat-fallback policy was deleted with the limitation that forced it.                                                                |
+| Console panel rect              | x 12–692, y 12–452 at a fixed 1920x1080 reference.                                                                                                                                                                                                                                                                                   |
+| `Toolbar` rect                  | 218x26 at scale 3, bottom-centre, y 5 → spans x ≈ 633–1287, y ≈ 15–93 in reference pixels.                                                                                                                                                                                                                                           |
 
 **The console/toolbar overlap is real: ~59 reference px** at the default UI scale — see §5's RUF-3
 note for how it is resolved. `UIScaleController` scales whichever canvas it is attached to, and
@@ -135,11 +135,11 @@ Validation baselines were not added per phase: the blur contract is already pinn
 Each phase's gate was a build plus the aggregate suite staying green (482/482 across 22 suites), and
 RUF-2/RUF-3 additionally needed in-game confirmation because no suite covers a built hierarchy.
 
-| Phase     | Scope                                                                                                                                                        | Effort | Depends on |
-|-----------|--------------------------------------------------------------------------------------------------------------------------------------------------------------|--------|------------|
+| Phase     | Scope                                                                                                                                                                                                                                                                                                     | Effort | Depends on |
+|-----------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|--------|------------|
 | **RUF-1** | Created `Assets/Scripts/UI/Builders/RuntimeUIFactory.cs` (namespace `UI.Builders`) with the primitives lifted verbatim, plus `ConfigureCanvas` for an existing GameObject. Blur helpers: `CreateBlurMaterialInstance` and `ApplyBlurBackground`, the latter returning false when it applied the fallback. | 🟢     | —          |
-| **RUF-2** | Rewired `BenchmarkUIBuilder` to delegate, keeping its two public entry points and its palette. Dropped the HUD canvas's `sortingOrder` to -10 so the pause menu covers it. Preserved `FluidStressController`'s null-material path.                                    | 🟢     | RUF-1      |
-| **RUF-3** | Wired `ConsoleUI`'s panel backdrop through `ApplyBlurBackground`. Material instance allocated **once** and destroyed in `OnDestroy`.                            | 🟡     | RUF-1      |
+| **RUF-2** | Rewired `BenchmarkUIBuilder` to delegate, keeping its two public entry points and its palette. Dropped the HUD canvas's `sortingOrder` to -10 so the pause menu covers it. Preserved `FluidStressController`'s null-material path.                                                                        | 🟢     | RUF-1      |
+| **RUF-3** | Wired `ConsoleUI`'s panel backdrop through `ApplyBlurBackground`. Material instance allocated **once** and destroyed in `OnDestroy`.                                                                                                                                                                      | 🟡     | RUF-1      |
 
 ### RUF-1 note — why `ApplyBlurBackground` does not allocate
 
@@ -172,24 +172,24 @@ layout or policy change the arc's non-goals rule out.
 
 ## 6. Constraint compliance
 
-| Constraint                        | How this design satisfies it                                                                     |
-|-----------------------------------|--------------------------------------------------------------------------------------------------|
-| No hot-path GC                    | All allocation happens once at UI construction; nothing here runs per frame.                     |
-| Pooling                           | Not applicable — these objects live for the screen's lifetime.                                   |
-| `[SerializeField] private`        | The factory is static and exposes no inspector surface; no serialized state is introduced.       |
-| Directory placement               | `Assets/Scripts/UI/Builders/` per `PROJECT_STRUCTURE.md`'s `Scripts/UI/` rule.                    |
-| No scene/prefab edits for console | Preserved — the console still builds everything in code and finds its shader via `Shader.Find`.  |
-| Serialization                     | Zero on-disk change. Nothing here reaches a save file.                                           |
+| Constraint                        | How this design satisfies it                                                                    |
+|-----------------------------------|-------------------------------------------------------------------------------------------------|
+| No hot-path GC                    | All allocation happens once at UI construction; nothing here runs per frame.                    |
+| Pooling                           | Not applicable — these objects live for the screen's lifetime.                                  |
+| `[SerializeField] private`        | The factory is static and exposes no inspector surface; no serialized state is introduced.      |
+| Directory placement               | `Assets/Scripts/UI/Builders/` per `PROJECT_STRUCTURE.md`'s `Scripts/UI/` rule.                  |
+| No scene/prefab edits for console | Preserved — the console still builds everything in code and finds its shader via `Shader.Find`. |
+| Serialization                     | Zero on-disk change. Nothing here reaches a save file.                                          |
 
 ---
 
 ## 7. Extension roadmap
 
-| Version | Item                                                                                                       |
-|---------|-------------------------------------------------------------------------------------------------------------|
-| v2      | Vertex-color tinting (§4 Option A) once the `CanvasRenderer` color-space question is measured.               |
-| v2      | Fold `TouchControls`' runtime construction into the factory if its primitives turn out to overlap.           |
-| ⛔       | ~~A blurred-graphic-inside-`Mask` path.~~ Unreachable: the band pass binds no depth-stencil attachment, so a stencil `Mask` cannot clip there at all. `RectMask2D` is the only masking route (blur doc §8). |
+| Version | Item                                                                                                                                                                                                        |
+|---------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| v2      | Vertex-color tinting (§4 Option A) once the `CanvasRenderer` color-space question is measured.                                                                                                              |
+| v2      | Fold `TouchControls`' runtime construction into the factory if its primitives turn out to overlap.                                                                                                          |
+| ⛔      | ~~A blurred-graphic-inside-`Mask` path.~~ Unreachable: the band pass binds no depth-stencil attachment, so a stencil `Mask` cannot clip there at all. `RectMask2D` is the only masking route (blur doc §8). |
 
 ---
 

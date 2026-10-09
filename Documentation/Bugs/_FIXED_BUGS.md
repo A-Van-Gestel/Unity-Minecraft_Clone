@@ -782,10 +782,10 @@ purely the ambient-occlusion term.
 Reproduced in the harness under a **uniform light field of sky 15**, which rules out light propagation
 as a contributor:
 
-| Configuration                 | Slab's mid-plane top face |
-|-------------------------------|---------------------------|
-| slab isolated                 | `191,191,191,191`         |
-| **slab embedded in a floor**  | **`0,0,0,0`**             |
+| Configuration                | Slab's mid-plane top face |
+|------------------------------|---------------------------|
+| slab isolated                | `191,191,191,191`         |
+| **slab embedded in a floor** | **`0,0,0,0`**             |
 
 **Root cause — one error, two symptoms.** VO-6 correctly made a mid-plane face take its light from the
 cell the face looks into, which for such a face is the block's **own** cell. VO-8 then selects, per
@@ -816,10 +816,10 @@ VO-6 resolved the sample cell to the emitting block's own cell — and picks the
 *into* for an interior face, the half it points *away from* for a boundary face. The perpendicular axes
 still come from the corner vertex, so boundary faces are untouched. One change, both symptoms:
 
-| Configuration | Before | After |
-|---|---|---|
-| slab isolated  | `191` | `255` — nothing occludes it, so nothing should darken it |
-| slab embedded  | `0`   | `64`  |
+| Configuration | Before | After                                                    |
+|---------------|--------|----------------------------------------------------------|
+| slab isolated | `191`  | `255` — nothing occludes it, so nothing should darken it |
+| slab embedded | `0`    | `64`                                                     |
 
 **`64` is the right answer, not a tuned one:** an equivalent 1×1 pit floor built from full blocks measures
 `64,64,64,64` too. The recessed slab is no longer a special case — it shades exactly like any other
@@ -1140,15 +1140,15 @@ RMS difference between horizontally adjacent pixels over a fixed 400×200 band o
 the fine grain the quantization destroys, and one that (unlike variance) actually falls as the field goes
 piecewise-constant.
 
-| Distance | `ULP(D)` (blocks) | detail | vs spawn | Observed |
-|---------:|------------------:|-------:|---------:|----------|
-|        0 |            1.2e-7 | 0.01309 |     100% | reference |
-|      1e4 |             0.001 | 0.01310 |     100% | indistinguishable from spawn |
-|      1e5 |             0.008 | 0.01362 |     104% | indistinguishable from spawn |
-|      3e5 |             0.031 | 0.01252 |      96% | **flicker begins**; detail still intact |
-|      1e6 |             0.063 | 0.01060 |      81% | fine ripple grain gone |
-|      3e6 |             0.25  | 0.01014 |      77% | coarse blotches only |
-|      1e7 |             1.0   | 0.00706 |      54% | soft, near-featureless |
+| Distance | `ULP(D)` (blocks) | detail  | vs spawn | Observed                                |
+|---------:|------------------:|--------:|---------:|-----------------------------------------|
+| 0        | 1.2e-7            | 0.01309 | 100%     | reference                               |
+| 1e4      | 0.001             | 0.01310 | 100%     | indistinguishable from spawn            |
+| 1e5      | 0.008             | 0.01362 | 104%     | indistinguishable from spawn            |
+| 3e5      | 0.031             | 0.01252 | 96%      | **flicker begins**; detail still intact |
+| 1e6      | 0.063             | 0.01060 | 81%      | fine ripple grain gone                  |
+| 3e6      | 0.25              | 0.01014 | 77%      | coarse blotches only                    |
+| 1e7      | 1.0               | 0.00706 | 54%      | soft, near-featureless                  |
 
 **Onset ≈ 3×10⁵ blocks** (first symptom: flicker), **≈1×10⁶** for unmistakable loss of detail; nothing measurable
 at or below 1×10⁵. Cross-checked against an independent float32 port of `snoise`/`fbm`/`EvaluateWater`: the
@@ -1197,11 +1197,11 @@ The origin is reduced onto a period **the noise already has**. The noise functio
 
 Result: at 10⁷ blocks the reduced origin is `(22, 0, 6)` — as small as at spawn.
 
-| Distance | foam | mean | sd | detail | pre-fix detail |
-|---------:|-----:|-----:|---:|-------:|---------------:|
-| 0 | 0.039% | 0.70241 | 0.01696 | 0.01305 | 0.01309 |
-| 1e6 | 0.041% | 0.70233 | 0.01704 | 0.01310 | 0.01060 |
-| 1e7 | 0.005% | 0.70222 | 0.01341 | 0.01125 | 0.00706 |
+| Distance | foam   | mean    | sd      | detail  | pre-fix detail |
+|---------:|-------:|--------:|--------:|--------:|---------------:|
+| 0        | 0.039% | 0.70241 | 0.01696 | 0.01305 | 0.01309        |
+| 1e6      | 0.041% | 0.70233 | 0.01704 | 0.01310 | 0.01060        |
+| 1e7      | 0.005% | 0.70222 | 0.01341 | 0.01125 | 0.00706        |
 
 Spawn unchanged on every statistic; 1e6 statistically indistinguishable from spawn; 1e7 recovered to 86%.
 Guarded by 4 Chunk Math baselines (suite 51 → 55); `Validate All` 494/494 across 22 suites.
@@ -1248,11 +1248,11 @@ advances per frame at 120 fps), not spatial precision, which is what an earlier 
 
 | Uptime | wave steps/frame | ripple steps/frame |
 |-------:|-----------------:|-------------------:|
-| 1 h | 27.3 | 20.5 |
-| 10 h | 3.4 | 2.6 |
-| 20 h | 1.7 | 1.3 |
-| 40 h | 0.9 | 0.6 |
-| 100 h | 0.2 | 0.3 |
+| 1 h    | 27.3             | 20.5               |
+| 10 h   | 3.4              | 2.6                |
+| 20 h   | 1.7              | 1.3                |
+| 40 h   | 0.9              | 0.6                |
+| 100 h  | 0.2              | 0.3                |
 
 Below ~1 step per frame the surface holds the same value across consecutive frames — the same "steps, then
 freezes" symptom FL-1 had. So the onset is **20–40 h**, not 100 h. It is bounded in practice by `_Time.y` being

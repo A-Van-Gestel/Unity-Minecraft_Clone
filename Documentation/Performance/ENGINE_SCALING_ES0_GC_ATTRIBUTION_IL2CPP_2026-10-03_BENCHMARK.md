@@ -1,12 +1,12 @@
 # ES-0 — GC.Alloc Call-Stack Attribution of the ~130 KB per Generated Chunk at 200 m/s
 
-| Field           | Value                                                                                                       |
-|-----------------|-------------------------------------------------------------------------------------------------------------|
-| **Captured**    | 2026-10-03                                                                                                  |
-| **Branch**      | `main`                                                                                                      |
-| **Commit**      | `6d0484cb` + uncommitted capture tooling: the `Benchmark.Generation.<speed>mps` phase marker in `BenchmarkController`, `ProfilerQueries.GcCallstacks`, `ProfilerCapture` (no engine behavior change) |
+| Field           | Value                                                                                                                                                                                                                                                                                                                                                                                  |
+|-----------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Captured**    | 2026-10-03                                                                                                                                                                                                                                                                                                                                                                             |
+| **Branch**      | `main`                                                                                                                                                                                                                                                                                                                                                                                 |
+| **Commit**      | `6d0484cb` + uncommitted capture tooling: the `Benchmark.Generation.<speed>mps` phase marker in `BenchmarkController`, `ProfilerQueries.GcCallstacks`, `ProfilerCapture` (no engine behavior change)                                                                                                                                                                                   |
 | **Captured by** | Benchmark route, Gen = `200` only, 30 s phase, vd 10 — **IL2CPP player, Development build, IL2CPP configuration Master, Release managed-code variant, no deep profiling**, Burst AOT, D3D11, Unity 6000.6.4f1, i9-9900K / RTX 4070 Ti; Editor Profiler attached with **GC.Alloc call stacks**; 1 attributed capture + 1 reproduction run; Editor (Mono) screening pass for the tooling |
-| **Verdict**     | **ATTRIBUTED (instrumentation capture, no behavior change)** — 127.4 KB of GC.Alloc per generated chunk, **100 % resolved to call sites**; **77.3 % is one line pattern**: `BinaryWriter.Write(ReadOnlySpan<byte>)` copying every section array through `ReadOnlySpan<T>.ToArray()` on the ThreadPool save path (new item **ES-26**). The save path as a whole is 81.8 %. |
+| **Verdict**     | **ATTRIBUTED (instrumentation capture, no behavior change)** — 127.4 KB of GC.Alloc per generated chunk, **100 % resolved to call sites**; **77.3 % is one line pattern**: `BinaryWriter.Write(ReadOnlySpan<byte>)` copying every section array through `ReadOnlySpan<T>.ToArray()` on the ThreadPool save path (new item **ES-26**). The save path as a whole is 81.8 %.              |
 
 > Executes ES-0's attribution step in
 > [`ENGINE_SCALING_PERFORMANCE_ROADMAP.md`](../Design/ENGINE_SCALING_PERFORMANCE_ROADMAP.md) §4 Tier 0 — "one
@@ -59,11 +59,11 @@ and the share of bytes without a call stack is reported (0.0 %).
 
 ## Acceptance checks
 
-| Run | Build | Phase frames | Chunks generated | Avg GC/frame (heap-delta) | Heap-delta per chunk | vs Master ~130 KB | GC.Alloc per chunk | GC.Alloc ÷ heap-delta |
-|---|---|---:|---:|---:|---:|---:|---:|---:|
-| `BenchmarkRun_2026-10-03_16-20-22` (**attributed capture**) | IL2CPP Dev, Master | 825 | 8 831 | 1 406.8 KB | **131.4 KB** | **+1 %** ✅ | **127.4 KB** | **96.9 %** ✅ |
-| `BenchmarkRun_2026-10-03_16-14-08` (capture lost, see below) | IL2CPP Dev, Master | 880 | 8 952 | 1 407.9 KB | 138.4 KB | +6 % ✅ | — | — |
-| `BenchmarkRun_2026-10-03_15-47-09` (Editor screening) | Editor Mono | 598 | 5 882 | 1 560.7 KB | 158.7 KB | +22 % | 138.7 KB | 87.4 % |
+| Run                                                          | Build              | Phase frames | Chunks generated | Avg GC/frame (heap-delta) | Heap-delta per chunk | vs Master ~130 KB | GC.Alloc per chunk | GC.Alloc ÷ heap-delta |
+|--------------------------------------------------------------|--------------------|-------------:|-----------------:|--------------------------:|---------------------:|------------------:|-------------------:|----------------------:|
+| `BenchmarkRun_2026-10-03_16-20-22` (**attributed capture**)  | IL2CPP Dev, Master | 825          | 8 831            | 1 406.8 KB                | **131.4 KB**         | **+1 %** ✅       | **127.4 KB**       | **96.9 %** ✅         |
+| `BenchmarkRun_2026-10-03_16-14-08` (capture lost, see below) | IL2CPP Dev, Master | 880          | 8 952            | 1 407.9 KB                | 138.4 KB             | +6 % ✅           | —                  | —                     |
+| `BenchmarkRun_2026-10-03_15-47-09` (Editor screening)        | Editor Mono        | 598          | 5 882            | 1 560.7 KB                | 158.7 KB             | +22 %             | 138.7 KB           | 87.4 %                |
 
 The Profiler window held exactly the phase's frames in both attributed runs (825 = 825, 598 = 598 against the
 reports' "Frames sampled"). **(c):** the 45 listed call sites cover **100.0 %** of the GC.Alloc bytes; the 30 below
@@ -77,25 +77,25 @@ generated chunk), all in 16 frames.
 
 **Top 15 call sites** (of 45; per frame = ÷ 825):
 
-| # | Call site (allocating frame) | Thread | KB/chunk | KB/frame | Share | Calls | Frames | Maps to |
-|---:|---|---|---:|---:|---:|---:|---:|---|
-| 1 | `ChunkSerializer.WriteSection` (`BinaryWriter.Write` → `ReadOnlySpan<T>.ToArray()`) | ThreadPool | **98.01** | 1 049.1 | **76.9 %** | 62 967 | 345 | **ES-26 (new)**; removed with saves by ES-10 |
-| 2 | `StandardChunkGenerator.ExpandStructure` (`new` — iterator per structure marker) | Main | 7.99 | 85.5 | 6.3 % | 347 225 | 534 | ES-9 ("`ExpandStructure` iterator → pooled list fill") |
-| 3 | `ChunkData.AddToSkylightQueue` ← `ApplyCrossChunkLightMod` ← lighting merge (`Queue<T>.SetCapacity`) | Main | 7.59 | 81.3 | 6.0 % | 2 863 | 386 | **ES-27 (new)** |
-| 4 | `ChunkSection..ctor` ← `ConcurrentDynamicPool.Get` (section pool misses) | Main | 3.10 | 33.2 | 2.4 % | 2 274 | 16 | none — H-1's residue, bursty |
-| 5 | `RegionFile.SaveChunkData` (`new`) | ThreadPool | 1.95 | 20.8 | 1.5 % | 26 698 | 345 | ES-9 (padding `byte[]`, `BitConverter.GetBytes`) |
-| 6 | `ChunkStorageManager.LoadChunkAsync` state machine (`Task.Run`, closures, sync-context copies) | Main | 1.56 | 16.7 | 1.2 % | 147 135 | 290 | ES-9 (offset-table probe — misses on fresh terrain) |
-| 7 | `ChunkStorageManager.SaveChunkAsync` state machine (`Task.Run`, closures) | Main | 1.36 | 14.5 | 1.1 % | 111 192 | 345 | ES-9 / ES-10 |
-| 8 | `ChunkData.AddToBlocklightQueue` ← `ModifyVoxel` ← `ApplyModifications` (`Queue<T>.SetCapacity`) | Main | 1.33 | 14.2 | 1.0 % | 2 874 | 353 | **ES-27 (new)** |
-| 9 | `World.UnloadChunks` (`ContinueWith`, closures) | Main | 1.27 | 13.6 | 1.0 % | 112 608 | 367 | ES-9 ("static `ContinueWith`") / ES-10 |
-| 10 | `ChunkSerializer.WriteChunkInternal` (incl. 4 728.1 KB of the same span `ToArray`) | ThreadPool | 0.72 | 7.7 | 0.6 % | 17 806 | 345 | ES-26 (span part), ES-9 |
-| 11 | `ChunkStorageManager.CreateSerializationSnapshot` (`Queue<T>` growth) | Main | 0.45 | 4.8 | 0.4 % | 385 | 94 | ES-9 (section-ownership save) / ES-10 |
-| 12 | `ChunkSerializer.Serialize` (`BinaryWriter` + encoder per save) | ThreadPool | 0.26 | 2.8 | 0.2 % | 35 607 | 345 | ES-9 |
-| 13 | `WorldJobManager.MergeCompletedLightingJob` (`List<T>` growth) | Main | 0.25 | 2.7 | 0.2 % | 10 | 10 | ES-27 |
-| 14 | `ChunkStorageManager.GetRegion` (save + load) | ThreadPool | 0.25 | 2.7 | 0.2 % | 17 828 | 440 | ES-9 |
-| 15 | `WorldData.QueueSkylightRecalculation` (`HashSet<T>` growth) | Main | 0.22 | 2.3 | 0.2 % | 1 873 | 44 | ES-27 |
-| | **30 further sites** (per-frame UI/render 0.32, `CreateOutputStream` 0.20, `AddPendingMod` 0.13, telemetry 0.10, …) | | 1.12 | 12.0 | 0.9 % | | | |
-| | **Total** | | **127.41** | 1 363.8 | 100 % | | | |
+| #   | Call site (allocating frame)                                                                                        | Thread     | KB/chunk   | KB/frame | Share      | Calls   | Frames | Maps to                                                |
+|----:|---------------------------------------------------------------------------------------------------------------------|------------|-----------:|---------:|-----------:|--------:|-------:|--------------------------------------------------------|
+| 1   | `ChunkSerializer.WriteSection` (`BinaryWriter.Write` → `ReadOnlySpan<T>.ToArray()`)                                 | ThreadPool | **98.01**  | 1 049.1  | **76.9 %** | 62 967  | 345    | **ES-26 (new)**; removed with saves by ES-10           |
+| 2   | `StandardChunkGenerator.ExpandStructure` (`new` — iterator per structure marker)                                    | Main       | 7.99       | 85.5     | 6.3 %      | 347 225 | 534    | ES-9 ("`ExpandStructure` iterator → pooled list fill") |
+| 3   | `ChunkData.AddToSkylightQueue` ← `ApplyCrossChunkLightMod` ← lighting merge (`Queue<T>.SetCapacity`)                | Main       | 7.59       | 81.3     | 6.0 %      | 2 863   | 386    | **ES-27 (new)**                                        |
+| 4   | `ChunkSection..ctor` ← `ConcurrentDynamicPool.Get` (section pool misses)                                            | Main       | 3.10       | 33.2     | 2.4 %      | 2 274   | 16     | none — H-1's residue, bursty                           |
+| 5   | `RegionFile.SaveChunkData` (`new`)                                                                                  | ThreadPool | 1.95       | 20.8     | 1.5 %      | 26 698  | 345    | ES-9 (padding `byte[]`, `BitConverter.GetBytes`)       |
+| 6   | `ChunkStorageManager.LoadChunkAsync` state machine (`Task.Run`, closures, sync-context copies)                      | Main       | 1.56       | 16.7     | 1.2 %      | 147 135 | 290    | ES-9 (offset-table probe — misses on fresh terrain)    |
+| 7   | `ChunkStorageManager.SaveChunkAsync` state machine (`Task.Run`, closures)                                           | Main       | 1.36       | 14.5     | 1.1 %      | 111 192 | 345    | ES-9 / ES-10                                           |
+| 8   | `ChunkData.AddToBlocklightQueue` ← `ModifyVoxel` ← `ApplyModifications` (`Queue<T>.SetCapacity`)                    | Main       | 1.33       | 14.2     | 1.0 %      | 2 874   | 353    | **ES-27 (new)**                                        |
+| 9   | `World.UnloadChunks` (`ContinueWith`, closures)                                                                     | Main       | 1.27       | 13.6     | 1.0 %      | 112 608 | 367    | ES-9 ("static `ContinueWith`") / ES-10                 |
+| 10  | `ChunkSerializer.WriteChunkInternal` (incl. 4 728.1 KB of the same span `ToArray`)                                  | ThreadPool | 0.72       | 7.7      | 0.6 %      | 17 806  | 345    | ES-26 (span part), ES-9                                |
+| 11  | `ChunkStorageManager.CreateSerializationSnapshot` (`Queue<T>` growth)                                               | Main       | 0.45       | 4.8      | 0.4 %      | 385     | 94     | ES-9 (section-ownership save) / ES-10                  |
+| 12  | `ChunkSerializer.Serialize` (`BinaryWriter` + encoder per save)                                                     | ThreadPool | 0.26       | 2.8      | 0.2 %      | 35 607  | 345    | ES-9                                                   |
+| 13  | `WorldJobManager.MergeCompletedLightingJob` (`List<T>` growth)                                                      | Main       | 0.25       | 2.7      | 0.2 %      | 10      | 10     | ES-27                                                  |
+| 14  | `ChunkStorageManager.GetRegion` (save + load)                                                                       | ThreadPool | 0.25       | 2.7      | 0.2 %      | 17 828  | 440    | ES-9                                                   |
+| 15  | `WorldData.QueueSkylightRecalculation` (`HashSet<T>` growth)                                                        | Main       | 0.22       | 2.3      | 0.2 %      | 1 873   | 44     | ES-27                                                  |
+|     | **30 further sites** (per-frame UI/render 0.32, `CreateOutputStream` 0.20, `AddPendingMod` 0.13, telemetry 0.10, …) |            | 1.12       | 12.0     | 0.9 %      |         |        |                                                        |
+|     | **Total**                                                                                                           |            | **127.41** | 1 363.8  | 100 %      |         |        |                                                        |
 
 **Grouped:** the **save path** (sites 1, 5, 7, 9, 10, 11, 12, `CreateOutputStream`) is **104.2 KB per chunk
 (81.8 %)**; lighting-queue growth (3, 8, 13, 15) 9.4 KB (7.4 %); `ExpandStructure` 8.0 KB (6.3 %); section-pool

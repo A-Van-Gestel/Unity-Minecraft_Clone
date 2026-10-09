@@ -215,11 +215,11 @@ list above as the specification of what was useful.
 
 ## Key Files
 
-| File                                        | Responsibility                                                           |
-|---------------------------------------------|--------------------------------------------------------------------------|
-| `Assets/Scripts/Helpers/VoxelMeshHelper.cs` | `GenerateFluidMeshData` — wall mask encoding, push direction computation |
-| `Assets/Scripts/Jobs/BurstData/BurstFluidFlowUtility.cs` | `CalculateSymmetricCornerFlow` + its wall/fluid neighbor tests — the corner flow derivative, shared with `Physics.FluidContactResolver` |
-| `Assets/Shaders/Includes/LiquidCore.hlsl`   | `GetShoreData` — per-pixel wall distance, gradient, and push. Shared by the game shader and the editor preview shader; `UberLiquidShader.shader` itself only includes it |
+| File                                                     | Responsibility                                                                                                                                                           |
+|----------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `Assets/Scripts/Helpers/VoxelMeshHelper.cs`              | `GenerateFluidMeshData` — wall mask encoding, push direction computation                                                                                                 |
+| `Assets/Scripts/Jobs/BurstData/BurstFluidFlowUtility.cs` | `CalculateSymmetricCornerFlow` + its wall/fluid neighbor tests — the corner flow derivative, shared with `Physics.FluidContactResolver`                                  |
+| `Assets/Shaders/Includes/LiquidCore.hlsl`                | `GetShoreData` — per-pixel wall distance, gradient, and push. Shared by the game shader and the editor preview shader; `UberLiquidShader.shader` itself only includes it |
 
 ---
 

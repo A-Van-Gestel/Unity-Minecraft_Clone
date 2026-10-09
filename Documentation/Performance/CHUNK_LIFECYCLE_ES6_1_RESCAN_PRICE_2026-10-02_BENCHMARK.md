@@ -1,11 +1,11 @@
 # ES-6.1 — Price of the `OnDataPopulated` Rescan on Visual Re-Attach
 
-| Field           | Value                                                                                                       |
-|-----------------|-------------------------------------------------------------------------------------------------------------|
-| **Captured**    | 2026-10-02                                                                                                  |
-| **Branch**      | `main`                                                                                                      |
-| **Commit**      | `654d6343` + uncommitted `T_current` legs in the benchmark (no `Chunk` / `ChunkData` change)                  |
-| **Captured by** | `Minecraft Clone/Benchmarks/Active-Voxel Scan (TG-2)` (`Assets/Editor/Benchmarking/ActiveVoxelScanBenchmark.cs`), **Editor Mono, Burst on, safety checks on**, Unity 6000.6.4f1, i9-9900K; 3 runs × 5 batches × 100 chunks per scenario |
+| Field           | Value                                                                                                                                                                                                                                         |
+|-----------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Captured**    | 2026-10-02                                                                                                                                                                                                                                    |
+| **Branch**      | `main`                                                                                                                                                                                                                                        |
+| **Commit**      | `654d6343` + uncommitted `T_current` legs in the benchmark (no `Chunk` / `ChunkData` change)                                                                                                                                                  |
+| **Captured by** | `Minecraft Clone/Benchmarks/Active-Voxel Scan (TG-2)` (`Assets/Editor/Benchmarking/ActiveVoxelScanBenchmark.cs`), **Editor Mono, Burst on, safety checks on**, Unity 6000.6.4f1, i9-9900K; 3 runs × 5 batches × 100 chunks per scenario       |
 | **Verdict**     | **GO (screening) for ES-6.1 steps 2–3** — above the proposed 0.5 ms-per-crossing bar (vd 32) on every leg: Land 1.56 ms (first view) / 1.76 ms (re-entry), Flooded 42.8 / 20.1 ms. Owner decision, 2026-10-02; no IL2CPP confirmation needed. |
 
 > Serves step 1 of the ES-6.1 execution packet in
@@ -68,20 +68,20 @@ registers nothing, aborts the run. All three runs passed for all 1,000 chunk-sca
 
 ### Shipped scan (`T_current`)
 
-| Scenario | Leg | Run | Best-batch mean | Median | p95 | Max | Per crossing vd 10 | Per crossing vd 32 |
-|----------|-----|-----|-----------------|--------|-----|-----|--------------------|--------------------|
-| Land | first view | 1 | 27.66 | 26.40 | 44.30 | 2,297.40 | 0.581 ms | 1.798 ms |
-| Land | first view | 2 | 24.03 | 26.30 | 34.50 | 73.60 | 0.505 ms | 1.562 ms |
-| Land | first view | 3 | **23.95** | 26.30 | 36.10 | 69.90 | 0.503 ms | **1.557 ms** |
-| Land | re-entry | 1 | 32.15 | 29.30 | 51.20 | 675.90 | 0.675 ms | 2.090 ms |
-| Land | re-entry | 2 | **27.09** | 29.00 | 40.70 | 75.30 | 0.569 ms | **1.761 ms** |
-| Land | re-entry | 3 | 27.54 | 29.00 | 44.90 | 78.80 | 0.578 ms | 1.790 ms |
-| Flooded | first view | 1 | 658.96 | 665.00 | 718.20 | 1,198.50 | 13.84 ms | 42.83 ms |
-| Flooded | first view | 2 | **657.47** | 663.50 | 749.70 | 1,246.80 | 13.81 ms | **42.74 ms** |
-| Flooded | first view | 3 | 658.45 | 665.20 | 727.90 | 1,288.60 | 13.83 ms | 42.80 ms |
-| Flooded | re-entry | 1 | 310.57 | 314.20 | 352.30 | 547.70 | 6.52 ms | 20.19 ms |
-| Flooded | re-entry | 2 | 310.38 | 312.00 | 350.50 | 640.80 | 6.52 ms | 20.17 ms |
-| Flooded | re-entry | 3 | **307.85** | 312.60 | 369.80 | 634.20 | 6.46 ms | **20.01 ms** |
+| Scenario | Leg        | Run | Best-batch mean | Median | p95    | Max      | Per crossing vd 10 | Per crossing vd 32 |
+|----------|------------|-----|-----------------|--------|--------|----------|--------------------|--------------------|
+| Land     | first view | 1   | 27.66           | 26.40  | 44.30  | 2,297.40 | 0.581 ms           | 1.798 ms           |
+| Land     | first view | 2   | 24.03           | 26.30  | 34.50  | 73.60    | 0.505 ms           | 1.562 ms           |
+| Land     | first view | 3   | **23.95**       | 26.30  | 36.10  | 69.90    | 0.503 ms           | **1.557 ms**       |
+| Land     | re-entry   | 1   | 32.15           | 29.30  | 51.20  | 675.90   | 0.675 ms           | 2.090 ms           |
+| Land     | re-entry   | 2   | **27.09**       | 29.00  | 40.70  | 75.30    | 0.569 ms           | **1.761 ms**       |
+| Land     | re-entry   | 3   | 27.54           | 29.00  | 44.90  | 78.80    | 0.578 ms           | 1.790 ms           |
+| Flooded  | first view | 1   | 658.96          | 665.00 | 718.20 | 1,198.50 | 13.84 ms           | 42.83 ms           |
+| Flooded  | first view | 2   | **657.47**      | 663.50 | 749.70 | 1,246.80 | 13.81 ms           | **42.74 ms**       |
+| Flooded  | first view | 3   | 658.45          | 665.20 | 727.90 | 1,288.60 | 13.83 ms           | 42.80 ms           |
+| Flooded  | re-entry   | 1   | 310.57          | 314.20 | 352.30 | 547.70   | 6.52 ms            | 20.19 ms           |
+| Flooded  | re-entry   | 2   | 310.38          | 312.00 | 350.50 | 640.80   | 6.52 ms            | 20.17 ms           |
+| Flooded  | re-entry   | 3   | **307.85**      | 312.60 | 369.80 | 634.20   | 6.46 ms            | **20.01 ms**       |
 
 Average per chunk: Land 4.52 non-empty sections and 0.5 active voxels; Flooded 7.00 sections and 12,010.3 active
 voxels. Run 1's Land legs are the first run after a domain reload (one 2.3 ms single-chunk spike) and read
@@ -91,12 +91,12 @@ voxels. Run 1's Land legs are the first run after a domain reload (one 2.3 ms si
 
 | Scenario | Run | `T_old` | `T_bitmask` | `T_register` | `T_job` (Burst) |
 |----------|-----|---------|-------------|--------------|-----------------|
-| Land | 1 | 51.28 | 33.32 | 0.06 | 67.74 |
-| Land | 2 | 50.93 | 33.09 | 0.06 | 67.42 |
-| Land | 3 | 51.25 | 33.14 | 0.06 | 67.51 |
-| Flooded | 1 | 417.77 | 405.33 | 393.36 | 101.86 |
-| Flooded | 2 | 412.95 | 402.18 | 390.18 | 101.70 |
-| Flooded | 3 | 413.50 | 402.86 | 390.59 | 101.12 |
+| Land     | 1   | 51.28   | 33.32       | 0.06         | 67.74           |
+| Land     | 2   | 50.93   | 33.09       | 0.06         | 67.42           |
+| Land     | 3   | 51.25   | 33.14       | 0.06         | 67.51           |
+| Flooded  | 1   | 417.77  | 405.33      | 393.36       | 101.86          |
+| Flooded  | 2   | 412.95  | 402.18      | 390.18       | 101.70          |
+| Flooded  | 3   | 413.50  | 402.86      | 390.59       | 101.12          |
 
 ## Analysis
 

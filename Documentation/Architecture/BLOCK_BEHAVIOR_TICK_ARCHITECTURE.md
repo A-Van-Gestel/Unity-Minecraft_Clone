@@ -137,9 +137,9 @@ one call) and `RunFluids` (the `.Run()` serial-determinism oracle the harness dr
 Border voxels read across chunk seams through a **per-tick 9-snapshot neighbor halo**, gathered on the worker
 thread. Its dimensions are grounded in the job's *measured* read reach, not assumption:
 
-| Axis           | Reach | Why                                                                                                                                                       |
-|----------------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Horizontal** | 4     | `CalculateFlowCost`'s 4-cardinal BFS reads at Manhattan distance ≤ 4 from a border source (`MaxFlowSearchDepth = 4`), including diagonal (±2,±2) corner reads → an **8-neighbor** gather, padded width `16 + 2·4 = 24`. |
+| Axis           | Reach | Why                                                                                                                                                                                                                                                         |
+|----------------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Horizontal** | 4     | `CalculateFlowCost`'s 4-cardinal BFS reads at Manhattan distance ≤ 4 from a border source (`MaxFlowSearchDepth = 4`), including diagonal (±2,±2) corner reads → an **8-neighbor** gather, padded width `16 + 2·4 = 24`.                                     |
 | **Vertical**   | 1     | Every read is at the source's level, one below (`below`/`belowNeighbor`) or one above (`above`/`nbAbove`) — *regardless of horizontal distance*, because the BFS only moves horizontally. No vertical cross-chunk neighbor exists (chunks are full height). |
 
 **Y-band sizing.** Since the only sources are the chunk's active fluids and the vertical reach is ±1, *every*
@@ -290,12 +290,12 @@ tick-path change.
 
 **Surviving gates (post-cleanup):**
 
-| Gate                                                            | What it proves                                                                       |
-|-----------------------------------------------------------------|----------------------------------------------------------------------------------------|
-| `BH-D1[L\|L]`                                                   | comparator self-check (both drivers legacy → must report identical)                  |
-| `BH-D1[L\|S]`                                                   | storage-split reorder is behavior-equivalent                                          |
-| **`BH-D1[L\|HB]`**                                              | **legacy vs the shipped `FluidBurstHaloBand` driver over all 15 fixtures** — the end-to-end parity oracle |
-| `Validate Fluid Parallel Determinism (Cross-Chunk Halo, Y-band)` | 3×3 distinct chunks, byte-identical to serial + run-to-run stable                    |
+| Gate                                                             | What it proves                                                                                            |
+|------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------|
+| `BH-D1[L\|L]`                                                    | comparator self-check (both drivers legacy → must report identical)                                       |
+| `BH-D1[L\|S]`                                                    | storage-split reorder is behavior-equivalent                                                              |
+| **`BH-D1[L\|HB]`**                                               | **legacy vs the shipped `FluidBurstHaloBand` driver over all 15 fixtures** — the end-to-end parity oracle |
+| `Validate Fluid Parallel Determinism (Cross-Chunk Halo, Y-band)` | 3×3 distinct chunks, byte-identical to serial + run-to-run stable                                         |
 
 Behavior suite: **12 scenarios**. The historical per-phase gate configurations, and which were retired when
 their production path ceased to exist, are in **Appendix A.3**.
@@ -324,14 +324,14 @@ deliberately sequenced *after* the per-family layout existed, to avoid throwaway
 
 ## 6. Constraint compliance
 
-| Constraint                | How this system satisfies it                                                                                                     |
-|---------------------------|------------------------------------------------------------------------------------------------------------------------------------|
-| Packed-`uint` voxels      | The tick reads and writes packed voxel state only; no per-voxel objects. Falling-bit encoding shared via `BurstVoxelDataBitMapping`. |
-| Burst compatibility       | `FluidTickJob` uses only blittable inputs (`BlockTypeJobData`, `NativeHashSet<int>` snapshots, padded native buffers) and `Unity.Mathematics`; no managed references, no interpolated-string logging. |
-| No hot-path GC            | Per-ticker scratch is pooled (`DynamicPool<FluidBurstTicker>`); the padded volume is persistent per ticker; buckets are retained across pool recycle. `CalculateFlowCost`'s BFS scratch is one reused queue/visited per `Execute` (threaded locals — Burst rejects per-job container *fields*). |
-| Pooling                   | `DynamicPool<FluidBurstTicker>`, `Helpers/ActiveVoxelListPool`, and the `ChunkData` pool's `destroyAction` for bucket disposal.     |
-| Serialization             | **Zero on-disk change** — active voxels are derived runtime state and are never persisted. No AOT migration exists for this system. |
-| Pool-reset safety         | Buckets `Clear()`ed in `ChunkData.Reset`, disposed via the pool's `destroyAction`.                                                  |
+| Constraint           | How this system satisfies it                                                                                                                                                                                                                                                                    |
+|----------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Packed-`uint` voxels | The tick reads and writes packed voxel state only; no per-voxel objects. Falling-bit encoding shared via `BurstVoxelDataBitMapping`.                                                                                                                                                            |
+| Burst compatibility  | `FluidTickJob` uses only blittable inputs (`BlockTypeJobData`, `NativeHashSet<int>` snapshots, padded native buffers) and `Unity.Mathematics`; no managed references, no interpolated-string logging.                                                                                           |
+| No hot-path GC       | Per-ticker scratch is pooled (`DynamicPool<FluidBurstTicker>`); the padded volume is persistent per ticker; buckets are retained across pool recycle. `CalculateFlowCost`'s BFS scratch is one reused queue/visited per `Execute` (threaded locals — Burst rejects per-job container *fields*). |
+| Pooling              | `DynamicPool<FluidBurstTicker>`, `Helpers/ActiveVoxelListPool`, and the `ChunkData` pool's `destroyAction` for bucket disposal.                                                                                                                                                                 |
+| Serialization        | **Zero on-disk change** — active voxels are derived runtime state and are never persisted. No AOT migration exists for this system.                                                                                                                                                             |
+| Pool-reset safety    | Buckets `Clear()`ed in `ChunkData.Reset`, disposed via the pool's `destroyAction`.                                                                                                                                                                                                              |
 
 ---
 
@@ -384,8 +384,8 @@ World.Update() (after all chunks ticked)
 
 **The coupling that blocked Burst** (the harness seam table S1–S5 — the TG-4 spec in miniature):
 
-| Seam | Coupling                                                                          | Converted to                                                                        |
-|------|-----------------------------------------------------------------------------------|-------------------------------------------------------------------------------------|
+| Seam | Coupling                                                                          | Converted to                                                                         |
+|------|-----------------------------------------------------------------------------------|--------------------------------------------------------------------------------------|
 | S1   | `VoxelState.Properties` → `World.Instance.BlockTypes[id]` (managed `BlockType[]`) | a blittable `BlockTypeJobData` blob indexed by id (already existed for meshing/scan) |
 | S2   | `World.Instance.TickCounter` (RNG salt, TG-3)                                     | a value passed into the job                                                          |
 | S3   | `settings.enableWaterDiagnosticLogs` (debug logging)                              | compile-time / passed flag; no `Debug.Log` of interpolated strings in Burst          |
@@ -527,15 +527,15 @@ plan, which had been written before the harness adopted several "fallback" metho
 
 ## A.3 Historical per-phase BH-D1 gates
 
-| Phase     | BH-D1 configuration                                                                  | Pass condition                                                                                                                                                                                     |
-|-----------|--------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| 0 ✅      | both drivers = legacy                                                                | streams identical (comparator self-check) — **green**                                                                                                                                              |
-| 1 ✅      | legacy vs split-storage (managed)                                                    | equivalent under §3.3 (first real reorder test) — **green over 8 fixtures**                                                                                                                        |
-| 2 ⏭️      | *(skipped — grass stays managed)*                                                    | n/a                                                                                                                                                                                                |
-| 3 ✅      | `BH-D1[L\|F]` — legacy vs fluid-Burst hybrid                                         | equivalent over **all fixtures** (incl. BH-B1–B5) — **green**                                                                                                                                      |
-| 4a ✅     | parallel-vs-serial determinism suite                                                 | N concurrent tickers byte-identical to serial + run-to-run — **green** *(separate from BH-D1: it is single-chunk; the World-level parallel drain is covered by this suite + the 8-run IL2CPP A/B)* |
+| Phase     | BH-D1 configuration                                                                  | Pass condition                                                                                                                                                                                                                              |
+|-----------|--------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 0 ✅      | both drivers = legacy                                                                | streams identical (comparator self-check) — **green**                                                                                                                                                                                       |
+| 1 ✅      | legacy vs split-storage (managed)                                                    | equivalent under §3.3 (first real reorder test) — **green over 8 fixtures**                                                                                                                                                                 |
+| 2 ⏭️      | *(skipped — grass stays managed)*                                                    | n/a                                                                                                                                                                                                                                         |
+| 3 ✅      | `BH-D1[L\|F]` — legacy vs fluid-Burst hybrid                                         | equivalent over **all fixtures** (incl. BH-B1–B5) — **green**                                                                                                                                                                               |
+| 4a ✅     | parallel-vs-serial determinism suite                                                 | N concurrent tickers byte-identical to serial + run-to-run — **green** *(separate from BH-D1: it is single-chunk; the World-level parallel drain is covered by this suite + the 8-run IL2CPP A/B)*                                          |
 | 4b ✅     | `BH-D1[L\|H]` — legacy vs full Burst halo + cross-chunk determinism                  | equivalent over every fixture then existing — **13**: the 7 BH-B goldens + MIX + the **5** BH-4 cross-chunk cases this phase added (prove-red) — **green**; + the 3×3 distinct-chunk parallel-determinism stress (prove-red) — **green** ⚠️ |
-| Y-band ✅ | `BH-D1[H\|HB]` (full vs band) + `BH-D1[L\|HB]` (legacy vs band) + Y-band determinism | byte-identical over all 15 fixtures incl. `BH-4-SPLIT-Y`/`BH-4-BAND-EDGE` (prove-red 2/15→green) — **green**; + the `… (Cross-Chunk Halo, Y-band)` 3×3 stress — **green**                          |
+| Y-band ✅ | `BH-D1[H\|HB]` (full vs band) + `BH-D1[L\|HB]` (legacy vs band) + Y-band determinism | byte-identical over all 15 fixtures incl. `BH-4-SPLIT-Y`/`BH-4-BAND-EDGE` (prove-red 2/15→green) — **green**; + the `… (Cross-Chunk Halo, Y-band)` 3×3 stress — **green**                                                                   |
 
 The 2026-07-23 cleanup retired every configuration whose production path no longer exists; §4 lists what
 survives.

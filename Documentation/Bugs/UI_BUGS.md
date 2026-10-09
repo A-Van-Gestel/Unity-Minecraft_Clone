@@ -161,9 +161,9 @@ Game view is enough. The backdrop's blur strength visibly shifts as the resoluti
 With `downsample: 2` and 4 iterations (max offset ~2 texels):
 
 | Resolution | Blur target width | Max tap radius (screen width) |
-|---|---|---|
-| 2560x1440 | 1280 | ~0.16% |
-| 1280x720  | 640  | ~0.31% |
+|------------|-------------------|-------------------------------|
+| 2560x1440  | 1280              | ~0.16%                        |
+| 1280x720   | 640               | ~0.31%                        |
 
 **Not a regression of `fa9ac4bc`** (the pooled-render-graph-texture fix). That commit changed *which* texture
 the final blur iteration writes into; the per-camera history target takes the identical descriptor the pooled

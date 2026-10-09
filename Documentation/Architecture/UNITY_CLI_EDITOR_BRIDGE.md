@@ -40,31 +40,31 @@ The `UC-*` IDs were issued by the design this document was promoted from
 (`Documentation/Design/UNITY_MCP_TO_CLI_MIGRATION.md`, deleted on promotion; `git show
 58bbdecc:Documentation/Design/UNITY_MCP_TO_CLI_MIGRATION.md` retrieves it).
 
-| ID       | What                                                                                   | Status        | Now covered by |
-|----------|----------------------------------------------------------------------------------------|---------------|----------------|
-| **UC-0** | Trial: CLI + Pipeline package beside the old bridge                                    | ✅ 2026-09-27 | §1, §2         |
-| **UC-1** | Profiler queries as a repo-owned `run_script` file                                     | ✅ 2026-09-27 | §6             |
-| **UC-2** | Agent docs: `unity-editor` skill, `CLAUDE.md`/`AGENTS.md`, config, sweep               | ✅ 2026-09-27 | §1, §3         |
-| **UC-3** | Cutover: verified backup, old package removed, footprint measured                      | ✅ 2026-09-27 | §7, §9         |
-| **UC-4** | `unity mcp` evaluation + trimmed-old-bridge hybrid                                     | ✅ 2026-09-27 | §10 (both rejected) |
-| **UC-5** | Confirm on a release build that the Roslyn plugins are stripped                        | ✅ 2026-09-27 | §7             |
-| **UC-6** | Headless `Validate All` in CI via `unity run --command` / `unity test`                 | —             | Roadmap doc    |
-| **UC-7** | `--runtime` connection to a Development player                                         | —             | Roadmap doc    |
-| **UC-8** | Re-run the Project Auditor report through the `audit` command                          | —             | Roadmap doc    |
+| ID       | What                                                                     | Status        | Now covered by      |
+|----------|--------------------------------------------------------------------------|---------------|---------------------|
+| **UC-0** | Trial: CLI + Pipeline package beside the old bridge                      | ✅ 2026-09-27 | §1, §2              |
+| **UC-1** | Profiler queries as a repo-owned `run_script` file                       | ✅ 2026-09-27 | §6                  |
+| **UC-2** | Agent docs: `unity-editor` skill, `CLAUDE.md`/`AGENTS.md`, config, sweep | ✅ 2026-09-27 | §1, §3              |
+| **UC-3** | Cutover: verified backup, old package removed, footprint measured        | ✅ 2026-09-27 | §7, §9              |
+| **UC-4** | `unity mcp` evaluation + trimmed-old-bridge hybrid                       | ✅ 2026-09-27 | §10 (both rejected) |
+| **UC-5** | Confirm on a release build that the Roslyn plugins are stripped          | ✅ 2026-09-27 | §7                  |
+| **UC-6** | Headless `Validate All` in CI via `unity run --command` / `unity test`   | —             | Roadmap doc         |
+| **UC-7** | `--runtime` connection to a Development player                           | —             | Roadmap doc         |
+| **UC-8** | Re-run the Project Auditor report through the `audit` command            | —             | Roadmap doc         |
 
 ---
 
 ## 1. Components
 
-| Component                    | Where                                                               | Role |
-|------------------------------|---------------------------------------------------------------------|------|
-| Unity CLI                    | `unity` on `PATH` (`%LOCALAPPDATA%\Unity\bin`), machine-global      | Shell entry point: `unity command`, `unity recompile`, `unity job`, `unity status`. |
-| `com.unity.pipeline`         | `Packages/manifest.json`, pinned `0.8.0-exp.1`                      | Runs inside the Editor, serves the CLI on localhost. Preview on purpose. |
-| Agent environment            | `.claude/settings.json` → `env`                                     | `UNITY_PROJECT_PATH=.`, `UNITY_NO_BANNER`, `UNITY_NO_UPDATE_CHECK`; read-only CLI calls pre-allowed. |
-| `unity-editor` skill         | `.agents/skills/unity-editor/`                                      | The agent-facing reference card, recipes and gotcha list. |
-| Profiler queries             | `Tools/UnityCli/Profiler/ProfilerQueries.cs`                        | Profiler analysis entry points (§6). |
-| Profiler capture             | `Tools/UnityCli/Profiler/ProfilerCapture.cs`                        | Arms a recording with GC.Alloc call stacks and stops + saves it after a phase marker (§6). |
-| Capture folder               | `Assets/AgentCaptures~/` (gitignored)                               | The one safe place for saved captures (§5). |
+| Component            | Where                                                          | Role                                                                                                 |
+|----------------------|----------------------------------------------------------------|------------------------------------------------------------------------------------------------------|
+| Unity CLI            | `unity` on `PATH` (`%LOCALAPPDATA%\Unity\bin`), machine-global | Shell entry point: `unity command`, `unity recompile`, `unity job`, `unity status`.                  |
+| `com.unity.pipeline` | `Packages/manifest.json`, pinned `0.8.0-exp.1`                 | Runs inside the Editor, serves the CLI on localhost. Preview on purpose.                             |
+| Agent environment    | `.claude/settings.json` → `env`                                | `UNITY_PROJECT_PATH=.`, `UNITY_NO_BANNER`, `UNITY_NO_UPDATE_CHECK`; read-only CLI calls pre-allowed. |
+| `unity-editor` skill | `.agents/skills/unity-editor/`                                 | The agent-facing reference card, recipes and gotcha list.                                            |
+| Profiler queries     | `Tools/UnityCli/Profiler/ProfilerQueries.cs`                   | Profiler analysis entry points (§6).                                                                 |
+| Profiler capture     | `Tools/UnityCli/Profiler/ProfilerCapture.cs`                   | Arms a recording with GC.Alloc call stacks and stops + saves it after a phase marker (§6).           |
+| Capture folder       | `Assets/AgentCaptures~/` (gitignored)                          | The one safe place for saved captures (§5).                                                          |
 
 `CLAUDE.md` / `AGENTS.md` carry the always-loaded rules (compile gate, long operations, captures,
 play-mode confirmation) and route everything else to the skill.
@@ -203,10 +203,10 @@ total matched an independent sum of root-level GC exactly (58033.8 KB over 2,000
 ENABLE_RUNTIME_PIPELINE`, and its player server is off (`enableInBuilds: false`). Compiling the
 StandaloneWindows64 player scripts on 2026-09-27:
 
-| Player build | Pipeline assemblies compiled in                               |
-|--------------|---------------------------------------------------------------|
-| Release      | `Unity.Pipeline.Attributes` only                              |
-| Development  | + `Unity.Pipeline`, `Unity.Pipeline.IlInterpreter`            |
+| Player build | Pipeline assemblies compiled in                    |
+|--------------|----------------------------------------------------|
+| Release      | `Unity.Pipeline.Attributes` only                   |
+| Development  | + `Unity.Pipeline`, `Unity.Pipeline.IlInterpreter` |
 
 The package also bundles five precompiled Roslyn plugin DLLs (~9.1 MB; the `CodeAnalysis` ones
 are enabled for the Win64/Linux64/macOS players and auto-referenced). Nothing references them in
@@ -254,18 +254,18 @@ bridge installed is `61480be4`.
 
 ## 10. Rejected alternatives
 
-| Alternative                                             | Why rejected                                                                                                                                                                  | Date       |
-|---------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------|
-| `unity mcp` (the CLI's own MCP server) as a standing server | Nothing the shell path lacks; every tool call capped at a fixed 60 s with no detach; 5 s `eval` default; 160 tools (~26k-token list). Kept only as the documented fallback for an agent without shell access. | 2026-09-27 |
-| Hybrid: trimmed old bridge beside the CLI               | No old tool was unique. Its `Unity_Profiler_*` tools never worked over MCP (null `conversationContext`), `ValidateScript` is whole-file substring heuristics, captures had no size control. | 2026-09-27 |
-| Keep ai.assistant installed alongside the CLI           | Two bridges, 19 patches to maintain, a deprecated package pinned against entitlement changes.                                                                               | 2026-09-27 |
-| Upgrade ai.assistant to ≥ 2.13                          | Reintroduces the entitlement enforcement the 2.6.0-pre.1 pin avoided.                                                                                                         | 2026-09-27 |
-| Vendor Unity's generated `unity-cli` / `unity-pipeline` skills | Regenerated per CLI release; committed copies go stale. One project skill + the CLI's live schemas instead.                                                          | 2026-09-27 |
+| Alternative                                                                                | Why rejected                                                                                                                                                                                                                                                                                                                                                                                                                                                | Date       |
+|--------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------|
+| `unity mcp` (the CLI's own MCP server) as a standing server                                | Nothing the shell path lacks; every tool call capped at a fixed 60 s with no detach; 5 s `eval` default; 160 tools (~26k-token list). Kept only as the documented fallback for an agent without shell access.                                                                                                                                                                                                                                               | 2026-09-27 |
+| Hybrid: trimmed old bridge beside the CLI                                                  | No old tool was unique. Its `Unity_Profiler_*` tools never worked over MCP (null `conversationContext`), `ValidateScript` is whole-file substring heuristics, captures had no size control.                                                                                                                                                                                                                                                                 | 2026-09-27 |
+| Keep ai.assistant installed alongside the CLI                                              | Two bridges, 19 patches to maintain, a deprecated package pinned against entitlement changes.                                                                                                                                                                                                                                                                                                                                                               | 2026-09-27 |
+| Upgrade ai.assistant to ≥ 2.13                                                             | Reintroduces the entitlement enforcement the 2.6.0-pre.1 pin avoided.                                                                                                                                                                                                                                                                                                                                                                                       | 2026-09-27 |
+| Vendor Unity's generated `unity-cli` / `unity-pipeline` skills                             | Regenerated per CLI release; committed copies go stale. One project skill + the CLI's live schemas instead.                                                                                                                                                                                                                                                                                                                                                 | 2026-09-27 |
 | Install Unity's official agent plugin (`Unity-Technologies/unity-agent-plugin`, 32 skills) | All-or-nothing: ~16 KB of always-loaded skill descriptions (1.6× this project's whole set), UI skills that steer editor tooling to UI Toolkit against the IMGUI `editor-tool` standard, and 2D/IAP/ads/multiplayer skills with no use here. Adapted instead: the Render Graph checklist into `.agents/rules/render-graph.md` + `review-changes` gates 20–23, the Safe Mode note into `unity-editor`, and `ui-ugui`'s layout craft into the `game-ui` skill. | 2026-09-27 |
-| `set_authoring_root` to save captures under `Temp/`     | Measured: the root is confined to folders under `Assets/`; the `~` folder works.                                                                                              | 2026-09-27 |
-| `unity shell` to cut per-call latency                   | Measured ~1.2 s per call either way; the cost is the per-command Editor scan, which the project path removes.                                                                 | 2026-09-27 |
-| `eval_file` for the profiler queries                    | Takes no arguments; `run_script` passes typed arguments to named entry points.                                                                                                | 2026-09-27 |
-| Accept a profiler gap                                   | `burst-optimization` routes its evidence step through profiler queries.                                                                                                       | 2026-09-27 |
+| `set_authoring_root` to save captures under `Temp/`                                        | Measured: the root is confined to folders under `Assets/`; the `~` folder works.                                                                                                                                                                                                                                                                                                                                                                            | 2026-09-27 |
+| `unity shell` to cut per-call latency                                                      | Measured ~1.2 s per call either way; the cost is the per-command Editor scan, which the project path removes.                                                                                                                                                                                                                                                                                                                                               | 2026-09-27 |
+| `eval_file` for the profiler queries                                                       | Takes no arguments; `run_script` passes typed arguments to named entry points.                                                                                                                                                                                                                                                                                                                                                                              | 2026-09-27 |
+| Accept a profiler gap                                                                      | `burst-optimization` routes its evidence step through profiler queries.                                                                                                                                                                                                                                                                                                                                                                                     | 2026-09-27 |
 
 ---
 

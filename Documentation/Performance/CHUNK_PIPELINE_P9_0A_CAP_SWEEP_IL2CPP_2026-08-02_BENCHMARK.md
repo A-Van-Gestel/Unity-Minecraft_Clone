@@ -1,12 +1,12 @@
 # P9-0a — Light-quota cap probe, IL2CPP Release — two same-build legs at view distance 32
 
-| Field           | Value                                                                                                                                                                                                                                                                                                     |
-|-----------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Captured**    | 2026-08-01 23:42 – 2026-08-02 00:30                                                                                                                                                                                                                                                                       |
-| **Branch**      | `feat/world-scaling` (report authored at `7eabda7b`)                                                                                                                                                                                                                                                      |
-| **Commit**      | Build GUID **`cbb80fcb79164d7ab43a18a8bb28815d`** — the **same build as the P-8 capture** (`4ea1a38e`, over FP-11a's `26ec687e`). No rebuild: both legs are settings-only, per the warm-cache finding in [`Design/CHUNK_PIPELINE_SCHEDULE_QUOTA_THROUGHPUT.md`](../Design/CHUNK_PIPELINE_SCHEDULE_QUOTA_THROUGHPUT.md) §7.1 |
-| **Captured by** | `BenchmarkController` — **IL2CPP, Configuration: Release, Player, Burst on**. Two runs, **n = 1 per leg**, both at view distance 32. i9-9900K / 16 threads / 64 GB / D3D11                                                                                                                                 |
-| **Rule**        | **§7.1 v2**, as FP-8, FP-10 and P-8                                                                                                                                                                                                                                                                       |
+| Field           | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+|-----------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Captured**    | 2026-08-01 23:42 – 2026-08-02 00:30                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| **Branch**      | `feat/world-scaling` (report authored at `7eabda7b`)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| **Commit**      | Build GUID **`cbb80fcb79164d7ab43a18a8bb28815d`** — the **same build as the P-8 capture** (`4ea1a38e`, over FP-11a's `26ec687e`). No rebuild: both legs are settings-only, per the warm-cache finding in [`Design/CHUNK_PIPELINE_SCHEDULE_QUOTA_THROUGHPUT.md`](../Design/CHUNK_PIPELINE_SCHEDULE_QUOTA_THROUGHPUT.md) §7.1                                                                                                                                                                                                                                                                                                             |
+| **Captured by** | `BenchmarkController` — **IL2CPP, Configuration: Release, Player, Burst on**. Two runs, **n = 1 per leg**, both at view distance 32. i9-9900K / 16 threads / 64 GB / D3D11                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| **Rule**        | **§7.1 v2**, as FP-8, FP-10 and P-8                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | **Verdict**     | **MECHANISM CONFIRMED / NO-GO on the fix.** Doubling `maxLightJobsPerFrame` (24 → 48) does exactly what P-9 §3.1 predicts — gate closure falls **95.1 % → 62.6 %**, admission rises 25 %, completions rise **21 %**, and p50 end-to-end falls **26 %** — but it costs **×4.8 loading-pass CPU** and **×0.61 minimum FPS**, failing criterion Q2 by a wider margin than P-8 did. The binding limit did not move to a higher quota: it moved to the **8 ms schedule ceiling**, which now stops the pass on **95.8 %** of frames. The rate identity is real; raising the rate is unaffordable while `ProcessLightingJobs` stays unbudgeted |
 
 > **Design home:** [`Design/CHUNK_PIPELINE_SCHEDULE_QUOTA_THROUGHPUT.md`](../Design/CHUNK_PIPELINE_SCHEDULE_QUOTA_THROUGHPUT.md)
@@ -26,10 +26,10 @@
 capture. The only difference is one settings value, read from disk through the warm settings cache and
 **printed by each run's own settings block** (never asserted from configuration):
 
-| Leg    | `maxLightJobsPerFrame` | `maxMeshRebuildsPerFrame` | Implied rate ceiling (`cap × 60`) |
-|--------|------------------------|---------------------------|-----------------------------------|
-| **L1** | **24** (OM-1 calibrated) | 11 (OM-1 calibrated)    | 1 440 light + 660 mesh schedules/s |
-| **L2** | **48** (×2)              | 11 (unchanged)          | 2 880 light + 660 mesh schedules/s |
+| Leg    | `maxLightJobsPerFrame`   | `maxMeshRebuildsPerFrame` | Implied rate ceiling (`cap × 60`)  |
+|--------|--------------------------|---------------------------|------------------------------------|
+| **L1** | **24** (OM-1 calibrated) | 11 (OM-1 calibrated)      | 1 440 light + 660 mesh schedules/s |
+| **L2** | **48** (×2)              | 11 (unchanged)            | 2 880 light + 660 mesh schedules/s |
 
 Everything else is identical and was verified from the settings blocks: view distance 32, load
 distance 35 (71×71 = 5 041 resident), in-flight caps 32 / 64 / 20, ms ceilings 6 / 8 / 6 / 4,
@@ -64,10 +64,10 @@ drift before any conclusion rests on the L1 ↔ L2 comparison — see §F1.
 
 ### Loading pass @ 200 m/s — the criterion phase
 
-| Leg | frames | gate closed | requested | abandoned | **admitted** | **completed** | in-flight @ end | unloaded | waste | p50 e2e | verdict |
-|-----|--------|-------------|-----------|-----------|--------------|---------------|-----------------|----------|-------|---------|---------|
-| L1  | 5 428  | 95.1 %      | 33 330    | 21 485    | **11 845**   | **6 933**     | 3 760           | 1 152    | 9.7 %  | 3 703 ms | AdmissionBound |
-| L2  | 1 005  | **62.6 %**  | 32 302    | 17 464    | **14 838**   | **8 382**     | 3 551           | 2 905    | 19.6 % | **2 753 ms** | Healthy |
+| Leg | frames | gate closed | requested | abandoned | **admitted** | **completed** | in-flight @ end | unloaded | waste  | p50 e2e      | verdict        |
+|-----|--------|-------------|-----------|-----------|--------------|---------------|-----------------|----------|--------|--------------|----------------|
+| L1  | 5 428  | 95.1 %      | 33 330    | 21 485    | **11 845**   | **6 933**     | 3 760           | 1 152    | 9.7 %  | 3 703 ms     | AdmissionBound |
+| L2  | 1 005  | **62.6 %**  | 32 302    | 17 464    | **14 838**   | **8 382**     | 3 551           | 2 905    | 19.6 % | **2 753 ms** | Healthy        |
 
 ### Loading pass — stage latency p50 (only chunks reaching `MeshApplied` contribute)
 
@@ -100,9 +100,9 @@ drift before any conclusion rests on the L1 ↔ L2 comparison — see §F1.
 
 ### Generation pass @ 200 m/s
 
-| Leg | frames | gate closed | requested | abandoned | admitted | completed | waste  | verdict                     |
-|-----|--------|-------------|-----------|-----------|----------|-----------|--------|-----------------------------|
-| L1  | 1 763  | 57.0 %      | 30 209    | 19 138    | 11 071   | **4 353** | 16.8 % | AdmissionBound              |
+| Leg | frames | gate closed | requested | abandoned | admitted | completed | waste  | verdict                      |
+|-----|--------|-------------|-----------|-----------|----------|-----------|--------|------------------------------|
+| L1  | 1 763  | 57.0 %      | 30 209    | 19 138    | 11 071   | **4 353** | 16.8 % | AdmissionBound               |
 | L2  | 919    | 33.0 %      | 30 483    | 19 981    | 10 502   | **3 353** | 21.4 % | Healthy + **ORDERING-BOUND** |
 
 ### Frame cost — per-pass-group totals
@@ -116,9 +116,9 @@ Loading @ 200 m/s alone: avg CPU **6.1 ms → 29.2 ms**, min wall FPS **43.7 →
 
 ### Tour coverage
 
-| Leg | after ensure sweep | on disk when loading starts |
-|-----|--------------------|-----------------------------|
-| L1  | **99.0 %**         | 99.0 %                      |
+| Leg | after ensure sweep | on disk when loading starts                         |
+|-----|--------------------|-----------------------------------------------------|
+| L1  | **99.0 %**         | 99.0 %                                              |
 | L2  | **97.8 %**         | 97.8 % — *the loading pass generated the remainder* |
 
 ---
@@ -130,15 +130,15 @@ Loading @ 200 m/s alone: avg CPU **6.1 ms → 29.2 ms**, min wall FPS **43.7 →
 L1 is the same build and configuration as P-8's vd 32 unscaled control, three weeks later, and the
 operator reported heavy desktop multitasking during it. Loading @ 200 m/s:
 
-| Metric          | P-8 OFF control | L1       | Δ       |
-|-----------------|-----------------|----------|---------|
-| Requested       | 33 432          | 33 330   | −0.3 %  |
-| Admitted        | 11 911          | 11 845   | −0.6 %  |
-| Completed       | 6 807           | 6 933    | +1.9 %  |
+| Metric          | P-8 OFF control | L1       | Δ          |
+|-----------------|-----------------|----------|------------|
+| Requested       | 33 432          | 33 330   | −0.3 %     |
+| Admitted        | 11 911          | 11 845   | −0.6 %     |
+| Completed       | 6 807           | 6 933    | +1.9 %     |
 | **p50 e2e**     | 3 688 ms        | 3 703 ms | **+0.4 %** |
-| Gate closed     | 94.5 %          | 95.1 %   | +0.6 pt |
-| Loading min FPS | 37.5            | 37.4     | −0.3 %  |
-| Peak memory     | 5 118 MB        | 5 071 MB | −0.9 %  |
+| Gate closed     | 94.5 %          | 95.1 %   | +0.6 pt    |
+| Loading min FPS | 37.5            | 37.4     | −0.3 %     |
+| Peak memory     | 5 118 MB        | 5 071 MB | −0.9 %     |
 
 Every scored metric within 2 %. This is the strongest evidence available that the scored phase is
 insensitive to the session, and it partly retires the `n = 1` limitation for the criterion phase.
@@ -182,11 +182,11 @@ because the ceiling intercepted the rest.
 
 Loading @ 200 m/s frame time rose **6.1 → 29.2 ms**, +23.1 ms. The schedule pass cannot account for it:
 
-| Term                              | L1        | L2         |
-|-----------------------------------|-----------|------------|
-| Frames per second (30 s phase)    | 181       | 33.5       |
-| Light-schedule ms per frame       | ~1.2 ms † | 8.0 ms (ceiling-bound) |
-| Light-schedule ms **per second**  | ~223 ms   | ~268 ms    |
+| Term                             | L1        | L2                     |
+|----------------------------------|-----------|------------------------|
+| Frames per second (30 s phase)   | 181       | 33.5                   |
+| Light-schedule ms per frame      | ~1.2 ms † | 8.0 ms (ceiling-bound) |
+| Light-schedule ms **per second** | ~223 ms   | ~268 ms                |
 
 † Derived: L2 is ceiling-bound at 8 ms × 33.5 fps = 268 ms/s for an effective ~1 730 schedules/s,
 giving ~0.155 ms per lighting schedule; applying that cost to L1's quota-bound 1 440/s gives ~223 ms/s
@@ -199,9 +199,9 @@ and `ProcessLightingJobs`' merge is the one pipeline pass deliberately left **un
 (analysis §2 / P-3 owns it). A cost of ~0.37 ms per full-volume merge scan reproduces both legs:
 
 | Leg | schedule | merge (52 vs 8 per frame × 0.37 ms) | modelled | measured |
-|-----|----------|--------------------------------------|----------|----------|
-| L1  | 1.2 ms   | 3.0 ms                               | 4.2 ms   | 6.1 ms   |
-| L2  | 8.0 ms   | 19.1 ms                              | 27.1 ms  | 29.2 ms  |
+|-----|----------|-------------------------------------|----------|----------|
+| L1  | 1.2 ms   | 3.0 ms                              | 4.2 ms   | 6.1 ms   |
+| L2  | 8.0 ms   | 19.1 ms                             | 27.1 ms  | 29.2 ms  |
 
 If that attribution is right it has a feedback shape — slower frames land more completions per frame,
 which costs more unbudgeted merge time, which slows frames further — i.e. the §3 spiral the budgets
@@ -233,14 +233,14 @@ reader does not mistake the headline for a uniform improvement.
 
 Criteria are §2 of the design doc, fixed before the capture.
 
-| #       | Criterion                    | Threshold                                                | Result                                                                                                    |
-|---------|------------------------------|----------------------------------------------------------|-------------------------------------------------------------------------------------------------------------|
+| #       | Criterion                    | Threshold                                                                                     | Result                                                                                                           |
+|---------|------------------------------|-----------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------|
 | **Q1**  | Visibility budget met        | p50 ≤ `vd × 16 ÷ speed` = **2 560 ms**; partial credit if the shortfall ratio improves ≥ ×1.3 | ⚠️ **PARTIAL** — 3 703 → 2 753 ms, shortfall **1.45× → 1.08×**, an improvement of **×1.35**. Budget still missed |
-| **Q2**  | **Frame time holds** ⚠️      | min FPS ≥ ×0.95 **and** avg CPU ≤ ×1.05                  | ❌ **FAIL, decisively** — min FPS **×0.61** (43.7 → 26.6), avg CPU **×4.79** (6.1 → 29.2 ms). Worse than P-8   |
-| **Q3a** | Rate lever moved the ceiling | `Quota` share < 90 % **and** completions ≥ ×1.35         | ⚠️ **SPLIT** — quota share **99.6 % → 0.8 %** ✅, completions **×1.21** ❌                                      |
-| **Q4**  | Memory holds                 | peak ≤ ×1.10                                             | ✅ **PASS** — ×1.05 (5 071 → 5 320 MB)                                                                        |
-| **Q5**  | Waste not scored             | recorded, not charged                                     | ✅ Recorded (F5)                                                                                              |
-| **Q6**  | Coverage                     | ≥ 99 %                                                    | ❌ **FAIL for L2** — 97.8 %, and the log states the loading pass generated the remainder (see Limitation 3)     |
+| **Q2**  | **Frame time holds** ⚠️      | min FPS ≥ ×0.95 **and** avg CPU ≤ ×1.05                                                       | ❌ **FAIL, decisively** — min FPS **×0.61** (43.7 → 26.6), avg CPU **×4.79** (6.1 → 29.2 ms). Worse than P-8     |
+| **Q3a** | Rate lever moved the ceiling | `Quota` share < 90 % **and** completions ≥ ×1.35                                              | ⚠️ **SPLIT** — quota share **99.6 % → 0.8 %** ✅, completions **×1.21** ❌                                       |
+| **Q4**  | Memory holds                 | peak ≤ ×1.10                                                                                  | ✅ **PASS** — ×1.05 (5 071 → 5 320 MB)                                                                           |
+| **Q5**  | Waste not scored             | recorded, not charged                                                                         | ✅ Recorded (F5)                                                                                                 |
+| **Q6**  | Coverage                     | ≥ 99 %                                                                                        | ❌ **FAIL for L2** — 97.8 %, and the log states the loading pass generated the remainder (see Limitation 3)      |
 
 **MECHANISM CONFIRMED / NO-GO on the fix.** Q2 fails by a factor, and Q2 was written as a hard gate
 that overrides every other criterion precisely so that a throughput-only result could not pass. The

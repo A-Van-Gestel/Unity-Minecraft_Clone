@@ -45,10 +45,10 @@ the render-distance-scaling session that produced `c7eabd6`, not assumed.
 
 ## Legend
 
-| Field       | Values                                                                                                                                         |
-|-------------|------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Effort**  | 🟢 Low (hours, localized) · 🟡 Medium (days, several files) · 🔴 High (architectural, cross-system)                                            |
-| **Risk**    | 🟢 Low (isolated, easy to verify) · 🟡 Medium (touches shared state or visual output) · 🔴 High (touches pipeline invariants or semantics)     |
+| Field       | Values                                                                                                                                          |
+|-------------|-------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Effort**  | 🟢 Low (hours, localized) · 🟡 Medium (days, several files) · 🔴 High (architectural, cross-system)                                             |
+| **Risk**    | 🟢 Low (isolated, easy to verify) · 🟡 Medium (touches shared state or visual output) · 🔴 High (touches pipeline invariants or semantics)      |
 | **Benefit** | 🟢 Core — high value or unlocks other planned work · 🟡 Situational / polish · ⚪ Minor                                                         |
 | **Seed**    | ✅ Safe — cannot change generated terrain for a given seed · ⚠️ Terrain-affecting                                                               |
 | **Save**    | ✅ Safe — no on-disk format change · ⚠️ Format — requires a save-format version bump + AOT migration step (see `serialization-migration` skill) |
@@ -60,17 +60,17 @@ the render-distance-scaling session that produced `c7eabd6`, not assumed.
 All remaining CL-* items build on the render-distance-scaled tile system (`c7eabd6`) plus the
 CL-1/CL-2 drift + shader work (`d52b089`, `12e6cf6`, both in-game verified 2026-07-19):
 
-| Area          | Current state (verified)                                                                                                                                                                                                                                                                                                                                                                 |
-|---------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Coverage      | `max(viewDistance × 2, 8)` chunks radius; 64-block tiles keyed by **cloud-space tile index** (drift-corrected), pooled GameObjects, one shared `Mesh` per unique pattern tile (`Clouds.GetTileMesh`)                                                                                                                                                                                     |
-| Pattern       | **Procedural seeded (was CL-3 Option A):** `CloudPatternJob` (Burst) — periodic FBM value noise, lowbias32 lattice hash, thresholded at the coverage percentile (0.23); knobs 32 cells / 4 octaves / 0.6 persistence. Optional hand-authored texture behind `_useClassicPattern` (no texture ships — assign one for an art-directed or per-dimension layout); still repeats every 512 via `WrapToPattern`                   |
-| Styles        | `CloudStyle` enum: `Off` / `Fast` (down-facing quads only) / `Fancy` (1-block-tall extruded hull, corners inflated by `_depthOffset` against Z-fighting)                                                                                                                                                                                                                                 |
-| Shader        | `Minecraft/CloudShader` — unlit; MC-style per-face shading (Fancy-only via the **per-material** `_CloudFaceShading`, v1.4), `SkylightColor` day/night tint, coverage-edge fade (`_CloudFadeParams`). Transparent with **`ZWrite On`**: depth resolves overlapping faces (v1.1)                                                                                                           |
-| Motion        | **Wind drift (was CL-1):** cloud-space tiles on a drift-carrying root — per-frame cost is one root transform move; re-key sweep only on cloud-tile crossing; accumulator wraps at the pattern period; wind vector **owned by `World` since FL-1** (`World.WindBlocksPerSecond`, default `(−0.6, 0)`, shared with foliage sway; `Clouds.LayerWind` reads it), RF-7 drives the value later |
-| Lighting/time | **Face shading + tint + edge fade (was CL-2, absorbs RF-2 §5):** top 1.0 / bottom 0.7 / X 0.9 / Z 0.8 on Fancy, flat on Fast; hue follows `SkylightColor`, brightness follows the shared `VoxelLightToShadow` curve at `skyLuminance = 1`, **normalized to noon** (noon look = authored `_Color` exactly; night matches terrain's relative darkening)                                    |
-| Update driver | Per-frame `Clouds.Update` drift tick (root move only, allocation-free); the re-key sweep runs on cloud-tile crossing and from `CheckViewDistance` / `Reanchor()` / `OnSettingsChanged` → `Reinitialize()` (drift survives reinit)                                                                                                                                                        |
+| Area          | Current state (verified)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+|---------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Coverage      | `max(viewDistance × 2, 8)` chunks radius; 64-block tiles keyed by **cloud-space tile index** (drift-corrected), pooled GameObjects, one shared `Mesh` per unique pattern tile (`Clouds.GetTileMesh`)                                                                                                                                                                                                                                                                                                                                                                             |
+| Pattern       | **Procedural seeded (was CL-3 Option A):** `CloudPatternJob` (Burst) — periodic FBM value noise, lowbias32 lattice hash, thresholded at the coverage percentile (0.23); knobs 32 cells / 4 octaves / 0.6 persistence. Optional hand-authored texture behind `_useClassicPattern` (no texture ships — assign one for an art-directed or per-dimension layout); still repeats every 512 via `WrapToPattern`                                                                                                                                                                        |
+| Styles        | `CloudStyle` enum: `Off` / `Fast` (down-facing quads only) / `Fancy` (1-block-tall extruded hull, corners inflated by `_depthOffset` against Z-fighting)                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Shader        | `Minecraft/CloudShader` — unlit; MC-style per-face shading (Fancy-only via the **per-material** `_CloudFaceShading`, v1.4), `SkylightColor` day/night tint, coverage-edge fade (`_CloudFadeParams`). Transparent with **`ZWrite On`**: depth resolves overlapping faces (v1.1)                                                                                                                                                                                                                                                                                                   |
+| Motion        | **Wind drift (was CL-1):** cloud-space tiles on a drift-carrying root — per-frame cost is one root transform move; re-key sweep only on cloud-tile crossing; accumulator wraps at the pattern period; wind vector **owned by `World` since FL-1** (`World.WindBlocksPerSecond`, default `(−0.6, 0)`, shared with foliage sway; `Clouds.LayerWind` reads it), RF-7 drives the value later                                                                                                                                                                                         |
+| Lighting/time | **Face shading + tint + edge fade (was CL-2, absorbs RF-2 §5):** top 1.0 / bottom 0.7 / X 0.9 / Z 0.8 on Fancy, flat on Fast; hue follows `SkylightColor`, brightness follows the shared `VoxelLightToShadow` curve at `skyLuminance = 1`, **normalized to noon** (noon look = authored `_Color` exactly; night matches terrain's relative darkening)                                                                                                                                                                                                                            |
+| Update driver | Per-frame `Clouds.Update` drift tick (root move only, allocation-free); the re-key sweep runs on cloud-tile crossing and from `CheckViewDistance` / `Reanchor()` / `OnSettingsChanged` → `Reinitialize()` (drift survives reinit)                                                                                                                                                                                                                                                                                                                                                |
 | Compositing   | **Pre-transparent cloud pass (was CL-9, 2026-09-05):** `Rendering.CloudPrepassRendererFeature` draws `CloudShader` at `RenderPassEvent.AfterRenderingSkybox` — after the skybox and opaque terrain, before `m_CopyColorPass` — so clouds land in `_CameraOpaqueTexture` and `UberLiquidShader`'s `SampleSceneColor` can see them through a water surface. The pass is selected by a custom `LightMode` (`VoxelCloud`), which is what keeps URP's own transparent draw off it; queue and blend state are unchanged. Pinned by the **Cloud Render** validation suite (6 baselines) |
-| Layers        | **Per-layer config array (was CL-6):** `CloudLayerConfig[]` on the `Clouds` component — height, drift multiplier + veer, opacity, style clamp (`min(setting, maxStyle)`), noise knobs, seed salt; per-layer runtime state (drift root, material instance, pattern, pools). Defaults: main 100 + upper 170 (×1.5 drift veered 15°, 60% opacity, always `Fast`, 2× blobs @ 0.12 coverage)  |
+| Layers        | **Per-layer config array (was CL-6):** `CloudLayerConfig[]` on the `Clouds` component — height, drift multiplier + veer, opacity, style clamp (`min(setting, maxStyle)`), noise knobs, seed salt; per-layer runtime state (drift root, material instance, pattern, pools). Defaults: main 100 + upper 170 (×1.5 drift veered 15°, 60% opacity, always `Fast`, 2× blobs @ 0.12 coverage)                                                                                                                                                                                          |
 
 ---
 
@@ -78,11 +78,11 @@ CL-1/CL-2 drift + shader work (`d52b089`, `12e6cf6`, both in-game verified 2026-
 
 | ID   | Finding                                                            | Effort | Risk | Benefit | Seed | Save |
 |------|--------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|
-| CL-3 | Pattern repeats every 512 blocks — infinite non-repeating pattern  |   🟡   |  🟡  |    ⚪    |  ✅   |  ✅   |
-| CL-4 | Frozen shapes — slow density evolution + weather-driven coverage   |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
-| CL-5 | `Volumetric` quality tier — raymarched slab above the voxel styles |   🔴   |  🟡  |   🟡    |  ✅   |  ✅   |
-| CL-7 | Cloud shadows — pattern projected as terrain skylight attenuation  |   🟡   |  🟡  |   🟡    |  ✅   |  ✅   |
-| CL-8 | Flying through clouds does nothing — in-cloud screen fog           |   🟢   |  🟢  |    ⚪    |  ✅   |  ✅   |
+| CL-3 | Pattern repeats every 512 blocks — infinite non-repeating pattern  |   🟡   |  🟡  |   ⚪    |  ✅  |  ✅  |
+| CL-4 | Frozen shapes — slow density evolution + weather-driven coverage   |   🟡   |  🟡  |   🟡    |  ✅  |  ✅  |
+| CL-5 | `Volumetric` quality tier — raymarched slab above the voxel styles |   🔴   |  🟡  |   🟡    |  ✅  |  ✅  |
+| CL-7 | Cloud shadows — pattern projected as terrain skylight attenuation  |   🟡   |  🟡  |   🟡    |  ✅  |  ✅  |
+| CL-8 | Flying through clouds does nothing — in-cloud screen fog           |   🟢   |  🟢  |   ⚪    |  ✅  |  ✅  |
 
 ---
 
@@ -221,8 +221,8 @@ too); pairs naturally with CL-5 where the slab shader gives the effect for free 
 
 | Wave | Items                       | Rationale                                                                                    |
 |------|-----------------------------|----------------------------------------------------------------------------------------------|
-| v1   | ~~CL-1 → CL-2~~             | ✅ **SHIPPED 2026-07-19** (`d52b089` + `12e6cf6`, in-game verified; archived in v1.1)         |
-| v2   | ~~CL-3 Option A → CL-6~~    | Both ✅ **SHIPPED 2026-07-19** (`cfaca87` + `cf8f7b9`, archived in v1.3/v1.4)                 |
+| v1   | ~~CL-1 → CL-2~~             | ✅ **SHIPPED 2026-07-19** (`d52b089` + `12e6cf6`, in-game verified; archived in v1.1)        |
+| v2   | ~~CL-3 Option A → CL-6~~    | Both ✅ **SHIPPED 2026-07-19** (`cfaca87` + `cf8f7b9`, archived in v1.3/v1.4)                |
 | v3   | CL-4 → CL-7                 | Field substrate + weather knobs (waits on/degrades without RF-7), shadows                    |
 | v4   | CL-5, CL-8, CL-3 (infinite) | Volumetric tier once the field/texture path exists; CL-8 and the infinite pattern ride along |
 
@@ -230,13 +230,13 @@ too); pairs naturally with CL-5 where the slab shader gives the effect for free 
 
 ## Constraint compliance
 
-| Constraint             | How CL-* complies                                                                                                                 |
-|------------------------|-----------------------------------------------------------------------------------------------------------------------------------|
-| Packed-`uint` voxels   | Untouched — clouds never enter voxel data                                                                                         |
-| Burst job rules        | Only CL-3/CL-4 generation may use jobs; pure `Unity.Mathematics` noise over native arrays if so                                   |
-| No hot-path GC         | The drift re-key uses the existing pool + mesh cache; CL-4 remesh budget reuses pooled lists; per-frame paths allocation-free     |
-| Pooling                | Tile GameObject pool + shared-mesh cache from `c7eabd6` are the substrate for every item                                          |
-| Serialization          | Nothing on disk (weather persistence explicitly belongs to RF-7, not here) — Save ✅ across the table                              |
+| Constraint             | How CL-* complies                                                                                                                                                                                 |
+|------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Packed-`uint` voxels   | Untouched — clouds never enter voxel data                                                                                                                                                         |
+| Burst job rules        | Only CL-3/CL-4 generation may use jobs; pure `Unity.Mathematics` noise over native arrays if so                                                                                                   |
+| No hot-path GC         | The drift re-key uses the existing pool + mesh cache; CL-4 remesh budget reuses pooled lists; per-frame paths allocation-free                                                                     |
+| Pooling                | Tile GameObject pool + shared-mesh cache from `c7eabd6` are the substrate for every item                                                                                                          |
+| Serialization          | Nothing on disk (weather persistence explicitly belongs to RF-7, not here) — Save ✅ across the table                                                                                             |
 | WS-4 coordinate spaces | Drift accumulator wrapped mod pattern width; pattern math integer; placement via `VoxelToUnity`; shadows need a voxel-space position that `_LiquidNoiseOrigin` no longer provides (it is reduced) |
 
 ---

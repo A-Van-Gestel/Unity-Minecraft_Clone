@@ -43,14 +43,14 @@ IL2CPP player, **full-timing** (`_excludePrepareFromTiming=false` — the timed 
 
 | Scenario                  | pre-LI-1 | LI-1 POST (PRE) | **P-2 Ph1 (POST)** | vs LI-1 POST | vs pre-LI-1 |
 |---------------------------|---------:|----------------:|-------------------:|:------------:|:-----------:|
-| Sunlight Vertical Flat    |    371.1 |           386.7 |          **234.4** |  **−39 %**   |    −37 %    |
-| Sunlight Complex Caves    |    367.2 |           394.5 |          **226.6** |  **−43 %**   |    −38 %    |
-| Sunlight Removal Covered  |    273.4 |           363.3 |          **199.2** |  **−45 %**   |    −27 %    |
-| Blocklight Stress Test    |    503.9 |           468.8 |          **308.6** |  **−34 %**   |    −39 %    |
-| Edge Check Consistency    |    312.5 |           386.7 |          **210.9** |  **−45 %**   |    −33 %    |
-| Blocklight Simple         |    121.1 |           312.5 |          **156.3** |  **−50 %**   |    +29 %    |
-| Blocklight Removal Simple |    113.3 |           312.5 |          **156.3** |  **−50 %**   |    +38 %    |
-| Blocklight Removal Stress |    113.3 |           312.5 |          **156.3** |  **−50 %**   |    +38 %    |
+| Sunlight Vertical Flat    | 371.1    | 386.7           | **234.4**          |  **−39 %**   |    −37 %    |
+| Sunlight Complex Caves    | 367.2    | 394.5           | **226.6**          |  **−43 %**   |    −38 %    |
+| Sunlight Removal Covered  | 273.4    | 363.3           | **199.2**          |  **−45 %**   |    −27 %    |
+| Blocklight Stress Test    | 503.9    | 468.8           | **308.6**          |  **−34 %**   |    −39 %    |
+| Edge Check Consistency    | 312.5    | 386.7           | **210.9**          |  **−45 %**   |    −33 %    |
+| Blocklight Simple         | 121.1    | 312.5           | **156.3**          |  **−50 %**   |    +29 %    |
+| Blocklight Removal Simple | 113.3    | 312.5           | **156.3**          |  **−50 %**   |    +38 %    |
+| Blocklight Removal Stress | 113.3    | 312.5           | **156.3**          |  **−50 %**   |    +38 %    |
 
 Total wall-clock for the POST run: **1m 51s** (the LI-1 POST run was ~3m 51s).
 

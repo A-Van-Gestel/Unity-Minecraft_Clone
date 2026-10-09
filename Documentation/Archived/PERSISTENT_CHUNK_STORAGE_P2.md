@@ -283,17 +283,17 @@ Phase 1 (Layer 1 gather)  ──►  [profiler gate]  ──►  Phase 2 (cores)
 
 ## 11. Risks & open questions
 
-| #  | Risk / question                                                                | Disposition                                                                                                |
-|----|--------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------|
-| R1 | **Layer 1:** `GatherPadded<T>` not Burst-safe → can't move verbatim            | Monomorphize to `uint`/`ushort` + `UnsafeUtility.MemCpy`; re-run prove-red (§3.3)                          |
-| R2 | **Layer 1:** worker gather still costs (bandwidth-bound machine)               | Re-measure (§3.4); if not net-positive, the fill — not the gather — is the cost → go P-1/P-3, skip Layer 2 |
-| R3 | **Layer 2:** zero-copy vs Unity job-safety / §4.3 documented rejection         | Double-buffer (§6.2/§6.5) keeps reads on an immutable buffer; supersede §4.3 with explicit justification   |
-| R4 | **Layer 2:** mid-flight edit / cross-neighbor read tearing → non-bit-identical | Double-buffer all 9 read cores (§6.2/§6.3); defer is higher-risk fallback                                  |
-| R5 | **Layer 2:** read-pin lifetime → UAF / widened unload-pin                      | New additive refcount (NOT the existing job sets); generation guard (§6.6); P-4 rec-1 bounds it            |
-| R6 | **Layer 2:** "no save-format change" hides serializer rewrite                  | §5.2/§6.4 — serializer/snapshot/steal/count/Reset all reworked; on-wire bytes still unchanged              |
-| R7 | **Layer 2:** section-as-view vs independent section pooling                    | §5.2 — resolve before choosing layout (i); else choose (ii)                                                |
-| Q1 | Layer 2 footprint: full-dense vs non-resident sections?                        | §7 — pick ONE up front (it's the §10 memory-gate number)                                                   |
-| Q2 | Layer 2 consistency: double-buffer vs defer?                                   | Prefer double-buffer (race-free, collapses §6.1+§6.2); defer only if memory forces it                      |
+| #   | Risk / question                                                                | Disposition                                                                                                |
+|-----|--------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------|
+| R1  | **Layer 1:** `GatherPadded<T>` not Burst-safe → can't move verbatim            | Monomorphize to `uint`/`ushort` + `UnsafeUtility.MemCpy`; re-run prove-red (§3.3)                          |
+| R2  | **Layer 1:** worker gather still costs (bandwidth-bound machine)               | Re-measure (§3.4); if not net-positive, the fill — not the gather — is the cost → go P-1/P-3, skip Layer 2 |
+| R3  | **Layer 2:** zero-copy vs Unity job-safety / §4.3 documented rejection         | Double-buffer (§6.2/§6.5) keeps reads on an immutable buffer; supersede §4.3 with explicit justification   |
+| R4  | **Layer 2:** mid-flight edit / cross-neighbor read tearing → non-bit-identical | Double-buffer all 9 read cores (§6.2/§6.3); defer is higher-risk fallback                                  |
+| R5  | **Layer 2:** read-pin lifetime → UAF / widened unload-pin                      | New additive refcount (NOT the existing job sets); generation guard (§6.6); P-4 rec-1 bounds it            |
+| R6  | **Layer 2:** "no save-format change" hides serializer rewrite                  | §5.2/§6.4 — serializer/snapshot/steal/count/Reset all reworked; on-wire bytes still unchanged              |
+| R7  | **Layer 2:** section-as-view vs independent section pooling                    | §5.2 — resolve before choosing layout (i); else choose (ii)                                                |
+| Q1  | Layer 2 footprint: full-dense vs non-resident sections?                        | §7 — pick ONE up front (it's the §10 memory-gate number)                                                   |
+| Q2  | Layer 2 consistency: double-buffer vs defer?                                   | Prefer double-buffer (race-free, collapses §6.1+§6.2); defer only if memory forces it                      |
 
 ---
 

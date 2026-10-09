@@ -37,18 +37,18 @@ coverage from a live `TMP_FontAsset` query.
 
 ## ID index
 
-| ID | Scope | Where it now lives |
-|----|-------|--------------------|
-| **TN-0** | `MusicMetadata` + `MusicMetadataLibrary`, asset, `SoundManager` wiring | §6.1 |
-| **TN-1** | Sound Editor authoring section + "Sync from pools" | §6.2 |
-| **TN-2** | `ToastAnchor` + `ToastRequest` | §2 |
-| **TN-3** | `ToastManager`: canvas, anchors, pooling, queue | §3 |
-| **TN-4** | `ToastCard`: view + lifetime | §4 |
-| **TN-5** | `/toast` dev command | §7.1, and `COMMAND_CONSOLE_SYSTEM.md` §8.5 |
-| **TN-6** | `MusicScheduler.TrackStarted` | §6.3 |
-| **TN-7** | `NowPlayingToastPresenter` | §6.3 |
-| **TN-8** | `showNowPlayingToasts` setting | §6.4 |
-| **TN-9** | `ToastVariant` + `ToastStyle` style table | §5 |
+| ID       | Scope                                                                  | Where it now lives                         |
+|----------|------------------------------------------------------------------------|--------------------------------------------|
+| **TN-0** | `MusicMetadata` + `MusicMetadataLibrary`, asset, `SoundManager` wiring | §6.1                                       |
+| **TN-1** | Sound Editor authoring section + "Sync from pools"                     | §6.2                                       |
+| **TN-2** | `ToastAnchor` + `ToastRequest`                                         | §2                                         |
+| **TN-3** | `ToastManager`: canvas, anchors, pooling, queue                        | §3                                         |
+| **TN-4** | `ToastCard`: view + lifetime                                           | §4                                         |
+| **TN-5** | `/toast` dev command                                                   | §7.1, and `COMMAND_CONSOLE_SYSTEM.md` §8.5 |
+| **TN-6** | `MusicScheduler.TrackStarted`                                          | §6.3                                       |
+| **TN-7** | `NowPlayingToastPresenter`                                             | §6.3                                       |
+| **TN-8** | `showNowPlayingToasts` setting                                         | §6.4                                       |
+| **TN-9** | `ToastVariant` + `ToastStyle` style table                              | §5                                         |
 
 ---
 
@@ -92,15 +92,15 @@ scheduler holds no UI reference; the toast system holds no audio reference.
 
 `ToastRequest` is a `readonly struct` the caller fills:
 
-| Field | Meaning |
-|-------|---------|
-| `Title` | The headline. A request whose title is null/whitespace is not shown (`IsShowable`). |
-| `Subtitle` | Second line; null/empty collapses the row. |
-| `Icon` | `Sprite` for the icon slot. |
-| `Glyph` | Text glyph for the icon slot, used when `Icon` is null. |
-| `DwellSeconds` | Seconds to dwell; ≤ 0 uses the variant's default. |
-| `Anchor` | `ToastAnchor`; `None` uses the manager's default. |
-| `Variant` | `ToastVariant`; selects accent, glyph and default dwell. |
+| Field          | Meaning                                                                             |
+|----------------|-------------------------------------------------------------------------------------|
+| `Title`        | The headline. A request whose title is null/whitespace is not shown (`IsShowable`). |
+| `Subtitle`     | Second line; null/empty collapses the row.                                          |
+| `Icon`         | `Sprite` for the icon slot.                                                         |
+| `Glyph`        | Text glyph for the icon slot, used when `Icon` is null.                             |
+| `DwellSeconds` | Seconds to dwell; ≤ 0 uses the variant's default.                                   |
+| `Anchor`       | `ToastAnchor`; `None` uses the manager's default.                                   |
+| `Variant`      | `ToastVariant`; selects accent, glyph and default dwell.                            |
 
 `ToastAnchor` is `{ None, TopRight, TopLeft, BottomRight, BottomLeft }` and mirrors
 `TooltipHoverPosition`'s `None`-means-default convention, so a reader who knows one knows the other.
@@ -140,13 +140,13 @@ on both axes.
 
 ### 3.3 Pooling and the overflow queue
 
-| Constant | Value |
-|----------|------:|
-| `MAX_CARDS_PER_ANCHOR` | 3 |
-| `MAX_QUEUED_PER_ANCHOR` | 8 |
-| `AnchorCapacity` (public) | 11 |
-| `EDGE_MARGIN` | 16 |
-| `CARD_SPACING` | 8 |
+| Constant                  | Value |
+|---------------------------|------:|
+| `MAX_CARDS_PER_ANCHOR`    | 3     |
+| `MAX_QUEUED_PER_ANCHOR`   | 8     |
+| `AnchorCapacity` (public) | 11    |
+| `EDGE_MARGIN`             | 16    |
+| `CARD_SPACING`            | 8     |
 
 Cards come from a manager-owned free-list shared by every anchor, never `Instantiate`/`Destroy` per
 toast. When an anchor is full the request is queued; beyond `MAX_QUEUED_PER_ANCHOR` the **newest** is
@@ -186,18 +186,18 @@ Built in code by `ToastCard.Create` and pooled. Hierarchy: a root carrying the b
 `RectMask2D`, a `CanvasGroup`, a `HorizontalLayoutGroup` and a `LayoutElement`; children are the
 icon `Image`, the glyph label, and a vertical text column holding title and subtitle.
 
-| Constant | Value |
-|----------|------:|
-| `CARD_WIDTH` | 340 |
-| `CARD_PADDING` | 12 |
-| `ICON_GAP` | 10 |
-| `ICON_SIZE` | 44 |
-| `GLYPH_FONT_SCALE` | 0.8 |
-| `TEXT_SPACING` | 2 |
-| `TITLE_FONT_SIZE` | 21 |
-| `SUBTITLE_FONT_SIZE` | 16 |
-| `ENTER_SECONDS` | 0.22 |
-| `EXIT_SECONDS` | 0.3 |
+| Constant             | Value |
+|----------------------|------:|
+| `CARD_WIDTH`         | 340   |
+| `CARD_PADDING`       | 12    |
+| `ICON_GAP`           | 10    |
+| `ICON_SIZE`          | 44    |
+| `GLYPH_FONT_SCALE`   | 0.8   |
+| `TEXT_SPACING`       | 2     |
+| `TITLE_FONT_SIZE`    | 21    |
+| `SUBTITLE_FONT_SIZE` | 16    |
+| `ENTER_SECONDS`      | 0.22  |
+| `EXIT_SECONDS`       | 0.3   |
 
 ### 4.1 Icon resolution
 
@@ -241,11 +241,11 @@ not only the ones a request sets. A pooled card last shown as an error must not 
 `ToastStyles.For(variant)` returns a `ToastStyle` carrying accent colour, fallback glyph, blur tint,
 flat backdrop and default dwell.
 
-| Variant | Accent | Glyph | Default dwell |
-|---------|--------|:-----:|:-------------:|
-| `Info` | `#F5F5F5` | none | 4.5 s |
-| `Warning` | `#FFC24B` | `!` | 7 s |
-| `Error` | `#FF6060` | `×` | 7 s |
+| Variant   | Accent    | Glyph | Default dwell |
+|-----------|-----------|:-----:|:-------------:|
+| `Info`    | `#F5F5F5` | none  |     4.5 s     |
+| `Warning` | `#FFC24B` |  `!`  |      7 s      |
+| `Error`   | `#FF6060` |  `×`  |      7 s      |
 
 `For` is a **total switch with a `_ =>` Info default**, so a variant added to the enum and forgotten
 here renders as a neutral card rather than an unstyled one — there is no "missing entry" state.
@@ -266,11 +266,11 @@ saturated tint turns the card into a colour cast the text then has to fight.
 
 Resolved values, since the neutral input never reaches the screen:
 
-| Variant | Blur tint (`_MultiplyColor`) |
-|---------|------------------------------|
-| `Info` | `(0.606, 0.606, 0.606)` |
-| `Warning` | `(0.620, 0.536, 0.373)` |
-| `Error` | `(0.620, 0.402, 0.402)` |
+| Variant   | Blur tint (`_MultiplyColor`) |
+|-----------|------------------------------|
+| `Info`    | `(0.606, 0.606, 0.606)`      |
+| `Warning` | `(0.620, 0.536, 0.373)`      |
+| `Error`   | `(0.620, 0.402, 0.402)`      |
 
 Note **`Info` is `0.606` grey, not the `0.415` the console and the five scene panels use** — the lerp
 is applied to every variant, and Info's near-white accent pulls its tint 35 % toward white. An
@@ -406,18 +406,18 @@ rest of the sound engine, never a verification of the trigger seam.
 
 ## 9. Rejected alternatives
 
-| Alternative | Why rejected | Date |
-|-------------|--------------|------|
-| `title`/`artist`/`cover` fields on `MusicTrack` | The same clip appears in the global pool and any number of biome pools, so metadata would be authored once per appearance and drift; it also mixes display data into a scheduling struct and widens a struct serialized inside `AmbienceDatabase.asset` and every biome asset. | 2026-09-02 |
-| Parsing `"Artist - Title"` from the clip filename | Makes filenames a load-bearing contract, breaks on rename or on a title containing a dash, and offers no path to cover art. | 2026-09-02 |
-| Keying metadata by clip **name** | `clip.name` is already the matching key for `/music play`; a rename would silently orphan the entry. An object reference survives renames and moves. | 2026-09-02 |
-| A `ToastCard.prefab` | Needs a scene-wired manager reference and drags prefab/`.meta` churn into every visual tweak. | 2026-09-02 |
-| Suppressing toasts entirely while any UI is open | A surface that hides whenever a menu opens is not a notification surface. Made safe by non-interactive cards instead. | 2026-09-02 |
-| Offsetting the stack below the F3 panel | Same reasoning; the overlap is accepted. | 2026-09-02 |
-| Hand-rolled stack offset math | `VerticalLayoutGroup` + `ContentSizeFitter` handles non-overlap, variable card heights and mid-stack gap closure for free; hand-rolled math would re-derive all three and get wrapped titles wrong. | 2026-09-02 |
-| A `static TrackStarted` event | Would need its own domain-reload handling for the subscriber list. | 2026-09-02 |
-| `event Action<MusicTrack> TrackStarted` | Would require widening the scheduler's pending state, rippling into `QueueTrack`, `ForcePick`, `DiagPendingTrack` and `ForceTrack` — which holds no `MusicTrack` and would have had to fabricate a weight and environment — for fields no subscriber reads. | 2026-09-02 |
-| A per-variant style entry guarded by a test | Made unnecessary by a total switch with an Info default — there is no missing-entry state to catch. | 2026-09-02 |
+| Alternative                                       | Why rejected                                                                                                                                                                                                                                                                   | Date       |
+|---------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------|
+| `title`/`artist`/`cover` fields on `MusicTrack`   | The same clip appears in the global pool and any number of biome pools, so metadata would be authored once per appearance and drift; it also mixes display data into a scheduling struct and widens a struct serialized inside `AmbienceDatabase.asset` and every biome asset. | 2026-09-02 |
+| Parsing `"Artist - Title"` from the clip filename | Makes filenames a load-bearing contract, breaks on rename or on a title containing a dash, and offers no path to cover art.                                                                                                                                                    | 2026-09-02 |
+| Keying metadata by clip **name**                  | `clip.name` is already the matching key for `/music play`; a rename would silently orphan the entry. An object reference survives renames and moves.                                                                                                                           | 2026-09-02 |
+| A `ToastCard.prefab`                              | Needs a scene-wired manager reference and drags prefab/`.meta` churn into every visual tweak.                                                                                                                                                                                  | 2026-09-02 |
+| Suppressing toasts entirely while any UI is open  | A surface that hides whenever a menu opens is not a notification surface. Made safe by non-interactive cards instead.                                                                                                                                                          | 2026-09-02 |
+| Offsetting the stack below the F3 panel           | Same reasoning; the overlap is accepted.                                                                                                                                                                                                                                       | 2026-09-02 |
+| Hand-rolled stack offset math                     | `VerticalLayoutGroup` + `ContentSizeFitter` handles non-overlap, variable card heights and mid-stack gap closure for free; hand-rolled math would re-derive all three and get wrapped titles wrong.                                                                            | 2026-09-02 |
+| A `static TrackStarted` event                     | Would need its own domain-reload handling for the subscriber list.                                                                                                                                                                                                             | 2026-09-02 |
+| `event Action<MusicTrack> TrackStarted`           | Would require widening the scheduler's pending state, rippling into `QueueTrack`, `ForcePick`, `DiagPendingTrack` and `ForceTrack` — which holds no `MusicTrack` and would have had to fabricate a weight and environment — for fields no subscriber reads.                    | 2026-09-02 |
+| A per-variant style entry guarded by a test       | Made unnecessary by a total switch with an Info default — there is no missing-entry state to catch.                                                                                                                                                                            | 2026-09-02 |
 
 ---
 

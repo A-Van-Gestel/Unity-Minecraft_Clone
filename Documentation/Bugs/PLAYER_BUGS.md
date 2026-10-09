@@ -55,13 +55,13 @@ axis". For a body *inside* a cell that means leaving the cell along the movement
 way it was moving. Harness measurements, body embedded 0.8 into a one-block floor (feet 4.200, head 6.000, floor cell
 `y = 4`):
 
-| Tick's movement | `dir` | Correction | Outcome |
-|---|---|---|---|
-| **Downward** (gravity, standing) | −1 | `+0.80` (`blockTop − feet`) | feet → **5.001**, on top of the block, grounded — a clean auto-recovery |
-| **Upward** (jump, momentum = `jumpForce`) | +1 | **`−2.00`** (`blockBottom − head`) | feet → **2.199**: shoved down by the whole collider height plus the embed depth, **through the floor**, still falling |
-| **Upward, solid rock below** | +1 | `−2.00` | down to 2.199, then the downward recovery walks it back to 5.001 over the next ticks |
-| **Horizontal, `IsGrounded == false`** | ±1 | `∓0.90` | input reversed into a ~1-block backward hop |
-| **Horizontal, `IsGrounded == true`** | — | — | ✅ no ejection: the **step-up pre-pass** lifts the body out and preserves the input exactly |
+| Tick's movement                           | `dir` | Correction                         | Outcome                                                                                                               |
+|-------------------------------------------|-------|------------------------------------|-----------------------------------------------------------------------------------------------------------------------|
+| **Downward** (gravity, standing)          | −1    | `+0.80` (`blockTop − feet`)        | feet → **5.001**, on top of the block, grounded — a clean auto-recovery                                               |
+| **Upward** (jump, momentum = `jumpForce`) | +1    | **`−2.00`** (`blockBottom − head`) | feet → **2.199**: shoved down by the whole collider height plus the embed depth, **through the floor**, still falling |
+| **Upward, solid rock below**              | +1    | `−2.00`                            | down to 2.199, then the downward recovery walks it back to 5.001 over the next ticks                                  |
+| **Horizontal, `IsGrounded == false`**     | ±1    | `∓0.90`                            | input reversed into a ~1-block backward hop                                                                           |
+| **Horizontal, `IsGrounded == true`**      | —     | —                                  | ✅ no ejection: the **step-up pre-pass** lifts the body out and preserves the input exactly                           |
 
 **Why it is almost never seen:** gravity makes nearly every tick a *downward* one, and the downward case resolves the
 right way — onto the surface. In-game attempts to provoke it (`/teleport ~ ~-1 ~` into ground, `/teleport ~-1 ~ ~`
@@ -103,12 +103,12 @@ backward hop. §01 remains the in-game symptom to chase for a repro.
 **The upward correction is surface-seeking, not a local un-stick** (measured 2026-08-03). Each tick it raises the
 body to the top of the **highest solid cell its AABB overlaps**, and it repeats every tick:
 
-| Setup | Outcome |
-|---|---|
-| Buried at `y = 20.5` in solid stone, surface top `y = 60`, gravity only | **Reaches the surface in 20 ticks (~0.4 s)** — about 2.5 blocks per tick |
-| Same column with a 2-block air pocket at `y = 30` | Stops at `30.001` — the first pocket tall enough wins |
-| Same column with a **fluid** pocket at `y = 30–32` | Stops at `30.001` — the sweep skips fluids, so the body surfaces *into* the lava/water and stays there |
-| Shallow embeds of 0.05 / 0.25 / 0.50 / 0.95 in a one-block floor | Moves `+0.051 / +0.251 / +0.501 / +0.951` — exactly the embed depth, a proportional nudge |
+| Setup                                                                   | Outcome                                                                                                |
+|-------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------|
+| Buried at `y = 20.5` in solid stone, surface top `y = 60`, gravity only | **Reaches the surface in 20 ticks (~0.4 s)** — about 2.5 blocks per tick                               |
+| Same column with a 2-block air pocket at `y = 30`                       | Stops at `30.001` — the first pocket tall enough wins                                                  |
+| Same column with a **fluid** pocket at `y = 30–32`                      | Stops at `30.001` — the sweep skips fluids, so the body surfaces *into* the lava/water and stays there |
+| Shallow embeds of 0.05 / 0.25 / 0.50 / 0.95 in a one-block floor        | Moves `+0.051 / +0.251 / +0.501 / +0.951` — exactly the embed depth, a proportional nudge              |
 
 The last row is the important one: **the same rule is well-behaved for a shallow embed and pathological for a buried
 body**, and the only difference is how many solid cells the AABB spans. So the design lever is the correction's
@@ -217,13 +217,13 @@ Five conditions, rated **blind** (the settings behind each were withheld until a
 > direction: their frame rates *did* differ (140 vs 100) and they were rated the *same*. Anything that needs the
 > display path itself characterised must be re-run in a **standalone build**.
 
-| # | Physics | Render | Frames per step | Observed |
-|---|---|---|---:|---|
-| 1 | **100 Hz** | ~117 uncapped | 1.17 | walking "kinda smoother"; **jump/collisions broke** — see §07 |
-| 2 | 50 Hz | 50 cap | **1.00** | "slideshow"; movement responsive; physics correct |
-| 3 | 50 Hz | ~140 uncapped | 2.80 | **baseline** — microstutter visible strafing past a block line |
-| 4 | 50 Hz | 100 cap | **2.00 exact** | microstutter **the same as baseline**; physics correct |
-| 5 | **100 Hz** | 100 cap | **1.00** | **worse than 4** — "smoother at some times, larger microstutter at others" |
+| #   | Physics    | Render        | Frames per step | Observed                                                                   |
+|-----|------------|---------------|----------------:|----------------------------------------------------------------------------|
+| 1   | **100 Hz** | ~117 uncapped | 1.17            | walking "kinda smoother"; **jump/collisions broke** — see §07              |
+| 2   | 50 Hz      | 50 cap        | **1.00**        | "slideshow"; movement responsive; physics correct                          |
+| 3   | 50 Hz      | ~140 uncapped | 2.80            | **baseline** — microstutter visible strafing past a block line             |
+| 4   | 50 Hz      | 100 cap       | **2.00 exact**  | microstutter **the same as baseline**; physics correct                     |
+| 5   | **100 Hz** | 100 cap       | **1.00**        | **worse than 4** — "smoother at some times, larger microstutter at others" |
 
 **What the conditions establish:**
 
@@ -296,13 +296,13 @@ and being "pushed back way too strong". At `0.02` the same session behaves corre
 
 **Controlled observation** (from §06's five-condition test — the two variables were separated there):
 
-| `fixedDeltaTime` | Render | Jump / collision |
-|---|---|---|
-| 0.01 (100 Hz) | ~117 fps uncapped | **broken** |
-| 0.02 (50 Hz) | 50 cap | correct |
-| 0.02 (50 Hz) | ~140 uncapped | correct |
-| 0.02 (50 Hz) | 100 cap | correct |
-| 0.01 (100 Hz) | 100 cap | **broken** |
+| `fixedDeltaTime` | Render            | Jump / collision |
+|------------------|-------------------|------------------|
+| 0.01 (100 Hz)    | ~117 fps uncapped | **broken**       |
+| 0.02 (50 Hz)     | 50 cap            | correct          |
+| 0.02 (50 Hz)     | ~140 uncapped     | correct          |
+| 0.02 (50 Hz)     | 100 cap           | correct          |
+| 0.01 (100 Hz)    | 100 cap           | **broken**       |
 
 Render rate varies across the correct rows and across the broken rows, so **the render rate is not the variable —
 the tick rate is**. Nothing else changed between conditions.

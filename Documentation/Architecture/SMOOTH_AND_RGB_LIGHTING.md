@@ -710,10 +710,10 @@ A second, independent toggle sits beside it (**`SS-3`**, added 2026-08-09):
 public bool fullBlockContactShadows;   // default OFF, pending a perf capture
 ```
 
-| State   | Behavior                                                                                                                                                                        |
-|---------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Off** (default) | A face is subdivided only when a **partial** occluder (slab, post — anything with authored `collisionBounds`) can reach it. Ordinary full-cube terrain carries one shading value per cell corner, as it always has. |
-| **On**  | Faces reached by **full cubes** are subdivided too, at half the density (`FULL_CUBE_SUB_CELL_TESSELLATION = 2` against `SUB_CELL_TESSELLATION = 4`), so a wall's shadow resolves as a band hugging it instead of a ramp across the whole adjoining cell. |
+| State             | Behavior                                                                                                                                                                                                                                                 |
+|-------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Off** (default) | A face is subdivided only when a **partial** occluder (slab, post — anything with authored `collisionBounds`) can reach it. Ordinary full-cube terrain carries one shading value per cell corner, as it always has.                                      |
+| **On**            | Faces reached by **full cubes** are subdivided too, at half the density (`FULL_CUBE_SUB_CELL_TESSELLATION = 2` against `SUB_CELL_TESSELLATION = 4`), so a wall's shadow resolves as a band hugging it instead of a ramp across the whole adjoining cell. |
 
 Both settings **apply live**: `World.HandleSettingChanged` subscribes to
 `SettingsManager.OnSettingChanged` and re-requests a mesh rebuild for every active chunk when either
@@ -1403,14 +1403,14 @@ Each RGB channel attenuates independently at -1 per block. A channel starting at
 
 **Example: Lava at `(15, 7, 1)`**
 
-| Distance | R  | G | B | Perceived color       |
-|----------|----|---|---|-----------------------|
-| 0        | 15 | 7 | 1 | Warm orange           |
-| 1        | 14 | 6 | 0 | Orange (blue gone)    |
-| 5        | 10 | 2 | 0 | Red-orange            |
-| 7        | 8  | 0 | 0 | Pure red (green gone) |
-| 12       | 3  | 0 | 0 | Dim red               |
-| 15       | 0  | 0 | 0 | Dark                  |
+| Distance | R   | G   | B   | Perceived color       |
+|----------|-----|-----|-----|-----------------------|
+| 0        | 15  | 7   | 1   | Warm orange           |
+| 1        | 14  | 6   | 0   | Orange (blue gone)    |
+| 5        | 10  | 2   | 0   | Red-orange            |
+| 7        | 8   | 0   | 0   | Pure red (green gone) |
+| 12       | 3   | 0   | 0   | Dim red               |
+| 15       | 0   | 0   | 0   | Dark                  |
 
 The warm orange hue only extends 7 blocks (where green dies). The remaining 8 blocks are pure red — creating a harsh color boundary.
 

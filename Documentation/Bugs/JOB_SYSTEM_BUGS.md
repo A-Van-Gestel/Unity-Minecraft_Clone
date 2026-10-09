@@ -29,12 +29,12 @@ As of this audit, all fields are covered in both paths. **Rule:** when adding a 
 
 The pool retains up to `_maxRetainedPerType` buffers **per element type**, across four types:
 
-| Stack | Element | Length | Per buffer | × 512 |
-|---|---|---|---|---|
-| `_voxelMaps` | `uint` | 32,768 (16×128×16) | 128 KB | 64 MB |
-| `_lightMaps` | `ushort` | 32,768 | 64 KB | 32 MB |
-| `_paddedVoxels` | `uint` | 51,200 (20×128×20) | 200 KB | 100 MB |
-| `_paddedLight` | `ushort` | 51,200 | 100 KB | 50 MB |
+| Stack           | Element  | Length             | Per buffer | × 512  |
+|-----------------|----------|--------------------|------------|--------|
+| `_voxelMaps`    | `uint`   | 32,768 (16×128×16) | 128 KB     | 64 MB  |
+| `_lightMaps`    | `ushort` | 32,768             | 64 KB      | 32 MB  |
+| `_paddedVoxels` | `uint`   | 51,200 (20×128×20) | 200 KB     | 100 MB |
+| `_paddedLight`  | `ushort` | 51,200             | 100 KB     | 50 MB  |
 
 giving a **cap-limited** ceiling of ≈ **246 MB** of Persistent native memory.
 

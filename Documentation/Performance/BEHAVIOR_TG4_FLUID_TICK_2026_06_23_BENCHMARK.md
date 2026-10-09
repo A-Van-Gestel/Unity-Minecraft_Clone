@@ -37,25 +37,25 @@ active-voxel count sampled across the run (fluid flow grows the set as the front
 
 ## Result — IL2CPP, ms/tick over 150 per-run samples
 
-| Scenario          | Chunks | PeakActive |       mean |        min |     median | stddev |   peak |  µs/voxel |
+| Scenario          | Chunks | PeakActive | mean       | min        | median     | stddev | peak   | µs/voxel  |
 |-------------------|-------:|-----------:|-----------:|-----------:|-----------:|-------:|-------:|----------:|
-| Fluid-Small       |      1 |        836 |      0.850 |      0.756 |      0.839 |  0.076 |  3.131 |     0.904 |
-| Fluid-Medium      |      1 |       3456 |      2.093 |      1.892 |      2.090 |  0.072 |  7.530 |     0.548 |
-| Fluid-Large-4ch   |      4 |      13824 |      8.204 |      7.580 |      8.193 |  0.288 | 38.944 |     0.548 |
-| Cave-Fill-Cascade |      1 |        712 |      0.908 |      0.780 |      0.891 |  0.093 |  3.401 |     1.096 |
-| **Ocean-25ch**    | **25** |  **17800** | **22.502** | **21.431** | **22.516** |  0.379 | 46.136 | **1.204** |
-| Grass-Field       |      1 |        144 |      0.007 |      0.006 |      0.006 |  0.000 |  0.110 |     0.044 |
-| Mixed-Lake+Grass  |      1 |        944 |      0.976 |      0.857 |      0.967 |  0.066 |  2.984 |     0.908 |
+| Fluid-Small       | 1      | 836        | 0.850      | 0.756      | 0.839      | 0.076  | 3.131  | 0.904     |
+| Fluid-Medium      | 1      | 3456       | 2.093      | 1.892      | 2.090      | 0.072  | 7.530  | 0.548     |
+| Fluid-Large-4ch   | 4      | 13824      | 8.204      | 7.580      | 8.193      | 0.288  | 38.944 | 0.548     |
+| Cave-Fill-Cascade | 1      | 712        | 0.908      | 0.780      | 0.891      | 0.093  | 3.401  | 1.096     |
+| **Ocean-25ch**    | **25** | **17800**  | **22.502** | **21.431** | **22.516** | 0.379  | 46.136 | **1.204** |
+| Grass-Field       | 1      | 144        | 0.007      | 0.006      | 0.006      | 0.000  | 0.110  | 0.044     |
+| Mixed-Lake+Grass  | 1      | 944        | 0.976      | 0.857      | 0.967      | 0.066  | 2.984  | 0.908     |
 
 ## Backend comparison — Mono editor → IL2CPP player (min ms/tick, 5 shared scenarios)
 
 | Scenario         | Mono (`59dcebf`) | IL2CPP (`db7a8f0`) | speedup |
 |------------------|-----------------:|-------------------:|:-------:|
-| Fluid-Small      |            1.096 |              0.756 |  1.45×  |
-| Fluid-Medium     |            2.635 |              1.892 |  1.39×  |
-| Fluid-Large-4ch  |           10.528 |              7.580 |  1.39×  |
-| Grass-Field      |            0.012 |              0.006 |  2.0×   |
-| Mixed-Lake+Grass |            1.268 |              0.857 |  1.48×  |
+| Fluid-Small      | 1.096            | 0.756              |  1.45×  |
+| Fluid-Medium     | 2.635            | 1.892              |  1.39×  |
+| Fluid-Large-4ch  | 10.528           | 7.580              |  1.39×  |
+| Grass-Field      | 0.012            | 0.006              |  2.0×   |
+| Mixed-Lake+Grass | 1.268            | 0.857              |  1.48×  |
 
 *(Cave-Fill-Cascade + Ocean-25ch were added after the Mono run, so they have no Mono PRE column.)*
 

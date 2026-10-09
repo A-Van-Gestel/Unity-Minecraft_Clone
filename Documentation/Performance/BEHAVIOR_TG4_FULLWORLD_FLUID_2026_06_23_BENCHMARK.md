@@ -29,16 +29,16 @@ relight is unmeasured. (Region scale = render-distance-5, the regime of the hist
 
 **Average ms/frame** (the sustained cost):
 
-| Phase     |     Frame |  Tick | Apply |      Mesh |     Light | Min FPS | GC/frame |
+| Phase     | Frame     | Tick  | Apply | Mesh      | Light     | Min FPS | GC/frame |
 |-----------|----------:|------:|------:|----------:|----------:|--------:|---------:|
-| Baseline  |      1.83 | 0.018 | 0.005 |     0.045 |     0.062 |      44 |   2.7 KB |
-| **Flood** | **10.44** | 0.244 | 0.089 | **1.509** | **6.925** |   **5** |  10.4 KB |
+| Baseline  | 1.83      | 0.018 | 0.005 | 0.045     | 0.062     | 44      | 2.7 KB   |
+| **Flood** | **10.44** | 0.244 | 0.089 | **1.509** | **6.925** | **5**   | 10.4 KB  |
 
 **Peak ms/frame** (the worst single frame):
 
-| Phase     |      Frame |       Tick | Apply | Mesh | Light |
+| Phase     | Frame      | Tick       | Apply | Mesh | Light |
 |-----------|-----------:|-----------:|------:|-----:|------:|
-| Baseline  |      22.64 |      12.63 |  5.44 | 7.07 | 13.04 |
+| Baseline  | 22.64      | 12.63      | 5.44  | 7.07 | 13.04 |
 | **Flood** | **185.78** | **179.17** | 22.53 | 5.52 | 26.51 |
 
 The avg flood frame (10.44 ms) is **~66 % Light** (6.93), ~14 % Mesh (1.51), **~2 % Tick** (0.24), ~1 % Apply, the
@@ -47,14 +47,14 @@ rest render/generation/pool. The worst flood frame (185.78 ms ≈ 5 FPS) is **~9
 
 ## Backend comparison — Mono editor → IL2CPP player (Flood phase)
 
-| Metric             |       Mono |     IL2CPP |  speedup  |
+| Metric             | Mono       | IL2CPP     |  speedup  |
 |--------------------|-----------:|-----------:|:---------:|
-| Frame avg (ms)     |      29.04 |      10.44 |   2.78×   |
-| Light avg (ms)     |      15.75 |       6.93 |   2.27×   |
-| Mesh avg (ms)      |       3.69 |       1.51 |   2.44×   |
-| Tick avg (ms)      |       0.87 |       0.24 |   3.62×   |
+| Frame avg (ms)     | 29.04      | 10.44      |   2.78×   |
+| Light avg (ms)     | 15.75      | 6.93       |   2.27×   |
+| Mesh avg (ms)      | 3.69       | 1.51       |   2.44×   |
+| Tick avg (ms)      | 0.87       | 0.24       |   3.62×   |
 | **Tick PEAK (ms)** | **187.80** | **179.17** | **1.05×** |
-| GC/frame (KB)      |       97.5 |       10.4 | 9.4× less |
+| GC/frame (KB)      | 97.5       | 10.4       | 9.4× less |
 
 ## Reading the result
 

@@ -27,20 +27,20 @@
 
 ## 1. Components
 
-| File | Role |
-|------|------|
-| `Assets/Scripts/Sky/CelestialMath.cs` | Pure static celestial model. No Unity objects, no state. |
-| `Assets/Scripts/Sky/AtmosphericFog.cs` | Pure static fog range/curve + the `FogStyle` enum. |
-| `Assets/Scripts/WorldTimeManager.cs` | Owns world time (RF-1); exposes the derived celestial properties. |
-| `Assets/Scripts/World.cs` | `PublishSkyGlobals()` / `PublishFogGlobals()`; camera and `RenderSettings` wiring. |
-| `Assets/Scripts/Data/WorldTypes/TimeOfDaySettings.cs` | The authored sky asset, linked from `WorldTypeDefinition`. |
-| `Assets/Shaders/SkyboxShader.shader` | Gradient, sun, moon, stars. |
-| `Assets/Shaders/Includes/VoxelFog.hlsl` | Shared fog, included by the block, transparent and liquid shaders. |
-| `Assets/Editor/WorldTools/SkyMaterialCreator.cs` | `Minecraft Clone/Create Sky Material`. Owns the sky material's asset path. |
-| `Assets/Editor/WorldTools/SkyGradientDefaults.cs` | `Minecraft Clone/Dev/Reset Sky Gradients To Code Defaults`. |
-| `Assets/Editor/WorldTools/Libraries/SkyPreviewRenderer.cs` | Renders the skybox to a texture in edit mode, so sky work is judged by pixels rather than by a swatch (§8). |
-| `Assets/Editor/WorldTools/SkyEditorWindow.cs` | `Minecraft Clone/Sky Editor` — authors the sky against a live render. |
-| `Assets/Editor/Validation/Celestial/SkyRenderValidationSuite.cs` | `Validate Sky Render` — the shader half, asserted on rendered pixels. |
+| File                                                             | Role                                                                                                        |
+|------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------|
+| `Assets/Scripts/Sky/CelestialMath.cs`                            | Pure static celestial model. No Unity objects, no state.                                                    |
+| `Assets/Scripts/Sky/AtmosphericFog.cs`                           | Pure static fog range/curve + the `FogStyle` enum.                                                          |
+| `Assets/Scripts/WorldTimeManager.cs`                             | Owns world time (RF-1); exposes the derived celestial properties.                                           |
+| `Assets/Scripts/World.cs`                                        | `PublishSkyGlobals()` / `PublishFogGlobals()`; camera and `RenderSettings` wiring.                          |
+| `Assets/Scripts/Data/WorldTypes/TimeOfDaySettings.cs`            | The authored sky asset, linked from `WorldTypeDefinition`.                                                  |
+| `Assets/Shaders/SkyboxShader.shader`                             | Gradient, sun, moon, stars.                                                                                 |
+| `Assets/Shaders/Includes/VoxelFog.hlsl`                          | Shared fog, included by the block, transparent and liquid shaders.                                          |
+| `Assets/Editor/WorldTools/SkyMaterialCreator.cs`                 | `Minecraft Clone/Create Sky Material`. Owns the sky material's asset path.                                  |
+| `Assets/Editor/WorldTools/SkyGradientDefaults.cs`                | `Minecraft Clone/Dev/Reset Sky Gradients To Code Defaults`.                                                 |
+| `Assets/Editor/WorldTools/Libraries/SkyPreviewRenderer.cs`       | Renders the skybox to a texture in edit mode, so sky work is judged by pixels rather than by a swatch (§8). |
+| `Assets/Editor/WorldTools/SkyEditorWindow.cs`                    | `Minecraft Clone/Sky Editor` — authors the sky against a live render.                                       |
+| `Assets/Editor/Validation/Celestial/SkyRenderValidationSuite.cs` | `Validate Sky Render` — the shader half, asserted on rendered pixels.                                       |
 
 ---
 
@@ -72,12 +72,12 @@ sunDir = ( −sin H ,  cos φ · cos H ,  −sin φ · cos H )     // (+x east, 
 Unit length is structural — the components are direction cosines of a point on the celestial equator —
 so it holds at the poles with no guard. Behaviour that falls out rather than being authored:
 
-| Time | Direction | Reads as |
-|------|-----------|----------|
-| `DayFraction` 0.25 | `(1, 0, 0)` | Sunrise, due east, every latitude |
-| 0.50, φ = 45°N | `(0, 0.707, −0.707)` | Noon, up and due **south** |
-| 0.75 | `(−1, 0, 0)` | Sunset, due west |
-| Noon altitude | — | Exactly `90° − |φ|` |
+| Time               | Direction            | Reads as                          |
+|--------------------|----------------------|-----------------------------------|
+| `DayFraction` 0.25 | `(1, 0, 0)`          | Sunrise, due east, every latitude |
+| 0.50, φ = 45°N     | `(0, 0.707, −0.707)` | Noon, up and due **south**        |
+| 0.75               | `(−1, 0, 0)`         | Sunset, due west                  |
+| Noon altitude      | —                    | Exactly `90° − \|φ\|`             |
 
 **Coordinate space.** Every direction is a unit vector in Unity render space. These are *directions,
 not positions*, so the floating-origin shift (`WorldOrigin`) does not apply — see
@@ -142,17 +142,17 @@ moment costs an existing one; that ceiling is why the fix had to move a key rath
 `StartWorld`, and a half-published sky (a stale sun direction against a fresh horizon colour) would be
 worse than the shaders' own defaults.
 
-| Global | Type | Source |
-|--------|------|--------|
-| `_SunDirection` | `float3` | `WorldTimeManager.SunDirection` |
-| `_MoonDirection` | `float3` | `WorldTimeManager.MoonDirection` |
-| `_MoonPhase` | `float` | Lit fraction, 0 = new, 1 = full |
-| `_SkyRotation` | `float4x4` | Celestial sphere orientation |
-| `_ZenithColor` / `_HorizonColor` | `half3` | `TimeOfDaySettings` gradients at `DayFraction` |
-| `_SunAngularRadius` / `_MoonAngularRadius` | `float` | Authored, degrees |
-| `_StarBrightness` | `float` | Authored |
-| `_VoxelFogRange` | `float4` | `(start, end, curveExponent, 0)` |
-| `_VoxelFogColor` | `half3` | The horizon colour |
+| Global                                     | Type       | Source                                         |
+|--------------------------------------------|------------|------------------------------------------------|
+| `_SunDirection`                            | `float3`   | `WorldTimeManager.SunDirection`                |
+| `_MoonDirection`                           | `float3`   | `WorldTimeManager.MoonDirection`               |
+| `_MoonPhase`                               | `float`    | Lit fraction, 0 = new, 1 = full                |
+| `_SkyRotation`                             | `float4x4` | Celestial sphere orientation                   |
+| `_ZenithColor` / `_HorizonColor`           | `half3`    | `TimeOfDaySettings` gradients at `DayFraction` |
+| `_SunAngularRadius` / `_MoonAngularRadius` | `float`    | Authored, degrees                              |
+| `_StarBrightness`                          | `float`    | Authored                                       |
+| `_VoxelFogRange`                           | `float4`   | `(start, end, curveExponent, 0)`               |
+| `_VoxelFogColor`                           | `half3`    | The horizon colour                             |
 
 `WorldTimeManager.ContinuousDays` is defined so its fractional part is exactly `DayFraction`. That is
 what keeps the moon's phase and the sun's position on one clock.

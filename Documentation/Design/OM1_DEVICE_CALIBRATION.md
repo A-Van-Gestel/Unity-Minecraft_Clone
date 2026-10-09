@@ -66,16 +66,16 @@ consult the device. A 3–4 GB / 4-slow-core phone gets the same in-flight memor
 desktop — and needs *lower* caps twice over: less RAM to hold the backlog **and** fewer cores to drain
 it.
 
-| Knob                             | Location                                            | Kind                          | Today                     |
-|----------------------------------|-----------------------------------------------------|-------------------------------|---------------------------|
-| `maxLightJobsPerFrame`           | `SettingsManager.cs:386`                            | user setting `[Range(1,128)]` | `32`                      |
-| `maxMeshRebuildsPerFrame`        | `SettingsManager.cs:376`                            | user setting `[Range(1,50)]`  | `10`                      |
-| In-flight mesh cap               | `World.cs:1669` (`JobManager.MeshJobs.Count < 20`)  | hardcoded literal             | `20`                      |
-| `ChunkJobArrayPool` retention    | `ChunkJobArrayPool.cs:31` (`MAX_RETAINED_PER_TYPE`) | `private const`               | `512` (≈96 MB worst case) |
-| Pool prune buffer / multipliers  | `ChunkPoolManager.cs:32,107,113,116`                | `private const`               | `1.25`, ×2, ×8            |
+| Knob                             | Location                                            | Kind                          | Today                                   |
+|----------------------------------|-----------------------------------------------------|-------------------------------|-----------------------------------------|
+| `maxLightJobsPerFrame`           | `SettingsManager.cs:386`                            | user setting `[Range(1,128)]` | `32`                                    |
+| `maxMeshRebuildsPerFrame`        | `SettingsManager.cs:376`                            | user setting `[Range(1,50)]`  | `10`                                    |
+| In-flight mesh cap               | `World.cs:1669` (`JobManager.MeshJobs.Count < 20`)  | hardcoded literal             | `20`                                    |
+| `ChunkJobArrayPool` retention    | `ChunkJobArrayPool.cs:31` (`MAX_RETAINED_PER_TYPE`) | `private const`               | `512` (≈96 MB worst case)               |
+| Pool prune buffer / multipliers  | `ChunkPoolManager.cs:32,107,113,116`                | `private const`               | `1.25`, ×2, ×8                          |
 | `viewDistance` (default + range) | `SettingsManager.cs:169`                            | user setting `[Range(1,32)]`  | default `5` (**`10` since 2026-08-17**) |
-| `maxInitialLoadRadius`           | `SettingsManager.cs:367`                            | user setting                  | `10` (secondary)          |
-| `maxStructureModsPerFrame`       | `SettingsManager.cs:397`                            | user setting                  | `5000` (secondary)        |
+| `maxInitialLoadRadius`           | `SettingsManager.cs:367`                            | user setting                  | `10` (secondary)                        |
+| `maxStructureModsPerFrame`       | `SettingsManager.cs:397`                            | user setting                  | `5000` (secondary)                      |
 
 Note the in-flight cap (`20`) and the pool retention (`512`) are already **coupled by hand** — the
 `ChunkJobArrayPool` doc comment sizes `512` as `(32 lighting + 20 mesh) × 9 buffers`. Centralizing both

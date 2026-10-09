@@ -55,18 +55,18 @@ modding), and multiplayer — which is listed as a reopen trigger (§6), not eva
 
 ## 2. Current state
 
-| Item | State | Source |
-|---|---|---|
-| Entities / Entities Graphics / Unity Physics / Netcode | **Not installed.** All four ship inside the 6000.6.4f1 editor as **core packages, version 6.6.0** — installing is a manifest line, not a download | manifest + bundled `package.json` |
-| Burst / Collections / Mathematics | 2.0.0 / 6.6.0 (core) / 1.4.0 — already the backbone of every job | manifest, lock file |
-| ECS code in `Assets/` | **None** (`Unity.Entities`, `IComponentData`, `ISystem`, `SystemBase`, `EntityManager`: zero hits); no `GetInstanceID` use either, so the InstanceID → `EntityId` deprecation costs nothing | grep |
-| Jobs in use | 12 job structs (9 `IJob`, 2 `IJobFor`, 1 `IJobParallelFor`), 74 native hash-map/queue/stream references | grep |
-| Renderer | URP 17.6 renderer `m_RenderingMode: 0` = **Forward**, not Forward+ | `VoxelEngine-URP-Renderer.asset:68` |
-| Block shaders | Forward pass only; no `DOTS_INSTANCING_ON` variants | the three block `.shader` files |
-| Physics | Custom `VoxelRigidbody` against the voxel grid; no PhysX colliders | `Physics/VoxelRigidbody.cs` |
-| Orchestration | Managed `World` (5 877 lines) + `WorldJobManager` (2 239) | — |
-| Validation | ~36 editor `Validate …` suites driving pure helpers and job structs directly | `Assets/Editor` |
-| Package policy | `assetbundle`, `unityanalytics`, `unitywebrequest` deliberately removed (lean package set) | memory + manifest |
+| Item                                                   | State                                                                                                                                                                                       | Source                              |
+|--------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------|
+| Entities / Entities Graphics / Unity Physics / Netcode | **Not installed.** All four ship inside the 6000.6.4f1 editor as **core packages, version 6.6.0** — installing is a manifest line, not a download                                           | manifest + bundled `package.json`   |
+| Burst / Collections / Mathematics                      | 2.0.0 / 6.6.0 (core) / 1.4.0 — already the backbone of every job                                                                                                                            | manifest, lock file                 |
+| ECS code in `Assets/`                                  | **None** (`Unity.Entities`, `IComponentData`, `ISystem`, `SystemBase`, `EntityManager`: zero hits); no `GetInstanceID` use either, so the InstanceID → `EntityId` deprecation costs nothing | grep                                |
+| Jobs in use                                            | 12 job structs (9 `IJob`, 2 `IJobFor`, 1 `IJobParallelFor`), 74 native hash-map/queue/stream references                                                                                     | grep                                |
+| Renderer                                               | URP 17.6 renderer `m_RenderingMode: 0` = **Forward**, not Forward+                                                                                                                          | `VoxelEngine-URP-Renderer.asset:68` |
+| Block shaders                                          | Forward pass only; no `DOTS_INSTANCING_ON` variants                                                                                                                                         | the three block `.shader` files     |
+| Physics                                                | Custom `VoxelRigidbody` against the voxel grid; no PhysX colliders                                                                                                                          | `Physics/VoxelRigidbody.cs`         |
+| Orchestration                                          | Managed `World` (5 877 lines) + `WorldJobManager` (2 239)                                                                                                                                   | —                                   |
+| Validation                                             | ~36 editor `Validate …` suites driving pure helpers and job structs directly                                                                                                                | `Assets/Editor`                     |
+| Package policy                                         | `assetbundle`, `unityanalytics`, `unitywebrequest` deliberately removed (lean package set)                                                                                                  | memory + manifest                   |
 
 ---
 
@@ -108,15 +108,15 @@ modding), and multiplayer — which is listed as a reopen trigger (§6), not eva
 
 ## 4. Per-subsystem verdicts
 
-| ID | Subsystem | ECS benefit | Cost / risk | Verdict |
-|---|---|---|---|---|
-| **EC-1** | Chunk data storage | Native memory, queries, inspector | Rewrite storage + every reader; per-type safety; structural churn | **REJECT** → `ES-18` |
-| **EC-2** | Pipeline orchestration | Automatic dependencies, ordered systems | ~8.1 k lines; re-prove lifecycle invariants; LP-8 + suites invalidated | **REJECT** — borrow one pattern |
-| **EC-3** | Section rendering (Entities Graphics) | Unity-maintained BRG path | Forward+ switch, DOTS-instancing variants, still one `Mesh` per section | **REJECT** → `ES-20`, BRG-direct first |
-| **EC-4** | Fluid / behavior tick | None — TG-4 already Burst + parallel | Rewrite for nothing | **REJECT** |
-| **EC-5** | Lighting BFS | None | Cross-entity writes need ECBs or disabled safety; re-prove seam baselines | **REJECT** → `ES-18b` |
-| **EC-6** | Future dynamic entities (items, projectiles, mobs, particles) | **Real** — thousands of identical instances, textbook `IJobEntity` | Package install, hybrid boundary | **DEFER** until §6 triggers, then **PARTIAL** |
-| **EC-7** | Physics (Unity Physics) | Nothing for terrain | Per-section collider generation on every remesh | **REJECT** for terrain; **DEFER** for rigid props |
+| ID       | Subsystem                                                     | ECS benefit                                                        | Cost / risk                                                               | Verdict                                           |
+|----------|---------------------------------------------------------------|--------------------------------------------------------------------|---------------------------------------------------------------------------|---------------------------------------------------|
+| **EC-1** | Chunk data storage                                            | Native memory, queries, inspector                                  | Rewrite storage + every reader; per-type safety; structural churn         | **REJECT** → `ES-18`                              |
+| **EC-2** | Pipeline orchestration                                        | Automatic dependencies, ordered systems                            | ~8.1 k lines; re-prove lifecycle invariants; LP-8 + suites invalidated    | **REJECT** — borrow one pattern                   |
+| **EC-3** | Section rendering (Entities Graphics)                         | Unity-maintained BRG path                                          | Forward+ switch, DOTS-instancing variants, still one `Mesh` per section   | **REJECT** → `ES-20`, BRG-direct first            |
+| **EC-4** | Fluid / behavior tick                                         | None — TG-4 already Burst + parallel                               | Rewrite for nothing                                                       | **REJECT**                                        |
+| **EC-5** | Lighting BFS                                                  | None                                                               | Cross-entity writes need ECBs or disabled safety; re-prove seam baselines | **REJECT** → `ES-18b`                             |
+| **EC-6** | Future dynamic entities (items, projectiles, mobs, particles) | **Real** — thousands of identical instances, textbook `IJobEntity` | Package install, hybrid boundary                                          | **DEFER** until §6 triggers, then **PARTIAL**     |
+| **EC-7** | Physics (Unity Physics)                                       | Nothing for terrain                                                | Per-section collider generation on every remesh                           | **REJECT** for terrain; **DEFER** for rigid props |
 
 **EC-1 — Chunk storage.** A section would be an entity holding `[InternalBufferCapacity(0)]`
 `DynamicBuffer`s of voxels and light — the same heap-array memory model as ES-18a, with less control.
@@ -235,13 +235,13 @@ suites and the static/domain-reload rules carry on unchanged.
 
 ## 8. Rejected alternatives
 
-| Alternative | Why rejected | Date |
-|---|---|---|
-| Full ECS migration | Pays ≈8 k lines + every harness + Forward+ for one deferred benefit (§5 Option A) | 2026-10-02 |
-| Sections as entities with `DynamicBuffer` voxels | Per-type safety blocks per-section concurrency; streaming = structural changes (EC-1) | 2026-10-02 |
-| Entities Graphics for terrain | Forward+ + DOTS-instancing tax, no batching win for unique meshes, no indirect/procedural path (EC-3) | 2026-10-02 |
-| One entity per voxel / per active voxel | Violates the packed-`uint` constraint; documented community failure | 2026-10-02 |
-| Unity Physics for terrain collision | Per-section colliders rebuilt on every remesh; custom sweep already fits (EC-7) | 2026-10-02 |
+| Alternative                                      | Why rejected                                                                                          | Date       |
+|--------------------------------------------------|-------------------------------------------------------------------------------------------------------|------------|
+| Full ECS migration                               | Pays ≈8 k lines + every harness + Forward+ for one deferred benefit (§5 Option A)                     | 2026-10-02 |
+| Sections as entities with `DynamicBuffer` voxels | Per-type safety blocks per-section concurrency; streaming = structural changes (EC-1)                 | 2026-10-02 |
+| Entities Graphics for terrain                    | Forward+ + DOTS-instancing tax, no batching win for unique meshes, no indirect/procedural path (EC-3) | 2026-10-02 |
+| One entity per voxel / per active voxel          | Violates the packed-`uint` constraint; documented community failure                                   | 2026-10-02 |
+| Unity Physics for terrain collision              | Per-section colliders rebuilt on every remesh; custom sweep already fits (EC-7)                       | 2026-10-02 |
 
 ---
 

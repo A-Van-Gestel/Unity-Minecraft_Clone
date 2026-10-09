@@ -54,16 +54,16 @@ Findings were verified in code, not assumed.
 
 ## 2. Current state
 
-| Area | Behaviour today |
-|-----------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `Time.timeScale` | **Never written.** Repo-wide search finds only a comment. Unity's time step runs at full speed always. |
-| Input / cursor | `WorldUIManager.InUI = IsCreativeInventoryOpen \|\| IsPauseMenuOpen` gates player input and cursor lock. This is the entire extent of "pause" today. |
-| Chunk generation | Runs. `World.Update` drives `ProcessGenerationJobs` → `DrainGenerationRequests` every frame regardless of UI state. |
-| Meshing / lighting | Runs. Same pass sequence, same budgets. |
-| Fluids / block ticks | Run. `ProcessTickUpdates` accumulates `Time.deltaTime` against `VoxelData.TickLength`. |
-| Day/night clock | **Halts** while `IsPauseMenuOpen` — `World.AdvanceWorldTime`, added by RF-1 (2026-08-10). The only system that stops, and the reason this doc exists. |
-| Physics | Runs. `VoxelRigidbody` integrates in `FixedUpdate`. |
-| Cloud drift / sway | Run. Both are shader-time driven (`FoliageSway`, `CloudShader`), so they ignore any C#-side gate by construction. |
+| Area                 | Behaviour today                                                                                                                                       |
+|----------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `Time.timeScale`     | **Never written.** Repo-wide search finds only a comment. Unity's time step runs at full speed always.                                                |
+| Input / cursor       | `WorldUIManager.InUI = IsCreativeInventoryOpen \|\| IsPauseMenuOpen` gates player input and cursor lock. This is the entire extent of "pause" today.  |
+| Chunk generation     | Runs. `World.Update` drives `ProcessGenerationJobs` → `DrainGenerationRequests` every frame regardless of UI state.                                   |
+| Meshing / lighting   | Runs. Same pass sequence, same budgets.                                                                                                               |
+| Fluids / block ticks | Run. `ProcessTickUpdates` accumulates `Time.deltaTime` against `VoxelData.TickLength`.                                                                |
+| Day/night clock      | **Halts** while `IsPauseMenuOpen` — `World.AdvanceWorldTime`, added by RF-1 (2026-08-10). The only system that stops, and the reason this doc exists. |
+| Physics              | Runs. `VoxelRigidbody` integrates in `FixedUpdate`.                                                                                                   |
+| Cloud drift / sway   | Run. Both are shader-time driven (`FoliageSway`, `CloudShader`), so they ignore any C#-side gate by construction.                                     |
 
 **The inconsistency to resolve.** RF-1 was asked for "a full time freeze when paused" and delivered
 exactly that, but the request was made under the reasonable assumption that pausing already stopped
@@ -152,23 +152,23 @@ pausing frame rather than left half-processed:
 
 ## 5. What deliberately does not pause
 
-| System | Rationale |
+| System                    | Rationale                                                                                                                |
 |---------------------------|--------------------------------------------------------------------------------------------------------------------------|
-| Console (`/`) open | The console is a debugging surface; freezing the world while typing would make it useless for observing live behaviour. |
-| Creative inventory open | Long-standing behaviour, and the inventory is used mid-flight. Changing it is out of scope. |
+| Console (`/`) open        | The console is a debugging surface; freezing the world while typing would make it useless for observing live behaviour.  |
+| Creative inventory open   | Long-standing behaviour, and the inventory is used mid-flight. Changing it is out of scope.                              |
 | Cloud drift, foliage sway | Shader-time driven; a C# gate cannot reach them without a new "paused time" global. Cosmetic, and motion reads as alive. |
-| Editor play-mode pause | Unity's own pause already stops `Update` entirely; no engine involvement needed. |
+| Editor play-mode pause    | Unity's own pause already stops `Update` entirely; no engine involvement needed.                                         |
 
 ---
 
 ## 6. Phased implementation plan
 
-| Phase    | Scope                                                                                                              | Effort | Depends on |
-|----------|--------------------------------------------------------------------------------------------------------------------|:------:|------------|
+| Phase    | Scope                                                                                                                                                                                                                            | Effort | Depends on |
+|----------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|------------|
 | **PA-0** | `World.IsSimulationPaused` + the `Update` prologue/body split, with only `WorldTimeManager.Tick` gated (behaviour-identical to RF-1's shipped gate, but through the new seam). Validation: a scenario driving the flag directly. |   🟢   | —          |
-| **PA-1** | Gate the tick/fluid passes. Validation: fluid column does not advance across a paused span; resumes identically.     |   🟡   | PA-0       |
+| **PA-1** | Gate the tick/fluid passes. Validation: fluid column does not advance across a paused span; resumes identically.                                                                                                                 |   🟡   | PA-0       |
 | **PA-2** | Gate the generation/meshing/lighting sequence incl. §4.2's drain contract. Validation: no chunk left mid-transition; `Validate All` green; the `chunk-lifecycle` invariants re-checked.                                          |   🔴   | PA-1       |
-| **PA-3** | Telemetry: exclude paused frames from the participation denominator (§4.2).                                          |   🟢   | PA-2       |
+| **PA-3** | Telemetry: exclude paused frames from the participation denominator (§4.2).                                                                                                                                                      |   🟢   | PA-2       |
 
 **Validation baselines are built alongside each phase.** PA-0/PA-1 extend the World Clock and
 Behavior suites; PA-2 belongs to the Pipeline Backpressure and Meshing suites, whose fixtures
@@ -178,23 +178,23 @@ already drive `World.Update`-equivalent pass sequences headlessly.
 
 ## 7. Constraint compliance
 
-| Constraint                | How this design satisfies it                                                                                   |
-|---------------------------|------------------------------------------------------------------------------------------------------------------|
-| Packed-`uint` voxel data  | Untouched — no voxel, light, or section data is read or written by a pause gate.                               |
-| Burst job compatibility   | The gate is main-thread managed state; no job struct changes. Jobs are drained, never cancelled mid-flight.     |
-| No hot-path GC            | One bool read per pass sequence per frame. No allocation.                                                       |
-| Pooling                   | Unaffected; the pool-prune linger window is wall-clock based and keeps running (correct — a pause is not demand). |
-| Serialization             | **No on-disk change.** Pause is transient session state and is deliberately not persisted.                      |
+| Constraint               | How this design satisfies it                                                                                      |
+|--------------------------|-------------------------------------------------------------------------------------------------------------------|
+| Packed-`uint` voxel data | Untouched — no voxel, light, or section data is read or written by a pause gate.                                  |
+| Burst job compatibility  | The gate is main-thread managed state; no job struct changes. Jobs are drained, never cancelled mid-flight.       |
+| No hot-path GC           | One bool read per pass sequence per frame. No allocation.                                                         |
+| Pooling                  | Unaffected; the pool-prune linger window is wall-clock based and keeps running (correct — a pause is not demand). |
+| Serialization            | **No on-disk change.** Pause is transient session state and is deliberately not persisted.                        |
 
 ---
 
 ## 8. Extension roadmap
 
-| Version | Item                                                                                                       |
-|---------|--------------------------------------------------------------------------------------------------------------|
+| Version | Item                                                                                                                                                                   |
+|---------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | v2      | Pause on application focus loss (`OnApplicationFocus`), gated by a setting — desirable on laptops, but needs care not to pause during an alt-tabbed benchmark capture. |
-| v2      | A distinct **background throttle** (reduced tick rate rather than full halt) for AFK, reusing P-4's FPS-cap-proportional ceiling scaling rather than the pause gate.    |
-| v3      | Pausing audio and ambience once `SOUND_ENGINE_DESIGN.md` ships.                                            |
+| v2      | A distinct **background throttle** (reduced tick rate rather than full halt) for AFK, reusing P-4's FPS-cap-proportional ceiling scaling rather than the pause gate.   |
+| v3      | Pausing audio and ambience once `SOUND_ENGINE_DESIGN.md` ships.                                                                                                        |
 
 ---
 
