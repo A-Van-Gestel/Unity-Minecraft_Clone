@@ -318,7 +318,7 @@ The obvious "delete the unused variants" move is **wrong**, and this is the part
 the weight faces, not orphans. `Monocraft.asset` itself is the TMP default font
 (`TMP Settings.asset:27`) with 29 referrers.
 
-**Verdict — ⛔ declined (owner decision, 2026-09-17).** Atlas regeneration on this project is
+**Verdict — ⛔ declined (2026-09-17).** Atlas regeneration on this project is
 finicky: the fonts turn boxy or soft at different resolutions and font sizes, and the current
 settings render correctly in the common cases. The ~96 MB was real but the risk is to text
 legibility everywhere, and regeneration would additionally add ~280 MB of fresh blobs to git history
@@ -339,7 +339,7 @@ Re-importing at a lower quality would **not** disturb the sound engine's authore
 `AudioLoudnessAnalyzer.Measure` runs ffmpeg against the **source** `.ogg` file, and import settings
 never modify sources. That was the plausible-looking coupling, and it does not exist.
 
-**Verdict — ⛔ declined (owner decision, 2026-09-17).** Music stays at highest quality; the ~40–50 MB
+**Verdict — ⛔ declined (2026-09-17).** Music stays at highest quality; the ~40–50 MB
 is not worth trading audible fidelity for. Note for any future revisit: the knob is one float on
 `defaultSampleSettings`, fully reversible, and the honest gate is a fresh player build — the
 auditor's size data comes from the build report, not from the project.
@@ -358,8 +358,8 @@ reference in code.
 **Gap / finding:** ~18 MB of build payload for four faces nothing points at. Unlike `AU-4` this
 needs no regeneration — it is a deletion.
 
-**Proposal:** owner decision, not a mechanical cleanup: content deletion is curated by the project
-owner, and a font that is unreferenced today may still be intended for a future UI. If accepted,
+**Proposal:** a curation decision, not a mechanical cleanup: content is curated by deletion, and a font
+that is unreferenced today may still be intended for a future UI, so it goes only on explicit approval. If accepted,
 delete through the `unity-file-ops` skill (asset + `.meta` together), one commit, then confirm the
 console shows no missing-script/GUID errors and `Monocraft.asset`'s fallback entry still resolves.
 

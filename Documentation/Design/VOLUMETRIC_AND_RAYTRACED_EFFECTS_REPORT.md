@@ -263,7 +263,8 @@ occlusion a planned consumer, and AO is a harsher client than fog in three ways:
    **5-chunk radius** — half of today's default `viewDistance` of 10, and a quarter of the 20 that
    `FP-4`'s IL2CPP sweep also used.
 
-**Owner steer (2026-08-09): the volume should be view-distance aware.** The honest counter is that a
+**Requirement (2026-08-09): the volume should be view-distance aware**, because point 3's default
+radius covers only half the default view distance. The honest counter is that a
 uniform-resolution volume scales **quadratically** in horizontal radius:
 
 | View distance | Volume (voxels) | `_VoxelOccupancyVolume` (R8) | `_VoxelLightVolume` (R16) | Total       |
@@ -282,7 +283,7 @@ whoever plans VX-1, not a decision):
   light, and it is why `SS-3` is permanent infrastructure rather than a stopgap.
 - **Decouple the two volumes' radii.** Occupancy (R8) is half the cost of light (R16) and AO is the
   shorter-range effect; fog wants reach, AO wants detail.
-- **⚠️ Offset, raised by the owner and worth pricing rather than assuming:** per-pixel AO is the one
+- **⚠️ Offset, worth pricing rather than assuming:** per-pixel AO is the one
   route that retires `MR-8`'s *AO* merge constraint (see VX-8 below), and `MR-8` claims a 60–90 %
   vertex cut. If that lands, the mesh memory freed could pay for a larger volume. **Do not treat this
   as banked** — `MR-8` is gated on its own design doc and on harness gap `MH-8`, and the two costs
@@ -586,7 +587,7 @@ means the line must **not** be relaxed later as a convenience:
 So VX-8 moves *where light is stored*; it does not and cannot fix *what an occlusion value is*. The
 two are orthogonal and compose: `SS-*` is the model, VX-8 is the container.
 
-**A cheap consumer this unlocks, for `VX-5`'s attention — now an owner-endorsed destination
+**A cheap consumer this unlocks, for `VX-5`'s attention — now an endorsed destination
 (updated 2026-08-09).** VX-1's volumes let a fragment shader tap the 3×3 in the layer in front of its
 face and evaluate `SS-*`'s Euclidean distance-to-silhouette field **per pixel** — zero vertex cost,
 and `SILHOUETTE_CONTACT_SHADOWS.md`'s **D7** was decided with this as where that design ends up.
@@ -717,7 +718,7 @@ but v2+ is best scheduled after RF-1 ships.
 * **v1.5** - **`GS-4` de-staled** (2026-08-15, no scope change). `GS-4` closed having added Render Scale
   and MSAA settings but **no device-tier mechanism**, so it constrains nothing here and each `VX-*` item
   must carry its own quality gating and its own pass-cost capture. `GS-2` remains open and still binds.
-* **v1.4** - **VX-1 gains a committed AO consumer and a requirement it does not yet meet; VX-8's per-pixel-AO aside upgraded from an idea to an endorsed destination** (2026-08-09, no scope change to either item). `SILHOUETTE_CONTACT_SHADOWS.md`'s D7 was decided as "build `SS-3` now, per-pixel on VX-1 later", which makes AO a planned client of these volumes — and a harsher one than fog: it needs **both** volumes (post-`SS-2a` occlusion enters the light weights, so per-cell light is required), it has **no graceful out-of-volume degradation** (corner shadows stop at a fixed radius instead of thinning), and the default ≈ 5-chunk radius is half to a quarter of the view distances `FP-4` swept. Owner steer that the volume be **view-distance aware** is recorded with the quadratic memory it implies (9.4 MB at vd 5 → 37.5 MB at 10 → **150 MB at 20**) and three unchosen answers: cascades, decoupled per-volume radii, and the `MR-8` vertex saving as a possible offset (**explicitly not banked** — different budgets, and MR-8 is gated on MH-8). Also corrected: analytic per-pixel AO **does** retire MR-8's AO merge constraint, because that constraint's justification is about *filtered baked* channels and does not apply to per-fragment evaluation
+* **v1.4** - **VX-1 gains a committed AO consumer and a requirement it does not yet meet; VX-8's per-pixel-AO aside upgraded from an idea to an endorsed destination** (2026-08-09, no scope change to either item). `SILHOUETTE_CONTACT_SHADOWS.md`'s D7 was decided as "build `SS-3` now, per-pixel on VX-1 later", which makes AO a planned client of these volumes — and a harsher one than fog: it needs **both** volumes (post-`SS-2a` occlusion enters the light weights, so per-cell light is required), it has **no graceful out-of-volume degradation** (corner shadows stop at a fixed radius instead of thinning), and the default ≈ 5-chunk radius is half to a quarter of the view distances `FP-4` swept. The requirement that the volume be **view-distance aware** is recorded with the quadratic memory it implies (9.4 MB at vd 5 → 37.5 MB at 10 → **150 MB at 20**) and three unchosen answers: cascades, decoupled per-volume radii, and the `MR-8` vertex saving as a possible offset (**explicitly not banked** — different budgets, and MR-8 is gated on MH-8). Also corrected: analytic per-pixel AO **does** retire MR-8's AO merge constraint, because that constraint's justification is about *filtered baked* channels and does not apply to per-fragment evaluation
 * **v1.3** - **VX-8 gains the technical reason behind its "vertex AO stays vertex-baked" line**, supplied by the new `SILHOUETTE_CONTACT_SHADOWS.md` (`SS-*`) design: hardware trilinear filtering is a product of three per-axis linear ramps, which is exactly the separable weighting that produces the engine's round-blob AO artifact, and one texel per voxel cannot locate a partial block inside its cell. So a light volume would reproduce both artifacts rather than fix either — the line is now a constraint with a reason, not a scoping choice. Also recorded on VX-8: a cheap consumer for `VX-5`'s attention — per-pixel evaluation of `SS-*`'s distance field on VX-1's occupancy volume would deliver full-cube contact shadows at zero vertex cost and retire that design's expensive `SS-3` phase, while AO can never be *baked* into a volume because it is face-dependent (~157 MB for six directional volumes at 2x, against VX-1's 3.3 MB). No item added or changed
 * **v1.2** - Routing note: the gap sweep's non-volumetric ideas were documented in their owning
   reports (RF-2 §6 sky ambience, RF-3 §5 extra post effects, RF-7 §6 lightning sketch, new RF-8

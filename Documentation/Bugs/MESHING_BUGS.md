@@ -20,7 +20,7 @@ This document outlines **open** bugs related to the current meshing implementati
 **Severity:** Low–Medium (cosmetic, but widespread)  
 **Status:** Open — **cause not yet established.** May belong in
 [`LIGHTING_BUGS.md`](./LIGHTING_BUGS.md); the diagnostic below decides.  
-**Found:** 2026-08-08, owner's in-game visual review.
+**Found:** 2026-08-08, in-game visual review.
 
 **Description:**
 Large open floor areas show faint brighter streaks radiating outward, several blocks long, forming a
