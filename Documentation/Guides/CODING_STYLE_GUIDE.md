@@ -191,7 +191,49 @@ private int _maxLightJobsPerFrame = 8;
 private int _maxLightJobsPerFrame;
 ```
 
+### No backlog IDs in user-facing strings
+
+Design-doc and backlog IDs (`RF-2`, `CL-3`, `FL-2`, `CP-1`) never appear in `[Header]`, `[Tooltip]`,
+`GUIContent`, editor-window labels or any other string a tool's user reads — they are roadmap
+bookkeeping that means nothing there. Code comments and XML docs may use them freely; they help
+navigation. `EditorGUILayout.PropertyField` draws `[Header]` decorators, so an ID in a ScriptableObject's
+header leaks into every custom window that draws that property.
+
+```csharp
+// Good
+[Header("Sky")]
+
+// Bad
+[Header("Sky (RF-2)")]
+```
+
 ## 5. General Principles & Best Practices
+
+- **Host interfaces are implemented explicitly.** When a helper reaches back into `World` or
+  `WorldJobManager` through a host interface (`IMeshDrainHost`, `IJobCompletionDriver<ChunkCoord>`,
+  `IMeshCompletionHost`), implement every member as `bool IMeshDrainHost.TrySchedule(...)`, not
+  `public bool TrySchedule(...)`, keep the member's docstring (`/// <inheritdoc />`, or its own summary where
+  it adds a host-specific rationale, as `World`'s do), and give the reason in the region comment.
+  Both types are reachable from anywhere, and these members carry buffer-lifecycle operations — a
+  public `ReleaseJobData` invites a second call that returns a pooled buffer twice, so two in-flight
+  jobs share it. The driver holds the interface type, so no call site changes.
+
+- **Public voxel/light queries guard their own bounds.** Copy the guard from the nearest sibling query
+  before writing the body — in this engine the folded
+  `if ((uint)y >= VoxelData.ChunkHeight) { result = default; return false; }`, which rejects `y < 0` and
+  `y >= ChunkHeight` in one test. `ChunkData`'s `AssertLocalPositionInChunk` is
+  `[Conditional("UNITY_ENABLE_CHECKS")]`, so it compiles out of every player without that define (any
+  Release managed code variant, Mono or IL2CPP), and an unguarded query in production is a position lottery — a
+  silent uniform-sky read, a silent wrong-voxel alias, or an `IndexOutOfRangeException` — and
+  callers that sample the voxel *above* a candidate reach `y == ChunkHeight` by construction.
+
+- **Never draw from `UnityEngine.Random` outside world generation.** `World` seeds the single
+  process-wide stream with `Random.InitState(VoxelData.Seed)` and generation draws from it, while
+  `Awake` order between components is undefined — so a `Random.Range` in any World-scene
+  `Awake`/`OnEnable` makes a seeded world generate differently depending on initialization order, and
+  any other `Random.InitState` reseeds everyone. For per-session entropy use a source with its own
+  state: `unchecked((uint)System.Guid.NewGuid().GetHashCode())` or a `System.Random` instance
+  (`Environment.TickCount` is millisecond-resolution, so same-frame callers collide).
 
 - **Cache Component References:** In `MonoBehaviour` scripts, get references to components in `Awake()` or `Start()` and store them in private fields. Do not repeatedly call `GetComponent()` in `Update()`.
 

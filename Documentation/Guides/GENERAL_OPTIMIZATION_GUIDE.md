@@ -169,6 +169,7 @@ If a value is expensive to calculate (e.g., `Mathf.PerlinNoise` or World Coordin
 
 * **Structs (Value Types):** Stored on the stack or inline in arrays.
     * **Warning (Boxing):** Never cast a struct to `object` or an `Interface` (e.g., `List<IMyInterface>`). This forces the struct onto the Heap ("Boxing"), causing memory allocations that are often worse than just using a Class.
+    * **Consume a struct-implemented interface through a generic constraint.** An interface-typed parameter, field or collection is the smell, not the interface: `void F(IFoo x)` boxes a struct argument at every call, `void F<T>(T x) where T : IFoo` dispatches through `constrained callvirt` with no allocation. House examples: `LightingScanDecision` (`where TGates : INeighborGates`), `ChunkData` (`where TObstruction : struct, IBlockObstruction`). Null checks belong at the lookup that can miss, not inside the generic method.
 * **Classes (Reference Types):** Stored on the heap. Creating them generates Garbage.
 
 ---
@@ -202,6 +203,11 @@ If a value is expensive to calculate (e.g., `Mathf.PerlinNoise` or World Coordin
     * **Bad:** `text.text = "Coords: " + x + ", " + y;` (Allocates new strings every frame).
     * **Good:** Use `StringBuilder` for complex strings.
     * **Note:** C# String Interpolation (`$"{x}"`) on .NET Framework API Compatibility typically allocates in both Mono (dev) and IL2CPP (production) backends. Avoid in hot paths.
+    * **`StringBuilder.Append(int)` / `Append(long)` allocate** a string per call (~24–32 B); `Append(char)` does not. On any path claimed allocation-free, use `Helpers.UI.StringBuilderFormat.AppendInteger` (and the other `StringBuilderFormat` helpers, which route through it).
+4. **UI text allocates below your code:**
+    * **TMP `SetText` allocates in the Editor only.** Every overload (`StringBuilder`, `char[]`, span, format) syncs `m_text` under `#if UNITY_EDITOR`, so each text *change* allocates its string in the Editor, Play mode included; players allocate nothing. Skip `SetText` when the shown value is unchanged, and count TMP's floor separately before blaming your own code.
+    * **IMGUI `GUI.Label` allocates on every call** (`GUIContent.Temp` copies the string, `GUIStyle.Internal_DrawContent` allocates too). Cached strings remove only your own formatting garbage; a cached `GUIContent` removes the copy but not the draw. Only leaving IMGUI (uGUI/TMP) removes it.
+5. **Measuring an allocation in the Editor:** read `ProfilerRecorder.StartNew(ProfilerCategory.Memory, "GC Allocated In Frame").CurrentValue` before and after running the path N times inside one synchronous call (a menu item or `run_script` — no frame boundary in between). The delta is exact bytes; the shipped pattern is `Assets/Editor/Benchmarking/DebugHudAllocationBenchmark.cs`. Judge the second run after a recompile (the first includes one-time init), and run benchmark menus one at a time. `GC.GetTotalMemory` deltas miss allocations that reuse freed memory, and `GC.GetAllocatedBytesForCurrentThread()` reads 0 here — neither supports a "zero allocations" claim.
 
 ### Advanced Pooling Architectures
 
@@ -242,6 +248,30 @@ Used for temporary, short-lived standard C# collections (`List<T>`, `HashSet<T>`
 * **The Hazard:** If you allocate a collection with `new HashSet<T>()` and later pass it into `HashSetPool<T>.Release()`, you have poisoned the pool. If another script or system kept a reference to that original object, both systems now think they own the exact same memory. When
   the pool auto-clears the collection, it will silently corrupt the other script's data.
 * **The Rule:** **Never mix `new` and `Pool.Release`.** If an object is going to be released to a pool, it *must* have been acquired from that pool via `.Get()`.
+
+### Native Container Teardown: `IsCreated` Is Not a Liveness Test
+
+`NativeArray<T>` is a struct (a pointer plus a safety handle). The project's `Dispose` idiom hoists `readonly` fields to locals to avoid defensive copies — and disposing that **copy** frees the buffer while the field keeps its original pointer. From then on `field.IsCreated` returns `true` forever, reading the field throws in the Editor and is undefined under IL2CPP, and a second `Dispose()` throws because its own `IsCreated` guards never fire.
+
+```csharp
+// Bad: the guard has never fired, and Dispose is not idempotent
+if (owner == null || !owner.Templates.IsCreated) return;
+
+// Good: the owning type tracks its own state
+public bool IsDisposed { get; private set; }
+
+public void Dispose()
+{
+    if (IsDisposed) return;
+    NativeArray<float> templates = Templates;
+    if (templates.IsCreated) templates.Dispose();
+    IsDisposed = true;
+}
+```
+
+The `owner == null` half is usually wrong too: Unity teardown paths dispose without nulling the field (`World.OnDestroy`). Pattern in use: `Data.JobData.JobDataManager`, `Data.NativeData.FluidVertexTemplatesNativeData`.
+
+**Never free job-read native memory on `Application.quitting`.** The measured quit order is `OnApplicationQuit` → `Application.quitting` (World still alive) → `OnDestroy`, and World completes its jobs only in `OnDestroy` (`JobManager.Dispose()`), so jobs can still be reading at `quitting` — a use-after-free that is silent in Master. Mark the quit there and release after the jobs complete (`BurstVoxelData.ReleaseAfterQuit()` from `World.OnDestroy`). In the Editor `quitting` also fires on Play exit while `[InitializeOnLoadMethod]` statics are not re-created, so disposing edit-mode-shared data there breaks editor tools. Leaks show in a **Development** player's `Player.log` ("Leak Detected : Persistent allocates N"); a clean Master log proves nothing. Measure an event order (subscribe a logger via `unity command eval`, stop Play, read the console) rather than recall it.
 
 ### Method Inlining (`[MethodImpl(MethodImplOptions.AggressiveInlining)]`)
 
