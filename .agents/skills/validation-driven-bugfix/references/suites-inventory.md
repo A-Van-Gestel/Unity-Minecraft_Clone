@@ -93,6 +93,12 @@ independently. Three scenario categories: **Baseline** (`.Baseline.cs`, controll
 **Data-audit** (`.DataAudit.cs`, inspects the **real** `BlockDatabase.asset` for ray-tunneling
 `placementCanReplaceTags`), and **Regression** (`.Regression.cs`).
 
+**Far coordinates need no harness work:** `PlacementTestWorld` takes any origin chunk, and
+`.Baseline.FarCoordinate.cs` is the pattern (both directions asserted at each magnitude, anchors
+declared as a chunk index). `World.BorderRadius` defaults to `0`, which disables the border check
+outright, so a far scenario must never call `SetBorderRadius`: the border would reject the far cell
+and void the occupancy assertion silently.
+
 ### MeshQueue (`MeshQueue/`) and LightScheduler (`LightScheduler/`)
 
 Both test a pure managed data structure in isolation (no Burst, jobs, or world state): the MT-1

@@ -64,8 +64,29 @@ writing a baseline, running a prove-red, or writing "closed" into a doc.
   (`Equal`/`IsZero`) is for "copied unmodified", "a 0/1 gate", "a reserved channel is exactly 0";
   `Mathf.Approximately` or an epsilon is for anything computed or read back. A tolerance on an
   exactness claim accepts 0.999 and is weaker than the raw `==`. Needs `using Editor.Validation.Framework;`.
+- **An intermediate flag cannot catch an ordering bug.** Physics `B41` asserts a jump request is not
+  latched and stays green when the jump is armed a tick late; `B43` asserts the outcome (peak == final,
+  jump counter unchanged) and reds. Assert the observable result, not a step on the way to it.
+- **A fixture at a balance point satisfies a directional assertion by cancellation.** A falling column
+  open on four sides yields outward vectors whose mean is exactly zero, so "no horizontal push" passed
+  without the fix (the wall-backed fixture discriminates); a fluid at buoyancy 1 cancels gravity, so a
+  "body loses the vertical contest" scenario passes for free (`Id.SinkingFluid` exists for this).
+- **Derive expected values from the suite's own constants, never from the constant under test.** The
+  first Performance Monitor `B32` computed its expected age from `PerfStore.RowFinalAge`, and an
+  off-by-one in that constant survived prove-red; it now uses the suite's `BACKFILL_MAX_AGE + 1`.
 
 ## 5. Fixtures and harnesses
+
+- **A harness that paraphrases a Unity lifecycle method must be diffed against it step by step.** The
+  physics `Tick()` ran "resolve, then move" and silently omitted `FixedUpdate`'s jump application, so
+  for a year no jump could fire in the suite. Call the real method (here, the extracted
+  `VoxelRigidbody.ApplyPendingJump`) instead of re-describing it.
+- **Pooled-collection leaks cannot be asserted.** `UnityEngine.Pool.CollectionPool<,>` (the base of
+  `HashSetPool<T>` / `DictionaryPool<,>`) exposes no active/inactive counters; only `ChunkPool`'s
+  `ActiveData`/`ActiveSections` support a balance check. A collection-pool leak is a code-review item.
+- **Never park throwaway counters on a shared stats class a scenario resets.** Physics `B25` calls
+  `PhysicsQueryStats.Reset()` mid-suite, which once turned a shadow run into "0 mismatches over 0
+  comparisons". Give instrumentation its own class.
 
 - **Extract the state machine, not just the predicate.** `_wasX` / `_lastX` latches and accumulators
   are where the defects live; a struct-in / struct-out `Advance()` (pattern: `FootfallTracker`) makes
@@ -80,7 +101,10 @@ writing a baseline, running a prove-red, or writing "closed" into a doc.
 - **Edit-mode suites pin the statics they read.** Domain reload happens on entering Play and on
   recompile, never on exiting Play, so a static set during a play session (e.g. `PerfStore.Tier`) is
   still set when a local suite runs. Set it explicitly and restore it in `finally`; headless CI starts
-  a fresh process and hides this.
+  a fresh process and hides this. `Validate All` can hide it too: Command Console `B37` went red only
+  when run alone after a Play session moved `WorldOrigin`, because an earlier suite in the aggregate
+  resets the origin first. Reproduce a suspected leak by setting the static (e.g.
+  `Helpers.WorldOrigin.SetOrigin(...)` via `eval`) and running that one suite.
 - **`job.Run()` needs every container constructed**, including `[ReadOnly]` inputs the tested path
   never indexes: pass zero-length arrays, never `default`.
 - **Never name a suite namespace after a type the `Editor.Validation.*` tree references.**

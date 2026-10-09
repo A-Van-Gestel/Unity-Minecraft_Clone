@@ -22,6 +22,16 @@ Under `Assets/Editor/Validation/<System>/Framework/`, namespace `Editor.Validati
 3. **`<System>Oracle`**: naive borderless solver encoding the spec from the architecture doc. ~100–200 lines, readability over speed.
 4. **`<System>Assert`**: oracle compare + invariant asserts + convergence assert, bounded diffs, `[PASS]`/`[FAIL]` style.
 
+**When the system under test is a `World` method** (a tick or orchestration step rather than a job),
+drive the real one instead of replicating it. The pattern is Performance Monitor's
+`PerfMonitorValidationSuite.Tick.cs`: `BehaviorTestWorld` stubs `World.Instance`, `EnableModifyVoxel()`
+sets the `World.JobDataManager` the tick reads, and a `Chunk` minted with
+`FormatterServices.GetUninitializedObject` (no GameObjects or meshes) wraps the rig's `ChunkData`.
+Invoke the private method by reflection; no `InternalsVisibleTo` exists. `World.OnDestroy` never runs
+for an edit-mode stub, so free in a `finally` whatever it would have freed (that test clears
+`_fluidTickerPool`). Run any serial oracle *before* the tick, because the tick's drain removes inactive
+voxels.
+
 **Smoke-test the framework end-to-end via `unity command eval` before writing scenarios** — a healthy scenario must match the oracle bit-for-bit. If it doesn't, the harness or oracle is wrong, not the engine (usually).
 
 ## Phase 2 — Baselines

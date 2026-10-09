@@ -17,6 +17,7 @@ Two structural defenses follow from that, and both are load-bearing:
 1. **`B1` asserts the stranding itself, not merely non-convergence.** It neuters the §9.6 strand guard and requires the center chunk to end up permanently unable to clear `HasLightChangesToProcess`. If `B1` ever passes trivially, the pump has stopped modeling production and `B2`–`B6` are worthless — fix
    `ChunkPipelineSimulator`, not the engine. (§4 explains why the flag, and not the mesh, is the signal.)
 2. **Every convergence assertion carries a non-vacuity floor.** `PipelineAssert.Converged` fails a run in which no chunk was ever parked or mesh-declined, and `FlagsPaired` fails a run in which no lighting flag was ever set. A scenario whose adversarial ordering never bit is a scenario that tested nothing.
+   The floor counts only the chunks a scenario names through `ChunkPipelineSimulator.Observe`. Frontier chunks park unconditionally, so a floor over the global park counter can never fail — that version hid that `B3` gated no target at all, because a neighborhood seeded up front passes `AreNeighborsDataReady` from frame 0 and the §9.3 wave-front only forms when chunks arrive over time.
 
 ## 2. What is real, and what is modeled
 
@@ -33,6 +34,8 @@ Two structural defenses follow from that, and both are load-bearing:
 
 The gates are drivable for a precise reason, verified by reading them: they read only the three job dictionaries, `worldData`, five `ChunkData` bools, `settings.enableLighting` and `IsChunkInWorld`. No generator, no native memory, no jobs. That is why `WorldJobManager` is stood up **without** its real constructor — and why a gate that later reaches for generator state will throw here rather than pass vacuously.
 
+The three job dictionaries (`GenerationJobs` / `MeshJobs` / `LightingJobs`) are seeded **empty**, and the fixture's chunk placement populates only `worldData`; only `ChunkPipelineSimulator` inserts jobs. A fixture-only test therefore sees **no jobs in flight** unless it inserts them (`dict[coord] = default` works, the job data are structs). For the same reason, never time a lookup against these dictionaries as seeded: an insert-free `Dictionary<,>` has no buckets, so `ContainsKey` returns before hashing (~4 ns, against ~13 ns at production's 64-job cap). Fill them to a realistic size first.
+
 ## 3. Known blind spots
 
 - **Job internals.** A bug inside `NeighborhoodLightingJob` or `MeshGenerationJob` is invisible here; those belong to the Lighting and Meshing suites. This suite only decides *when* jobs may run.
@@ -41,6 +44,7 @@ The gates are drivable for a precise reason, verified by reading them: they read
 - **The behavior tick.** §3.4 of the pipeline doc: fluid/grass ticks have no neighbor gate at all. Out of scope; owned by the Behavior suite.
 - **`MeshBuildQueue` / `MeshDrainPolicy`.** The pump keeps its own simple queue rather than driving the real queue and drain loop. Those are pinned by the MeshQueue suite and the meshing suite's `B25`/`B26`
   respectively, but the *composition* of the real drain with the real gates is not yet exercised (**CP-H2**).
+- **A retired readiness term.** `B7`'s oracle is co-edited with `NeighborReadinessDecision`: retiring a term edits both sides in one change, so `B7` can witness a term that *misbehaves*, never one that *disappears*.
 - **Unload geometry.** Scenarios place an out-of-range chunk directly adjacent to a chunk under test. In production `DATA_LOAD_BUFFER` keeps a loaded-but-invisible band between the two, so this geometry is deliberately harsher than reality. It is the right shape for stranding assertions and the wrong shape for meshing ones — see §4.
 
 ## 4. Why the §9.6 scenarios assert a flag, not a mesh
@@ -66,3 +70,4 @@ Being permanently unable to clear the flag is what pipeline §9.6 actually descr
 |------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | 2026-08-22 | Created alongside NS-3 slice 1 (`B1`–`B6`).                                                                                                                                                                                                        |
 | 2026-08-23 | `B7` added by LP-2 — a census of the shared `NeighborReadinessDecision` predicate (3 gates × 2⁶ facts vs an independent oracle; 2⁷ until LP-3 retired one fact). Not a pump scenario: it guards the gate-term matrix the pump provably cannot see. |
+| 2026-10-09 | Recorded three harness facts that lived only in session notes: the non-vacuity floor's observed-set scoping (§1), the empty job dictionaries and their timing trap (§2), and `B7`'s co-edit blind spot (§3).                                       |
