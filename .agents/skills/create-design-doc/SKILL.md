@@ -82,6 +82,8 @@ Rules:
   (`[*.md] trim_trailing_whitespace = false`) and `.gitattributes`
   (`*.md whitespace=-blank-at-eol`, which stops `git apply --whitespace=fix` stripping them).
   Verify a doc with `python Tools/Python/check_markdown_breaks.py` (add `--fix` to repair).
+- **Tables are column-aligned** (house style for everything under `Documentation/`): run
+  `python Tools/Python/align_md_tables.py --fix <doc>` after writing or editing one.
 - **Status taxonomy** (exact strings, bold in place):
     - `Draft — <horizon>` — direction captured, not scheduled; must name what to re-verify
       before implementation starts.

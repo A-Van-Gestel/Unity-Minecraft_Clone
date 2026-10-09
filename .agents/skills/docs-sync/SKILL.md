@@ -186,6 +186,8 @@ do it regardless of what you changed:
 python Tools/Python/check_doc_refs.py      # @-prefixed doc references
 python Tools/Python/check_doc_links.py     # relative markdown links between docs
 python Tools/Python/check_doc_status.py    # OPEN_WORK_INDEX vs each doc's own **Status:**
+python Tools/Python/align_md_tables.py     # Documentation/ tables column-aligned (--fix aligns)
+python Tools/Python/check_twin_files.py    # CLAUDE.md == AGENTS.md
 ```
 
 `check_doc_links.py` is the one that matters on a move, rename or deletion: `check_doc_refs.py`

@@ -37,7 +37,7 @@ Not an exhaustive list — use judgment. Examples include:
 ## Where scripts live (HARD RULE)
 
 - **NEVER place `.py` files under `Assets/`.** Anything in `Assets/` triggers Unity's asset import pipeline, generates `.meta` files, and gets indexed by the IDE/Burst toolchain. Python scripts are not Unity assets.
-- **Persistent / reusable scripts** → `Tools/Python/<purpose>/script.py` at the repo root (sibling to `Documentation/`). Mirror the architectural area when relevant (e.g., `Tools/Python/Meshing/`, `Tools/Python/Serialization/`).
+- **Persistent / reusable scripts** → `Tools/Python/<purpose>/script.py` at the repo root (sibling to `Documentation/`). Mirror the architectural area when relevant (e.g., `Tools/Python/Meshing/`, `Tools/Python/Serialization/`). Add a row for it to `Tools/Python/README.md` — the index sessions and subagents search, since a tool nobody can find is never run.
 - **One-off throwaways** → inline in chat as a code block or Artifact. Do not commit ad-hoc scratch scripts to the repo.
 - If the destination is unclear, ask the user where it should live before writing the file.
 
