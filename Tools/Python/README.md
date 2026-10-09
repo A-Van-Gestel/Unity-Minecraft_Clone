@@ -31,8 +31,11 @@ a Store stub on this machine). Everything is stdlib-only unless `requirements.tx
 `python Tools/Python/tests/run_tests.py` (stdlib `unittest`, ~30 s; `run_tests.py fold` runs one module) covers
 the scripts above that the pre-commit flow and the subagents depend on: `fold_into_commit`, `stage_hunks`,
 `audit_reserialize_guids`, `check_american_english`, `align_md_tables`, `check_twin_files`,
-`setup_agent_links` and `session_cost_report`. Each test builds its own throwaway git repo under the system
-temp directory. Run it after changing one of those scripts, and add a test for each behavior you add or fix.
+`setup_agent_links` and `session_cost_report`, plus the doc checkers (`check_markdown_breaks`, `check_doc_refs`,
+`check_doc_links`, `check_doc_status`), `rename_tokens`, and `prove_red`'s argument and restore logic (its
+Editor half is stubbed). Each test builds its own throwaway directory or git repo under the system temp
+directory. Run it after changing one of those scripts, and add a test for each behavior you add or fix.
+A known gap is recorded as an `expectedFailure` test that names it, so a fix shows up as an unexpected success.
 
 ## Setup
 

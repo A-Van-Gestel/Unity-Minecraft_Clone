@@ -20,6 +20,8 @@ PATH SHAPES HANDLED
     * percent-encoding — `Architecture/World%20Generation/CAVE_GENERATION.md` is the CORRECT
       markdown spelling of a path with a space, and is decoded before resolution rather than
       reported. Undecoded, these are the single largest source of false positives in this tree.
+    * raw spaces       — `World Generation/CAVES.md` written with a literal space is reported even when
+      the file exists: GFM renders no link for it, so on GitHub it is broken text.
     * fragments        — `SOME_DOC.md#section-heading` resolves on the file, the anchor is ignored
     * same-file anchors, `[x](#heading)`, are not links to a file and are skipped
 
@@ -152,7 +154,7 @@ def _resolves(path):
 
 
 def scan(roots):
-    """Return (links, files_scanned, skipped) — links are (target, source_file, line) triples."""
+    """Return (links, files_scanned, skipped) — links are (target, source_file, line, raw_space) tuples."""
     links = []
     skipped = 0
     files_scanned = 0
@@ -165,7 +167,8 @@ def scan(roots):
                         raw = match.group(1) or match.group(2)
                         target = _target_of(raw)
                         if target:
-                            links.append((target, path, number))
+                            # Tested on the undecoded target: `%20` is the correct spelling, a raw space never is.
+                            links.append((target, path, number, ' ' in urlsplit(raw).path))
                         elif PLACEHOLDER.search(unquote(urlsplit(raw).path)):
                             skipped += 1
     return links, files_scanned, skipped
@@ -188,7 +191,7 @@ def main():
     links, files_scanned, skipped = scan(roots)
 
     if args.list:
-        for target, source, number in sorted(links, key=lambda item: (_display(item[1]), item[2])):
+        for target, source, number, _raw_space in sorted(links, key=lambda item: (_display(item[1]), item[2])):
             print('  {}:{}  -> {}'.format(_display(source), number, target))
 
     print('Scanned {} markdown files - found {} relative markdown links ({} ignored as '
@@ -196,10 +199,11 @@ def main():
 
     # Resolved against the LINKING file's directory, which is what a relative link means.
     missing = {}
-    for target, source, number in links:
-        if _resolves(os.path.normpath(os.path.join(os.path.dirname(source), target))):
+    for target, source, number, raw_space in links:
+        if not raw_space and _resolves(os.path.normpath(os.path.join(os.path.dirname(source), target))):
             continue
-        missing.setdefault((_display(source), target), []).append(number)
+        label = target + ('  (raw space: GFM renders no link; write it as %20)' if raw_space else '')
+        missing.setdefault((_display(source), label), []).append(number)
 
     if not missing:
         print('All {} links resolve.'.format(len(links)))
