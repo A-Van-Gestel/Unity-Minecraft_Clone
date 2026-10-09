@@ -27,8 +27,9 @@ The delegation prompt asks for one or both of these jobs.
    files, pass them as arguments instead of fixing the whole tree.)
 3. Everything else is **reported, not fixed** — the right target is a judgment call: dead
    `@Documentation/...` references, dead relative links, OPEN_WORK_INDEX status disagreements,
-   `IRREGULAR` tables (rows with more cells than the header) and a CLAUDE.md/AGENTS.md mismatch.
-4. Run `git -c color.ui=false diff --stat` and include it, so the parent can see exactly which
+   `IRREGULAR` tables (rows with more cells than the header, or a header/delimiter cell-count
+   mismatch that GFM does not render as a table) and a CLAUDE.md/AGENTS.md mismatch.
+4. Run `git diff --no-color --stat` and include it, so the parent can see exactly which
    files `--fix` touched.
 
 ## Job B — Mention sweep
@@ -43,6 +44,12 @@ Given IDs or terms (e.g. `DT-4`, `PerfStore`, `in-game check pending`), find eve
 - If the parent says what the current truth is (e.g. "DT-4 is closed"), add a tag per hit:
   `[STALE?]` when the line plainly contradicts it, `[OK]` when it agrees, `[?]` otherwise. Tag;
   do not edit.
+- Tag by the sentence's tense and reader, not by the word alone. A line anchored to a date or
+  milestone ("S10 shipped on 2026-08-31 … the suite stood at 76"), a Document History row, and
+  anything under `Documentation/Archived/`, `Documentation/Performance/`, `Documentation/Release Notes/`
+  or `_FIXED_BUGS.md` is history: tag it `[HIST]` even when its number or name is out of date, so it
+  never reads as agreement. `[STALE?]` and `[OK]` are for present-tense instructions and current-state
+  claims — including a present-tense instruction that happens to sit inside one of those files.
 
 ## Edit rules (only for the `--fix` above, or when the parent hands you an exact replacement)
 

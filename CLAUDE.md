@@ -63,6 +63,7 @@ This is critical because you are working in a modern Unity 6 environment.
 - Before adding a `using` directive, verify with `get_namespace` if unsure.
 - Covers: all UnityEngine/UnityEditor modules, Input System, Addressables.
 - Does NOT cover: DOTween, VContainer, Newtonsoft.Json (third-party).
+- An empty result means "not indexed", never "does not exist". Fall back to the installed Editor's own docs (`C:/Unity/Editors/<version>/Editor/Data/Documentation/en/ScriptReference/`, pages named by fully-qualified member) — they also carry constraints a signature omits.
 
 ## Performance & Optimization
 
@@ -96,6 +97,7 @@ When a change touches the chunk generation → lighting → meshing pipeline spe
 - **Markdown tables:** tables under `Documentation/` are column-aligned (house style); after editing one, run `python Tools/Python/align_md_tables.py --fix <doc>`. Agent-facing files (`CLAUDE.md`, `AGENTS.md`, `.agents/`) are exempt — padding there only costs tokens. `Tools/Python/README.md` indexes every helper script.
 - **Preservation:** NEVER delete existing XML Docstrings (`///`), inline comments, or `#region` tags unless the code they describe is explicitly being deleted. When a fix changes behavior, update the comment/docstring to match the *current* code — describe what it does now, not the old bug or the fix ("war stories" belong in `Documentation/Bugs/_FIXED_BUGS.md`).
 - **Modification:** Do not rewrite entire files to make minor changes. Apply targeted diffs.
+- **Settled designs:** before reporting a review finding, check `.agents/skills/review-changes/references/settled-decisions.md` — deliberate designs that look like defects and are never findings.
 
 ## Execution Protocol & Verification
 
@@ -122,7 +124,7 @@ Your context is the session's main cost: every turn re-reads all of it, and late
 
 | Agent               | Model  | Spawn it for                                                                                                  | Before relaying its report as verified                                                                                      |
 |---------------------|--------|---------------------------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------|
-| `committer`         | Sonnet | Pre-commit steps 0, 1, 3 — **only after the user's commit trigger**, naming the exact batch of paths            | `git log --stat <old-HEAD>..HEAD`; re-run `audit_reserialize_guids.py --base <old-HEAD> --head HEAD`; read its style-edit list |
+| `committer`         | Sonnet | Pre-commit steps 0, 1, 3 — **only after the user's commit trigger**, naming the exact batch of paths            | `git log --stat <old-HEAD>..HEAD` (after a `fold_into_commit.py squash`, which rewrites history: `git log --stat @{u}..HEAD` plus `git diff --stat <old-HEAD> HEAD` for the batch itself); re-run `audit_reserialize_guids.py --base <old-HEAD> --head HEAD` (it compares trees, so it stays scoped to the batch); read its style-edit list |
 | `validation-runner` | Haiku  | Recompile + run one suite, several, or Validate All, when you only need the verdict                             | Its report quotes each summary line verbatim; "NO VERDICT FOUND" or a missing line is a failure, never a pass             |
 | `doc-sweeper`       | Haiku  | Running the doc checkers (+ `--fix` for line breaks and table alignment); sweeping docs/skills for every mention of an ID or term | Check its `git diff --stat` against what `--fix` may touch; a zero-hit sweep must show the command it ran                  |
 
@@ -229,7 +231,7 @@ The `rider` MCP server exposes Rider's inspection, refactoring, and build engine
 |----------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `lint_files` / `get_file_problems`                                                                                         | Run Rider/ReSharper inspections on edited files — catches dead code, impure-struct-copy warnings, and UDR domain-reload analyzer hits that `dotnet build` cannot report       |
 | `rename_refactoring`                                                                                                       | Solution-wide symbol rename incl. `nameof(...)` and XML-doc `<see cref>` refs. ALWAYS run `preview: true` first and audit the blast radius                                    |
-| `safe_delete`                                                                                                              | Delete a symbol only if unused; refuses with a conflict list otherwise. `preview: true` doubles as a dead-code check                                                          |
+| `safe_delete`                                                                                                              | `preview: true` is the dead-code check (refuses with a conflict list if used). Applied, it can report success without writing the file — delete by hand; see `refactor-safely` |
 | `extract_method` / `extract_interface` / `extract_base_class` / `change_api_signature` / `move_type_to_namespace` / `reorganize_namespaces` | Structural refactorings on the same engine                                                                                                                                   |
 | `build_solution_start` + `build_solution_state`                                                                            | Build ALL assemblies (runtime + editor) in one shot — covers the editor-assembly gap of the two-step `dotnet build`. Poll state with the returned `sessionId`                 |
 | `reformat_file`                                                                                                            | Apply the solution code style to edited files (verified no-op on already-conforming files)                                                                                   |
@@ -239,8 +241,8 @@ The `rider` MCP server exposes Rider's inspection, refactoring, and build engine
 
 ### Rules
 
-- Requires Rider to be running with the solution open — if calls fail, fall back to the file-based workflow and mention it.
-- Rider refactorings do NOT handle Unity-side concerns: `.meta` sibling renames, `[FormerlySerializedAs]`, prefab/scene GUID references. The `refactor-safely` and `unity-file-ops` guardrails still apply on top of any Rider-applied refactoring.
+- Requires Rider to be running with the solution open. If the tools are missing or calls fail, ask the user to open Rider and run `/mcp` (it reconnects mid-session); otherwise fall back to the file-based workflow and mention it.
+- Rider refactorings do NOT handle Unity-side concerns: `.meta` sibling renames, serialized-key renames (carried over by the `unity-file-ops` workflow, never `[FormerlySerializedAs]`), prefab/scene GUID references. The `refactor-safely` and `unity-file-ops` guardrails still apply on top of any Rider-applied refactoring.
 - A Rider build is MSBuild against Unity-generated `.csproj` files — the "new `.cs` file not yet in the project" gotcha from the Execution Protocol applies to it exactly as it does to `dotnet build`.
 
 ## System Environment & Capabilities

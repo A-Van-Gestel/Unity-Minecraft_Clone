@@ -44,8 +44,11 @@ uncommitted work never pull you outside the batch, and fix what they report:
 - `python Tools/Python/check_american_english.py <batch paths…>` — British spellings in the
   batch's added lines (whitespace-only changes, such as a re-aligned table row, are ignored).
 - `python Tools/Python/align_md_tables.py --fix <each changed .md under Documentation/>` — table
-  alignment is house style there. An `IRREGULAR` table (more cells than its header) is a content
-  question: report it, do not fix it.
+  alignment is house style there. An `IRREGULAR` table (a row with more cells than its header, or a header
+  whose cell count differs from the delimiter row's, which GFM does not render as a table at all) is
+  a content question: report it, do not fix it.
+- `python Tools/Python/tests/run_tests.py` when the batch changes a script under `Tools/Python/` — a
+  failing test is a STOP: report it verbatim, never edit the test to pass.
 - `python Tools/Python/check_twin_files.py` when `CLAUDE.md` or `AGENTS.md` is in the batch; a
   mismatch means one side missed an edit — report it rather than guessing which side wins.
 
@@ -67,7 +70,7 @@ attribution reminder.
 
 ## Step 3 — Commit
 
-a. Plain commits: `git add -- <paths>`, verify with `git -c color.ui=false diff --cached --stat`,
+a. Plain commits: `git add -- <paths>`, verify with `git diff --no-color --cached --stat`,
    then `git commit -m "<subject>"`.
    Splitting one file's hunks across commits (`git add -p` is unavailable):
    `python Tools/Python/stage_hunks.py <file> --list`, then `--hunks 1,3`. It prints the staged
@@ -87,8 +90,9 @@ b. Folding into an unpushed older commit (`rebase -i` is unavailable), via git's
 
 ## Repo traps
 
-- Pass `--no-color` (or `-c color.ui=false`) to every `git diff` you grep. `color.ui` is `auto`
-  today, which is safe when piped, but a `color.ui = always` setting makes anchored greps like `^\+`
+- Pass `--no-color` to every `git diff` / `git log -p` you grep — not `-c color.ui=false`, which a
+  `color.diff = always` setting outranks. `color.ui` is `auto` today, which is safe when piped, but an
+  `always` setting makes anchored greps like `^\+`
   silently match nothing — the flag keeps every command correct whatever the config says.
 - `python`, never `python3` (the latter is a Store stub that runs nothing).
 - `core.editor` opens Notepad++: never run a git command that wants an editor (`commit` without
@@ -97,7 +101,8 @@ b. Folding into an unpushed older commit (`rebase -i` is unavailable), via git's
 
 ## Report (keep it under ~40 lines)
 
-1. `git log --oneline <old-HEAD>..HEAD` and, per commit, its file list (`--stat` summary lines only).
+1. `git log --oneline <old-HEAD>..HEAD` (after a squash: `@{u}..HEAD`, plus `git diff --stat <old-HEAD> HEAD`
+   for exactly what this batch changed) and, per commit, its file list (`--stat` summary lines only).
 2. Reserialize: ran / skipped (why); guid audit summary line verbatim.
 3. Checker results (American English, tables, twins) and style edits, each edit as
    `file:line: before → after`, or "none".
