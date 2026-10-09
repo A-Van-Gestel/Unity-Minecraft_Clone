@@ -50,6 +50,10 @@ Known-bug scenarios are **not** "tests that pass when the bug exists". They asse
 
 ## Pitfalls (all happened; all will recur)
 
+Before writing a baseline, running a prove-red, or writing "closed" into a doc, read
+[references/proving-baselines.md](references/proving-baselines.md) — the ways a green suite or a
+prove-red passes while proving nothing, and the evidence rules for doc claims.
+
 - **The oracle is authoritative; hand-computed probe constants are not.** A spot-probe expectation computed in your head can be wrong while the field is correct (forgetting an opaque occluder changes a straight-line distance into a detour). Prefer oracle-field comparison as the real assertion; treat probes as readable documentation and derive their constants from the oracle.
 - **The oracle can share the engine's bug.** When engine and oracle disagree, do not assume the engine is wrong — derive the correct value from first principles / the architecture docs, then fix whichever side is off (and say so in the commit).
 - **Sentinel values collide with legitimate data.** Check the value domain before trusting a sentinel (e.g. `ushort.MaxValue` as out-of-bounds collides with a legitimately fully-lit `0xFFFF` voxel). Prefer bounds checks on a channel whose domain cannot collide.

@@ -13,6 +13,10 @@ Profiler API details (the `ProfilerQueries` / `ProfilerCapture` entries) live in
 
 ## 1. Build
 
+**First record the active build profile** (`AssetDatabase.GetAssetPath(BuildProfile.GetActiveBuildProfile())`
+via `unity command eval`): it lives in `Library/`, not git, and a build replaces it — §5 restores it. A null
+profile means the classic platform settings were active; record that too.
+
 ```bash
 OUT="<parent of the repo>/<YYYY-MM-DD> - <purpose> [IL2CPP]/Minecraft Clone.exe"
 # Flow A
@@ -109,12 +113,37 @@ if ($p.WaitForExit(900000)) { "exit $($p.ExitCode)" } else { Stop-Process -Id $p
 
 ## 5. Cleanup
 
-- A CLI build leaves its target profile active — restore the previous one:
+Run this right after the last run, before docs or reviews.
+
+- A CLI build leaves its target profile active — restore the one recorded in §1:
   `BuildProfile.SetActiveBuildProfile(AssetDatabase.LoadAssetAtPath<BuildProfile>("Assets/Settings/Build Profiles/<name>.asset"))`
-  through `unity command eval`.
+  through `unity command eval` — or `BuildProfile.SetActiveBuildProfile(null)` when §1 recorded a null profile,
+  which makes the platform profile active again.
 - A build rewrites `Assets/Resources/Data/BuildStamp.asset` and may add `m_RuntimeSettings` entries to
   `Assets/UniversalRenderPipelineGlobalSettings.asset`: `git restore` both unless the build is a release.
 - It also bakes today's date into `PlayerSettings.bundleVersion` (`ProjectSettings/ProjectSettings.asset`, via
   `GameVersionManager`). Keep that one: it lands alone, as `Updated: Version to "<YYYY-MM-DD> - PreAlpha"`.
-- Delete the throwaway build folder. The `[IL2CPP]` suffix is a wildcard to PowerShell path cmdlets — use
-  `-LiteralPath` there, or bash.
+- Delete the throwaway build folder (ask first if the user may want to play it). The `[IL2CPP]` suffix is a
+  wildcard to PowerShell path cmdlets — use `-LiteralPath` there, or bash.
+
+## 6. Reading a built player
+
+- **Compile-time gating (`#if`, `[Conditional]`) can only be verified in a player.** The Editor defines
+  `DEBUG`, `UNITY_ENABLE_CHECKS` and `UNITY_INCLUDE_INSTRUMENTATION` under every managed code variant, so a
+  suite is green before and after a gating change by construction. Build two players that differ only in the
+  gate and byte-search `<Product>_Data/il2cpp_data/Metadata/global-metadata.dat` for a literal inside the gated
+  block (`s.encode("utf-8") in blob or s.encode("utf-16-le") in blob`), always with an **ungated control
+  literal** present in both — without it an all-absent result is indistinguishable from a broken search.
+  - Pick a literal in a method that really runs in a player: editor/test-only methods are stripped from both
+    builds, so their absence is inconclusive.
+  - `[Conditional]` removes call sites, not the method: a `[Conditional]` method on a MonoBehaviour can ship
+    its body and strings in a Release player. If diagnostic text must not ship, use `#if`.
+  - Confirm the build is the configuration you think: `<Data>/boot.config` carries a `player-connection-*`
+    block only in a Development build, and `profiler-enable=1` in a profiler build.
+- `<Data>/globalgamemanagers` holds the baked `bundleVersion`; `<Data>/app.info` holds company | product.
+- **A build profile's Player Settings override is a full copy, not a diff.** Diff its
+  `m_PlayerSettingsYaml` blob against live settings before trusting it (the copy does not follow later project
+  changes; normalize the extra leading space after each `'|`). Never hand-write a partial fragment — every
+  omitted field falls back to Unity defaults (`DefaultCompany`, version `1.0`). Flipping one existing line in
+  place is safe; verify it as a 1-line `git diff`, then `ImportAsset(ForceUpdate)` and confirm the asset still
+  loads as a `BuildProfile`. With the profile active, `PlayerSettings.Set…` calls write into its override.

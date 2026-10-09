@@ -61,31 +61,42 @@ outcome this review guards against.
 
 ---
 
-## Gate 9 — Serialized field renamed or deleted without `[FormerlySerializedAs]`
+## Gate 9 — Serialized field renamed or deleted without its asset data carried over
 
 **What fails.** A `[SerializeField] private` field, or a `public` field
-referenced by prefabs/scenes/ScriptableObjects, is **renamed or deleted** and no
-`[FormerlySerializedAs("oldName")]` preserves the binding. Unity matches
-serialized data by field name; the moment the scene/prefab/asset re-serializes,
-the old value is gone — a wired Inspector reference becomes null, a tuned value
-resets to default.
+referenced by prefabs/scenes/ScriptableObjects, is **renamed or deleted** and the
+assets that held a value under the old key lose it. Unity matches serialized data
+by field name; the moment the scene/prefab/asset re-serializes, the old value is
+gone — a wired Inspector reference becomes null, a tuned value resets to default.
+The project deliberately does not use `[FormerlySerializedAs]`: the rename is
+carried over by the `unity-file-ops` workflow (reserialize, diff, restore dropped
+values from git), so **do not flag a missing attribute** — flag a missing carry-over.
 
 **How to check.** Read the `-`/`+` pair on the field. A rename shows as a removed
 field and an added one with a new name; a deletion shows as a removed field with
-no replacement. For either, the question is: is there a `[FormerlySerializedAs]`
-(rename) or was the field genuinely unused by any asset (deletion)? Rider
-`safe_delete` with `preview: true` doubles as the "is this field referenced
-anywhere" check; if the IDE is closed, treat an Inspector-facing field as
-referenced and flag it (uncertain), tool on `Not verified`.
+no replacement. Then grep HEAD's YAML for the old key
+as a whole word (`git grep -nwF "_oldName" HEAD -- '*.unity' '*.prefab' '*.asset'`),
+which also catches scene prefab-instance overrides (`propertyPath: _oldName`,
+`parent._oldName`) — a reserialize never migrates those. For each hit, the change
+must carry that asset with the old key gone and the new key holding the **same
+value** (a reference keeps its `guid`; an override is re-keyed to the new name). An asset still carrying the old
+key is Medium — name the asset and the step that clears it: the reserialize for an
+`.asset`, the `LoadPrefabContents` round-trip for a `.prefab` (a reserialize can leave
+one untouched), and the user-run Prune Stale Prefab Overrides In Scenes for a scene
+override (a reserialize never removes those); a new key at
+the C# default where the old one held something else is the loss (Blocker).
+Never verify through the runtime accessor — an absent key falls back to the
+initializer, which matches whenever the authored value was the default.
 
-Renaming with Rider `rename_refactoring` does **not** add `[FormerlySerializedAs]`
-or fix `.meta`/prefab GUID bindings — the `refactor-safely` and `unity-file-ops`
+Renaming with Rider `rename_refactoring` does not touch serialized keys or
+`.meta`/prefab GUID bindings — the `refactor-safely` and `unity-file-ops`
 guardrails still apply on top of any Rider rename. This is why the gate exists
 even when a "safe" rename tool was used.
 
 **Delta-based.**
 
-**Severity.** Blocker when the field is Inspector-wired or holds tuned data
-(silent loss). Downgrade to Medium only if you can show the field was never
-serialized into any asset (a brand-new field renamed within the same uncommitted
-session, e.g.) — and say how you know.
+**Severity.** Blocker when an asset's value under the old key did not survive
+(silent loss). Medium when the old key is still in an asset because the
+reserialize has not run yet. No finding when HEAD's YAML never held the old key
+(a brand-new field renamed within the same uncommitted session, e.g.) — say how
+you know.

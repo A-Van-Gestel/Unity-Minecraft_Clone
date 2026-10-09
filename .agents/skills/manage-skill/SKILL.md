@@ -82,6 +82,15 @@ activate the skill from the description alone. Write it as:
 3. If an adjacent skill could be confused with it, add an explicit routing line
    (e.g. `For updating EXISTING docs use the docs-sync skill instead.`).
 
+**A user-triggered skill's description is triggers plus routing, nothing else.** Mechanism prose
+there is paid for in every session and buys nothing when activation is an explicit `/command`.
+When trimming one, keep every literal quoted trigger phrase, every sibling-routing clause, any
+*autonomous* trigger (e.g. review-changes' "or before offering a commit"), and enough identity to
+tell it from a built-in — and check that each removed clause is re-established in the body, since a
+constraint can live only in the description. Skills that genuinely self-activate (`docs-sync`,
+`perf-benchmark`) keep their inference wording. Re-measure the always-loaded total with
+`for f in .agents/skills/*/SKILL.md; do grep -m1 '^description: ' "$f"; done | wc -c`.
+
 ## Step 4 — Write the body
 
 No format restrictions, but the house style that has worked here:
@@ -155,6 +164,12 @@ Most changes to a skill are edits, not new skills. The discipline differs from a
 - **Don't write generic knowledge.** Ask of every line: *would the agent get this wrong without
   it?* If no, cut it. A skill is the corrections and conventions specific to this repo, not a
   restatement of what a capable model already knows.
+- **Describe what a tool does now, never what it used to do** — in skills, agent definitions and
+  `CLAUDE.md`/`AGENTS.md` alike. A warning that lists removed tools ("do NOT call X") plants names
+  the reader would never otherwise consider, and a fixed-bug war story about an API that changed is
+  archaeology. Keep the forward-looking instruction and the reason it still holds. A bug's failure
+  mechanism, a migration rule about prior inputs, or a regression check may still cite the past;
+  the test is whether the sentence describes a tool or API that changed.
 
 ## Constraints
 

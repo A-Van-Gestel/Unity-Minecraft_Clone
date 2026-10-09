@@ -45,7 +45,7 @@ rewrite by design.
 # rewrites: files where deletions dwarf additions
 git diff --numstat $RANGE -- '*.md' '*.json'
 
-# headings present before and absent after (--no-color is REQUIRED: color.ui=always here, so ANSI
+# headings present before and absent after (--no-color is REQUIRED: under a color.ui / color.diff = always setting, ANSI
 # escapes would break the ^- anchor and the gate would silently find nothing)
 git diff --no-color $RANGE -- '*.md' | grep -E '^-#{1,4} '
 ```

@@ -84,6 +84,9 @@ Rules:
   Verify a doc with `python Tools/Python/check_markdown_breaks.py` (add `--fix` to repair).
 - **Tables are column-aligned** (house style for everything under `Documentation/`): run
   `python Tools/Python/align_md_tables.py --fix <doc>` after writing or editing one.
+- **Voice:** the writing rules in `docs-sync` § Constraints apply to new docs too — decisions carry
+  their rationale, never "the user" as the reason; provenance is a positive timeline; a count beside
+  a dated event stays in the past tense.
 - **Status taxonomy** (exact strings, bold in place):
     - `Draft — <horizon>` — direction captured, not scheduled; must name what to re-verify
       before implementation starts.

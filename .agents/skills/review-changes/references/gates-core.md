@@ -106,8 +106,8 @@ The recurring shapes in this engine:
 
 - a **per-play `static` reset** removed — the field now leaks a stale value into
   the next play session (gate 11's invariant, deleted rather than missing)
-- a `[FormerlySerializedAs]` attribute dropped during a rename — the old
-  serialized data is now orphaned (gate 9's invariant, deleted)
+- a serialized field renamed with its old value not restored in the asset
+  YAML — the old serialized data is now orphaned (gate 9's invariant)
 - a **pool `Release`/recycle** call removed, or an `await`/`Complete()` on a job
   handle dropped, leaving work in flight or a buffer never returned (gate 10)
 - a `[BurstCompile]` attribute removed from a job, silently dropping it to managed
@@ -126,8 +126,8 @@ nothing and the gate passes for the wrong reason:
 
 ```bash
 # $RANGE is whatever step 1 resolved: "" (unstaged), --staged, @{u}...HEAD, <base>...HEAD
-# --no-color is REQUIRED, not cosmetic: this repo sets color.ui=always, so git emits ANSI escapes
-# even when piped — every ^+ / ^- anchor below then matches NOTHING and the gate passes silently.
+# --no-color is REQUIRED, not cosmetic: under a color.ui / color.diff = always setting git emits ANSI
+# escapes even when piped — every ^+ / ^- anchor below then matches NOTHING and the gate passes silently.
 git diff --no-color -U5 $RANGE | grep -nE '^-.*(FormerlySerializedAs|RuntimeInitializeOnLoadMethod|BurstCompile|\.Release\(|\.Complete\(|await |IsCreated|return;|DomainReset)'
 ```
 
@@ -148,6 +148,6 @@ findings — the invariant went with the thing it protected.
 **Delta-based** by construction.
 
 **Severity.** Inherit the gate the deleted line belonged to — a removed static
-reset is gate 11's High, a removed `[FormerlySerializedAs]` is gate 9's Blocker.
+reset is gate 11's High, a dropped serialized value is gate 9's Blocker.
 For a deletion matching no other gate, High when it can reach a user (lost save
 data, a stuck pipeline, a corrupted mesh), Medium otherwise.

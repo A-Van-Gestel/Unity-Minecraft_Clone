@@ -59,6 +59,43 @@ dependencies you declare. Most defects below compile, render something plausible
 - Render scale and MSAA are changed at runtime by the graphics settings. Verify a depth- or
   resolution-sensitive effect at a non-default render scale.
 
+## Choosing the pass event
+
+- **The post stack does not always run.** `GraphicsSettingsController.ApplyBloom` sets
+  `renderPostProcessing = enabled && FindAnyObjectByType<Volume>() != null`, so post is off with
+  bloom off and in any scene without a `Volume`. Default an effect that must look the same in every
+  configuration to `AfterRenderingTransparents` with its glow in its own color; choose
+  `BeforeRenderingPostProcessing` only when it should vanish with post, and say so. Either way, verify
+  the effect with post off too — bloom disabled, and in the main menu, which has no `Volume`.
+- **Measure screen/UV orientation; never derive it.** `UNITY_UV_STARTS_AT_TOP` handling composes
+  across URP's own flips (`GetFullScreenTriangleTexCoord` already flips), so a derivation from source
+  can be inverted and still look airtight. Draw a reference band into the **same** render target with
+  an identity view-projection (clip-space `y = -1` is the bottom by definition), read back its rows,
+  and assert the effect lands on those rows (`OverlayFragmentRenderer.RenderClipSpaceBottomMarker`).
+- **Never sample the screen at `AfterRendering`.** URP has switched `activeColorTexture` to the
+  backbuffer by then: `IsValid()` is still true, but the blit source resolves to null. Sample at
+  `AfterRenderingPostProcessing` (check `resourceData.isActiveTargetBackBuffer` at record time).
+- **Features sharing an event run in `m_RendererFeatures` list order**, so a full-screen effect must
+  be listed before a same-event feature that samples the screen. A baseline guarding it asserts the
+  order or the events, read from the features' own constants — not membership, and not a restated
+  copy of two literals.
+
+## Wiring the renderer asset
+
+- Adding or removing a feature is an Editor operation with a read-back. Editing `m_RendererFeatures`
+  through `SerializedObject` leaves `m_RendererFeatureMap` stale (URP rebuilds it only when the list
+  contains null): rewrite the map in the same call — entry `i` is feature `i`'s local id from
+  `AssetDatabase.TryGetGUIDAndLocalFileIdentifier` — then run the whole validation aggregate (the
+  baseline that catches a stale map is not in the suite you edited).
+- **A feature can unlink itself across a recompile:** a sub-asset whose script is momentarily
+  unresolvable reads as null, and `OnValidate` prunes it from the list, leaving an orphan sub-asset
+  with blanked references. The effect stops with nothing in the console. Re-run the wiring baselines
+  after a heavy recompile session; recover by destroying the orphan and re-adding the feature fresh.
+- **An edit-mode harness faking `_CameraDepthTexture`:** `SampleSceneDepth` is a texel *load* at
+  `uv * _ScreenSize`, so the stand-in must be at least that size and the harness must publish
+  `_ScreenSize`, `_RTHandleScale` and the texel size, or every pixel reads 0. Probe the sampled value
+  rather than swapping binding strategies.
+
 ## Reference
 
 - Architecture: `@Documentation/Architecture/UI_BLUR_BACKDROP_SYSTEM.md`,

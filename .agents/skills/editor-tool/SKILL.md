@@ -158,6 +158,8 @@ Direct field assignment without SerializedObject. Requires manual `Undo.RecordOb
 
 **Use for:** BlockEditor's in-memory database copy where SerializedObject overhead is measurable.
 
+**Copying a `BlockType` goes through `Editor/BlockEditor/Helpers/BlockTypeCloner.Clone`**, which copies every instance field, public and private, by reflection. Never write an initializer list to copy one: the Block Editor saves its whole working copy back over the asset, so a field missing from a hand-written copy is silently reset to its initializer for every block on the next Save. (`AddNewBlock` is deliberately not a copy — a new block takes the field initializers.) After any repair of `BlockDatabase.asset`, `git diff HEAD` on it must show additions only; diff the whole asset, never one block, because each block lost different fields.
+
 ### [HideInInspector] fields
 
 `EditorGUILayout.PropertyField` and `NextVisible` skip fields marked `[HideInInspector]`. To draw them anyway, iterate child properties by explicit path:
@@ -243,3 +245,13 @@ public struct MyPreviewJob : IJobParallelFor
 **When NOT to use jobs:** If the evaluation has sequential Y-dependencies (e.g., `previousDensity` tracking in column evaluation), it can't be parallelized per-pixel. Parallelize per-column instead, or keep it sequential if performance is acceptable.
 
 **Full chunk pipeline previews:** when the preview needs actual chunk data (not just per-pixel noise), do not write a new job — run the real pipeline via `EditorChunkPipelineRunner` (see section 1). It reuses the runtime Burst jobs and stays correct as the pipeline evolves.
+
+---
+
+## 8. Layout & Label Conventions
+
+- **Icons are emoji in the label string** for named actions and tabs (`"🧱 Block Editor"`, `"💾 Save to Prefab"`, `"🔄 Refresh List"`), not `EditorGUIUtility.IconContent`. Inline list controls use Unity-native glyphs instead: a plain `+` to add, and `▶ ⏹ ✕ ◀` as `EditorGUIHelper` already does — `➕` looks out of place beside Unity's chrome.
+- **`PropertyField` draws the field's `[Header]` decorator**, so inside `BeginHorizontal` the header takes the row and anything drawn after the field aligns to the header. In a horizontal row use `EditorGUILayout.ObjectField(SerializedProperty, type, GUIContent)` and draw the heading explicitly with `EditorUILayoutHelper.SubHeader`.
+- **Never stack an unbounded section above a list/detail split** — when it grows it pushes the list and detail pane (and their scroll views) out of the window. Make the global content the first row of the selection list (`🌐 Global`), so there is one detail pane. `EditorGUIHelper.DrawSearchableSelectionList<T>` skips null items, so that row needs a small wrapper type.
+- **Tabs sharing one `SerializedObject` with separate selections rebind it at draw time**, not on selection change — otherwise switching tabs leaves the other tab's asset bound and every field writes to the wrong asset.
+- `EditorGUIHelper.IntFieldWithSteppers` expands by default; pass a `width` when it shares a row.

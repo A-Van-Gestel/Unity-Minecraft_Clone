@@ -88,6 +88,11 @@ its own band.
   scroll list paints across the screen. The project has zero `Mask` components; keep it that way.
 - **Fully qualify uGUI types:** `UnityEngine.UI.Image`, `UnityEngine.UI.Button`. Inside this project's
   `UI.*` namespaces a bare `UI.Button` resolves to *our* namespace.
+- **Audit authored materials over `Image`, never `Graphic`.** `TMP_SubMeshUI` overrides the `material`
+  getter to *create* an instance, which throws `MissingReferenceException` when its source material was
+  destroyed (routine for generated submeshes) and allocates instances on the way. For a census by canvas,
+  walk transforms: `Graphic.canvas` is the nearest active ancestor canvas and uGUI's ancestor walks stop at
+  `overrideSorting`, so `GraphicRegistry.GetGraphicsForCanvas` misses nested sorting canvases.
 - **Create UI objects as `new GameObject(name, typeof(RectTransform))`.** `AddComponent<RectTransform>()`
   on a plain `Transform` returns null. Likewise add a `[RequireComponent]` target first and the
   requiring component last, or the explicit add returns null.

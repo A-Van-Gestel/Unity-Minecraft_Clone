@@ -114,6 +114,24 @@ images, never to a saved file.
 
 </recipe>
 
+<recipe name="project-auditor">
+The `Window/Analysis/Project Auditor` grid is not queryable from the CLI. Either parse a saved report or
+re-run the audit from code.
+
+- **Saved report** (`*.projectauditor`): two header lines (`PROJECT_AUDITOR_REPORT`, format version), then one
+  JSON document — `m_Issues` (each with `descriptorId.m_AsString`, `category.m_String`, `severity`,
+  `location.path`/`.line`, `properties[]`, where `[0]` is the assembly for Code issues),
+  `m_DescriptorLibrary.m_SerializedDescriptors` (the rule definitions), `sessionInfo`, `moduleMetadata`.
+  Reports run to megabytes: parse with Python, never read one whole.
+- **Re-run** (a full audit takes ~54 s, so run it as a detached job):
+  `var report = new Unity.ProjectAuditor.Editor.ProjectAuditor().Audit(new AnalysisParams(true) { Platform = BuildTarget.StandaloneWindows64 }, null);`
+  then `report.FindByDescriptorId("UAL0013")` / `GetAllIssues()` / `Save(path)`.
+- **It audits with `CodeOptimization.Release`,** so `#if UNITY_INCLUDE_INSTRUMENTATION` code is compiled out and
+  its statics and allocations never appear — a "0 issues" claim is release-only. Build-size figures come from the
+  last player build's report, and the audit has no call context and cannot see Burst jobs, so allocation counts
+  are not a performance signal.
+</recipe>
+
 </recipes>
 
 <gotchas>

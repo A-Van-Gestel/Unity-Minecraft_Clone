@@ -17,7 +17,9 @@ any large refactor of a performance-sensitive system (meshing, lighting, generat
 or an explicit "capture a baseline" / "profile gate" request.
 
 Skip for: micro-cleanups with no claimed perf effect, and correctness-only fixes — do not
-generate benchmark noise for changes nobody will gate on.
+generate benchmark noise for changes nobody will gate on. A correct system beats a marginally
+faster broken one: on a bug fix, record "deliberately not measured, none owed" (with the reasoning
+if it plausibly costs something), never a "never perf-measured" debt line.
 
 ## The harness inventory (two homes, different jobs)
 
@@ -79,8 +81,28 @@ first as its own commit.
 
 ## Step 2 — Measurement discipline
 
+- **Measure in the Editor first.** A Master player build costs ~9 minutes and ~1 GB; reserve it for
+  what the Editor cannot answer (IL2CPP/Master-only behavior, a frame-level GO/NO-GO). When a plan
+  has a Master A/B gate, ask whether an editor micro-bench under `Assets/Editor/Benchmarking/`
+  answers the same question.
+- **Read what a benchmark executes before naming it the instrument.** Grep the harness for the
+  production method under test: `ChunkGenerationBenchmark` never runs
+  `WorldJobManager.ProcessGenerationJobs` (its `AvgActive` only counts), and
+  `ActiveVoxelScanBenchmark`'s `T_bitmask`/`T_register` legs are managed replicas — only `T_current`
+  calls production. A count column or a replica named after the method is not coverage.
+- **The route's own noise is ±1–5 % per phase** (same code, two runs). A change worth <1 % of a pass
+  cannot be resolved by any benchmark here: measure the work removed with deterministic counters
+  (calls, iterations) and price it with an editor micro A/B. Never read a single-run swing inside
+  that band as a result.
+- **Check the pass's stop reasons before choosing a metric.** A `Ceiling`-bound pass works until its
+  budget expires either way, so a win shows as throughput (served/s, fewer `Ceiling` stops), never
+  as fewer ms. The binding limit differs by backend: the per-frame quota is device-calibrated at
+  launch, so a pass `Ceiling`-bound in the Editor can be `Quota`-bound in Master IL2CPP — read the
+  player's stop-reason table before targeting it.
 - **Prefer A/B legs over the same build** (flag-switched: e.g. `managed` / `halo-full` /
-  `halo-band`) — one build, one session, per-leg rows. Separate builds add noise and doubt.
+  `halo-band`) — one build, one session, per-leg rows. Separate builds add noise and doubt. In a
+  player, put the flag on `Settings` and add it to `SettingsManager.OverlayBenchmarkSettingsFromDisk`'s
+  whitelist: benchmark mode pins every other gameplay setting to `new Settings()` defaults.
 - **Fixed scenario set, fixed seed** — reuse the established scenarios for the system so numbers
   stay comparable across reports. Include warm-up iterations before timing.
 - **Report the full distribution**: `mean`, `min` (clean floor — best CPU-cost proxy), `median`,

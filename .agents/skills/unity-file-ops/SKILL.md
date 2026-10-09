@@ -47,18 +47,16 @@ Before deleting a prefab, ScriptableObject, or scene:
 
 `[SerializeField] private int _fooBar;` renamed to `_fooBaz` is a **data break**, not a compile break. Unity silently resets the field to its default on next scene/prefab load — any data previously set in the Inspector is gone.
 
-Two safe options:
+**This project does not use `[FormerlySerializedAs]`.** Every asset is in version control and the pre-commit reserialize surfaces a dropped value immediately, so the attribute would be permanent clutter guarding a loss that is already caught and cheaply reversed. Instead:
 
-- **`[FormerlySerializedAs]`** — preserves the data:
-
-  ```csharp
-  [FormerlySerializedAs("_fooBar")]
-  [SerializeField] private int _fooBaz;
-  ```
-
-  Requires `using UnityEngine.Serialization;`. Keep the attribute for at least one release cycle or until you are certain every scene/prefab has been re-saved.
-
-- **Manual migration** — grep `.unity`/`.prefab`/`.asset` files for the old field name and replace with the new name. Riskier; prefer `[FormerlySerializedAs]`.
+1. **Audit the exposure before renaming.** Serialized keys are a surface separate from the binary chunk format: sweep HEAD's YAML for the old key as a whole word (`git grep -nwF "_fooBar" HEAD -- '*.unity' '*.prefab' '*.asset'`), which catches both the field line `_fooBar: …` and prefab-instance overrides in scenes (`propertyPath: _fooBar`, `parent._fooBar`), and report what is at risk.
+2. **Rename, then reserialize** (`Tools/Voxel Engine/Force Reserialize All Assets`, CLAUDE.md pre-commit step 0).
+3. **Diff the touched assets; restore any dropped value** by copying the old YAML value back from `git show HEAD:<file>`, through the Editor. A reserialize does **not** migrate a scene's prefab-instance override (`m_Modifications` keeps the stale `propertyPath`), so every override hit from step 1 must be re-applied on the instance under the new name, and the stale
+   `propertyPath: _fooBar` entry then removed with `Tools/Voxel Engine/Prune Stale Prefab Overrides In Scenes`
+   (user-run: dry run first, a human reviews each candidate). A `.prefab` that still carries the old key
+   needs the `PrefabUtility.LoadPrefabContents` → `SaveAsPrefabAsset` round-trip — a reserialize can leave it
+   untouched (recipe: the `unity-editor` skill's `references/editor-writes.md`).
+4. **Verify in the YAML, not through the runtime accessor.** Grep each asset for both the old and the new key as whole words (`grep -nw`): the old must be gone — from field lines and `propertyPath:` overrides alike — and the new present. An accessor read-back can report the expected value while the asset still carries the old key — an absent key leaves the C# initializer in place, which matches whenever the authored value was the default.
 
 ### Scene and prefab merge conflicts
 
@@ -74,8 +72,21 @@ Two safe options:
 - **`.meta` without `.cs`:** either restore the `.cs` from git history or delete the orphan `.meta`. Do not leave orphan `.meta` files — they cause duplicate-GUID warnings.
 - **Duplicate GUID warning:** two `.meta` files contain the same `guid:` value. Usually caused by copy-pasting a folder instead of duplicating through the Editor. Change one of the GUIDs (Unity will regenerate on next import) or delete the duplicate.
 
+### Hand-editing a ScriptableObject `.asset` (only when the user asks)
+
+For plain-field assets only — no `{fileID:}` / GUID references:
+
+- Edit in Python, not `Edit`: Unity writes an empty scalar as `field: ` **with a trailing space**, which `Edit` cannot express. Assert each anchor matches exactly once and write with `newline="\n"`.
+- Validate with a real parser: strip the `%YAML`, `%TAG` and `--- !u!` lines, then `yaml.safe_load` the body (`python -m pip install pyyaml`).
+- Quote a scalar only when required — a value containing `": "` must be single-quoted. Non-ASCII may be written literally; Unity re-escapes and re-folds long scalars on its next save (a re-fold is a spurious hunk to revert when splitting commits).
+- Enum fields are stored as bare ints, so an enum backing an asset is append-only: pin explicit values and land the enum and its data in the same commit.
+- The proof it is well-formed is a reserialize whose `git diff --numstat` shows **0 deletions**.
+
+Writing assets through the Editor instead (scenes, prefabs, import settings) has its own traps: the `unity-editor` skill's `references/editor-writes.md`.
+
 ## Never
 
 - Never manually text-edit `.meta`, `.prefab`, `.unity`, or ScriptableObject `.asset` files unless the user explicitly asks. Let the Editor handle serialization.
+- Never add `[FormerlySerializedAs]` — use the rename workflow above.
 - Never delete a `.meta` file without also deleting its asset (or confirming the asset is already gone).
 - Never do `git rm {file}.cs` without also removing `{file}.cs.meta`.

@@ -75,6 +75,7 @@ Retry it; it is not a hang.
 | Command groups, argument shapes, examples                   | [references/commands.md](references/commands.md) |
 | Project recipes + the full gotcha list                      | [references/recipes.md](references/recipes.md)   |
 | Profiler: auto-stop recording, captures, queries, drill-down | [references/profiler.md](references/profiler.md) |
+| Writing scenes, prefabs, assets or import settings from C#  | [references/editor-writes.md](references/editor-writes.md) |
 
 ## Constraints
 

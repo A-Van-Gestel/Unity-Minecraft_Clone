@@ -16,7 +16,7 @@ python --version
 ```
 
 - Expected: `Python 3.14.x` (or newer minor of 3.14). Anything ≥ 3.12 is usable in practice; flag the mismatch to the user but proceed.
-- On Windows, `python` may resolve to a Microsoft Store stub that opens an install prompt. If `python --version` hangs or returns nothing, try `py -3 --version` instead and use `py -3` for subsequent invocations.
+- On this host always call `python`, never `python3`: `python3` resolves to the Microsoft Store stub and runs nothing. If `python --version` itself hangs or returns nothing, try `py -3 --version` and use `py -3` for subsequent invocations.
 - If Python is **not installed** (command not found, exit code ≠ 0): stop. Tell the user Python is required for this task and either ask them to install it (3.14 preferred) or propose a C#-only alternative if one is reasonable. Do not attempt to install Python yourself.
 - If the version is older than 3.10: avoid `match` statements, PEP 604 union syntax (`int | str`), and other recent features, or ask the user to upgrade.
 
@@ -38,6 +38,7 @@ Not an exhaustive list — use judgment. Examples include:
 
 - **NEVER place `.py` files under `Assets/`.** Anything in `Assets/` triggers Unity's asset import pipeline, generates `.meta` files, and gets indexed by the IDE/Burst toolchain. Python scripts are not Unity assets.
 - **Persistent / reusable scripts** → `Tools/Python/<purpose>/script.py` at the repo root (sibling to `Documentation/`). Mirror the architectural area when relevant (e.g., `Tools/Python/Meshing/`, `Tools/Python/Serialization/`). Add a row for it to `Tools/Python/README.md` — the index sessions and subagents search, since a tool nobody can find is never run.
+- **Tested scripts** (the git and Markdown helpers listed under the README's *Tests* section) have a `unittest` suite in `Tools/Python/tests/`. After changing one, run `python Tools/Python/tests/run_tests.py` and add a test for the behavior you added or fixed — each test builds its own throwaway repo with `tests/helpers.py`'s `TempRepo`. A script the pre-commit flow or a subagent depends on should get tests when it is added.
 - **One-off throwaways** → inline in chat as a code block or Artifact. Do not commit ad-hoc scratch scripts to the repo.
 - If the destination is unclear, ask the user where it should live before writing the file.
 
@@ -55,6 +56,8 @@ Not an exhaustive list — use judgment. Examples include:
 
 - If you have terminal access, run the script directly and read the output yourself. Do not ask the user to paste output if you can run it.
 - If output is large, write it to a file under `Tools/Python/output/` (gitignored) and read the file rather than dumping into the conversation.
+- **Write any script containing a backslash escape to a file** (the `Write` tool) and run the file. Inside a bash heredoc, `\n`, `\r` and friends get mangled in this environment even with a quoted delimiter, producing real newlines in string literals (`SyntaxError: unterminated string literal`) or silently different replacement text. In a scripted find-and-replace, assert each anchor matches exactly once and that the content changed.
+- **A script that edits a doc must never truncate it before the new content exists.** `open(path, 'w')` empties the file at open, so an exception during `write()` (e.g. `UnicodeEncodeError` on an emoji status glyph) leaves 0 bytes — and the next script reports "substring not found", which looks like a bad anchor. Prefer the `Edit` tool for prose; in a script, build the full text first, encode it, then write bytes, preserving the file's line endings (`newline=""` on read and write).
 - For scripts that emit C# code, write directly to the target `.cs` path so the user can review the diff in their editor.
 
 ## Script structure conventions

@@ -52,8 +52,8 @@ This is the "hidden identity" that §5 of
 
 ```bash
 # $RANGE is whatever step 1 resolved: "" (unstaged), --staged, @{u}...HEAD, <base>...HEAD
-# --no-color is REQUIRED, not cosmetic: this repo sets color.ui=always, so git emits ANSI escapes
-# even when piped — every ^+ / ^- anchor below then matches NOTHING and the gate passes silently.
+# --no-color is REQUIRED, not cosmetic: under a color.ui / color.diff = always setting git emits ANSI
+# escapes even when piped — every ^+ / ^- anchor below then matches NOTHING and the gate passes silently.
 git diff --no-color $RANGE -- '*.hlsl' '*.shader' | grep -nE '^\+.*(_LiquidNoiseOrigin|worldPos|positionWS|_Time)'
 git diff --no-color $RANGE -- '*.cs'             | grep -nE '^\+.*(OriginVoxel|WorldOrigin|SetGlobalVector|SetGlobalFloat)'
 ```
@@ -133,8 +133,8 @@ The shapes the guide names, in rough order of how often they appear:
 
 ```bash
 # $RANGE is whatever step 1 resolved: "" (unstaged), --staged, @{u}...HEAD, <base>...HEAD
-# --no-color is REQUIRED, not cosmetic: this repo sets color.ui=always, so git emits ANSI escapes
-# even when piped — every ^+ / ^- anchor below then matches NOTHING and the gate passes silently.
+# --no-color is REQUIRED, not cosmetic: under a color.ui / color.diff = always setting git emits ANSI
+# escapes even when piped — every ^+ / ^- anchor below then matches NOTHING and the gate passes silently.
 git diff --no-color $RANGE | grep -nE '^\+.*(transform\.position\s*[-+]|FloorToInt\([^)]*/\s*16|%\s*16|FromVoxelPosition|OriginVoxel)'
 git diff --no-color $RANGE -- 'Assets/Scripts/Jobs/*' | grep -n 'WorldOrigin'
 ```

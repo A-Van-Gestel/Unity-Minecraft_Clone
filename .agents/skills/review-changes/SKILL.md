@@ -210,7 +210,7 @@ are the part that matters, and the exceptions are where false positives come fro
 | 6 | Hot-path GC allocation | jobs |
 | 7 | Pool not used where a pool exists | jobs |
 | 8 | On-disk serialization layout changed with no AOT migration | serialization |
-| 9 | `[SerializeField]` / prefab-referenced field renamed or deleted without `[FormerlySerializedAs]` | serialization |
+| 9 | `[SerializeField]` / prefab-referenced field renamed or deleted without its asset data carried over | serialization |
 | 10 | Chunk-pipeline invariant broken (flag pairing, gate ordering, pool recycle safety) | pipeline |
 | 11 | Mutable `static` added without a per-play reset, or a second `[RuntimeInitializeOnLoadMethod]` | pipeline |
 | 12 | Change collides with a known bug in `Documentation/Bugs/` | pipeline |
@@ -246,9 +246,9 @@ Everything else fires on every run. Three that look deferrable and are not:
 - **Gate 5 (Burst).** A managed reference or a `string` interpolation in a
   `[BurstCompile]` job does not "compile later" — it silently falls out of Burst
   or fails AOT in the IL2CPP player. It must never reach a commit that way.
-- **Gate 9 (serialized-field rename).** A rename without `[FormerlySerializedAs]`
-  is silent data loss the instant the scene/prefab re-serializes. There is no
-  later — the reference is already gone.
+- **Gate 9 (serialized-field rename).** A rename whose asset data was not
+  carried over is silent data loss the instant the scene/prefab re-serializes.
+  There is no later — the reference is already gone.
 - **Gate 11 (domain-reload static).** A mutable `static` with no per-play reset
   leaks a stale value into the next play session the moment fast enter play mode
   (*Reload Domain* off) is switched on, and both analyzers flag it today. A field
@@ -279,7 +279,7 @@ other side, and land on one of:
   engine's normal failure modes, not speculation.
 - **Refuted** — drop it silently. Only three things refute a candidate: the code
   does not say that (quote the line that proves it), the diff already handles it
-  elsewhere (cite the guard — a `[FormerlySerializedAs]`, an existing
+  elsewhere (cite the guard — a renamed key's value restored in the asset YAML, an existing
   `DomainReset`, a pool `Get`/`Release` pair), or it is pre-existing and the diff
   did not make it worse (the delta rule).
 
@@ -347,7 +347,9 @@ Rules for the report:
   one-line `Carried:` summary with its number and disposition. A finding the user
   rejected stays rejected — do not re-raise it in different words, and do not
   re-raise it through a different gate. Carry-forward is session-scoped: a new
-  session starts clean.
+  session starts clean — except for the deliberate designs in
+  [references/settled-decisions.md](references/settled-decisions.md), which are
+  never findings in any session.
 - **Answer a numbered reply directly.** The numbers exist so the review can be
   driven by reference, so treat `fix #1, drop #3` as the instruction it plainly is:
 
