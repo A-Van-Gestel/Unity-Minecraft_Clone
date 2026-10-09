@@ -1809,8 +1809,8 @@ contemporaneous notes.*
   logarithmic rolloff never reaching silence, and per-scan-only distance checks — each now fixed and pinned
   (53 baselines). The rolloff bound assertion earned its keep immediately: smoothed curve tangents put gain at
   1.000149 across the plateau, so the curve is piecewise-linear instead. The stop behaviour is confirmed in
-  game; the mix itself is not yet tuned by ear. A second in-game pass made the predicate **asymmetric** on the
-  user's call: water still sounds only when it moves, but lava sounds at any level, including a still pool —
+  game; the mix itself is not yet tuned by ear. A second in-game pass made the predicate **asymmetric**:
+  water still sounds only when it moves, but lava sounds at any level, including a still pool —
   it has no ambience bed of its own and is a hazard worth hearing early. The predicate is keyed on
   `FluidType`, so `flowingFluidCount` became `emitterFluidCount`; still lava resolves to `LavaFlow`, needing no
   fifth kind. Proved red on both sides before acceptance. A third pass moved the audible radius onto the

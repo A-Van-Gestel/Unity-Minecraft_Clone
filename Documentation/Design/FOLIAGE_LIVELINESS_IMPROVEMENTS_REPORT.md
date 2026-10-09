@@ -301,7 +301,7 @@ RF-1 effective-light queries; TG-4 cleanup (pending) touches the same scheduler.
   path confirmed end-to-end): per-block variation moved from engine constants to
   `BlockType.crossMeshVariation`, a `CrossMeshVariationSettings` struct (offset / scaleMin / scaleMax
   / allowMirror) mirrored into `BlockTypeJobData` and read by `CrossMeshVariation.FromCell`. Design
-  choices, all user decisions: a **nested settings struct** rather than four flat fields (each of the
+  choices: a **nested settings struct** rather than four flat fields (each of the
   BlockEditor's two hand-maintained `BlockType` copy initializers gains one line, not four — the
   omission FL-2 already had to fix once); the envelope is **clamped in the job-data mirror**
   (`SanitizeEnvelope`) with a BlockEditor `HelpBox` showing the clamped result, so MR-4's padded

@@ -312,7 +312,9 @@ semantics — accepted as the permanent world limit.
      > dedicated double bodies (its loops consume the absolute coordinate). The float-only `snoise`
      > dither/wiggle sites wrap their inputs to 2¹⁸/2²² -block periods (seams half-period offset from
      > spawn) on the precise path only.
-> 2. **Global setting instead of world-version gating** (user decision 2026-07-20): World tab →
+> 2. **Global setting instead of world-version gating** (2026-07-20): the classic far-lands look is
+     > worth keeping, and a global setting was the simpler way to keep it; a per-world option can follow
+     > if world-creation options are ever added. World tab →
      > "Far Lands (Classic Noise)", **default off = Precise64**, read at generator init
      > (`WorldJobManager` → `FastNoiseFactory.GlobalCoordinatePrecision`). Consequences accepted:
      > existing worlds' *new* far chunks change on first post-update load, and chunks generated under
@@ -373,8 +375,8 @@ semantics — accepted as the permanent world limit.
   pending): FNL `CoordinatePrecision.Precise64` double coordinate pipeline + double public API,
   classic float path preserved bit-identically (golden file, 15 050 tests) as the opt-in global
   "Far Lands (Classic Noise)" setting (default precise — deviation from the world-version-gating
-  spec, user decision). §6 annotated with the shipped design and the finding that the spec's
-  primary per-chunk-base-offset mechanism is mathematically insufficient (fallback promoted).
+  spec, the simpler way to keep the classic look). §6 annotated with the shipped design and the
+  finding that the spec's primary per-chunk-base-offset mechanism is mathematically insufficient (fallback promoted).
   snoise dither/wiggle period-wrapped on the precise path; worm-carver float positions deferred.
 * **v2.1** - §5 rider (a) — the structure cell-election floor-div fix — **shipped 2026-07-18**:
   `StandardChunkGenerationJob:573-574` swapped from the float idiom to the new `ChunkMath.FloorDiv`,

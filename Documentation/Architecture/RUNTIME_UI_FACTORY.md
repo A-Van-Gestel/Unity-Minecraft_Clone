@@ -163,7 +163,7 @@ again when the panel is destroyed out from under the view. A material instance c
 
 The console panel runs at alpha 1 with the same `0.415` tint as the scene panels, per the blur doc's
 §4. Being opaque, it covers the toolbar's leftmost slot region where the two overlap — **accepted
-deliberately** (user decision, 2026-08-15) over raising the panel, hiding the toolbar, or leaving the
+deliberately** (2026-08-15) over raising the panel, hiding the toolbar, or leaving the
 console flat. The hotbar is inert while the console holds input focus (the Gameplay action map is
 disabled), the overlap shrinks to nothing at Small UI scale, and every alternative would have meant a
 layout or policy change the arc's non-goals rule out.

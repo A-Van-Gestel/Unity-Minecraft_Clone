@@ -422,7 +422,7 @@ wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game con
 >   §5.3 + §9.5 and this fidelity doc's §4.
 > - ~~**PENDING (user):** the end-to-end in-game repro — `enableLighting = false`, place a block then immediately a
     > second in the same chunk within the flight window.~~
->   **✅ RETIRED 2026-07-25 — MP-3 is FULLY CLOSED without it (user decision).** Three independent attempts failed
+>   **✅ RETIRED 2026-07-25 — MP-3 is FULLY CLOSED without it.** Three independent attempts failed
 >   to fire the in-flight arm, including MCP-driven ultra-high-speed edit sequences on top of the two scripted
 >   probes below. That is the *predicted* outcome, not a gap: per the CORRECTION, F1 is **load-driven**, so no
 >   edit-rate recipe can reach it — the arm needs many concurrent mesh jobs with deferred completions.
@@ -532,7 +532,7 @@ wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game con
     > is empty in release builds — never read it for behavior.** (2) *`MeshCompletionDriver._curJob` held its
     > released handles* until the next `CompleteJob` overwrote them — the fidelity-B7 stranded-container shape.
 >   Now cleared (`= default`) at the end of `ReleaseJob`, **and symmetrically for `_curLightJob`** in the
->   lighting driver (user's call): the reviewer cited `_curLightChunk = null` as precedent, but that clears a
+>   lighting driver: the reviewer cited `_curLightChunk = null` as precedent, but that clears a
 >   managed ref at job *start* — clearing the released job struct is a new convention, so it was applied to
 >   both drivers rather than one. Neither `RemoveAndPromote` reads the scratch, and a stage-1 fault `continue`s
 >   before `ReleaseJob`, so a retried job keeps its data. *Neither finding was reddable by any baseline — see
@@ -734,7 +734,7 @@ wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game con
 >   the upload may well have landed and only the animation thrown; the retired drain's `ChunkGameObject != null`
 >   guard was dropped by omission; "the **five** ms ceilings" went stale in three live places; and the new
 >   pipeline-doc callout contradicted itself ("no step 8 … a *ninth* stage").
->   - **F5 decision (user):** the guard goes **inside `PlayChunkLoadAnimation`'s else branch** — the only line
+>   - **F5 decision:** the guard goes **inside `PlayChunkLoadAnimation`'s else branch** — the only line
 >     that dereferences `ChunkGameObject` — rather than at the call site, so the chunk owns its own liveness
 >     instead of every future caller re-checking it. Deliberately *not* an early return: `_hasPlayedLoadAnimation`
 >     must still latch, since the retry path the old queue provided no longer exists. **It does not make teardown
@@ -823,7 +823,7 @@ wave). Every behavior-changing phase (MP-3, MP-6) additionally needs in-game con
 >   `NeighborMapSet`). Closed by the `INeighborMapSource` seam + **B39**, below.
 > - **`<c>` prose is not a tracked reference.** Rider rewrites `cref` but not `<c>NeighborRight</c>`; eight
 >   doc-comment lines needed a manual sweep. Worth remembering for the next rename.
-> - **The suite was extended rather than left as-is (user decision).** A pure rename is not reddable, and
+> - **The suite was extended rather than left as-is.** A pure rename is not reddable, and
 >   B18–B21's +X-only coverage *is* F6's complaint, so MP-7 also generalized `MeshingTestWorld` to four lazily
 >   created cardinal maps (`SetNeighborBlock(CardinalNeighbor, …)`; unpopulated directions still pass the
 >   length-0 `emptyMap`, so the generalization is inert for every pre-existing fixture — evidenced twice:
@@ -938,7 +938,7 @@ it needs play mode or a heavyweight edit-mode world builder, re-tests what B12�
 ## Document History
 
 * **v1.9** - MP-7 implemented + **in-game confirmed** (2026-07-26) — **the MP-1…MP-7 arc is COMPLETE; this document is now a record, not a plan.** The 16 `MeshGenerationJob` neighbor fields are compass-named via Rider `rename_refactoring` (16/16 previewed to the predicted 5-file shape, zero conflicts, field order and therefore Burst ABI untouched), and the rename deliberately reached **all four** wiring sites — `WorldJobManager`, `MeshProbeInput`/`StartupCalibrationProbe`, `EditorChunkPipelineRunner`'s locals, and
-  `MeshGenerationBenchmark.BenchmarkVoxelData` (a consumer the planning grep missed and Rider's reference index found). Every site now reads `NeighborS = …NeighborS`, so **F6's job-side mapping no longer exists to be transposed** (a second review round narrowed that claim: the compass→offset table in `AcquireNeighborMaps` is a distinct site, closed by **B39**). On user decision the phase also closed F6's *coverage* half rather than only its naming half: `MeshingTestWorld` generalized to four lazily-created cardinal maps (inert for existing fixtures —
+  `MeshGenerationBenchmark.BenchmarkVoxelData` (a consumer the planning grep missed and Rider's reference index found). Every site now reads `NeighborS = …NeighborS`, so **F6's job-side mapping no longer exists to be transposed** (a second review round narrowed that claim: the compass→offset table in `AcquireNeighborMaps` is a distinct site, closed by **B39**). Because a pure rename is not reddable, the phase also closed F6's *coverage* half rather than only its naming half: `MeshingTestWorld` generalized to four lazily-created cardinal maps (inert for existing fixtures —
   **346/346** before any change, **347/347** after, with B37 the only addition; the later diagonal generalization likewise held at **37/37** before B38 existed) plus **B37**, whose prove-red — swapping `NeighborW`↔`NeighborN` in the job's own routing — gives `expected 80, got 88` and reds **exactly B37** while B18–B21 stay green. A `/code-review high` round then corrected the residual twice over: the diagonals are **not** AO-only (they drive fluid corner geometry unconditionally, so **B38** closes them via a corner-height oracle), and the review caught
   an omitted third surface — the **8 `Light*` maps**, identically rewired and completely unguarded, now fidelity **MH-13** (open). A **third** round narrowed F6's closure claim to the job-side table and closed the *acquire-site* table it excluded — `Helpers/NeighborMapAssembler` + `INeighborMapSource` + **B39**, whose prove-red shows 88 lighting baselines were blind to it. `Validate Meshing` 36 → **39**, **`Validate All` 346 → 349/349**. Doc-synced `CHUNK_LIFECYCLE_PIPELINE.md` §9.5 (F8 now observable via `CountMeshRequest`, measured not fixed — risk
   stays Medium), the meshing fidelity doc (new MH-12 + MH-13, tip B36 → B39), the lighting fidelity doc (new A0 — the neighbor offset table the lighting harness never executes), `VALIDATION_SUITE_COVERAGE_ROADMAP.md`'s verified counts, `PERSISTENT_CHUNK_STORAGE_P2.md`'s retire-the-fill pointer, and the meshing-suite skill reference.
@@ -946,7 +946,7 @@ it needs play mode or a heavyweight edit-mode world builder, re-tests what B12�
   `IMeshCompletionHost` rider** (its precondition held: the whole change is one branch in the merge hook): `MeshCompletionDriver` moved to `Helpers/` as a public class behind a 6-member host interface implemented on `WorldJobManager`, deliberately **excluding** the `[Conditional]` merge probes. **B31–B33** drive the real driver through the real skeleton with a fake host; each prove-red mutation reds exactly its own baseline, including the double-return (`[101, 102, 103, 103]`) that finally observes the 2026-07-25 scratch-lifecycle review finding.
   `Validate Meshing` 30 → **33**, **`Validate All` 343/343**. Doc-synced `CHUNK_LIFECYCLE_PIPELINE.md`
   §4 + §5.3, `SUB_CHUNK_MESHING_ARCHITECTURE.md` §4.4, this fidelity doc's §4 (tip B30 → B33), `CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md` §5.3 (the P-4 rider it documents is superseded; the budgets-off draw trickle no longer exists), the meshing-suite skill reference, and one stale call-site line in `DEBUG_METHODS_EXAMPLES.md`.
-* **v1.7** - **MP-3 declared FULLY CLOSED (2026-07-25, user decision) — the in-game repro is retired, not owed.** A third attempt (MCP-driven ultra-high-speed edit sequences, on top of the two scripted `EditorApplication.update` probes) again never fired the in-flight arm, exactly as the CORRECTION predicts: F1 is **load-driven**, so no edit-rate recipe can reach it. MP-3 stands on B26's prove-red plus production telemetry (273 / 814,801 retries in a real session). Also cleared the plan's stale status markers now that MP-1…MP-5 are all committed (phase
+* **v1.7** - **MP-3 declared FULLY CLOSED (2026-07-25) — the in-game repro is retired, not owed.** A third attempt (MCP-driven ultra-high-speed edit sequences, on top of the two scripted `EditorApplication.update` probes) again never fired the in-flight arm, exactly as the CORRECTION predicts: F1 is **load-driven**, so no edit-rate recipe can reach it. MP-3 stands on B26's prove-red plus production telemetry (273 / 814,801 retries in a real session). Also cleared the plan's stale status markers now that MP-1…MP-5 are all committed (phase
   table ✅ for MP-1/MP-2/MP-3, "uncommitted"/"smoke pending" headers on MP-2/MP-4/MP-5). **No open items remain in the MP-1…MP-5 arc.**
 * **v1.6** - MP-5 implemented (2026-07-25, uncommitted; in-game smoke pending): the GS-5 Phase 0.5 renderer-ownership split (F3) — `SectionRenderer.SetOcclusionCulled(bool)` as the codebase's sole writer of `MeshRenderer.forceRenderingOff`, `Clear()` resetting it on pool recycle, and the two-axis ownership contract XML-documented on the class plus `UpdateMeshNative`/`Clear()`. Decisions: bare write (no cached mirror), setter only (no getter), class + per-member docs. **B28–B30** on the MH-6 renderer fixture (non-interference over both apply paths,
   recycle reset, setter round-trip vs `activeSelf`); prove-red at `UpdateMeshNative`'s entry reds exactly B28 with both legs reporting. `Validate Meshing` 30/30, `Validate All` **340/340**. Doc-synced the culling doc (§5 Phase 0.5 ✅, status line, §7.3, §8, Phase 3 renderer step), `PERFORMANCE_IMPROVEMENTS_REPORT.md` GS-5 prerequisite + recommendation, `SUB_CHUNK_MESHING_ARCHITECTURE.md` §3.2 (ownership table), meshing fidelity tip B27 → B30. **In-game smoke confirmed** (fly-over: 7,969 merge attempts, 0 stale-instance, no visual change). Includes a

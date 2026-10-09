@@ -468,7 +468,7 @@ game. Tonemapping (§1's second half) and the §5 effects remain open, each stil
    `intensity 0.25`, `threshold 1.1`, so sub-white pixels contribute nothing and the visible change is
    confined to over-bright content.
 3. **No performance capture was taken.** Bloom ships default-on without a measured frame cost; the
-   post stack adds a full-screen pass plus an intermediate target. Waived by the user for desktop.
+   post stack adds a full-screen pass plus an intermediate target. Waived for desktop targets.
 4. **§5 effects** (vignette, DoF, motion blur) remain unstarted — the Volume now exists, so each is one
    override plus a sign-off.
 5. **The UI blur target must stay a persistent per-camera resource** — never a render graph texture.

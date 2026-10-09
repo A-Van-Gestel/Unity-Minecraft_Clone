@@ -687,7 +687,7 @@ change, alongside B11.
 **Not delivered by this phase (F14):** slab *surfaces* gain no shading. VO-5 only removes darkening, and a
 block never occludes its own face — judging the blend on slab faces has to wait for VO-6.
 
-- **Precondition:** ✅ D5's blend confirmed with the user (see the sign-off note in §4 D5).
+- **Precondition:** ✅ D5's blend signed off (see the sign-off note in §4 D5).
 - **Scope:** `MeshGenerationJob.SampleNeighborLight` returns a coverage fraction instead of a bool;
   `SampleCorner` weights the darkness term and the diagonal-skip test by it;
   `CalculateCornerLights`'s `directOpaque` branch likewise. Full cubes must produce **bit-identical**
@@ -793,15 +793,15 @@ visibility test and cull against it; baseline **B48**, Validate All **431**.
   geometry" claim (F4). Archive Bug M01 via `archive-fixed-bug` after confirmation.
 - **Serialization:** none.
 
-### VO-7 — World-version bump + relight migration · ❌ **DESCOPED 2026-08-08 (user decision) — DO NOT IMPLEMENT**
+### VO-7 — World-version bump + relight migration · ❌ **DESCOPED 2026-08-08 — DO NOT IMPLEMENT**
 
 **Why it was dropped.** F9's premise was that an upgraded client would silently mix old and new lighting
-per chunk. That premise does not hold for this project's actual situation, which the owner confirmed:
+per chunk. That premise does not hold for this project's actual situation:
 
 - The engine has **no released worlds**. The only saves carrying pre-`VO-3` light are the developer's own
   local test worlds, so there is no population to migrate.
-- Stale light is **self-healing in practice** — any block update in a chunk re-runs its lighting, and the
-  owner confirmed affected chunks already re-lit correctly that way. The residue is limited to chunks that
+- Stale light is **self-healing in practice** — any block update in a chunk re-runs its lighting, and
+  affected chunks were seen in game to re-light correctly that way. The residue is limited to chunks that
   are never touched again.
 - The remaining fix is a manual one-liner on a single local world, which is cheaper than a migration step
   plus its round-trip test, its doc-sync, and its permanent presence in the version ladder.

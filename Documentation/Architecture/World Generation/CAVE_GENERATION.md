@@ -297,7 +297,7 @@ one code path, not two. Guarded by the `Validate Worm Carver` suite (`Assets/Edi
 > why B1 is a *relative* precise-vs-classic comparison rather than an absolute assertion (an absolute one
 > false-reds on any biome cave retune), why B2 asserts `carved > 0` first, and that B5's Classic32 golden
 > was captured in editor/Mono and is **not** IL2CPP `FloatMode.Fast`-verified — plus the five gating
-> decisions that were settled with the user before implementation.
+> decisions that were settled before implementation.
 
 **The invariant the frame change had to keep — scatter re-simulation determinism.** The carver is a
 scatter algorithm: every chunk within the search radius independently re-simulates the *same* worms
@@ -314,8 +314,8 @@ the suite's baselines.
 
 **Why a cell-local frame rather than the alternatives.** No option was bit-identical to the old
 behavior near origin — worm paths are chaotic (position feeds radius noise, biome lookups, surface
-fade, seek checks, so a 1-ulp difference can flip a threshold and diverge a path), which is why the
-gating was a user decision rather than a technical one.
+fade, seek checks, so a 1-ulp difference can flip a threshold and diverge a path), so the choice was
+about which divergence to accept, not which option was correct.
 
 - **`double3` worm positions** (rejected as primary, kept as fallback) — smallest conceptual diff and
   exact to 2⁵³ outright, but it puts doubles in the *march hot loop*: the per-step vector math runs at

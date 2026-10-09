@@ -295,8 +295,8 @@ parse sites and format with it at the writer. The on-disk format does not change
 already invariant-identical — so this needs no save-version bump and no migration step.
 
 **Found by:** a code review of the NS-5 `G3` region-filename pins (August 2026); the ICU premise was checked
-against the runtime and did not reproduce, and the entry was kept on the user's call that the latent risk is
-worth recording.
+against the runtime and did not reproduce, and the entry was kept anyway because the latent risk is worth
+recording.
 
 ---
 

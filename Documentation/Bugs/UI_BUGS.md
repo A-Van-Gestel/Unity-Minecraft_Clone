@@ -136,7 +136,7 @@ adjacent frames to finally name the destroyer. (If deeper capture is again neede
 ## 05. UI Blur Strength Scales With Screen Resolution
 
 **Severity:** Bug (cosmetic) — **open, unfixed**  
-**Status:** **Reported, not started.** Reproduced 2026-08-14; deferred by the user as non-blocking. Wants a
+**Status:** **Reported, not started.** Reproduced 2026-08-14; deferred as non-blocking. Wants a
 full implementation plan before any code change, because both candidate fixes alter the blur's *look* and
 need a visual sign-off.  
 **Files:** `Assets/Shaders/UIBlurBlit.shader` (kernel), `Assets/Scripts/Rendering/UIBlurChain.cs`

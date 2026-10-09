@@ -135,7 +135,7 @@ of the three `AreNeighbors*` gates and in `GatherNeighborFacts`). They were adde
 prove it landed, and **that question is closed** — the counter diff is recorded in
 `LIGHTING_PIPELINE_STATE_REFACTOR.md`'s LP-6 Amended line (−34.7 % scan gate calls).
 
-They are **deliberately kept for now** (user decision, 2026-08-24): they are the only instrument that can
+They are **deliberately kept for now** (2026-08-24): they are the only instrument that can
 re-verify the laziness in production, and re-deriving them costs a session. The increments are
 `#if DEVELOPMENT_BUILD || UNITY_EDITOR`, so a release build carries none of it, and the fields are
 *instance* fields — no domain-reload reset obligation (the LP-1 probe convention).
