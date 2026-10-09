@@ -1,15 +1,14 @@
 # Directional Per-Face Voxel Occlusion (VO-*)
 
-**Version:** 3.0  
+**Version:** 3.1  
 **Date:** 2026-08-09  
-**Status:** **VO-0…VO-6 implemented and confirmed in game — the original arc is complete.** VO-7
-descoped. **VO-8 (per-corner AO coverage) implemented and confirmed in game.** **F16 / Bug M02 fixed,
-confirmed in game and archived — VO-9's ordering precondition is met.** **VO-9 not started and its
-premise is revised (F17) and it is restated as sub-voxel AO via adaptive tessellation. **VO-9a and VO-9b
-both executed; VO-9b is the substrate and is visually inert (F18).** The visual request itself now needs a
+**Status:** **VO-0…VO-6 and VO-8 implemented and confirmed in game — the original arc is complete**; VO-7
+descoped; **F16 / Bug M02 fixed, confirmed in game and archived.** **VO-9** was measured before designing,
+its first framing refuted (F17), and it shipped as sub-voxel AO via adaptive tessellation: **VO-9a and
+VO-9b executed**, with VO-9b a visually inert substrate (F18). The visual request itself needs a
 silhouette-based contact-shadow term, designed and executed in its own doc
 (`SILHOUETTE_CONTACT_SHADOWS.md`, `SS-*` — `SS-0`…`SS-3a` shipped and confirmed in game, `SS-3`
-default-OFF by owner decision; only `SS-4` remains).  
+default-OFF because it reads too flat; only `SS-4` remains). This doc's §7 roadmap rows remain unbuilt.  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
 
 > The engine gained partial blocks (`Stone Half Slab`) without the lighting model gaining a notion
@@ -219,7 +218,7 @@ Not part of the phases below — recording it so a cold executor does not redo i
 | F11 | **The oracle's sky column seeding was over-migrated by VO-3, and nothing could see it.** `LightingOracle`'s downward column walk charged only each cell's *entry* cost through its top face — and a horizontal slab's top face is the open mid-plane, so the column walked straight through the solid half beneath it, leaving the oracle 1 level brighter than the engine under any slab ceiling. The engine was right (its column recalc uses whole-block opacity there). It went unnoticed because B101–B104 are probe-based by design (F7), so **VO-4's B105 is the suite's first oracle comparison containing a partial block at all**. Full-cube controls matched throughout, which is how the fixture was cleared before the spec was touched. | VO-4 (fixed: `ExitBlocked` on the bottom face)                                                                                                                                                                                                                                                                                                                                                  |
 | F12 | **Sealing a partial-block light shaft never darkens the column beneath it.** Found while authoring B105; reproduces with **no chunk seam anywhere**, so it is not VO-4's subject. `IsLightObstructing` is `Opacity > 0`, so a slab already sits in the heightmap and sealing it never re-runs `RecalculateSkylightForColumn`; `PropagateDarkness` cannot help either, because a flat 15 column has no decrement chain. Controls pin it to partial blocks: a Glass shaft (full cube, opacity 0, equally undimmed column, *not* light-obstructing) and a Water shaft both darken correctly. This makes VO-3's recorded "the field is correct; the heightmap merely stays conservative" true for placement and **false for removal**.                    | Filed as `LIGHTING_BUGS.md` **Bug 21**; **root fix landed 2026-08-08** (user chose it over the narrower trigger-only option): `LightAttenuation.ObstructsSkyColumn` replaces `IsLightObstructing` at every heightmap site, **plus** a second part the harness caught — `ModifyVoxel`'s recalculation trigger fired only on an opacity change, which sealing a slab by rotation does not produce |
 | F13 | **The meshing harness's half slab had no authored volume.** `TestMeshBlockPalette.MakeHalfSlab` never set `collisionBounds`, so both slab fixtures reported `HasCustomBounds = false` and coverage 1 on all six faces — a slab in geometry, a full cube in shape. The lighting palette has always authored it (`TestBlockPalette.cs:88`); the meshing palette diverged silently because, until VO-5, no meshing code asked a shape question. Found by VO-5's first probe returning identical numbers for every orientation. Inert before VO-5 (no existing baseline read bounds), so no prior result was wrong.                                                                                                                                       | VO-5 (fixed: `collisionBounds = BlockCollisionBounds.BottomHalfSlab`). Generalizes the warning already recorded against `TestCustomMeshLibrary` in the VO-6 packet: **harness fixtures mirror production authoring, and an unmirrored field stays invisible until some phase reads it.**                                                                                                        |
-| F14 | **VO-5 cannot be visually judged on slab surfaces until VO-6 lands.** VO-5 only ever *removes* darkening (a partial block occludes less), and a block's volume never occludes its own face — so slab faces gain no shading from it, while losing the blanket darkening that previously masked F1. In game this reads as "the slabs have no AO". Confirmed numerically on the four-slab pit: the pit floor moved 64 → 132 (the reported artifact, fixed), while every slab face only brightened. The surfaces a viewer judges the AO blend on are exactly the ones VO-6 re-samples.                                                                                                                                                                    | Recorded. Owner accepted VO-5 as-is on this basis (2026-08-08) rather than reordering or tuning the blend to compensate — tuning a shading knob to hide a sampling bug would have to be undone by VO-6. **Re-check the D5 blend once VO-6 is in game.**                                                                                                                                         |
+| F14 | **VO-5 cannot be visually judged on slab surfaces until VO-6 lands.** VO-5 only ever *removes* darkening (a partial block occludes less), and a block's volume never occludes its own face — so slab faces gain no shading from it, while losing the blanket darkening that previously masked F1. In game this reads as "the slabs have no AO". Confirmed numerically on the four-slab pit: the pit floor moved 64 → 132 (the reported artifact, fixed), while every slab face only brightened. The surfaces a viewer judges the AO blend on are exactly the ones VO-6 re-samples.                                                                                                                                                                    | Recorded. VO-5 was accepted as-is on this basis (2026-08-08) rather than reordering or tuning the blend to compensate — tuning a shading knob to hide a sampling bug would have to be undone by VO-6. **Re-check the D5 blend once VO-6 is in game.**                                                                                                                                           |
 | F9  | ⚠️ **CLOSED-AS-WONTFIX 2026-08-08 (see VO-7).** **Light values are serialized; the model is not versioned.** Nothing on disk records which occlusion model produced a chunk's `LightData`, so without an explicit version bump an upgraded client silently mixes old and new lighting per chunk. (Executor verifies the exact world-version constant — the grep for it returned nothing under `Serialization/`/`Data/`.)                                                                                                                                                                                                                                                                                                                              | ~~VO-7~~ — descoped                                                                                                                                                                                                                                                                                                                                                                             |
 
 ---
@@ -337,8 +336,8 @@ decision whose *visual* outcome needs user sign-off (VO-5).
 > is the linear `light × (1 − coverage)`. Verified on the engine, not argued: the three orientations of
 > one slab — differing only by metadata — produce three distinct results on a probe face (bottom slab
 > occludes exactly like a full cube, vertical occludes half, top occludes nothing), while the rejected
-> six-face average scores all three at 0.5. Guarded by baseline **B42**. The owner accepted the blend
-> knowing VO-6 will change these same surfaces (**F14**) rather than tune it twice.
+> six-face average scores all three at 0.5. Guarded by baseline **B42**. The blend was accepted knowing
+> VO-6 will change these same surfaces (**F14**), rather than tuned twice.
 
 **Which face's coverage does an AO sample ask for? (proposed 2026-08-08, adopted same day.)** The
 question D5 left open: AO's side and diagonal samples are not face-adjacent to the meshed face, so
@@ -497,7 +496,7 @@ for sky-exposed slabs (VO-6 packet).
 - **Doc-sync:** `LIGHTING_VALIDATION_HARNESS_FIDELITY.md` — new palette entry + `meta` API note.
 - **Serialization:** none.
 
-### VO-3 — Directional occlusion in the BFS (🔴, behavior change — the F2 fix) · ✅ **CODE COMPLETE 2026-08-07 — AWAITING IN-GAME CONFIRMATION**
+### VO-3 — Directional occlusion in the BFS (🔴, behavior change — the F2 fix) · ✅ **EXECUTED + CONFIRMED IN GAME 2026-08-07**
 
 **How D3's full-cube-equivalence risk was resolved.** The packet warned that a two-face `max()` cost would
 regress semi-transparent full blocks (water into air: cost 1 → 2). Resolved by the first of the two options
@@ -820,6 +819,19 @@ append-only — the cost is permanent.
 
 ### VO-8 — Per-corner (sub-cell) AO coverage (🟡, behavior change — visual) · ✅ **EXECUTED + CONFIRMED IN GAME 2026-08-08**
 
+**Request (2026-08-08, from the in-game review of VO-6).** A vertical slab standing on a block should
+shade the exposed half of that block's top face the way a wall shades the floor beside it — a gradient
+— "except for in between shades". Filed as its own phase rather than folded into VO-6, which was a
+self-contained fix for a filed bug; this is a new capability. Before VO-8 the floor under a vertical
+slab `0x03` read a flat **`225,225,225,225`** (bottom slab `191`, top slab and open air `255`): VO-5's
+in-between shade was present and correctly ordered, but **uniform**, because AO's two sampling roles
+had different granularity. Ring samples were already per-corner in *position* (a slab in the ring
+measured `255,255,225,225`), but every sample's *coverage* was per-face — the direct sample's
+`cov(−Y) = 0.5` was shared by all four corners. VO-8 asks per corner instead: *does this occluder's
+volume cover the part of the shaded face nearest **this** corner?* **Do not re-derive D5's face
+choice:** the face a sample is asked about stays `OppositeFace(meshedFace)` (§4 D5, signed off); VO-8
+subdivides *that* face.
+
 **What landed.** `BurstOcclusionUtility.GetOctantCoverage` + `LightAttenuation.AmbientOcclusionOctantCoverage`
 replace the per-face `AmbientOcclusionCoverage` outright (the AO path was its only consumer, so no dead
 variant remains). A new 24-entry `BurstVoxelData.CornerVertices` LUT — built in the same loop as
@@ -848,7 +860,7 @@ VO-5, which is the degeneration check: VO-8 only *splits* the case that was flat
 roll to a flat `225,225,225,225` and reds B46 on its gradient leg and all six roll-distinctness pairs, while
 B41/B43/B44/B45 stay green.
 
-**⚠️ Follow-up fix — `MESHING_BUGS.md` Bug M03 (archived).** The owner's in-game review found a recessed
+**⚠️ Follow-up fix — `MESHING_BUGS.md` Bug M03 (archived).** An in-game review found a recessed
 half slab rendering **fully black**. Cause: the octant was selected from a *cell-boundary vertex*, which
 sits half a block below a mid-plane face, so the half chosen lay **behind** the surface — the block
 reported that it occluded its own face, and the same error evaluated the ambient ring through solid
@@ -863,9 +875,9 @@ floor. Validate All **430**.
 > reasonable and jointly wrong. Any future work that adds a face position the cell grid does not describe
 > should re-check every place that infers geometry from a cell index.
 
-**Perf — measurement WAIVED by the owner 2026-08-08. Do not re-open it speculatively.** The packet
-asked for a profiler capture before defaulting VO-8 on; the owner waived it on the grounds that
-correctness is what matters here and that a real bottleneck would be handled when it actually shows up.
+**Perf — measurement WAIVED 2026-08-08. Do not re-open it speculatively.** The packet asked for a
+profiler capture before defaulting VO-8 on; it was waived because correctness is what matters here and
+a real bottleneck is handled when it actually shows up.
 What exists is a structural argument, and it is the reason the waiver is safe:
 `AmbientOcclusionOctantCoverage` short-circuits on `HasCustomBounds`, so the 37 of 38 block types with
 no authored shape pay one inlined early return plus three comparisons and never reach the rotation path.
@@ -874,150 +886,72 @@ negligible while short-circuited, four rotations instead of one for a partial bl
 **If meshing ever does become a measured bottleneck**, the precomputation to reach for first is a
 per-block-type LUT of the eight octant coverages, which removes the rotation from the loop entirely.
 
-**Original request, for the record. Raised by the owner 2026-08-08**, on seeing VO-6 in game: a vertical slab standing on a block
-should shade the exposed half of that block's top face the way a wall shades the floor beside it —
-a gradient — "except for in between shades". Filed rather than folded into VO-6, which is a
-self-contained fix for a filed bug; this is a new capability.
-
-**What is true today** (measured, not inferred — floor block's `+Y` face, sun out of 255):
-
-| Occupant of the cell above | Floor's top face      |
-|----------------------------|-----------------------|
-| nothing                    | `255,255,255,255`     |
-| **vertical slab** `0x03`   | **`225,225,225,225`** |
-| bottom slab `0x00`         | `191,191,191,191`     |
-| top slab `0x10`            | `255,255,255,255`     |
-
-So VO-5's in-between shade is already there and correctly ordered — it is simply **uniform**. The
-cause is structural, not a defect: AO has two sampling roles with different granularity.
-
-- **Ring samples are per-corner**, which is where a wall's gradient comes from — a slab in the ring
-  measures `255,255,225,225`.
-- **The direct sample is per-face**: one value shared by all four corners. A vertical slab reports
-  `cov(−Y) = 0.5`, and 0.5 applied to four corners is exactly the flat 225 above.
-
-**Scope.** Replace the per-face coverage question with a per-corner one: *does this occluder's volume
-cover the part of the shaded face nearest **this** corner?* For a vertical slab over a floor that
-answers 1 on the two corners beneath its solid half and 0 on the other two — the requested gradient.
-The occluder's rotated AABB is already available (`BurstOcclusionUtility.RotateLocalBounds`); what is
-new is intersecting it against the corner's quadrant of the face rather than the whole face. Applies to
-the ring samples too, which are currently per-corner in *position* but per-face in *coverage*.
-
-**Do not re-derive D5's face choice.** The face a sample is asked about stays
-`OppositeFace(meshedFace)` (§4 D5, signed off); VO-8 subdivides *that* face, it does not re-open which
-face to ask.
-
-- **Precondition:** VO-6 confirmed in game (done) — the sample cell must be right before subdividing it.
-- **Prove-red:** a vertical slab on a floor block must take that face from four equal corners to two
-  dark and two light, with the dark pair on the side its solid half occupies (a *directional*
-  assertion — rotating the slab through its four rolls must move which pair darkens). Full cubes stay
-  bit-identical: coverage is 1 on every quadrant, so B41's binary invariant must extend unchanged, and
-  B11 plus every standard-cube baseline stay green. B42's per-orientation ordering stays green — VO-8
-  refines *where* the darkening lands, not the totals it is asserted on.
-- **Watch the cost:** this moves a coverage computation from once-per-face to once-per-corner in the
-  engine's hottest loop. (Measurement was subsequently **waived** — see the perf note in the executed
-  packet above.)
-- **Acceptance:** universal gate + in-game confirmation. **User sign-off** (visual change).
 - **Serialization:** none (mesh output is not persisted).
 
-### VO-9 — Sub-voxel ambient occlusion (⚠️ original framing superseded — see F17 and the restatement below)
+### VO-9 — Sub-voxel ambient occlusion · ✅ **VO-9a + VO-9b EXECUTED 2026-08-08/09 — the visual request moved to `SS-*` (F18)**
 
-**Raised by the owner 2026-08-08** from the same in-game review that produced VO-8: floor next to a
-vertical slab reads as unshaded where a full block would clearly darken it. **This is the model working
-as specified, not a defect** — hence a phase rather than a bug entry. Two separate causes, measured:
+**Request (2026-08-08, from the in-game review that produced VO-8).** A vertical slab standing on a
+block covers only half that block's top face; the still-visible half should receive a contact shadow
+and effectively does not. Where the slab's solid half is grid-aligned, its shading of the neighboring
+cell is already correct — which localizes the defect.
 
-**(a) An occluder coplanar with the shaded surface is never sampled at all.** ❌ **REFUTED BY
-MEASUREMENT 2026-08-08 — do not implement this. See finding F17 below.** AO only ever samples the
-layer *in front of* a face. A slab occupying the same cell layer as the floor is invisible to the
-neighbouring floor's `+Y` ambient ring — measured `255,255,255,255` on every neighbour, i.e. exactly
-zero contribution. No refinement of the coverage model changes this; the cell is not in the sample set.
+**Preconditions, both met.** `MESHING_BUGS.md` **Bug M03** first (fixed and archived 2026-08-08), and
+**Bug M02** ahead of this phase: both touch custom-mesh face handling, and M02 changes *which faces are
+emitted at all*, so VO-9's visual result would otherwise be judged against a changed mesh. M02 was
+fixed, confirmed in game and archived 2026-08-08 (baseline **B48**). **Any VO-9 measurement predating
+2026-08-08 is void** — it was taken against a mesh missing its mid-plane faces.
 
-**(b) A corner is all-or-nothing.** VO-8 asks "does your volume fill this octant", and for an
-axis-aligned half slab the answer is always 1 or 0 — never partial. Occluders standing *on* the floor,
-surveying the 8 surrounding top faces:
+**Finding F17 — the phase's first framing did not survive measurement.** VO-9 was first filed as two
+causes, both measured on the post-M02 engine before any VO-9 code was written:
 
-| Occluder             | Neighbour corners darkened | Mean |
-|----------------------|----------------------------|------|
-| full cube            | 12 of 32                   | 231  |
-| bottom slab `0x00`   | 16 of 36                   | 226  |
-| vertical slab `0x03` | 8 of 36                    | 240  |
+- **(a) "An occluder coplanar with the shaded surface is never sampled" — refuted. The hot-loop
+  sample-set widening it asked for is unnecessary and must not be built.** VO-6 re-bases a mid-plane
+  face's ring onto its own cell (`sampleCell - rotatedOffset`), so the own layer *is* sampled. On a
+  bottom-slab floor (mid-plane tops at `y = 8.5`) with a same-layer neighbor rising half a cell above
+  that surface: flush bottom slab **0 of 36**, full cube **8 of 32** (mean 239), vertical slab `0x03`
+  **4 of 32** (247). The control settles it: on a full-cube floor, an occluder confined to the floor's
+  own layer measures **0 of 32 for a full cube**, identical to either slab — so the original
+  `255,255,255,255` reading is what *any* occluder does when it lies entirely below the shaded plane,
+  which is the correct answer.
+- **(b) "A corner is all-or-nothing" — reproduces exactly, but its proposed fix cannot work for a
+  slab.** VO-8 asks "does your volume fill this octant". Occluder standing on a full-cube floor,
+  surveying the surrounding top faces:
 
-So a vertical slab does cast — on two-thirds the corners, with a third less mean darkening. Beside a
-cube that reads as nothing.
+  | Occluder             | Neighbor corners darkened | Mean |
+  |----------------------|---------------------------|------|
+  | full cube            | 12 of 32                  | 231  |
+  | bottom slab `0x00`   | 16 of 36                  | 227  |
+  | vertical slab `0x03` | 8 of 36                   | 241  |
+  | top slab `0x10`      | 0 of 36                   | 255  |
 
-**Scope sketch (not a decision).** (a) needs the sample set widened for surfaces whose own layer contains
-partial geometry, which is a bigger change than it sounds: it adds cells to the hottest loop for every
-face, so it must be gated on there being partial geometry present at all. (b) wants the *fractional*
-octant overlap to actually reach the output — `GetOctantCoverage` already returns a fraction and the
-axis-aligned half-slab case simply never produces an intermediate one; shapes that do (a fence post, a
-future stair) would already grade. Deciding whether (b) is worth solving for slabs specifically means
-deciding whether a corner should carry sub-cell resolution at all.
+  (The first filing's 226/240 is floor-versus-round on identical corner values.) The proposed route —
+  let `GetOctantCoverage`'s fractional overlap reach the output — cannot help: an octant is exactly
+  half a cell on each axis and so is an axis-aligned half slab, so every octant is fully in or out and
+  the fraction is never intermediate for a slab. It would grade a fence post or a stair and does
+  nothing for the reported geometry. Moving those numbers needs a volume-weighted direct term, a new
+  visual model with its own sign-off, prove-red and per-corner cost in the hottest loop.
 
----
+**The measured mechanism of the actual request.** The floor block under a vertical slab `0x03` reads
+`255, 191, 255, 191`; through `GetCornerUV` (face 2: `u = x`, `v = z`) the darkened pair is the `z = 1`
+side, exactly where that slab's solid half sits. **The occlusion query is already correct.** The
+failure is in *where the answer can be stored*: `VoxelMeshHelper.BlendCornerLight` blends per emitted
+vertex from four corner values per face, the slab's edge lies at the cell midline `z = 0.5`, and there
+is no vertex there. Across the visible half the shading therefore runs a straight `255 → 223` where a
+contact shadow should reach about `191` at the wall and fall off quickly — a shadow smeared to twice
+its width at half its strength. The grid-aligned case looks right for the same reason: there the
+occluder edge coincides with a cell boundary, which is where the vertices are. **In one sentence: AO
+resolution is pinned to mesh vertex resolution, one sample per cell corner**, so any occluder feature
+that is not grid-aligned is smeared across a whole cell.
 
-**New finding F17 — cause (a) does not exist, and cause (b)'s proposed route cannot work for a slab.**
-Measured 2026-08-08 on the post-M02 engine, before any VO-9 code was written.
-
-*(b) reproduces exactly.* Occluder standing on a full-cube floor, surveying the surrounding top faces:
-full cube **12 of 32** (mean 231), bottom slab `0x00` **16 of 36** (227), vertical slab `0x03` **8 of 36**
-(241), top slab `0x10` **0 of 36** (255). The packet's 226/240 versus 227/241 is floor-versus-round on
-identical corner values.
-
-*(a) is refuted.* The claim "the cell is not in the sample set" has been false since **VO-6**, which
-re-bases a mid-plane face's ring onto its own cell (`sampleCell - rotatedOffset`) — so the own layer
-*is* sampled. On a bottom-slab floor (mid-plane tops at `y = 8.5`) with a same-layer neighbour rising
-half a cell above that surface: flush bottom slab **0 of 36**, full cube **8 of 32** (mean 239),
-vertical slab `0x03` **4 of 32** (247). The coplanar cell demonstrably contributes.
-
-*The control that settles it.* On a full-cube floor, an occluder confined to the floor's own layer
-measures **0 of 32 for a full cube** — identical to either slab. So the original `255,255,255,255`
-reading was never partial-block behaviour; it is what *any* occluder does when it lies entirely below
-the shaded plane, which is the correct answer. **The hot-loop sample-set widening (a) asked for is
-unnecessary and must not be built.**
-
-*(b) cannot be solved by routing the fraction through.* An octant is exactly half a cell on each axis
-and an axis-aligned half slab is exactly half a cell, so every octant is fully in or fully out and
-`GetOctantCoverage` can never return an intermediate value for a slab. The proposed route would grade a
-fence post or a stair and does nothing for the reported geometry. The visible artifact — the floor on
-the slab's *open* side reading a flat `255,255,255,255` — is a granularity limit of the binary
-per-octant model. The only change that would move those numbers is a volume-weighted direct term
-(weight a corner by how much of the sampled cell's volume sits near it, instead of a binary octant
-test), which is a new visual model needing its own sign-off, prove-red, and per-corner cost in the
-hottest loop.
-
-**Status 2026-08-08:** superseded by the owner's clarification below. **Any VO-9 measurement predating
-2026-08-08 is void** — M02 changed which faces are emitted.
-
----
-
-## VO-9 restated: sub-voxel ambient occlusion
-
-**The owner's actual request (2026-08-08), which neither (a) nor (b) captured.** A vertical slab
-standing on a block covers only half that block's top face. The still-visible half should receive a
-contact shadow and effectively does not. Crucially, the owner also observed that *where the slab's
-solid half is grid-aligned, its shading of the neighbouring cell is correct* — which localizes the
-defect precisely.
-
-**Measured mechanism.** The floor block under a vertical slab `0x03` reads `255, 191, 255, 191`; through
-`GetCornerUV` (face 2: `u = x`, `v = z`) the darkened pair is the `z = 1` side, exactly where that
-slab's solid half sits. **The occlusion query is already correct.** The failure is in *where the answer
-can be stored*: `VoxelMeshHelper.BlendCornerLight` blends per emitted vertex from four corner values per
-face, the slab's edge lies at the cell midline `z = 0.5`, and there is no vertex there. Across the
-visible half the shading therefore runs a straight `255 → 223` where a contact shadow should reach about
-`191` at the wall and fall off quickly — a shadow smeared to twice its width at half its strength. The
-grid-aligned case looks right for the same reason: there the occluder edge coincides with a cell
-boundary, which is where the vertices are.
-
-**So the limitation is one sentence: AO resolution is pinned to mesh vertex resolution, one sample per
-cell corner.** Any occluder feature that is not grid-aligned is smeared across a whole cell.
-
-**Chosen approach (owner, 2026-08-08): adaptive sub-quad tessellation.** Rejected alternatives, against
-the owner's stated requirement that it work for arbitrary custom meshes without per-shape patching: a
-per-face AO sub-grid texture (true per-pixel smoothing, but needs an atlas, UV allocation, upload
-bandwidth and a shader change, and touches MR-2's packed vertex format); per-pixel analytic evaluation
-(needs GPU-side shape data, highest risk in URP); baked AO shapes (fails the requirement outright — every
-new mesh needs a bake). Tessellation is the only option that reuses the existing pipeline end to end, and
-its sampling function is the prerequisite for the texture approach, so it is not a dead end.
+**Chosen approach (2026-08-08): adaptive sub-quad tessellation**, because the fix must work for
+arbitrary custom meshes without per-shape patching. Rejected against that requirement: a per-face AO
+sub-grid texture (true per-pixel smoothing, but needs an atlas, UV allocation, upload bandwidth and a
+shader change, and touches MR-2's packed vertex format); per-pixel analytic evaluation (needs GPU-side
+shape data, highest risk in URP); baked AO shapes (fails the requirement outright — every new mesh
+needs a bake). Tessellation is the only option that reuses the existing pipeline end to end, and its
+sampling function is the prerequisite for the texture approach, so it is not a dead end. It shipped as
+VO-9a (the query) and VO-9b (the subdivision); VO-9b's finding **F18** then showed that subdividing a
+coverage fraction cannot shade an axis-aligned slab, which moved the visual request to `SS-*`.
 
 ### VO-9a — generalize the occlusion query to an arbitrary sample point (🟢, no behavior change) · ✅ **EXECUTED 2026-08-08**
 
@@ -1073,8 +1007,8 @@ The first implementation re-evaluated **all four** samples (direct + ring) per s
 wrong: the ring carries the shadows cast by geometry standing *beside* a surface, and an undivided face
 renders those as a bilinear blend of its corner values. Re-sampling them concentrated every wall shadow
 into a hard band against the wall and lightened face interiors badly — measured at an inner corner
-between two walls, the face centre went **144 → 255**. The owner caught it in game immediately ("way too
-strong AO, especially compared to its neighbours"), and it is the same defect that produced the apparent
+between two walls, the face center went **144 → 255**. It showed in game immediately ("way too strong AO,
+especially compared to its neighbors"), and it is the same defect that produced the apparent
 improvement on a slab: it was strengthening AO overall, not resolving anything.
 
 Corrected, only the **direct** cell varies per sub-vertex. And then the slab case measures
@@ -1091,7 +1025,7 @@ coverage is *non-linear* in the cell: a fence post, a stair, any shape not spann
 
 **What would actually deliver the request** is a different shading model — a contact shadow that follows
 the occluder's **silhouette** and falls off with distance from it, rather than a coverage fraction. That
-is also the owner's second observation from the same review (an isolated block's AO reads as a round blob
+is also the second observation from the same review (an isolated block's AO reads as a round blob
 and should follow the block's rectangular shape): corner-blended AO cannot express either, and a
 silhouette-plus-falloff term expresses both. Filed as its own design pass; VO-9b's sub-vertices are the
 substrate it needs.
@@ -1108,24 +1042,6 @@ substrate it needs.
 - **`EmitQuadTriangles`' anisotropy-aware split** now runs per sub-quad; `MESHING_BUGS.md` **M04** stays
   filed and untouched.
 - **Serialization:** none.
-
-**Precondition:** `MESHING_BUGS.md` **Bug M03** first — satisfied (fixed and archived 2026-08-08).
-
-**Ordering:** the owner sequenced `MESHING_BUGS.md` **Bug M02** ahead of this phase (2026-08-08). Both
-touch custom-mesh face handling, and M02 changes *which faces are emitted at all* — doing it second would
-mean re-judging VO-9's visual result against a changed mesh. ✅ **Satisfied: M02 fixed, confirmed in game,
-and archived 2026-08-08** (baseline **B48**). Any VO-9 measurement taken before that date was taken
-against a mesh missing its mid-plane faces and must be re-run.
-
-**Both preconditions are now met, but the scope is still open.** §5's sketch above is explicitly *not a
-decision*: cause (a) needs the sample set widened for surfaces whose own layer contains partial geometry
-(cost in the hottest loop, so it must be gated on partial geometry being present at all), and cause (b)
-asks whether a corner should carry sub-cell resolution at all — for an axis-aligned half slab
-`GetOctantCoverage` never returns an intermediate value, so (b) buys nothing for slabs specifically.
-**The executor re-measures both causes in the harness first** — note that VO-6 already re-centres a
-mid-plane face's ring on its own cell (`sampleCell - rotatedOffset`), so cause (a)'s one-line statement
-needs checking against the current engine before it is designed against — and brings the numbers to the
-owner as a scope decision rather than picking one.
 
 ---
 
@@ -1145,14 +1061,14 @@ owner as a scope decision rather than picking one.
 
 ## 7. Extension roadmap
 
-| Version | Item                                                                                                                                  | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
-|---------|---------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| v2      | Compound (multi-AABB) occlusion for stairs / L-shapes / wedges                                                                        | **Owned by `VQ-4`** — this plan interlocks only. VO-1's utility should take a bounds *list* shape internally so VQ-4 does not have to re-cut the seam.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| v2      | Authored per-face occlusion overrides                                                                                                 | Escape hatch for a block whose visual and collision volumes intentionally differ (D1's accepted risk).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| v2      | Directional occlusion for fluids                                                                                                      | Fluid surfaces have their own height model; would need its own coverage derivation.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| v3      | `FLAG_HAS_SIDED_TRANSPARENT_BLOCKS`-style queue flag                                                                                  | Starlight's optimization — only pay the directional check when a partial block is in range. Measure first (`perf-benchmark`); do not pre-optimize.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| —       | **Close the `NS-4` rotated-bounds gap (F10)**                                                                                         | Add a Physics Solver scenario that actually discriminates a rotated custom-bounds volume (e.g. land a body on a vertical slab and assert the rest height differs from the identity orientation). Owned by `SUB_VOXEL_COLLISION_SYSTEM.md` / `NS-4`, not by a VO phase — but every VO phase touching the rotation core is unguarded there until it exists.                                                                                                                                                                                                                                                                                                          |
-| next    | **`SS-*` — silhouette-based contact shadows** — ✅ **designed**, see [`SILHOUETTE_CONTACT_SHADOWS.md`](SILHOUETTE_CONTACT_SHADOWS.md) | The visual feature VO-9 set out to deliver. **F18 establishes that no coverage-fraction model can produce it for an axis-aligned slab**, and the owner's "AO around a single block is too circular" observation is the same gap seen on a full cube. The design pass landed 2026-08-09: it derives the occluder's silhouette rectangle from the **same rotated AABB `GetFaceCoverage` already projects** (coverage is that rectangle's area), so the shape-agnostic primitive is preserved; it consumes VO-9a's `SampleFacePoint` and VO-9b's subdivision unchanged. Five phases `SS-0…SS-4`, 0 executed. **This arc (VO-*) is closed — no VO-* phase serves it.** |
+| Version | Item                                                                                                                                  | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+|---------|---------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| v2      | Compound (multi-AABB) occlusion for stairs / L-shapes / wedges                                                                        | **Owned by `VQ-4`** — this plan interlocks only. VO-1's utility should take a bounds *list* shape internally so VQ-4 does not have to re-cut the seam.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| v2      | Authored per-face occlusion overrides                                                                                                 | Escape hatch for a block whose visual and collision volumes intentionally differ (D1's accepted risk).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| v2      | Directional occlusion for fluids                                                                                                      | Fluid surfaces have their own height model; would need its own coverage derivation.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| v3      | `FLAG_HAS_SIDED_TRANSPARENT_BLOCKS`-style queue flag                                                                                  | Starlight's optimization — only pay the directional check when a partial block is in range. Measure first (`perf-benchmark`); do not pre-optimize.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| —       | **Close the `NS-4` rotated-bounds gap (F10)**                                                                                         | Add a Physics Solver scenario that actually discriminates a rotated custom-bounds volume (e.g. land a body on a vertical slab and assert the rest height differs from the identity orientation). Owned by `SUB_VOXEL_COLLISION_SYSTEM.md` / `NS-4`, not by a VO phase — but every VO phase touching the rotation core is unguarded there until it exists.                                                                                                                                                                                                                                                                                                                        |
+| next    | **`SS-*` — silhouette-based contact shadows** — ✅ **designed**, see [`SILHOUETTE_CONTACT_SHADOWS.md`](SILHOUETTE_CONTACT_SHADOWS.md) | The visual feature VO-9 set out to deliver. **F18 establishes that no coverage-fraction model can produce it for an axis-aligned slab**, and the "AO around a single block is too circular" observation is the same gap seen on a full cube. The design pass landed 2026-08-09: it derives the occluder's silhouette rectangle from the **same rotated AABB `GetFaceCoverage` already projects** (coverage is that rectangle's area), so the shape-agnostic primitive is preserved; it consumes VO-9a's `SampleFacePoint` and VO-9b's subdivision unchanged. `SS-0`…`SS-3a` shipped and confirmed in game; `SS-4` open. **This arc (VO-*) is closed — no VO-* phase serves it.** |
 
 ---
 
@@ -1161,9 +1077,11 @@ owner as a scope decision rather than picking one.
 1. ~~**Does an opaque partial block's cell store a usable surface stamp today?**~~ — ✅ **RESOLVED
    2026-08-07 by VO-0(c): yes.** Measured sky 15 on a sky-exposed opaque surface, 0 when buried.
    VO-6 is unblocked from VO-3, with the sky-exposed-only caveat recorded in its packet.
-2. **What is the correct rounding in D2's cost formula?** `round` is written here as a placeholder;
-   the executor pins one rule and shares it between `LightAttenuation` and `LightingOracle` in the
-   same commit (F7 is the failure mode if they diverge).
+2. ~~**What is the correct rounding in D2's cost formula?**~~ — ✅ **MOOT since D2's reversal
+   (2026-08-07, v1.3).** The only formula with a `round` was the graded Option B,
+   `max(1, round(opacity × coverage))`, which D2 rejected; the chosen binary per-face model charges
+   either the air minimum or the block's `opacity` exactly, so there is nothing to round and no rule
+   for `LightAttenuation` and `LightingOracle` to share.
 3. **Should `opaqueCount` (`ChunkData.cs:880`, the section meshing optimization) count partial
    blocks?** It currently uses `IsOpaque`. Counting them risks a section being treated as fully
    solid when it is not; not counting them is safe but may cost meshing throughput. Executor decides
@@ -1175,18 +1093,19 @@ owner as a scope decision rather than picking one.
 
 * **v1.0** - Initial design
 * **v1.1** - VO-0 executed (no production code needed): blast radius is one block type, §2.3's bounds table confirmed, surface stamp confirmed (resolves open question 1 and unblocks VO-6 from VO-3), VO-7 version anchors pinned
-* **v3.0** - **The `SS-*` follow-up has its own design doc** — [`SILHOUETTE_CONTACT_SHADOWS.md`](SILHOUETTE_CONTACT_SHADOWS.md), authored 2026-08-09, 0/5 phases executed. §7's roadmap row and the relationship list now point at it. It generalizes F18 (a fill fraction is linear across the cell for *any* occluder bounded by one plane, not just a slab) and adds the mechanism behind the owner's second observation: the round blob is a **weighting** artifact — the four-cell average weights an occluder by a product of two per-axis ramps, giving hyperbolic isocontours — and that derivation reproduces **F17's measured `12 of 32` darkened corners exactly**. No change to this document's own phases; **the VO-* arc stays closed**
-* **v2.9** - **VO-9b executed as a visually inert substrate, and the reason is finding F18.** Faces a partial occluder can reach are split into 4x4 sub-quads (gated on a flag that rides along on samples the face already takes); baseline **B49**, Validate All **432**. The first implementation re-sampled the ring per sub-vertex, which collapsed every wall shadow into a hard band and lightened face interiors (an inner corner's centre went 144 -> 255) — caught in game by the owner, and the same defect was what made the slab case look improved. Corrected to vary only the direct cell, an axis-aligned half slab shows no useful change, because its coverage is linear across the cell and a blend of the two corner values already is that ramp. **A seam-only continuity check stayed green throughout the defect** — B49 now samples face interiors, exactly where the direct cell is empty so any drift is ring re-sampling. B42/B46 probes rewritten to locate faces by corner position (they had assumed one quad per face). Cost measured at 4.75x verts on a floor with nine slabs. Next: a silhouette-following contact-shadow term, which is what both the original request and the owner's "AO is too circular" observation actually need
-* **v2.8** - **VO-9 restated as sub-voxel ambient occlusion, and VO-9a executed.** The owner's clarification localized the defect: the occlusion query is already right, but AO resolution is pinned to mesh vertex resolution (one sample per cell corner), so a slab's mid-cell edge is smeared across a whole cell — the visible half of a floor face under a vertical slab runs `255 -> 223` where a contact shadow should reach ~`191` at the wall. Approach chosen by the owner: **adaptive sub-quad tessellation** (texture/per-pixel/baked alternatives rejected against the arbitrary-custom-mesh requirement). **VO-9a** generalizes the query to an arbitrary sample point (`GetRegionCoverage` / `AmbientOcclusionRegionCoverage` / `SampleFacePoint`), with the octant reduced to its corner case so corner values cannot move — proven by a bit-identical mesh fingerprint across three lighting qualities, prove-red by two reverted mutations (box extent reds B11; inverted neighbour selection reds B11/B40/B42). Validate All **431**. **VO-9b** (tessellation, visual) not started
-* **v2.7** - **VO-9 measured before designing, and its premise did not survive (finding F17).** Cause (a) — "a coplanar occluder is never sampled at all" — is refuted: VO-6 re-bases a mid-plane face's ring onto its own cell, so the own layer IS sampled (full cube 8/32, vertical slab 4/32 on a bottom-slab floor), and the control shows the original zero reading is what ANY occluder does when it lies entirely below the shaded plane (full cube 0/32, identical to a slab). The hot-loop sample-set widening must not be built. Cause (b) reproduces exactly (12/32, 16/36, 8/36) but its proposed fix cannot work: an octant is exactly half a cell and so is an axis-aligned slab, so `GetOctantCoverage` never returns an intermediate value for one. **Owner paused VO-9 for a fresh in-game look** — M02 changed the meshes it would be judged on; measurements predating 2026-08-08 are void
+* **v3.1** - **Compacted, no content change** (2026-10-09). VO-9's original framing, its F17 refutation, the "superseded" status note and the separate "VO-9 restated" section are merged into one VO-9 section, and VO-9's preconditions moved back from the tail of VO-9b (where a stale "scope still open, re-measure first" paragraph is dropped — F17 is that measurement). Status markers now match the confirmed state (Status line, VO-3 heading, §7's `SS-*` row), and decisions are stated with their reasons rather than attributed. VO-8's pre-execution packet is folded into a short Request paragraph at the top of its section (the executed record already covers its scope, prove-red and cost), and §8 question 2 is marked moot — its rounding rule belonged to D2's rejected graded Option B
+* **v3.0** - **The `SS-*` follow-up has its own design doc** — [`SILHOUETTE_CONTACT_SHADOWS.md`](SILHOUETTE_CONTACT_SHADOWS.md), authored 2026-08-09, 0/5 phases executed. §7's roadmap row and the relationship list now point at it. It generalizes F18 (a fill fraction is linear across the cell for *any* occluder bounded by one plane, not just a slab) and adds the mechanism behind the second observation: the round blob is a **weighting** artifact — the four-cell average weights an occluder by a product of two per-axis ramps, giving hyperbolic isocontours — and that derivation reproduces **F17's measured `12 of 32` darkened corners exactly**. No change to this document's own phases; **the VO-* arc stays closed**
+* **v2.9** - **VO-9b executed as a visually inert substrate, and the reason is finding F18.** Faces a partial occluder can reach are split into 4x4 sub-quads (gated on a flag that rides along on samples the face already takes); baseline **B49**, Validate All **432**. The first implementation re-sampled the ring per sub-vertex, which collapsed every wall shadow into a hard band and lightened face interiors (an inner corner's center went 144 -> 255) — caught in game, and the same defect was what made the slab case look improved. Corrected to vary only the direct cell, an axis-aligned half slab shows no useful change, because its coverage is linear across the cell and a blend of the two corner values already is that ramp. **A seam-only continuity check stayed green throughout the defect** — B49 now samples face interiors, exactly where the direct cell is empty so any drift is ring re-sampling. B42/B46 probes rewritten to locate faces by corner position (they had assumed one quad per face). Cost measured at 4.75x verts on a floor with nine slabs. Next: a silhouette-following contact-shadow term, which is what both the original request and the "AO is too circular" observation actually need
+* **v2.8** - **VO-9 restated as sub-voxel ambient occlusion, and VO-9a executed.** A clarified request localized the defect: the occlusion query is already right, but AO resolution is pinned to mesh vertex resolution (one sample per cell corner), so a slab's mid-cell edge is smeared across a whole cell — the visible half of a floor face under a vertical slab runs `255 -> 223` where a contact shadow should reach ~`191` at the wall. Approach chosen: **adaptive sub-quad tessellation** (texture/per-pixel/baked alternatives rejected against the arbitrary-custom-mesh requirement). **VO-9a** generalizes the query to an arbitrary sample point (`GetRegionCoverage` / `AmbientOcclusionRegionCoverage` / `SampleFacePoint`), with the octant reduced to its corner case so corner values cannot move — proven by a bit-identical mesh fingerprint across three lighting qualities, prove-red by two reverted mutations (box extent reds B11; inverted neighbor selection reds B11/B40/B42). Validate All **431**. **VO-9b** (tessellation, visual) not started
+* **v2.7** - **VO-9 measured before designing, and its premise did not survive (finding F17).** Cause (a) — "a coplanar occluder is never sampled at all" — is refuted: VO-6 re-bases a mid-plane face's ring onto its own cell, so the own layer IS sampled (full cube 8/32, vertical slab 4/32 on a bottom-slab floor), and the control shows the original zero reading is what ANY occluder does when it lies entirely below the shaded plane (full cube 0/32, identical to a slab). The hot-loop sample-set widening must not be built. Cause (b) reproduces exactly (12/32, 16/36, 8/36) but its proposed fix cannot work: an octant is exactly half a cell and so is an axis-aligned slab, so `GetOctantCoverage` never returns an intermediate value for one. **VO-9 paused for a fresh in-game look** — M02 changed the meshes it would be judged on; measurements predating 2026-08-08 are void
 * **v2.6** - **`MESHING_BUGS.md` Bug M02 (finding F16) fixed, confirmed in game and archived.** Both custom-mesh paths now resolve `ResolveFaceSampleCell` *before* the visibility test and cull against that cell, with an explicit interior-face guard (an interior face keeps its own cell's open half in front of it, so nothing outside the cell can occlude it) — without that guard the block asks itself whether it occludes, and it survives only by the accident of `Stone Half Slab` being authored `renderNeighborFaces: 1`. Repro `KM02` (five legs: both signs of the mid-plane normal, the counter-assertion that boundary faces still cull, and the walled-in configuration in both orientations) promoted to baseline **B48**; Validate All **431**. **The predicted geometry-baseline sweep moved nothing** — recorded under F16 as a coverage finding, not a clearance. VO-9's ordering precondition is now satisfied
-* **v2.5** - VO-8's **perf measurement waived** by the owner (correctness over a speculative capture; the octant LUT is recorded as the first lever if meshing ever measures as a bottleneck). VO-9 gains an explicit ordering note: Bug **M02** runs first, since it changes which faces are emitted and would otherwise force VO-9's visual result to be re-judged
+* **v2.5** - VO-8's **perf measurement waived** (correctness over a speculative capture; the octant LUT is recorded as the first lever if meshing ever measures as a bottleneck). VO-9 gains an explicit ordering note: Bug **M02** runs first, since it changes which faces are emitted and would otherwise force VO-9's visual result to be re-judged
 * **v2.4** - **VO-8 confirmed in game** (a vertical slab shades its neighbouring floor face the way a full block does), closing the last gate on the arc. Everything shipped except VO-9. Outstanding, unchanged: VO-8's perf measurement is still a structural argument rather than a profiler capture
-* **v2.3** - **Bug M03 fixed and archived** (owner's in-game review: a recessed half slab rendered fully black). The octant's normal axis is now resolved from the face's own plane rather than from a cell-boundary vertex, so a face interior to its cell is not shadowed by the block emitting it — baseline **B47**, Validate All **430**. **VO-9 filed** (partial/coplanar occluders cast a weak or absent contact shadow — the model working as specified, measured, not a defect). `MESHING_BUGS.md` **M04** filed for the radiating-streak artifact with AO ruled out and a decisive diagnostic recorded
+* **v2.3** - **Bug M03 fixed and archived** (in-game review: a recessed half slab rendered fully black). The octant's normal axis is now resolved from the face's own plane rather than from a cell-boundary vertex, so a face interior to its cell is not shadowed by the block emitting it — baseline **B47**, Validate All **430**. **VO-9 filed** (partial/coplanar occluders cast a weak or absent contact shadow — the model working as specified, measured, not a defect). `MESHING_BUGS.md` **M04** filed for the radiating-streak artifact with AO ruled out and a decisive diagnostic recorded
 * **v2.2** - **VO-8 code complete**: AO coverage is now per-corner (octant of the sample cell touching the corner's vertex) rather than per-face — `GetOctantCoverage` + `AmbientOcclusionOctantCoverage` replace the per-face entry point outright, plus a `CornerVertices` LUT built alongside `CornerOffsets`. The four rolls of a vertical slab now darken four different corner pairs (measured), while bottom/top slabs are unchanged from VO-5. Baseline **B46**, prove-red by a corner-blind mutation; Validate All **429**. **Perf measurement still owed** — only a structural argument (the `HasCustomBounds` short-circuit) so far. AWAITING IN-GAME CONFIRMATION
-* **v2.1** - **VO-6 confirmed in game; the original VO-0…VO-6 arc is complete.** `KM01a`/`KM01b` promoted to permanent baselines **B44**/**B45** (`MeshingValidationSuite.SubBlockFaceLight.cs`), the now-empty known-bug file retired, Bug M01 archived as `_FIXED_BUGS.md` Meshing #M01. **VO-8 filed** (per-corner sub-cell AO coverage) from the owner's in-game observation that a vertical slab shades the block beneath it uniformly rather than with a wall-like gradient — measured 225 flat vs 255 unshaded and 191 fully shaded, so VO-5's in-between shade is present and correctly ordered but not directional
+* **v2.1** - **VO-6 confirmed in game; the original VO-0…VO-6 arc is complete.** `KM01a`/`KM01b` promoted to permanent baselines **B44**/**B45** (`MeshingValidationSuite.SubBlockFaceLight.cs`), the now-empty known-bug file retired, Bug M01 archived as `_FIXED_BUGS.md` Meshing #M01. **VO-8 filed** (per-corner sub-cell AO coverage) from an in-game observation that a vertical slab shades the block beneath it uniformly rather than with a wall-like gradient — measured 225 flat vs 255 unshaded and 191 fully shaded, so VO-5's in-between shade is present and correctly ordered but not directional
 * **v2.0** - **VO-6 code complete**: `CustomFaceData.Centroid` + `MeshGenerationJob.ResolveFaceSampleCell` across the schema-aware, legacy, and flat-light paths; `KM01a` **and new `KM01b`** both flip green, Validate All **426**. Three findings: this packet's half-cell step was **wrong** and `KM01a` could not detect it (proved by mutation — half-cell step passes KM01a, reproduces KM01b), **F15** (KM01a's original positive control asserted the buggy coupling, so it would have failed exactly when the fix succeeded), and **F16** (`MESHING_BUGS.md` Bug M02 — the same wrong-cell confusion in *culling*, filed not fixed). AWAITING IN-GAME CONFIRMATION
-* **v1.9** - **VO-5 executed + confirmed in game**: `AmbientOcclusionCoverage` + `BurstVoxelData.OppositeFace`, AO weighted by `1 − coverage`, baselines **B41–B43** (Validate All **426**), all three prove-red by mutation. D5's face rule **signed off** — measured to score bottom/vertical/top slabs 1 / 0.5 / 0 where the rejected six-face average scores all three 0.5. Two new findings: **F13** (the meshing palette's half slab had no authored `collisionBounds`, so VO-5 was invisible to that suite until fixed) and **F14** (slab surfaces gain no shading from VO-5 by construction, so the blend cannot be judged on them until VO-6 — owner accepted VO-5 as-is rather than tune a shading knob to hide a sampling bug)
+* **v1.9** - **VO-5 executed + confirmed in game**: `AmbientOcclusionCoverage` + `BurstVoxelData.OppositeFace`, AO weighted by `1 − coverage`, baselines **B41–B43** (Validate All **426**), all three prove-red by mutation. D5's face rule **signed off** — measured to score bottom/vertical/top slabs 1 / 0.5 / 0 where the rejected six-face average scores all three 0.5. Two new findings: **F13** (the meshing palette's half slab had no authored `collisionBounds`, so VO-5 was invisible to that suite until fixed) and **F14** (slab surfaces gain no shading from VO-5 by construction, so the blend cannot be judged on them until VO-6 — VO-5 accepted as-is rather than tuning a shading knob to hide a sampling bug)
 * **v1.8** - VO-4 confirmed in game (repro `K20b` → baseline **B106**, commits `9443d08c`/`72b11cd8`); **F12's Bug 21 fixed and archived** as `_FIXED_BUGS.md` Lighting #25 with baseline **B107** (commits `eeb8953e`/`2857996c`) — the root fix needed a second part beyond the heightmap, since `ModifyVoxel`'s recalc trigger keyed on opacity and a rotation changes none; D5 gained a concrete face-choice proposal awaiting user sign-off, and VO-6 gained the centroid-storage and `directNeighbor` notes. Validate All **423**
 * **v1.7** - VO-4 code complete: the support/veto mirrors made directional via `TargetEntryCost` + `NeighborCanDeliver`, `IsVerticallySkyLit` found as a third unlisted site, shadow-caster site deliberately left whole-block; repro `K20b` flips green and baseline **B105** added; 421 baselines green. Two new findings — **F11** (the oracle's column seeding was over-migrated by VO-3; B105 is the suite's first partial-block oracle comparison) and **F12** (sealed partial-block shafts never darken — filed as Bug 21, NOT a VO-4 defect). AWAITING IN-GAME CONFIRMATION
 * **v1.6** - VO-3 confirmed in game (repro `K20a` promoted to permanent baseline **B104**); the sky-column rule found still whole-block in play and fixed via `IsTransparentThroughFace`; undimmed-column question settled with rationale; **VO-7 DESCOPED** (no released worlds, stale light self-heals on block update) with a conditional tripwire; F9 closed as wontfix and D4 superseded
