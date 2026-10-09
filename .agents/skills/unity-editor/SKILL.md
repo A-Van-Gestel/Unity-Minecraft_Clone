@@ -67,6 +67,7 @@ Retry it; it is not a hang.
 | Packages                               | `package_list`                                                                            |
 | See what a view shows                  | `capture_scene_view` / `capture_game_view` → `Assets/AgentCaptures~/`, then read the PNG  |
 | Profiler data                          | `run_script` on `Tools/UnityCli/Profiler/ProfilerQueries.cs`                              |
+| Load/drive a world in Play mode, capture | `run_script` on `Tools/UnityCli/PlayMode/WorldRig.cs` (recipe `playmode-world`)         |
 
 ## Routing
 

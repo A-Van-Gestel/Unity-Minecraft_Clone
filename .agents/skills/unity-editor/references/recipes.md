@@ -66,7 +66,7 @@ How to read a suite's output is owned by run-validation-suite.
 **"Query a singleton or ScriptableObject"**
 
 ```bash
-unity command eval "var w = UnityEngine.Object.FindFirstObjectByType<World>(); return w == null ? \"no World\" : \"chunks=\" + w.worldData.Chunks.Count;" --result-only
+unity command eval "var w = UnityEngine.Object.FindAnyObjectByType<World>(); return w == null ? \"no World\" : \"chunks=\" + w.worldData.Chunks.Count;" --result-only
 
 unity command eval "var g = UnityEditor.AssetDatabase.FindAssets(\"t:BlockDatabase\"); return UnityEditor.AssetDatabase.GUIDToAssetPath(g[0]);" --result-only
 ```
@@ -104,6 +104,50 @@ images, never to a saved file.
 
 </recipe>
 
+<recipe name="playmode-world">
+
+**"Load a world in Play mode, set it up, and capture a frame"**
+
+The entry points live in `Tools/UnityCli/PlayMode/WorldRig.cs` (`run_script`, never imported):
+
+```bash
+RIG() { unity command run_script --file Tools/UnityCli/PlayMode/WorldRig.cs \
+          --entry "UnityCli.WorldRig.$1" --args "$2" --result-only; }
+
+RIG Saves '[5]'                           # edit mode OK; current-version saves only
+unity command editor_play                 # the user's call — say so first; wait for "playing"
+RIG Launch '["Probe", 4242, true]'        # MainMenu only; true = fresh world at the current version
+RIG Status '[]'                           # poll: chunks > 0, then cameraCell off (0, -999999, 0)
+RIG Command '["/fly"]'                    # without it gravity drops a posed player within ~2 s
+RIG Command '["/time set noon"]'; RIG Command '["/time freeze"]'
+unity command eval "var w = UnityEngine.Object.FindAnyObjectByType<World>(); return w.PlaceBlockCommand(0, 74, 6, Data.BlockIDs.Stone).ToString();" --result-only
+RIG Pose '[0.5, 76.6, -2.5, 0, 8]'        # eye in VOXEL space, yaw, pitch (+ looks down)
+RIG Capture '["<scratchpad>/frame.png", 480, 270]'   # a LATER call than any state change
+unity command editor_stop                 # when done
+```
+
+Verified 2026-10-09 end to end on a fresh seed-4242 world (noon and midnight frames of a placed wall).
+
+- **State change and capture never share a call.** `World.Update()` pushes the global shader uniforms, so in
+  the call that ran `/time set midnight` `GlobalLightLevel` still read `1`; the next call read `0.267`.
+  `Status` and `Capture` both report it — check it before trusting a frame. Freshly placed blocks remesh
+  asynchronously for the same reason.
+- **Console commands need the live `ConsoleUI.Engine`.** `new CommandEngine()` has no commands registered and
+  answers `Unknown command`, which reads like a missing feature.
+- **Pose in voxel space, always.** The floating origin is not stable across a reload, so a literal Unity
+  position from an earlier session can land inside terrain; `Pose` converts through `WorldOrigin` and returns
+  the round-tripped cell to check.
+- **`Launch` skips the menu's AOT migration**, so it only loads current-version saves (`Saves` filters to
+  them); the save root comes from the `enableVolatileSaveData` setting, not from `WorldLaunchState`.
+- **Captures include the HUD** (the hotbar draws into the camera).
+- **No worldgen path places lava** (only the block, fluid and credits assets name it), so a lava scene
+  needs a fixture. Recorded 2026-08, not re-run since: an open-topped stone box of `BlockIDs.Lava` sources
+  is stable, and `/noclip` holds an eye under its surface (lava's buoyancy floats the player out).
+- **Keep the rig as a script** (fixed seed + `IsNewGame` + placements + pose + `/time freeze`), not as a saved
+  world: a later session re-runs it and gets a comparable frame.
+
+</recipe>
+
 <recipe name="serialized-field">
 
 **"Read a `[SerializeField]` value from a scene object"**
@@ -138,7 +182,9 @@ re-run the audit from code.
 
 1. **Save paths are confined to `Assets/`.** `Temp/x.png` becomes `Assets/Temp/x.png` and is
    imported with a `.meta`. Only `Assets/AgentCaptures~/` (gitignored, never imported) is safe.
-2. **Project types need their namespace in `eval`** — `Data.BlockIDs.Stone`.
+2. **Project types need their namespace in `eval`** — `Data.BlockIDs.Stone`. Global-namespace types
+   (`World`, `Player`, `SaveSystem`) bind as-is: `eval` injects no namespace, so the `global::` prefixes
+   in old MCP-bridge snippets are unnecessary.
 3. **Default timeout is 30 s.** `--timeout` raises it; long work uses `--detach`.
 4. **A call during a domain reload fails fast** — retry it.
 5. **A synchronous `wait_for` holds the whole command queue** — use `--async true`.
