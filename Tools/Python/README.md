@@ -26,6 +26,14 @@ a Store stub on this machine). Everything is stdlib-only unless `requirements.tx
 | `stage_hunks.py`      | Lists a file's hunks, stages the chosen ones, prints the staged diff                        |
 | `fold_into_commit.py` | `fixup <rev> [paths]` then `squash`: folds changes into unpushed commits, gated + backed up |
 
+## Tests
+
+`python Tools/Python/tests/run_tests.py` (stdlib `unittest`, ~30 s; `run_tests.py fold` runs one module) covers
+the scripts above that the pre-commit flow and the subagents depend on: `fold_into_commit`, `stage_hunks`,
+`audit_reserialize_guids`, `check_american_english`, `align_md_tables`, `check_twin_files`,
+`setup_agent_links` and `session_cost_report`. Each test builds its own throwaway git repo under the system
+temp directory. Run it after changing one of those scripts, and add a test for each behavior you add or fix.
+
 ## Setup
 
 | Script                 | Does                                                                                                          |
