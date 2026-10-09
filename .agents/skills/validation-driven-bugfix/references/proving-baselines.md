@@ -79,8 +79,8 @@ writing a baseline, running a prove-red, or writing "closed" into a doc.
 
 - **A harness that paraphrases a Unity lifecycle method must be diffed against it step by step.** The
   physics `Tick()` ran "resolve, then move" and silently omitted `FixedUpdate`'s jump application, so
-  for a year no jump could fire in the suite. Call the real method (here, the extracted
-  `VoxelRigidbody.ApplyPendingJump`) instead of re-describing it.
+  no jump could fire in the suite and every jump assertion was untestable. Call the real method (here,
+  the extracted `VoxelRigidbody.ApplyPendingJump`) instead of re-describing it.
 - **Pooled-collection leaks cannot be asserted.** `UnityEngine.Pool.CollectionPool<,>` (the base of
   `HashSetPool<T>` / `DictionaryPool<,>`) exposes no active/inactive counters; only `ChunkPool`'s
   `ActiveData`/`ActiveSections` support a balance check. A collection-pool leak is a code-review item.
