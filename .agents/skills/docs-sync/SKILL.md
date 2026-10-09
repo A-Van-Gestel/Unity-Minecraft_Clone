@@ -190,6 +190,11 @@ python Tools/Python/align_md_tables.py     # Documentation/ tables column-aligne
 python Tools/Python/check_twin_files.py    # CLAUDE.md == AGENTS.md
 ```
 
+`check_doc_status.py` reads a `**Status:**` field only up to the next line that starts with `**` and a
+capital letter. A reflowed Status block that wraps onto a line beginning `**F16 …` is cut there, and the
+words after it never reach the classifier, so the doc can silently flip between open and closed. When
+re-wrapping a Status, keep a bold run off the start of every continuation line.
+
 `check_doc_links.py` is the one that matters on a move, rename or deletion: `check_doc_refs.py`
 reads only the `@`-prefixed form, so a doc whose inbound links are ordinary markdown can be deleted
 with both the reference checker and the line-break checker fully green.
@@ -293,7 +298,7 @@ whole-file doc rewrite.
 - **Do not promote by paraphrasing the Design doc.** A promotion's claims come from current code, verified per claim; the design's own prose is the least trustworthy input in the room.
 - **Do not duplicate content.** If the same fact lives in `CLAUDE.md` and an Architecture doc, link from `CLAUDE.md` to the doc — do not copy the doc's body into `CLAUDE.md`.
 - **Performance docs are append-only snapshots.** `Documentation/Performance/PHASE_*` files capture a benchmark moment; never retroactively edit a phase report. Add a new phase file instead.
-- **Never attribute a decision to "the user"** ("user request", "locked by the user", "overridden by the user"). The repo has one owner, so the attribution carries no information and displaces the reason. Write the decision and its rationale in the project's own voice — `**Decided: always visible** — a surface that hides whenever a menu opens is not a notification surface.` A rejected alternative is "rejected", never "overridden". "User" still means the *player* where it does.
+- **Never attribute a decision to "the user" or "the owner"** ("user request", "user decision", "the user's call", "locked by the user", "overridden by the user", "owner decision", "decided by the owner", a bare "(owner)"). The repo has one owner, so the attribution carries no information and displaces the reason. Provenance stays, without the person: "raised by the in-game review of VO-6", "observation 1", "found 2026-08-08, in-game visual review". Write the decision and its rationale in the project's own voice — `**Decided: always visible** — a surface that hides whenever a menu opens is not a notification surface.` A rejected alternative is "rejected", never "overridden". "User" still means the *player* where it does.
 - **Write provenance as a positive timeline** — built X, then studied Y, adopted Z (named specifically, with the code that shows it) — and stop. Denials ("not a port — no code taken") read as defensive; "reference implementation" or "heavily inspired by" overstate derivation. Credits and license notes are legal-adjacent: accuracy in both directions.
 - **A number next to a dated event is history.** Before changing a count in a doc, ask whether its sentence is anchored to a date or milestone; if so, verify it against that event's commit (`git grep -h -o "new Scenario(" <commit> -- <suite dir> | wc -l`) and keep it in the past tense ("the suite stood at 76"). Only current-state sentences move to today's value.
 - **After deleting a flag or policy, sweep the docs in prose**, not only for its identifier. Classify each hit by the tense and reader of its sentence: would an agent executing it today follow it? Instructions get fixed, history stays. Run any code example a sweep carries forward.

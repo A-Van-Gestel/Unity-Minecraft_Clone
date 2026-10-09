@@ -71,7 +71,9 @@ Rules:
   line starts a new `**Label:**` field.* Corollaries:
     - The **last** field in a block needs none (a blank line follows it).
     - When a field's value wraps over several lines, the two spaces go on its **last** line
-      only — the wrapped lines are meant to join.
+      only — the wrapped lines are meant to join. Never start a wrapped `**Status:**` line with a
+      bold run (`**F16 …`): `check_doc_status.py` ends the field at any line starting with `**`
+      plus a capital, so the rest of the Status never reaches its classifier.
     - Same rule in the footer (`**Last Updated:**` → `**Next Review:**`) and in any other
       field stack (bug entries' `**Reported:**` / `**Fixed:**` / `**Status:**`).
     - A field line that directly follows a **blockquote** cannot be fixed this way: without a
