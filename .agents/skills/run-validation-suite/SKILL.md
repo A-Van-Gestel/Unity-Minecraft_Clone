@@ -141,6 +141,14 @@ Per-suite summary line: green `ALL N … BASELINE TESTS PASSED` or red
 `VALIDATE ALL: all N baselines across S suites PASSED` (green) /
 `VALIDATE ALL: REGRESSION — …` (red) / a yellow *ran-nothing* warning.
 
+**For `Validate All`, that combined block is the verdict.** The console keeps only its last 2000 entries
+and a full run logs more, so the early suites' own `ALL N … PASSED` lines have rolled out by the end;
+their absence from `unity command console` is expected, not a missing verdict. Two cross-checks that
+do not work: counting console errors (each known-bug repro logs its `[FAIL]` lines at error level, so a
+green run is never error-free) and the ring buffer itself. The one that does: grep `Logs/Editor.log`
+from the last `=== Validate All: running` line for `[FAIL]`, `REGRESSION` and `ISOLATION VIOLATION`,
+and check every `[FAIL]` belongs to a known-bug repro.
+
 `ISOLATION VIOLATION: '<suite>' left World.Instance mutated …` means that suite leaked
 process-global state; the runner force-restored it (protecting the next suite) and marked that
 suite failed+untrusted. Treat it as a real bug in that suite's teardown, not a flake.

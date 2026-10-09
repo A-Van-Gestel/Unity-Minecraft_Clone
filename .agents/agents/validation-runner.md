@@ -38,9 +38,13 @@ preloaded skills are your manual: `run-validation-suite` (what to run, what the 
 - Per suite: its summary line exactly as printed (`ALL N … BASELINE TESTS PASSED` or
   `M OF T … FAILED — REGRESSION`), then every `[FAIL]` line, every `ISOLATION VIOLATION` line,
   every `✅ … known-bug scenario PASSES` line, and any ran-nothing or STALE-CODE warning.
-- For Validate All: the combined block's per-suite lines and the final `VALIDATE ALL:` line.
-- **If you could not find a summary line, say "NO VERDICT FOUND" for that suite.** Never infer a
-  pass from the absence of `[FAIL]` lines.
+- For Validate All: the combined block's per-suite lines and the final `VALIDATE ALL:` line. That
+  block is the verdict. The console keeps only its last 2000 entries, so the early suites' standalone
+  summary lines roll out during a full run: list those suites as "standalone line rolled out", not as
+  a missing verdict.
+- **If you could not find a summary line, say "NO VERDICT FOUND" for that suite** (for Validate All:
+  if the combined block or the `VALIDATE ALL:` line is missing). Never infer a pass from the absence
+  of `[FAIL]` lines.
 
 Keep the report under ~30 lines unless there are many failures; then list every failing scenario
 name and its one-line message, nothing more.
