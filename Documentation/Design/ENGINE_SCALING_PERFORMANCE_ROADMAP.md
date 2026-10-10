@@ -1,12 +1,12 @@
 # Engine Scaling Performance Roadmap
 
-**Version:** 1.17  
+**Version:** 1.18  
 **Date:** 2026-10-02  
 **Status:** In progress — `ES-0` ✅ complete (2026-10-10: drain stamp shipped, every-layer re-measurement in §2.6 — added
 `ES-29`), `ES-1`, `ES-2` and `ES-6.1` shipped (2026-10-02); ES-0's GC.Alloc attribution captured (2026-10-03, §2.2.1 —
 added `ES-26`/`ES-27`; PM-1's smoke capture added the `ES-28` quick win); `ES-26` ✅ shipped (2026-10-10: −75.9 % GC.Alloc
-per generated chunk); the rest is a near-to-far horizon, not
-scheduled. Tier 1 items are execution-sized; Tier 2/3
+per generated chunk); `ES-28` ✅ shipped (2026-10-10: the UI passes allocate nothing per frame); the rest is a
+near-to-far horizon, not scheduled. Tier 1 items are execution-sized; Tier 2/3
 items each need their own design or implementation plan. Re-verify the anchors named per item before
 starting (§8).  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
@@ -527,10 +527,19 @@ its Render Graph passes**, every frame, whether or not anything changed:
   and reads each `layer.name`, a marshalled string.
 
 Fix: cache the pass names per band and iteration count (rebuilt only when the blur settings change) and the sorting
-values (resolved once; sorting layers change only in the Editor). Gate on the UI Band Layers and UI Blur Render
-suites, then a repeat GC.Alloc capture showing none of these sites. Recorded in Editor Play mode with one camera
-blurring per frame (`PublishGlobal` 854 calls in 855 frames); the same code runs in players, but the per-frame figure
-there is unmeasured.
+values (resolved once; sorting layers change only in the Editor). Gate on the UI Band Layers suite (the UI Blur Render
+suite renders the shader alone and never reaches the chain), then a repeat GC.Alloc capture showing none of these
+sites. Recorded in Editor Play mode with one camera blurring per frame (`PublishGlobal` 854 calls in 855 frames); the
+ES-0 re-measurement later found the same 0.78 KB per frame in a player.
+*Shipped 2026-10-10:* each band's pass names are built once, in the pass's constructor (`UIBlurPassNames`, grown only
+past the iteration count already named), and `SortingValueOf` reads native ids (`NameToID` +
+`GetLayerValueFromID`) instead of the `SortingLayer.layers` copy, so nothing is cached and no static is added. Pass
+names are unchanged. UI Band Layers L20/L21 pin the lookup against a full scan, the names against the documented text,
+and both at 0 `GC.Alloc` samples over 1 000 calls, with a positive control (under Unity's Mono,
+`GC.GetAllocatedBytesForCurrentThread` reads 0 even for a fresh array, so the scenarios count the profiler marker).
+Editor Play-mode re-capture (1 929 frames, every sampled frame recording the Hud band's four passes): **0 B from these
+sites; 20.2 KB on the main thread in all**, most of it a one-off assembly load, against ≈ 1.45 MB before at 0.75 KB per
+frame. The player figure is not re-measured.
 
 **ES-29 — Cut the behavior tick's spikes: fluid snapshot copies, the fluid-job wait, the managed grass tick.** 🟡 / 🟡.
 Added 2026-10-10 from the ES-0 re-measurement (§2.6). The tick runs at its own cadence, so its per-frame average is tiny
@@ -645,11 +654,11 @@ constants + migration change. Prerequisites: ES-13, ES-18, ES-19.
 
 ### 4.1 Expected impact by symptom
 
-| Symptom          | Biggest levers (in order)                                                                                                                                                                                                                                                              |
-|------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Time-to-stable   | ES-0 (attributed 2026-10-10, §2.6) → ES-1, ES-2, ES-3 → **ES-29** (drained → stable), ES-4, ES-11, ES-13                                                                                                                                                                               |
-| Traversal spikes | ES-0 (see them; H-1 §2.2.1 refuted, **garbage attributed 2026-10-03**) → **ES-26** ✅ (−75.9 % of per-chunk garbage), ES-27, ES-9 (~12 %) → ES-6, ES-8, ES-7, ES-25 → ES-18a (heap); ES-10 after ES-26; ES-28 (steady-state UI garbage, every frame); **ES-29** (loading-pass hitches) |
-| Height / vd 32   | ES-13 (200 k cap), ES-25, ES-19, ES-18, ES-20 + ES-21 + ES-23, ES-24                                                                                                                                                                                                                   |
+| Symptom          | Biggest levers (in order)                                                                                                                                                                                                                                                             |
+|------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Time-to-stable   | ES-0 (attributed 2026-10-10, §2.6) → ES-1, ES-2, ES-3 → **ES-29** (drained → stable), ES-4, ES-11, ES-13                                                                                                                                                                              |
+| Traversal spikes | ES-0 (see them; H-1 §2.2.1 refuted, **garbage attributed 2026-10-03**) → **ES-26** ✅ (−75.9 % of per-chunk garbage), ES-27, ES-9 (~12 %) → ES-6, ES-8, ES-7, ES-25 → ES-18a (heap); ES-10 after ES-26; **ES-28** ✅ (steady-state UI garbage gone); **ES-29** (loading-pass hitches) |
+| Height / vd 32   | ES-13 (200 k cap), ES-25, ES-19, ES-18, ES-20 + ES-21 + ES-23, ES-24                                                                                                                                                                                                                  |
 
 ---
 
@@ -699,7 +708,7 @@ constants + migration change. Prerequisites: ES-13, ES-18, ES-19.
 | **ES-25 — Upload/vertex cuts**   | Rendering baseline, 16-bit indices, buffer capacity, per-section dirty upload, shared sub-quad grids, DepthOnly pass |   🟡   | ES-0                | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | **ES-26 — Serializer span copy** | Write section arrays without `ReadOnlySpan<T>.ToArray()` — byte-identical output                                     |   🟢   | —                   | ✅ 2026-10-10 (GC re-capture + 3 Master runs)                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | **ES-27 — BFS queue regrowth**   | Presize or nativize `ChunkData`'s lighting BFS queues                                                                |   🟢   | —                   | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| **ES-28 — UI pass garbage**      | Cache the UI band/blur Render Graph pass names and sorting values — ≈ 0.75 KB/frame of steady-state garbage          |   🟢   | —                   | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| **ES-28 — UI pass garbage**      | Cache the UI band/blur Render Graph pass names and sorting values — ≈ 0.75 KB/frame of steady-state garbage          |   🟢   | —                   | ✅ 2026-10-10 (suite L20/L21 + Editor GC re-capture)                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | **ES-29 — Behavior tick spikes** | Banded / deduplicated fluid snapshots, the fluid-job wait, Grass-Burst                                               |   🟡   | —                   | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | **ES-12 — Jobified merge**       | P-3                                                                                                                  |   🟡   | ES-7                | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | **ES-13 — Sky from heightmap**   | Frontier-seeded initial lighting                                                                                     |   🟡   | ES-12               | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
@@ -1080,6 +1089,11 @@ saving is inferred from step 1's re-entry leg, not re-measured.
 ---
 
 ## Document History
+
+* **v1.18** - **ES-28 shipped** (2026-10-10): the UI band/blur passes build their Render Graph pass names once and
+  resolve sorting values through native ids, so they allocate nothing per frame (Editor re-capture: 0 B from the
+  four sites over 1 929 frames). ES-28 entry, plan row, status line and §4.1 traversal row; the entry's gate no longer
+  names the UI Blur Render suite, which never reaches the chain.
 
 * **v1.17** - **ES-26 shipped** (2026-10-10): the serializer writes bulk arrays through a per-thread scratch and the
   `byte[]` overload, with byte-identical output. Scored with ES-0's capture in an IL2CPP Development (Master) player:
