@@ -55,7 +55,9 @@ Any player build — Master included — starts a harness from the command line 
 "Minecraft Clone.exe" -force-d3d11 -mc-run benchmark -mc-set benchmarkGenerationSpeeds=200 -mc-mute -mc-quit
 ```
 
-- `-mc-run benchmark | fluidstress` — the actions in `Scripts/Launch/LaunchActionInstaller.cs`.
+- `-mc-run benchmark | fluidstress | startup-new | startup-existing` — the actions in
+  `Scripts/Launch/LaunchActionInstaller.cs`. The two `startup-*` actions report ES-0's time-to-stable stamp
+  (handoff / drained / stable) for a fresh or a saved probe world in a `StartupRun_*.log`; run `startup-new` first.
 - `-mc-set field=value` (repeatable) — overrides any `Settings` field for this session only; `dev.<field>`
   targets `DevSettings` and is rejected outside development builds. The run otherwise inherits the build's
   `settings.json`, exactly like a menu launch. Overrides are never written back to the file.
@@ -102,7 +104,10 @@ first as its own commit.
 - **Prefer A/B legs over the same build** (flag-switched: e.g. `managed` / `halo-full` /
   `halo-band`) — one build, one session, per-leg rows. Separate builds add noise and doubt. In a
   player, put the flag on `Settings` and add it to `SettingsManager.OverlayBenchmarkSettingsFromDisk`'s
-  whitelist: benchmark mode pins every other gameplay setting to `new Settings()` defaults.
+  whitelist, or pass it with `-mc-set`. Benchmark mode is meant to pin every other gameplay setting to `new Settings()`
+  defaults, but the pin applies only when no settings were loaded before the mode switch — and the main menu always
+  loads them — so a run actually uses the settings file. A fresh player build's file holds the calibrated defaults;
+  an Editor run uses `Assets/settings.json`. Read the report's configuration block rather than assuming defaults.
 - **Fixed scenario set, fixed seed** — reuse the established scenarios for the system so numbers
   stay comparable across reports. Include warm-up iterations before timing.
 - **Report the full distribution**: `mean`, `min` (clean floor — best CPU-cost proxy), `median`,

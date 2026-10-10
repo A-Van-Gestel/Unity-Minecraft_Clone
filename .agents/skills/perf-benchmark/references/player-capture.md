@@ -75,6 +75,12 @@ if ($p.WaitForExit(900000)) { "exit $($p.ExitCode)" } else { Stop-Process -Id $p
   readouts over the run's last 2 048 frames — the only place each hitch's slot ranking appears without Capture. The
   next launch overwrites Player.log, so copy it after each run; `python Tools/Python/tabulate_tick_hitches.py <logs…>`
   turns a Systems run's `Tick`-led hitch records into one table of the tick's parts and counts.
+- **Per-phase slots, counters, jobs and I/O:** `python Tools/Python/summarize_perf_session.py --report <BenchmarkRun_*.log>
+  --session <PerfSession_*>` cuts a Capture run's session file by the frame range each Frame Health row prints and
+  cross-checks every phase against that row (exit 1 on a mismatch).
+- **Time to stable:** `-mc-run startup-new`, then `startup-existing`, with the same arguments; each writes a
+  `StartupRun_*.log` and exits 0 only when every mark was reached. The benchmark's own launch is interrupted by its
+  flight, so it never reports the stable mark.
 
 ## 3b. Flow B — Profiler capture of one phase
 
