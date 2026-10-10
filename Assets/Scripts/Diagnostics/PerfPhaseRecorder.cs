@@ -26,12 +26,16 @@ namespace Diagnostics
         /// <summary>End of a phase that has not ended yet.</summary>
         private const int OPEN_END = int.MaxValue;
 
+        /// <summary><see cref="_lastRowFrame"/> before any row arrives; one past it is never after a phase's first frame.</summary>
+        private const int NO_ROW = -1;
+
         private readonly List<int> _firstFrames;
         private readonly List<int> _endFrames;
         private readonly List<PerfPhaseSummary> _completed;
         private readonly NativeList<float>[] _samples = new NativeList<float>[FIELD_COUNT];
 
         private int _gcCollections;
+        private int _lastRowFrame = NO_ROW;
         private bool _isClosed;
         private bool _isDisposed;
 
@@ -99,6 +103,7 @@ namespace Diagnostics
             if (_isClosed) return;
 
             int frameIndex = frame.FrameIndex;
+            _lastRowFrame = frameIndex;
             while (CompletedCount < PhaseCount && frameIndex >= _endFrames[CompletedCount])
                 CompleteOldest();
 
@@ -112,12 +117,15 @@ namespace Diagnostics
             }
         }
 
-        /// <summary>Summarizes every phase not yet summarized with the rows that arrived, an open one included, and stops recording.</summary>
+        /// <summary>
+        /// Summarizes every phase not yet summarized with the rows that arrived, an open one included, and stops recording.
+        /// An open phase ends one past the last row received, so its range covers exactly the rows it summarizes.
+        /// </summary>
         public void Close()
         {
             if (_isClosed || _isDisposed) return;
 
-            EndPhase(OPEN_END - 1);
+            EndPhase(_lastRowFrame + 1);
             while (CompletedCount < PhaseCount)
                 CompleteOldest();
             _isClosed = true;
@@ -145,7 +153,12 @@ namespace Diagnostics
         /// <summary>Summarizes the phase gathering samples and clears the lists for the next.</summary>
         private void CompleteOldest()
         {
-            PerfPhaseSummary summary = new PerfPhaseSummary { GcCollections = _gcCollections };
+            PerfPhaseSummary summary = new PerfPhaseSummary
+            {
+                GcCollections = _gcCollections,
+                FirstFrame = _firstFrames[CompletedCount],
+                EndFrame = _endFrames[CompletedCount],
+            };
             for (int field = 0; field < FIELD_COUNT; field++)
             {
                 NativeList<float> samples = _samples[field];

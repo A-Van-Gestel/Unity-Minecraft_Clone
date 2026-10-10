@@ -50,6 +50,7 @@ A known gap is recorded as an `expectedFailure` test that names it, so a fix sho
 | `prove_red.py`                  | Proves a validation suite goes red under a source mutation, restores byte for byte |
 | `session_cost_report.py`        | Claude Code session cost: main context, turn mix by category, subagents            |
 | `tabulate_tick_hitches.py`      | Tabulates Tick-led hitch records from player-run performance summaries             |
+| `summarize_perf_session.py`     | Per-phase slots, counters, jobs, I/O and hitches from a Capture session + report   |
 | `inspect_save_chunks.py`        | Decodes region files and identifies each chunk payload's historical layout         |
 | `verify_floordiv_parity.py`     | Exhaustive parity proof for the structure cell-election floor-div fix              |
 | `verify_liquid_noise_period.py` | Float32 model of `LiquidCore.hlsl`'s noise (the FLUID #20 evidence)                |

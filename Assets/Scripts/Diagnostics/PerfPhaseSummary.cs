@@ -8,6 +8,12 @@ namespace Diagnostics
         /// <summary>Frames the phase recorded.</summary>
         public int FrameCount;
 
+        /// <summary>The phase's first frame index; with <see cref="EndFrame"/>, the frame range [first, end) the phase covers.</summary>
+        public int FirstFrame;
+
+        /// <summary>The first frame index after the phase.</summary>
+        public int EndFrame;
+
         /// <summary>Wall milliseconds.</summary>
         public PerfWindowSummary Wall;
 

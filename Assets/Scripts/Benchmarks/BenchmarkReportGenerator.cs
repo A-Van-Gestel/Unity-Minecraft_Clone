@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Text;
 using Diagnostics;
 using UnityEngine;
@@ -441,8 +442,9 @@ namespace Benchmarks
         private static void AppendFrameHealth(StringBuilder sb, string groupName, List<PhaseMetrics> group)
         {
             sb.AppendLine($"<b>=== {groupName} — Frame Health (every frame) ===</b>");
+            // The frame range is printed culture-invariant: it is the key a session file's rows are selected by.
             var table = new ReportTable("Phase", "Frames", "Wall p50", "Wall p99", "Worst", "CPU p50", "CPU p99",
-                "GC p99", "GCs", "Hitches", "GPU p99");
+                "GC p99", "GCs", "Hitches", "GPU p99", "First frame", "End frame");
             foreach (PhaseMetrics phase in group)
             {
                 if (!phase.HasFrameStats)
@@ -463,7 +465,9 @@ namespace Benchmarks
                     stats.GcAllocKb.Count > 0 ? $"{stats.GcAllocKb.P99:F1} KB" : "n/a",
                     $"{stats.GcCollections:N0}",
                     phase.HitchFrames >= 0 ? $"{phase.HitchFrames:N0}" : "n/a",
-                    stats.Gpu.Count > 0 ? $"{stats.Gpu.P99:F1} ms" : "n/a");
+                    stats.Gpu.Count > 0 ? $"{stats.Gpu.P99:F1} ms" : "n/a",
+                    stats.FirstFrame.ToString(CultureInfo.InvariantCulture),
+                    stats.EndFrame.ToString(CultureInfo.InvariantCulture));
             }
 
             table.AppendTo(sb);

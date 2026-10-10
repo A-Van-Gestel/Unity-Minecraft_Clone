@@ -112,6 +112,10 @@ namespace Editor.Validation.PerfMonitoring
                 ok &= Check("Each phase holds its own frames; those before, between and after phases are ignored",
                     a.FrameCount == PHASE_B_FIRST - PHASE_A_FIRST && b.FrameCount == PHASE_B_END - PHASE_B_FIRST
                     && c.FrameCount == PHASE_C_END - PHASE_C_FIRST);
+                ok &= Check("Each summary carries its phase's frame range, an end set by the next phase's begin included",
+                    a.FirstFrame == PHASE_A_FIRST && a.EndFrame == PHASE_B_FIRST
+                    && b.FirstFrame == PHASE_B_FIRST && b.EndFrame == PHASE_B_END
+                    && c.FirstFrame == PHASE_C_FIRST && c.EndFrame == PHASE_C_END);
                 ok &= Check("Phase statistics come from the phase's own rows",
                     ExactValue.Equal(a.Wall.Max, PhaseFrameWallMs(PHASE_B_FIRST - 1))
                     && ExactValue.Equal(a.Wall.P50, PhaseFrameWallMs(PHASE_A_FIRST + 2))
@@ -130,6 +134,8 @@ namespace Editor.Validation.PerfMonitoring
                 int finalRows = CLOSE_PHASE_FRAMES - FINAL_ROW_AGE;
                 ok &= Check("Close summarizes an open phase with the rows that are final",
                     closing.IsClosed && closing.CompletedCount == 1 && closing.GetCompleted(0).FrameCount == finalRows);
+                ok &= Check($"Close ends an open phase one past the last row it received (end {closing.GetCompleted(0).EndFrame}, expected {CLOSE_PHASE_FIRST + finalRows})",
+                    closing.GetCompleted(0).EndFrame == CLOSE_PHASE_FIRST + finalRows);
                 CommitPhaseFrames(CLOSE_PHASE_FIRST + CLOSE_PHASE_FRAMES, PerfStore.RowFinalAge);
                 closing.BeginPhase(CLOSE_PHASE_FIRST + CLOSE_PHASE_FRAMES);
                 ok &= Check("A closed recorder ignores later rows and phases",
