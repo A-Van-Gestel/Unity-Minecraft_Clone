@@ -53,7 +53,7 @@ Queue · Light Work Scheduler · Chunk Math · Chunk Unload Decision · Pool Pru
 Backpressure · Chunk Pipeline · Save Durability · Deserialization Robustness · Serialization
 Round-Trip · Migration Chain · Spawn · Command Console · Launch Arguments · World Clock · Sky & Celestial · Sky Render ·
 UI Band Layers · UI Blur Render · Underwater Render · Cloud Render · Worm Carver · Biome Selection ·
-Sound Engine · Validation Framework**
+Sound Engine · Performance Monitor · Validation Framework**
 
 Each has a `Minecraft Clone/Dev/Validate <name>` menu item, plus the aggregate **Validate All** —
 **with two where the menu path is NOT the display name**: `Voxel Occlusion` → *Validate Occlusion*,
