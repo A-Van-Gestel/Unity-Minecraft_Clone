@@ -19,8 +19,9 @@ namespace Benchmarks
         /// </summary>
         /// <param name="collector">The completed collector holding the Baseline + Flood phases.</param>
         /// <param name="regionChunks">Side length of the square flood region, in chunks.</param>
+        /// <param name="settingsDifference">The <see cref="SettingsDifferenceReport"/> block captured at run start.</param>
         /// <returns>The rich-text report and the absolute log path (path <c>null</c> if writing failed).</returns>
-        public static BenchmarkReportResult GenerateAndWrite(FluidStressMetricsCollector collector, int regionChunks)
+        public static BenchmarkReportResult GenerateAndWrite(FluidStressMetricsCollector collector, int regionChunks, string settingsDifference)
         {
             StringBuilder sb = new StringBuilder(4096);
 
@@ -35,6 +36,7 @@ namespace Benchmarks
                           $"flooding + overflowing across chunk borders (substrate stamped + settled pre-baseline).");
             sb.AppendLine();
             sb.Append(BenchmarkEnvironment.DescribeSystem());
+            sb.Append(settingsDifference);
 
             AppendAvgTable(sb, collector);
             AppendWorstFrameTable(sb, collector);

@@ -104,6 +104,9 @@ namespace Benchmarks
         /// </summary>
         private PipelineSettingsSnapshot _pipelineSettingsForCapture;
 
+        /// <summary>The <see cref="SettingsDifferenceReport"/> block, captured beside the pipeline snapshot for the same reason.</summary>
+        private string _settingsDifferenceForCapture;
+
         // ── Frame Rate Overrides ─────────────────────────────────────────
 
         private int _savedVSyncCount;
@@ -231,6 +234,7 @@ namespace Benchmarks
             // so the two report the same phases. Enabled only for the duration of this run and cleared in
             // OnDestroy — the WorldFrameProfiler/FluidStressController pattern.
             _pipelineSettingsForCapture = new PipelineSettingsSnapshot(settings);
+            _settingsDifferenceForCapture = SettingsDifferenceReport.Describe();
 
             // Pairs with the freshly-constructed collector above: both recorders must start a run empty, or
             // a second run in one process reports the first run's phases as its own (FP-5).
@@ -299,7 +303,8 @@ namespace Benchmarks
                 _totalStopwatch.Elapsed,
                 _savedVSyncCount,
                 _savedTargetFrameRate,
-                _pipelineSettingsForCapture);
+                _pipelineSettingsForCapture,
+                _settingsDifferenceForCapture);
 
             ShowResults(reportResult);
         }

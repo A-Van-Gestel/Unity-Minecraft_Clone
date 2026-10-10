@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
+using Benchmarks;
 using Editor.Dev;
 using Editor.Validation.Framework;
 using Launch;
@@ -13,7 +14,8 @@ namespace Editor.Validation.LaunchArgs
     /// <summary>
     /// Truth-table suite for the <c>-mc-*</c> command-line layer: <see cref="LaunchArguments"/> parsing,
     /// <see cref="LaunchSettingsOverrides"/> typing and validation, the save path that keeps session overrides off
-    /// disk (<see cref="SettingsManager.SerializeForSave"/>), and the <see cref="LaunchActionInstaller"/> list. All
+    /// disk (<see cref="SettingsManager.SerializeForSave"/>), the <see cref="LaunchActionInstaller"/> list, and the
+    /// reports' <see cref="SettingsDifferenceReport"/> block, which shows what a run inherited. All
     /// pure: no scene, no player, and the real settings file is never read or written.
     /// <para>
     /// All scenarios are <b>baselines</b>. The load-bearing one is B8: an override must never reach the settings
@@ -26,7 +28,8 @@ namespace Editor.Validation.LaunchArgs
     /// restoring every field unconditionally (ignoring later edits) reds B7; removing <c>Apply</c>'s
     /// all-or-nothing <c>return null</c> reds B5 and B6; and an <see cref="LaunchActionInstaller.InstalledActionCount"/>
     /// out of step with the list reds B9; replacing a re-overridden entry wholesale (losing the first file value) reds
-    /// B11; and listing <c>dev.*</c> fields as changed reds B13.
+    /// B11; listing <c>dev.*</c> fields as changed reds B13; and a <see cref="LaunchSettingsOverrides.HoldsOverride"/>
+    /// that ignores a later edit reds B14.
     /// </para>
     /// </summary>
     public static class LaunchArgumentsValidationSuite
@@ -60,6 +63,8 @@ namespace Editor.Validation.LaunchArgs
                 new Scenario("B11 A field overridden twice still saves its original file value", RunB11MergeKeepsFileValue),
                 new Scenario("B12 A rejected second batch leaves the earlier overrides untouched", RunB12FailedAddIsAtomic),
                 new Scenario("B13 Change notifications name Settings fields only, never dev.*", RunB13ChangedFields),
+                new Scenario("B14 The report's settings block lists exactly the non-default fields, overrides tagged",
+                    RunB14SettingsDifference),
             };
             return ValidationSuiteRunner.Execute("Launch Arguments", scenarios, KnownBugChannel.Unimplemented, logToConsole,
                 showProgress);
@@ -346,5 +351,71 @@ namespace Editor.Validation.LaunchArgs
                    & Check("masterVolume set to 0", Mathf.Approximately(settings.masterVolume, 0f))
                    & Check("notified exactly [masterVolume]", changed.Count == 1 && changed[0] == nameof(Settings.masterVolume));
         }
+
+        /// <summary>
+        /// B14 — the block names every field off its default and nothing else, tags only the fields still holding an
+        /// override, and compares the dev section only when asked, without also naming it as not compared.
+        /// </summary>
+        private static bool RunB14SettingsDifference()
+        {
+            List<string> unchanged = SettingsLines(SettingsDifferenceReport.Describe(new Settings(), null, true));
+            bool ok = Check("defaults: no field lines", unchanged.Count == 0);
+
+            var settings = new Settings();
+            settings.viewDistance += 1; // as edited in the settings file
+            var errors = new List<string>();
+            LaunchSettingsOverrides overrides = LaunchSettingsOverrides.Apply(settings, Assignments(
+                "maxLightJobsPerFrame=48", "benchmarkPhaseSeconds=5", "dev.keepChunksInMemory=true"), true, errors);
+            if (!Check("overrides applied", overrides != null))
+                return false;
+
+            settings.benchmarkPhaseSeconds = 99f; // edited after the override, e.g. in the settings menu
+
+            string block = SettingsDifferenceReport.Describe(settings, overrides, true);
+            List<string> lines = SettingsLines(block);
+            ok &= Check("exactly four field lines", lines.Count == 4);
+            ok &= Check("the dev section, compared field by field, is not also named as not compared",
+                !NotComparedNames(block).Contains(nameof(Settings.Dev)));
+            ok &= Check("a file edit is listed untagged", HasLine(lines, nameof(Settings.viewDistance), false));
+            ok &= Check("a held override is tagged", HasLine(lines, nameof(Settings.maxLightJobsPerFrame), true));
+            ok &= Check("a field changed since its override is untagged", HasLine(lines, nameof(Settings.benchmarkPhaseSeconds), false));
+            ok &= Check("a dev override is listed with its prefix, tagged", HasLine(lines, "dev.keepChunksInMemory", true));
+            ok &= Check("without the dev section, its field is not listed",
+                SettingsLines(SettingsDifferenceReport.Describe(settings, overrides, false)).Count == 3);
+            return ok;
+        }
+
+        /// <summary>The field lines of a settings block: every line but the header, the summary lines and blanks.</summary>
+        private static List<string> SettingsLines(string block)
+        {
+            var lines = new List<string>();
+            foreach (string raw in block.Split('\n'))
+            {
+                string line = raw.TrimEnd('\r');
+                if (line.Length > 0 && !line.StartsWith("<b>") && !line.StartsWith("None:") && !line.StartsWith("Not compared"))
+                    lines.Add(line);
+            }
+
+            return lines;
+        }
+
+        /// <summary>The field names on a settings block's "Not compared" line, or none when it has no such line.</summary>
+        private static List<string> NotComparedNames(string block)
+        {
+            var names = new List<string>();
+            foreach (string raw in block.Split('\n'))
+            {
+                string line = raw.TrimEnd('\r');
+                if (!line.StartsWith("Not compared")) continue;
+
+                foreach (string name in line.Substring(line.IndexOf(':') + 1).Split(','))
+                    names.Add(name.Trim());
+            }
+
+            return names;
+        }
+
+        private static bool HasLine(List<string> lines, string field, bool tagged) =>
+            lines.Exists(line => line.StartsWith(field + " ") && line.EndsWith("[session override]") == tagged);
     }
 }

@@ -129,6 +129,30 @@ namespace Launch
             }
         }
 
+        /// <summary>Whether <paramref name="name"/> is overridden and its field still holds the override value.</summary>
+        /// <param name="settings">The settings instance the overrides were applied to.</param>
+        /// <param name="name">The field name as overridden; <c>dev.field</c> for <see cref="DevSettings"/>.</param>
+        /// <returns>False for a field never overridden, or changed since (e.g. in the settings menu).</returns>
+        public bool HoldsOverride(Settings settings, string name)
+        {
+            foreach (AppliedOverride applied in _applied)
+            {
+                if (applied.Name == name)
+                    return Equals(applied.Field.GetValue(applied.Target(settings)), applied.Value);
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Whether a field is one an override can target: public, serialized, writable, and of a type
+        /// <see cref="Add"/> converts (<c>string</c>, <c>int</c>, <c>float</c>, <c>bool</c> or an enum).
+        /// </summary>
+        /// <param name="field">A public instance field of <see cref="Settings"/> or <see cref="DevSettings"/>.</param>
+        /// <returns>True when the field can be overridden.</returns>
+        public static bool IsOverridableField(FieldInfo field) =>
+            !field.IsNotSerialized && !field.IsInitOnly && IsConvertibleType(field.FieldType);
+
         /// <summary>Describes the overrides for the log, as <c>field=value</c> pairs.</summary>
         /// <returns>A comma-separated list.</returns>
         public override string ToString()
@@ -173,6 +197,10 @@ namespace Launch
             error = null;
             return true;
         }
+
+        // The types TryConvert handles; keep the two in step.
+        private static bool IsConvertibleType(Type type) =>
+            type == typeof(string) || type == typeof(int) || type == typeof(float) || type == typeof(bool) || type.IsEnum;
 
         private static bool TryConvert(string text, Type type, out object value)
         {

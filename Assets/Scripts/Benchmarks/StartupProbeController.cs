@@ -35,6 +35,7 @@ namespace Benchmarks
 
         private long _loadHitsAtStart;
         private long _loadMissesAtStart;
+        private string _settingsDifference;
         private bool _finished;
 
         // Owned by this run rather than inferred from the mode: the no-quit path switches the mode back before the
@@ -53,6 +54,7 @@ namespace Benchmarks
             _raisedTierFloor = true;
             _loadHitsAtStart = StorageIoStats.LoadHits;
             _loadMissesAtStart = StorageIoStats.LoadMisses;
+            _settingsDifference = SettingsDifferenceReport.Describe();
         }
 
         private IEnumerator Start()
@@ -144,6 +146,7 @@ namespace Benchmarks
             sb.AppendLine($"Monitor detail:   {PerfStore.Tier}");
             sb.AppendLine();
             sb.Append(BenchmarkEnvironment.DescribeSystem());
+            sb.Append(_settingsDifference);
             return sb.ToString();
         }
     }

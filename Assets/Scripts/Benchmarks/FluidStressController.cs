@@ -86,6 +86,7 @@ namespace Benchmarks
                 new KeyValuePair<string, string>(nameof(Settings.viewDistance), VIEW_DISTANCE.ToString(CultureInfo.InvariantCulture)),
                 new KeyValuePair<string, string>(nameof(Settings.enableLighting), bool.TrueString),
             }, "fluid stress");
+            string settingsDifference = SettingsDifferenceReport.Describe();
 
             _savedVSyncCount = QualitySettings.vSyncCount;
             _savedTargetFrameRate = Application.targetFrameRate;
@@ -141,7 +142,7 @@ namespace Benchmarks
             WorldFrameProfiler.Enabled = false;
             _profilerEnabled = false;
 
-            BenchmarkReportResult result = FluidStressReportGenerator.GenerateAndWrite(collector, REGION_CHUNKS);
+            BenchmarkReportResult result = FluidStressReportGenerator.GenerateAndWrite(collector, REGION_CHUNKS, settingsDifference);
             Debug.Log($"[FluidStress] Complete. Report written to: {result.LogFilePath ?? "(disk write failed — see console log above)"}");
 
             if (LaunchSession.TryQuitAfterRun(

@@ -44,6 +44,7 @@ namespace Benchmarks
         /// <param name="savedTargetFrameRate">The target frame rate that was saved before uncapping.</param>
         /// <param name="pipelineSettings">Pipeline tuning captured at run start (FP-6) — the values the
         /// FP stop-reason tallies must be read against.</param>
+        /// <param name="settingsDifference">The <see cref="SettingsDifferenceReport"/> block captured at run start.</param>
         /// <returns>A <see cref="BenchmarkReportResult"/> containing the report text and file path.</returns>
         public static BenchmarkReportResult GenerateAndWriteReport(
             BenchmarkMetricsCollector collector,
@@ -56,12 +57,14 @@ namespace Benchmarks
             TimeSpan totalDuration,
             int savedVSyncCount,
             int savedTargetFrameRate,
-            PipelineSettingsSnapshot pipelineSettings)
+            PipelineSettingsSnapshot pipelineSettings,
+            string settingsDifference)
         {
             StringBuilder sb = new StringBuilder(4096);
 
             AppendHeader(sb, totalDuration);
             sb.Append(BenchmarkEnvironment.DescribeSystem());
+            sb.Append(settingsDifference);
             AppendConfiguration(sb, generationSpeeds, loadingSpeeds, timePerPhase, routeGeometry,
                 generationWaypointCount, loadingWaypointCount, savedVSyncCount, savedTargetFrameRate);
             pipelineSettings.AppendTo(sb);
