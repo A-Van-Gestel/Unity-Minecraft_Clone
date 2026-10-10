@@ -124,14 +124,19 @@ namespace Serialization
         /// <param name="source">The chunk (live data or snapshot) to serialize.</param>
         /// <param name="buffer">The pooled destination buffer.</param>
         /// <param name="algorithm">The compression algorithm to apply.</param>
+        /// <param name="uncompressedLength">The payload's size before compression; 0 when the injection seam is armed.</param>
         /// <returns>The payload length, or 0 when the injection seam is armed.</returns>
-        private static int SerializeWithInjection(ChunkData source, byte[] buffer, CompressionAlgorithm algorithm)
+        private static int SerializeWithInjection(ChunkData source, byte[] buffer, CompressionAlgorithm algorithm, out int uncompressedLength)
         {
 #if UNITY_INCLUDE_INSTRUMENTATION
-            if (TryConsumeInjection(ref s_injectedZeroLengthSerializes)) return 0;
+            if (TryConsumeInjection(ref s_injectedZeroLengthSerializes))
+            {
+                uncompressedLength = 0;
+                return 0;
+            }
 #endif
             long start = StorageIoStats.Stamp();
-            int length = ChunkSerializer.Serialize(source, buffer, algorithm);
+            int length = ChunkSerializer.Serialize(source, buffer, algorithm, out uncompressedLength);
             StorageIoStats.RecordSerialize(start);
             return length;
         }
@@ -256,14 +261,14 @@ namespace Serialization
             try
             {
                 // Serialize
-                int length = SerializeWithInjection(data, buffer, algorithm);
+                int length = SerializeWithInjection(data, buffer, algorithm, out int uncompressedLength);
                 if (length <= 0)
                 {
                     Debug.LogWarning($"[SaveChunk] Chunk at voxelPos {data.Position.ToString()} serialization returned 0 bytes");
                     return;
                 }
 
-                WriteToRegion(data.Position, buffer, length, algorithm);
+                WriteToRegion(data.Position, buffer, length, uncompressedLength, algorithm);
 
                 // Live data is at least as fresh as any pending registry snapshot for this coord —
                 // drop such an entry rather than letting a later retry regress this write.
@@ -341,7 +346,7 @@ namespace Serialization
                         StorageIoStats.RecordQueueWait(submitted);
 
                         // Serialize
-                        int length = SerializeWithInjection(snapshot, buffer, algorithm);
+                        int length = SerializeWithInjection(snapshot, buffer, algorithm, out int uncompressedLength);
                         if (length <= 0)
                         {
                             // Deterministic failure — retrying can never succeed, so this must NOT enter
@@ -355,7 +360,7 @@ namespace Serialization
                         // Check token again before disk write to prevent writing partial/canceled state
                         if (cancellationToken.IsCancellationRequested) return; // taskResult stays Canceled
 
-                        WriteToRegion(snapshot.Position, buffer, length, algorithm);
+                        WriteToRegion(snapshot.Position, buffer, length, uncompressedLength, algorithm);
 
                         // Count only a real disk write (skips the length<=0 / canceled early-returns above),
                         // so SavesCompleted reflects actual writes rather than every non-throwing invocation.
@@ -717,7 +722,7 @@ namespace Serialization
             byte[] buffer = SerializationBufferPool.Get();
             try
             {
-                int length = SerializeWithInjection(snapshot, buffer, algorithm);
+                int length = SerializeWithInjection(snapshot, buffer, algorithm, out int uncompressedLength);
                 if (length <= 0)
                 {
                     Interlocked.Increment(ref s_savesFailed);
@@ -725,7 +730,7 @@ namespace Serialization
                     return ChunkSaveResult.FailedPermanent;
                 }
 
-                WriteToRegion(snapshot.Position, buffer, length, algorithm);
+                WriteToRegion(snapshot.Position, buffer, length, uncompressedLength, algorithm);
 
                 Interlocked.Increment(ref s_savesCompleted);
                 return ChunkSaveResult.Written;
@@ -799,8 +804,9 @@ namespace Serialization
         /// <param name="chunkVoxelPos">The chunk's voxel-space world origin.</param>
         /// <param name="buffer">The serialized payload buffer.</param>
         /// <param name="length">The payload length in bytes.</param>
+        /// <param name="uncompressedLength">The payload's size before compression, for the I/O totals.</param>
         /// <param name="algorithm">The compression algorithm the payload was written with.</param>
-        private void WriteToRegion(Vector2Int chunkVoxelPos, byte[] buffer, int length, CompressionAlgorithm algorithm)
+        private void WriteToRegion(Vector2Int chunkVoxelPos, byte[] buffer, int length, int uncompressedLength, CompressionAlgorithm algorithm)
         {
             ThrowIfInjectedSaveFault();
             ThrowIfInjectedTooLargeSave();
@@ -808,7 +814,7 @@ namespace Serialization
             long start = StorageIoStats.Stamp();
             (Vector2Int regionCoord, int lx, int lz) = _codec.ChunkVoxelPosToRegionAddress(chunkVoxelPos);
             GetRegion(regionCoord).SaveChunkData(lx, lz, buffer, length, algorithm);
-            StorageIoStats.RecordWrite(start, length);
+            StorageIoStats.RecordWrite(start, length, uncompressedLength);
         }
 
         // -------------------------------------------------------------------------

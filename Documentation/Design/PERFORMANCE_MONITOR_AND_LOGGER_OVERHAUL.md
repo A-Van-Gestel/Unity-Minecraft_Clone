@@ -503,16 +503,16 @@ Outside `World.Update` (a slot here may contain world work it triggers, e.g. a c
 Unity's own jobs (rendering, animation, uGUI) are invisible, so utilization is the engine's share of the workers.
 
 **Background I/O (Systems tier).** `ChunkStorageManager` only: loads (hits, misses, read and deserialize time, payload
-bytes), saves on every path (serialize and write time, payload bytes), the ThreadPool wait and the background operations
+bytes), saves on every path (serialize and write time, payload bytes and their uncompressed size), the ThreadPool wait and the background operations
 it covers, and the operations in flight. Region files touched outside it — the migration step, the world list — and the
 non-chunk files (`level.dat`, pending modifications, pending lighting) are not counted.
 
-**Counters (Systems tier).** 56, sampled in `World.SamplePerfCounters`:
+**Counters (Systems tier).** 57, sampled in `World.SamplePerfCounters`:
 - *Gauges (14):* the pipeline queues and jobs in flight (`GenerationQueue`, `GenerationInFlight`, `LightReady`,
   `LightWaiting`, `LightInFlight`, `MeshQueue`, `MeshInFlight`, `ModificationQueue`), residency (`ResidentChunks`,
   `ActiveChunks`, `ActiveSections`), the native pools' idle stock (`JobArraysPooled`, `MeshOutputsPooled`) and `IoInFlight`.
-- *Per-frame counts (42):* pool misses (section, chunk data, job array, mesh output, save buffer); completed / latency /
-  busy for each of the five job types, and `UntimedJobs`; the eleven disk I/O counts; the behavior tick's six timed parts
+- *Per-frame counts (43):* pool misses (section, chunk data, job array, mesh output, save buffer); completed / latency /
+  busy for each of the five job types, and `UntimedJobs`; the twelve disk I/O counts; the behavior tick's six timed parts
   (`TickListUs`, `TickPrepareUs`, `TickScheduleUs`, `TickWaitUs`, `TickGrassUs`, `TickFluidReplayUs`, from
   `PerfTickTotals`), its counts (`TickFluidChunks`, `TickSnapshotKb`, `TickGrassVoxels`) and `FluidTickerPoolMisses`.
   The tick's drain bookkeeping and ticker returns are timed by no part: `/perf stats` shows them as the average "Other".
@@ -1265,6 +1265,10 @@ Answers 1–4 come from `EngineApiProbe_2026-10-03_13-52-20.log`: a `Windows - P
 ---
 
 ## Document History
+
+* **v1.17** - `DiskSaveRawBytes` (2026-10-10, shipped with the roadmap's `ES-26`): each written save also counts its
+  uncompressed size, and `/perf stats` and the run-end summary print the compression ratio. This closes PM-4's deferred
+  decision 3 (§7.5, kept as recorded); §4.9's counter inventory is 57.
 
 * **v1.16** - Benchmark settings (2026-10-10): `OverlayBenchmarkSettingsFromDisk` and the defaults pin it served are
   removed, since every automated run already inherited the whole settings file; reports list each value that differs

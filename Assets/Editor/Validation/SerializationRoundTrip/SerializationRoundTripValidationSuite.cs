@@ -84,7 +84,7 @@ namespace Editor.Validation.SerializationRoundTrip
                 new Scenario("B4: re-serializing a reloaded chunk reproduces the original bytes and flag map", ReSerializationIsByteIdentical),
                 new Scenario("B5: randomized chunks round-trip identically and re-serialize byte-identically", FuzzChunksRoundTripIdentically),
                 new Scenario("B6: golden bytes — the reference payload's hash, length and version byte are frozen", GoldenPayloadBytesAreFrozen),
-                new Scenario("B7: every compression arm round-trips, and both codecs actually compress", EveryCompressionArmRoundTrips),
+                new Scenario("B7: every compression arm round-trips, reports the true uncompressed length, and both codecs actually compress", EveryCompressionArmRoundTrips),
                 new Scenario("B8: a chunk loads under any active saveCompression setting, not just the one it was written with", ChunksLoadRegardlessOfTheActiveCompressionSetting),
                 new Scenario("B9: RegionFile stores a record and describes it correctly in the offset table", RegionFileStoresAndDescribesARecord),
                 new Scenario("B10: a grown record relocates, and its vacated sectors are freed for reuse", GrowingARecordRelocatesAndFreesItsOldRun),

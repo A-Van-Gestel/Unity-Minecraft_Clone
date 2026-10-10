@@ -48,6 +48,9 @@ namespace Serialization
         private static long s_saveBytes;
 
         [NoAutoStaticsCleanup] // reset in DomainReset
+        private static long s_saveRawBytes;
+
+        [NoAutoStaticsCleanup] // reset in DomainReset
         private static long s_queueWaitTicks;
 
         [NoAutoStaticsCleanup] // reset in DomainReset
@@ -82,6 +85,9 @@ namespace Serialization
 
         /// <summary>Compressed payload bytes written.</summary>
         public static long SaveBytes => Interlocked.Read(ref s_saveBytes);
+
+        /// <summary>The same payloads' bytes before compression; with <see cref="SaveBytes"/>, the compression ratio.</summary>
+        public static long SaveRawBytes => Interlocked.Read(ref s_saveRawBytes);
 
         /// <summary>Time background loads and saves waited between submission and a ThreadPool thread starting them, in microseconds.</summary>
         public static long QueueWaitMicros => PerfStore.TicksToMicros(Interlocked.Read(ref s_queueWaitTicks));
@@ -168,13 +174,15 @@ namespace Serialization
         /// <summary>Records a completed region write.</summary>
         /// <param name="startTimestamp">The value <see cref="Stamp"/> returned before it; 0 is a no-op.</param>
         /// <param name="payloadBytes">The payload's length.</param>
-        public static void RecordWrite(long startTimestamp, int payloadBytes)
+        /// <param name="uncompressedBytes">The payload's length before compression.</param>
+        public static void RecordWrite(long startTimestamp, int payloadBytes, int uncompressedBytes)
         {
             if (startTimestamp == 0L) return;
 
             Interlocked.Add(ref s_writeTicks, Stopwatch.GetTimestamp() - startTimestamp);
             Interlocked.Increment(ref s_saves);
             Interlocked.Add(ref s_saveBytes, payloadBytes);
+            Interlocked.Add(ref s_saveRawBytes, uncompressedBytes);
         }
 
         /// <summary>Zeroes every total on play-mode entry.</summary>
@@ -190,6 +198,7 @@ namespace Serialization
             Interlocked.Exchange(ref s_serializeTicks, 0L);
             Interlocked.Exchange(ref s_writeTicks, 0L);
             Interlocked.Exchange(ref s_saveBytes, 0L);
+            Interlocked.Exchange(ref s_saveRawBytes, 0L);
             Interlocked.Exchange(ref s_queueWaitTicks, 0L);
             Interlocked.Exchange(ref s_backgroundOps, 0L);
             Interlocked.Exchange(ref s_inFlight, 0L);

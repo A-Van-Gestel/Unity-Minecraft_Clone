@@ -55,6 +55,7 @@ namespace Editor.Validation.PerfMonitoring
         private const int IO_LOAD_MISSES = 3;
         private const int IO_LOAD_BYTES = 4;
         private const int IO_BACKGROUND_OPS = 10;
+        private const int IO_SAVE_RAW_BYTES = 11;
 
         /// <summary>Background operations in the I/O round trip: one async save and two loads.</summary>
         private const int ROUND_TRIP_BACKGROUND_OPS = 3;
@@ -237,6 +238,8 @@ namespace Editor.Validation.PerfMonitoring
                 ok &= Check("The save is written, the saved chunk loads and the unsaved one does not", roundTrip);
                 ok &= Check("One save counted, with its payload bytes",
                     after[IO_SAVES] - before[IO_SAVES] == 1 && after[IO_SAVE_BYTES] > before[IO_SAVE_BYTES]);
+                ok &= Check("The save's uncompressed bytes counted exactly",
+                    after[IO_SAVE_RAW_BYTES] - before[IO_SAVE_RAW_BYTES] == UncompressedLength(data));
                 ok &= Check("One load hit with its payload bytes, and one miss",
                     after[IO_LOAD_HITS] - before[IO_LOAD_HITS] == 1 && after[IO_LOAD_MISSES] - before[IO_LOAD_MISSES] == 1
                     && after[IO_LOAD_BYTES] > before[IO_LOAD_BYTES]);
@@ -398,12 +401,27 @@ namespace Editor.Validation.PerfMonitoring
             return result == ChunkSaveResult.Written && loaded != null && missing == null;
         }
 
+        /// <summary>The chunk's serialized length before compression — what a save of it must count.</summary>
+        private static long UncompressedLength(ChunkData data)
+        {
+            byte[] buffer = SerializationBufferPool.Get();
+            try
+            {
+                return ChunkSerializer.Serialize(data, buffer, CompressionAlgorithm.None);
+            }
+            finally
+            {
+                SerializationBufferPool.Return(buffer);
+            }
+        }
+
         /// <summary>The storage I/O running totals, indexed by the <c>IO_*</c> constants.</summary>
         private static long[] IoTotals() => new[]
         {
             StorageIoStats.Saves, StorageIoStats.SaveBytes, StorageIoStats.LoadHits, StorageIoStats.LoadMisses,
             StorageIoStats.LoadBytes, StorageIoStats.SerializeMicros, StorageIoStats.WriteMicros, StorageIoStats.ReadMicros,
             StorageIoStats.DeserializeMicros, StorageIoStats.QueueWaitMicros, StorageIoStats.BackgroundOps,
+            StorageIoStats.SaveRawBytes,
         };
 
         private static bool SameTotals(long[] a, long[] b)

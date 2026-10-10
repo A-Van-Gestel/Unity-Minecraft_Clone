@@ -236,6 +236,24 @@ namespace Editor.Validation.SerializationRoundTrip
             }
         }
 
+        /// <summary>Serializes a chunk and returns the uncompressed length <see cref="ChunkSerializer.Serialize(ChunkData, byte[], CompressionAlgorithm, out int)"/> reports.</summary>
+        /// <param name="data">The chunk to serialize.</param>
+        /// <param name="algorithm">The compression algorithm to encode with.</param>
+        /// <returns>The reported uncompressed length.</returns>
+        private static int SerializeUncompressedLength(ChunkData data, CompressionAlgorithm algorithm)
+        {
+            byte[] buffer = SerializationBufferPool.Get();
+            try
+            {
+                ChunkSerializer.Serialize(data, buffer, algorithm, out int uncompressedLength);
+                return uncompressedLength;
+            }
+            finally
+            {
+                SerializationBufferPool.Return(buffer);
+            }
+        }
+
         // v7 layout constants for the independent payload parser below. These deliberately RE-STATE the
         // layout rather than calling into ChunkSerializer: a parser that reused the reader would share any
         // fault the reader has, and the flag map would then be a tautology instead of an oracle.

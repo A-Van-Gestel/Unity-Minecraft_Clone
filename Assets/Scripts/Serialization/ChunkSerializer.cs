@@ -61,6 +61,10 @@ namespace Serialization
         [NoAutoStaticsCleanup] // per-thread scratch, overwritten before every use
         private static byte[] s_tBulkScratch;
 
+        [ThreadStatic]
+        [NoAutoStaticsCleanup] // per-thread counter, rebound by every Serialize
+        private static CountingWriteStream s_tCountingStream;
+
         /// <summary>
         /// Serializes a ChunkData object into a byte array buffer using the specified compression algorithm.
         /// </summary>
@@ -68,7 +72,18 @@ namespace Serialization
         /// <param name="outputBuffer">The reusable buffer to write to.</param>
         /// <param name="algorithm">The compression algorithm to use.</param>
         /// <returns>The number of bytes written to the buffer (including the 4-byte length header).</returns>
-        public static int Serialize(ChunkData data, byte[] outputBuffer, CompressionAlgorithm algorithm)
+        public static int Serialize(ChunkData data, byte[] outputBuffer, CompressionAlgorithm algorithm) =>
+            Serialize(data, outputBuffer, algorithm, out _);
+
+        /// <summary>
+        /// Serializes a ChunkData object into a byte array buffer and reports the payload's size before compression.
+        /// </summary>
+        /// <param name="data">The chunk data to serialize.</param>
+        /// <param name="outputBuffer">The reusable buffer to write to.</param>
+        /// <param name="algorithm">The compression algorithm to use.</param>
+        /// <param name="uncompressedLength">The bytes written into the compression stream.</param>
+        /// <returns>The number of bytes written to the buffer.</returns>
+        public static int Serialize(ChunkData data, byte[] outputBuffer, CompressionAlgorithm algorithm, out int uncompressedLength)
         {
             // Write to the pre-allocated buffer
             using MemoryStream memoryStream = new MemoryStream(outputBuffer);
@@ -78,14 +93,21 @@ namespace Serialization
             // would close the stream before the Position read below (the same identity guard Deserialize
             // uses for its input wrapper).
             Stream compressionStream = CompressionFactory.CreateOutputStream(memoryStream, algorithm, leaveOpen: true);
+            CountingWriteStream counter = s_tCountingStream ??= new CountingWriteStream();
+            counter.Attach(compressionStream);
             try
             {
                 // Use UTF8 and leaveOpen=true for the writer too.
-                using BinaryWriter writer = new BinaryWriter(compressionStream, Encoding.UTF8, true);
-                WriteChunkInternal(writer, data);
+                using (BinaryWriter writer = new BinaryWriter(counter, Encoding.UTF8, true))
+                {
+                    WriteChunkInternal(writer, data);
+                }
+
+                uncompressedLength = (int)counter.BytesWritten;
             }
             finally
             {
+                counter.Detach();
                 if (compressionStream != memoryStream) compressionStream.Dispose();
             }
 

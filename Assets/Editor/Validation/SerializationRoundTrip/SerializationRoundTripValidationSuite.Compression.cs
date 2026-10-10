@@ -27,9 +27,11 @@ namespace Editor.Validation.SerializationRoundTrip
         /// <summary>
         /// B7. Red when: any compression arm fails to round-trip a chunk, or an arm silently degrades to a
         /// passthrough. The non-vacuity half matters as much as the identity half — a codec that quietly
-        /// stopped compressing would round-trip perfectly while every save on disk grew ~4x.
+        /// stopped compressing would round-trip perfectly while every save on disk grew ~4x. Also red when an
+        /// arm's reported uncompressed length differs from the <c>None</c> payload — the monitor's compression
+        /// ratio is built on that figure.
         /// </summary>
-        /// <returns>True when all three arms round-trip identically and both codecs actually compress.</returns>
+        /// <returns>True when all three arms round-trip identically, report the true uncompressed length, and both codecs actually compress.</returns>
         private static bool EveryCompressionArmRoundTrips()
         {
             using Fixture fx = new Fixture();
@@ -47,6 +49,9 @@ namespace Editor.Validation.SerializationRoundTrip
                 foreach (CompressionAlgorithm algorithm in s_compressionArms)
                 {
                     byte[] payload = Serialize(source, algorithm);
+                    int reportedUncompressed = SerializeUncompressedLength(source, algorithm);
+                    ok &= Check($"{algorithm.ToString()} reports the uncompressed length ({reportedUncompressed.ToString()} vs {uncompressedLength.ToString()})",
+                        reportedUncompressed == uncompressedLength);
 
                     ChunkData loaded = ChunkSerializer.Deserialize(payload, algorithm, pos);
                     if (loaded == null)

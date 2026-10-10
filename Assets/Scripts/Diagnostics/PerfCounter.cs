@@ -144,6 +144,9 @@ namespace Diagnostics
         /// <summary>Compressed payload bytes written this frame.</summary>
         DiskSaveBytes,
 
+        /// <summary>The same payloads' bytes before compression; with <see cref="DiskSaveBytes"/>, the compression ratio.</summary>
+        DiskSaveRawBytes,
+
         /// <summary>Time background loads and saves waited for a ThreadPool thread, in microseconds.</summary>
         IoQueueWaitUs,
 

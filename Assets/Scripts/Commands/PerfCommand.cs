@@ -30,6 +30,7 @@ namespace Commands
         private const int SLOT_NAME_WIDTH = 20;
         private const int FRAME_LABEL_WIDTH = 7;
         private const string PERCENT_FORMAT = "P1";
+        private const string RATIO_FORMAT = "0.00";
         private const double MILLISECONDS_PER_SECOND = 1000.0;
         private const double MICROSECONDS_PER_MILLISECOND = 1000.0;
         private const double BYTES_PER_MEGABYTE = 1024.0 * 1024.0;
@@ -311,7 +312,8 @@ namespace Commands
             lines.Add(new ConsoleLine(ConsoleLineSeverity.Info,
                 $"Disk over {Ms((float)seconds)} s: {hits} loads found on disk, {misses} not; {saves} saves; " +
                 $"{MegabytesPerSecond(PerfStore.SumCounter(PerfCounter.DiskLoadBytes), seconds)} MB/s read, " +
-                $"{MegabytesPerSecond(PerfStore.SumCounter(PerfCounter.DiskSaveBytes), seconds)} MB/s written"));
+                $"{MegabytesPerSecond(PerfStore.SumCounter(PerfCounter.DiskSaveBytes), seconds)} MB/s written " +
+                $"(compression {CompressionRatio()})"));
             lines.Add(new ConsoleLine(ConsoleLineSeverity.Info,
                 $"  avg ms per operation: read {AverageMs(PerfCounter.DiskReadUs, hits + misses)}, " +
                 $"deserialize {AverageMs(PerfCounter.DeserializeUs, hits)}, serialize {AverageMs(PerfCounter.SerializeUs, saves)}, " +
@@ -321,6 +323,15 @@ namespace Commands
         /// <summary>A microsecond counter's sum over the counter frames divided by an operation count, as milliseconds.</summary>
         private static string AverageMs(PerfCounter microseconds, long operations) =>
             operations > 0 ? Ms((float)(PerfStore.SumCounter(microseconds) / MICROSECONDS_PER_MILLISECOND / operations)) : "n/a";
+
+        /// <summary>Uncompressed over compressed bytes of the saves in the counter frames, as <c>N.NN:1</c>.</summary>
+        private static string CompressionRatio()
+        {
+            long compressed = PerfStore.SumCounter(PerfCounter.DiskSaveBytes);
+            return compressed > 0
+                ? $"{(PerfStore.SumCounter(PerfCounter.DiskSaveRawBytes) / (double)compressed).ToString(RATIO_FORMAT, CultureInfo.InvariantCulture)}:1"
+                : "n/a";
+        }
 
         private static string MegabytesPerSecond(long bytes, double seconds) => Ms((float)(bytes / BYTES_PER_MEGABYTE / seconds));
 

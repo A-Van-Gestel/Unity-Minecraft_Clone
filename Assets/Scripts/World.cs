@@ -3196,6 +3196,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         PerfStore.SampleTotal(PerfCounter.SerializeUs, StorageIoStats.SerializeMicros);
         PerfStore.SampleTotal(PerfCounter.DiskWriteUs, StorageIoStats.WriteMicros);
         PerfStore.SampleTotal(PerfCounter.DiskSaveBytes, StorageIoStats.SaveBytes);
+        PerfStore.SampleTotal(PerfCounter.DiskSaveRawBytes, StorageIoStats.SaveRawBytes);
         PerfStore.SampleTotal(PerfCounter.IoQueueWaitUs, StorageIoStats.QueueWaitMicros);
         PerfStore.SampleTotal(PerfCounter.IoBackgroundOps, StorageIoStats.BackgroundOps);
 
