@@ -114,7 +114,7 @@ namespace Editor.Validation.SerializationRoundTrip
         private static bool FixtureCoversEverySectionFlag()
         {
             using Fixture fx = new Fixture();
-            PoolBalance balance = PoolBalance.Capture();
+            ChunkPoolBalance balance = ChunkPoolBalance.Capture();
 
             ChunkData data = BuildReferenceChunk(new UnityEngine.Vector2Int(0, 0));
             int sectionCount = data.sections.Length;

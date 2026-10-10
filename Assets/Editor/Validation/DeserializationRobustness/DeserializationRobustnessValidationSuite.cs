@@ -82,37 +82,6 @@ namespace Editor.Validation.DeserializationRobustness
             }
         }
 
-        /// <summary>Snapshot of the concurrent data/section/light-queue pools' active counts, for leak balance checks.</summary>
-        private readonly struct PoolBalance
-        {
-            private readonly int _activeData;
-            private readonly int _activeSections;
-            private readonly int _activeLightQueues;
-
-            /// <summary>Captures the current active counts.</summary>
-            public static PoolBalance Capture() => new PoolBalance(World.Instance.ChunkPool.ActiveData,
-                World.Instance.ChunkPool.ActiveSections, World.Instance.ChunkPool.ActiveLightQueues);
-
-            private PoolBalance(int activeData, int activeSections, int activeLightQueues)
-            {
-                _activeData = activeData;
-                _activeSections = activeSections;
-                _activeLightQueues = activeLightQueues;
-            }
-
-            /// <summary>Asserts the active counts match this snapshot (no shell, section or light queue leaked).</summary>
-            /// <param name="label">Assertion label for the log.</param>
-            /// <returns>True when every pool is balanced.</returns>
-            public bool AssertUnchanged(string label)
-            {
-                PoolBalance now = Capture();
-                return Check(
-                    $"{label} (data {_activeData.ToString()}→{now._activeData.ToString()}, sections {_activeSections.ToString()}→{now._activeSections.ToString()}, light queues {_activeLightQueues.ToString()}→{now._activeLightQueues.ToString()})",
-                    now._activeData == _activeData && now._activeSections == _activeSections &&
-                    now._activeLightQueues == _activeLightQueues);
-            }
-        }
-
         // --- Helpers -----------------------------------------------------------------------------
 
         /// <summary>Builds a pooled chunk at <paramref name="pos"/> carrying two edits (sections 0 and 2).</summary>
@@ -154,7 +123,7 @@ namespace Editor.Validation.DeserializationRobustness
         /// <param name="label">Scenario label prefix for the assertions.</param>
         private static bool AssertCorruptPayloadContract(byte[] payload, Vector2Int pos, string label)
         {
-            PoolBalance balance = PoolBalance.Capture();
+            ChunkPoolBalance balance = ChunkPoolBalance.Capture();
             long failuresBefore = ChunkSerializer.DeserializeFailures;
 
             ChunkData result;
@@ -203,7 +172,7 @@ namespace Editor.Validation.DeserializationRobustness
             Vector2Int pos = new Vector2Int(0, 0);
             byte[] payload = BuildValidPayload(pos);
 
-            PoolBalance balance = PoolBalance.Capture();
+            ChunkPoolBalance balance = ChunkPoolBalance.Capture();
             ChunkData loaded = ChunkSerializer.Deserialize(payload, CompressionAlgorithm.None, pos);
             if (loaded == null) return Check("valid payload deserializes", false);
 
@@ -332,7 +301,7 @@ namespace Editor.Validation.DeserializationRobustness
             ChunkStorageManager second = new ChunkStorageManager(fx.WorldName, useVolatilePath: true, SaveSystem.CURRENT_VERSION);
             try
             {
-                PoolBalance balance = PoolBalance.Capture();
+                ChunkPoolBalance balance = ChunkPoolBalance.Capture();
                 ChunkData result = RunLoad(second, pos);
                 ok &= Check("corrupt on-disk payload loads as null (regenerate arm)", result == null);
                 ok &= balance.AssertUnchanged("pools balanced after corrupt disk load");

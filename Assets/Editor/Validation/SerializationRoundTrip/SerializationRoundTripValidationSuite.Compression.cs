@@ -1,4 +1,5 @@
 using Data;
+using Editor.Validation.Framework;
 using Serialization;
 using UnityEngine;
 
@@ -36,7 +37,7 @@ namespace Editor.Validation.SerializationRoundTrip
         {
             using Fixture fx = new Fixture();
             Vector2Int pos = new Vector2Int(64, 64);
-            PoolBalance balance = PoolBalance.Capture();
+            ChunkPoolBalance balance = ChunkPoolBalance.Capture();
 
             ChunkData source = BuildReferenceChunk(pos);
             bool ok = true;

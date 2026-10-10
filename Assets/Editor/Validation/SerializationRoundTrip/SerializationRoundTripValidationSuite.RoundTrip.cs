@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.Text;
 using Data;
+using Editor.Validation.Framework;
 using Helpers;
 using Jobs.BurstData;
 using Serialization;
@@ -32,7 +33,7 @@ namespace Editor.Validation.SerializationRoundTrip
         {
             using Fixture fx = new Fixture();
             Vector2Int pos = new Vector2Int(0, 0);
-            PoolBalance balance = PoolBalance.Capture();
+            ChunkPoolBalance balance = ChunkPoolBalance.Capture();
 
             ChunkData source = BuildReferenceChunk(pos);
             ChunkData loaded = null;
@@ -161,7 +162,7 @@ namespace Editor.Validation.SerializationRoundTrip
         private static bool FuzzChunksRoundTripIdentically()
         {
             using Fixture fx = new Fixture();
-            PoolBalance balance = PoolBalance.Capture();
+            ChunkPoolBalance balance = ChunkPoolBalance.Capture();
             Random rng = new Random(FUZZ_SEED);
             bool ok = true;
 

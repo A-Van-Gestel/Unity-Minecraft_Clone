@@ -27,7 +27,7 @@ namespace Editor.Validation.SerializationRoundTrip
         {
             using Fixture fx = new Fixture();
             ChunkPoolManager pool = World.Instance.ChunkPool;
-            PoolBalance balance = PoolBalance.Capture();
+            ChunkPoolBalance balance = ChunkPoolBalance.Capture();
             int active = pool.ActiveLightQueues;
 
             ChunkData chunk = pool.GetChunkData(new Vector2Int(0, 0));
