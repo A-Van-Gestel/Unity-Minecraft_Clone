@@ -1,6 +1,6 @@
 # Engine Scaling Performance Roadmap
 
-**Version:** 1.15  
+**Version:** 1.16  
 **Date:** 2026-10-02  
 **Status:** In progress — `ES-0` ✅ complete (2026-10-10: drain stamp shipped, every-layer re-measurement in §2.6 — added
 `ES-29`), `ES-1`, `ES-2` and `ES-6.1` shipped (2026-10-02); ES-0's GC.Alloc attribution captured (2026-10-03, §2.2.1 —
@@ -642,8 +642,8 @@ constants + migration change. Prerequisites: ES-13, ES-18, ES-19.
 ## 5. Prerequisites & integration points
 
 - ⚠️ **ES-0 gates every verdict.** P-4/P-9 history shows editor numbers mislead; GO/NO-GO calls are
-  same-build Master IL2CPP A/Bs per `perf-benchmark` (rollback flags listed in
-  `SettingsManager.OverlayBenchmarkSettingsFromDisk`).
+  same-build Master IL2CPP A/Bs per `perf-benchmark`: a rollback flag is a `Settings` field switched per leg with
+  `-mc-set`, and the report's "Settings (differing from defaults)" block proves which value each leg ran with.
 - Pipeline-touching items (ES-3, ES-6, ES-7.4, ES-8, ES-12, ES-13, ES-16, ES-18) require the
   `chunk-lifecycle` skill. Meshing is gated on `AreNeighborsMeshReady` (`CHUNK_LIFECYCLE_PIPELINE.md`
   §3.3); the rule and skills that said `AreNeighborsReadyAndLit` were corrected 2026-10-03.
@@ -1067,6 +1067,9 @@ saving is inferred from step 1's re-entry leg, not re-measured.
 
 ## Document History
 
+* **v1.16** - §5 (2026-10-10): automated runs read the whole settings file — the unused benchmark defaults pin and its
+  `OverlayBenchmarkSettingsFromDisk` whitelist are removed — and every report lists the values that differ from the
+  defaults, so rollback flags are switched with `-mc-set`.
 * **v1.15** - **ES-0 complete** (2026-10-10): the drain stamp shipped (`StartupTimeline`, `PipelineDrainPredicate`,
   `-mc-run startup-new` / `startup-existing`), and the first every-layer re-measurement in IL2CPP Master is §2.6 — time to
   stable split before/after the handoff, the 200 m/s frame lighting-merge-bound, the behavior tick behind the loading

@@ -360,7 +360,9 @@ longer produce.
 **cannot be A/B'd in a player build at all**: benchmark mode builds a fresh `Settings` and copies
 only the fields that method names, so an unlisted flag is pinned to its code default for every
 capture. P-8's flag is listed; the P-4 flags never were, and were only ever toggled programmatically
-by the P-4 harness. (3) `AssetDatabase.ForceReserializeAssets` **does not rewrite a `.prefab`** — the
+by the P-4 harness. *Superseded 2026-10-10:* that pin never applied to a menu- or command-line-launched
+run, which inherits the whole settings file, and it is now removed; a flag is switched with `-mc-set`, and the report's
+settings block shows its value. (3) `AssetDatabase.ForceReserializeAssets` **does not rewrite a `.prefab`** — the
 orphaned keys of a retired flag survive it. Round-trip the prefab through
 `PrefabUtility.LoadPrefabContents` → `SetDirty` → `SaveAsPrefabAsset` instead, and gate the result on
 an unchanged `guid:` count so a reserialize cannot silently null a `[SerializeField]` reference.

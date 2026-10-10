@@ -816,6 +816,10 @@ the P-8 convention is good practice, just not the load-bearing constraint it was
 `SettingsManager.cs:1108–1115`'s remark asserts the strong form and should be corrected to the
 conditional one; that is a code-comment fix, filed as a P9-0 rider rather than done here.
 
+*Since 2026-10-10:* the fresh-defaults branch and `OverlayBenchmarkSettingsFromDisk` are removed, so every launch path
+inherits the whole settings file, and every automated-run report lists the values that differ from the defaults
+(`SettingsDifferenceReport`). Rollback flags are switched with `-mc-set`.
+
 ---
 
 ### 7.2 Zero-code options that remain available

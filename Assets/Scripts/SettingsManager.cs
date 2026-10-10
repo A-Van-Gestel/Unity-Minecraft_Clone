@@ -1,7 +1,6 @@
 using System;
 using System.IO;
 using Config;
-using Data;
 using Data.Enums;
 using Diagnostics;
 using Launch;
@@ -683,9 +682,7 @@ public class Settings
     /// Scales the panic-gate thresholds with the resident load square (P-8). <b>Default-OFF</b> — the
     /// shipping path uses the two thresholds below verbatim. ON is retained as an opt-in for re-testing,
     /// not as a shipping default.
-    /// <para>Listed in <c>SettingsManager.OverlayBenchmarkSettingsFromDisk</c> so a benchmark run can
-    /// capture either leg from the same build even on a cold settings cache, where the overlay list is the
-    /// only channel from disk.</para>
+    /// <para>Switchable per run with <c>-mc-set</c>, so both legs come from one build.</para>
     /// </summary>
     /// <remarks>
     /// The reasoning was sound and the measurement refuted it. The thresholds count backlogged chunks while
@@ -900,8 +897,6 @@ public class Settings
 
     /// <summary>
     /// How much the performance monitor records. Applied live; each tier includes everything below it.
-    /// <para>Listed in <c>SettingsManager.OverlayBenchmarkSettingsFromDisk</c> so a benchmark can be captured at
-    /// a chosen tier on both the cold and the menu-launched path.</para>
     /// </summary>
     [SubHeader("Performance Monitor")]
     [SettingField(SettingsTab.DebugScreen, Label = "Monitor Detail", Order = 12)]
@@ -937,8 +932,6 @@ public class Settings
     /// <summary>
     /// Wall milliseconds above which a frame always counts as a hitch, at Frame detail and above. Read when the
     /// detail level is applied; a non-positive value falls back to the default.
-    /// <para>Listed in <c>SettingsManager.OverlayBenchmarkSettingsFromDisk</c>, like the next field, because a benchmark
-    /// report's hitch counts depend on both.</para>
     /// </summary>
     [Tooltip("A frame slower than this many milliseconds always counts as a hitch.")]
     public float perfHitchMinMs = PerfHitchDetector.DefaultMinMs;
@@ -1076,21 +1069,13 @@ public static class SettingsManager
     /// creates and persists defaults if the settings file does not exist.
     /// Subsequent calls return the cached instance without disk IO.
     /// </summary>
+    /// <remarks>
+    /// Every mode reads the same file, automated runs included, so a run measures the player's settings plus any session
+    /// overrides.
+    /// </remarks>
     /// <returns>The singleton Settings object.</returns>
     public static Settings LoadSettings()
     {
-        // Benchmark and startup-probe modes: use deterministic defaults for gameplay settings,
-        // but overlay user-configured benchmark-specific fields from disk.
-        if (WorldLaunchState.CurrentMode is RuntimeMode.Benchmark or RuntimeMode.StartupProbe)
-        {
-            if (s_cachedSettings != null)
-                return s_cachedSettings;
-
-            s_cachedSettings = new Settings();
-            OverlayBenchmarkSettingsFromDisk(s_cachedSettings);
-            return s_cachedSettings;
-        }
-
         // Return cached instance if available
         if (s_cachedSettings != null)
             return s_cachedSettings;
@@ -1339,62 +1324,5 @@ public static class SettingsManager
         }
 
         return json;
-    }
-
-    /// <summary>
-    /// Reads the saved settings file (if it exists) and overlays benchmark-specific
-    /// fields onto the provided defaults. This allows benchmark mode to use
-    /// deterministic gameplay settings while still honoring user-configured
-    /// benchmark parameters (waypoints, phase duration, speed lists) plus the
-    /// <b>rollback levers a capture needs to A/B</b>.
-    /// </summary>
-    /// <param name="defaults">The fresh defaults to overlay onto.</param>
-    /// <remarks>
-    /// <b>This list is the only channel from disk on a COLD settings cache</b> — the caller hands us a fresh
-    /// <see cref="Settings"/> and never reads the file itself, so a capture is not silently shaped by whatever
-    /// the operator last configured for play.
-    /// <para>
-    /// It does <i>not</i> hold on the menu-launched path, which is how captures are actually run:
-    /// <see cref="LoadSettings"/>'s benchmark branch returns an already-cached instance first, and the main
-    /// menu populates that cache from disk (via <c>UIScaleController</c>) while the mode is still
-    /// <see cref="RuntimeMode.Default"/> — so a menu-launched run inherits the <b>whole</b> settings file.
-    /// That is what lets a capture sweep <c>viewDistance</c> or the per-frame budgets on one build.
-    /// </para>
-    /// <para>
-    /// A rollback flag a benchmark must toggle therefore still belongs here, so it works on <i>both</i>
-    /// paths rather than only the warm one, and the field's own docstring should say so.
-    /// </para>
-    /// </remarks>
-    private static void OverlayBenchmarkSettingsFromDisk(Settings defaults)
-    {
-        if (!File.Exists(s_settingsFilePath)) return;
-
-        try
-        {
-            string json = File.ReadAllText(s_settingsFilePath);
-            Settings saved = JsonUtility.FromJson<Settings>(json);
-            if (saved == null) return;
-
-            defaults.benchmarkGenerationWaypoints = saved.benchmarkGenerationWaypoints;
-            defaults.benchmarkPhaseSeconds = saved.benchmarkPhaseSeconds;
-            defaults.benchmarkGenerationSpeeds = saved.benchmarkGenerationSpeeds;
-            defaults.benchmarkLoadingSpeeds = saved.benchmarkLoadingSpeeds;
-
-            // P-8's opt-in lever. It is default-OFF after its capture came back NO-GO, and stays listed
-            // here because the re-test it is retained for needs to switch legs without a rebuild — a
-            // rebuilt leg would not be the same build, which is the whole point of running one.
-            defaults.scalePanicGateThresholdsWithResidency = saved.scalePanicGateThresholdsWithResidency;
-
-            // The monitor's tier changes what a capture costs, so an overhead A/B must be able to choose it.
-            defaults.perfMonitorTier = saved.perfMonitorTier;
-
-            // The thresholds decide what the report's Hitches column counts, so both launch paths must use the same ones.
-            defaults.perfHitchMinMs = saved.perfHitchMinMs;
-            defaults.perfHitchMedianFactor = saved.perfHitchMedianFactor;
-        }
-        catch (Exception)
-        {
-            // Overlay failed — keep defaults
-        }
     }
 }

@@ -103,11 +103,12 @@ first as its own commit.
   player's stop-reason table before targeting it.
 - **Prefer A/B legs over the same build** (flag-switched: e.g. `managed` / `halo-full` /
   `halo-band`) — one build, one session, per-leg rows. Separate builds add noise and doubt. In a
-  player, put the flag on `Settings` and add it to `SettingsManager.OverlayBenchmarkSettingsFromDisk`'s
-  whitelist, or pass it with `-mc-set`. Benchmark mode is meant to pin every other gameplay setting to `new Settings()`
-  defaults, but the pin applies only when no settings were loaded before the mode switch — and the main menu always
-  loads them — so a run actually uses the settings file. A fresh player build's file holds the calibrated defaults;
-  an Editor run uses `Assets/settings.json`. Read the report's configuration block rather than assuming defaults.
+  player, put the flag on `Settings` and switch legs with `-mc-set`. Automated runs (benchmark, startup probe, fluid
+  stress) use the whole settings file plus session overrides; there is no defaults pin. A fresh player build's file
+  holds the calibrated defaults; an Editor run uses `Assets/settings.json`, which holds dev-tuned values (job caps,
+  MSAA, fog, fps cap). Every report's "Settings (differing from defaults)" block lists each value off its default,
+  tagged `[session override]` when it came from `-mc-set` or the harness: diff that block across legs before
+  comparing numbers.
 - **Fixed scenario set, fixed seed** — reuse the established scenarios for the system so numbers
   stay comparable across reports. Include warm-up iterations before timing.
 - **Report the full distribution**: `mean`, `min` (clean floor — best CPU-cost proxy), `median`,

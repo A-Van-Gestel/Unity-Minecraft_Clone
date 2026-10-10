@@ -1,6 +1,6 @@
 # Performance Monitor & Logger Overhaul Design
 
-**Version:** 1.15  
+**Version:** 1.16  
 **Date:** 2026-10-06  
 **Status:** In progress — PM-0 ✅ complete (2026-10-03, Master answers in §8); PM-1 ✅ complete (2026-10-03, §7.2;
 confirmed in an IL2CPP Master build); PM-2 ✅ complete (2026-10-04, §7.3; confirmed in an IL2CPP Master build); PM-3 ✅
@@ -98,7 +98,7 @@ read-only `unity command eval`. Unity 6000.6 APIs (`ProfilerRecorder`, `Profiler
 | Instrumentation variant drift     | CP-1/LP-1/MP-1 probes are gated on `UNITY_INCLUDE_INSTRUMENTATION`, but comments say "dev/editor builds only"; the `Windows - Development` profile uses the default Release variant, so the probes are **compiled out of Development builds** while their "(dev)" HUD rows read 0 and the save-diagnostics toggle is shown but inert. Only `Windows - Profiler` (Checked variant) has them | `World.cs:1185, 1190, 3471`; build profiles |
 | Logging                           | 327 runtime `Debug.Log*` sites (150 Log / 74 Warning / 103 Error); no central logger or `logMessageReceived` subscriber; tags mixed (system, method, class, backlog-ID, untagged); only 3 sites honor `enableDiagnosticLogs`, ~10 `enableWaterDiagnosticLogs`, save diagnostics double-gated (flag + `UNITY_INCLUDE_INSTRUMENTATION`)                                                      | census                                      |
 | Stack traces                      | Player settings: **Error = None, Assert/Warning/Log/Exception = ScriptOnly** — every `Log`/`Warning` in a player walks the managed stack (expensive in IL2CPP), while errors carry none (the reverse of the useful choice)                                                                                                                                                                 | `ProjectSettings.asset:57` (live)           |
-| Settings hosting                  | `[SettingField(tab)]` + `DebugOnly`, `SubHeader`, `DisabledWhen`; live apply via `SettingsManager.OnSettingChanged`; the **DebugScreen** tab is player-facing; benchmark cold-launch only copies a whitelist (`OverlayBenchmarkSettingsFromDisk`)                                                                                                                                          | `SettingsManager.cs:1003–1039, 1279–1305`   |
+| Settings hosting                  | `[SettingField(tab)]` + `DebugOnly`, `SubHeader`, `DisabledWhen`; live apply via `SettingsManager.OnSettingChanged`; the **DebugScreen** tab is player-facing; benchmark cold-launch only copies a whitelist (`OverlayBenchmarkSettingsFromDisk`, removed 2026-10-10)                                                                                                                      | `SettingsManager.cs:1003–1039, 1279–1305`   |
 
 ---
 
@@ -148,7 +148,8 @@ Pipeline Backpressure suite.
 The tier is a `Settings` enum on the **DebugScreen** tab, applied live through `OnSettingChanged`.
 Benchmark harnesses set it explicitly (as they already force `WorldFrameProfiler.Enabled`) and the
 field is added to `OverlayBenchmarkSettingsFromDisk`, so captures stay comparable on cold and menu
-launches alike. Logging levels (§4.6) are independent of the tier. *PM-1 (2026-10-03):* `Settings.perfMonitorTier`
+launches alike. *2026-10-10:* the whitelist is removed — automated runs read the whole settings file, and every report
+lists the values that differ from the defaults (`SettingsDifferenceReport`). Logging levels (§4.6) are independent of the tier. *PM-1 (2026-10-03):* `Settings.perfMonitorTier`
 ("Monitor Detail") ships all four values, contiguous from 0, because the Settings dropdown maps option index to enum
 value and the JSON stores the integer — a tier inserted later would shift saved values. Until PM-2/PM-6 land, Frame
 records the same as Basic and Capture the same as Systems; the tooltip says so. `/perf tier` sets it from the console.
@@ -403,7 +404,7 @@ public enum LogLevel : byte { Off, Error, Warning, Info, Verbose }
   - **Report.** A "Performance Monitor" block (tier, and the hitch thresholds as the detector applies them), raw worst frame / hitch frames / collections in
     the overall summary, and a "Frame Health (every frame)" table per group: frames, wall p50/p99/worst, CPU p50/p99, GC
     p99, collections, hitches, GPU p99. The averaged columns stay. The hitch thresholds joined
-    `OverlayBenchmarkSettingsFromDisk`. *ES-0 (2026-10-10):* the table also prints each phase's `First frame` / `End
+    `OverlayBenchmarkSettingsFromDisk` (removed 2026-10-10). *ES-0 (2026-10-10):* the table also prints each phase's `First frame` / `End
     frame` (`PerfPhaseSummary.FirstFrame` / `EndFrame`, culture-invariant), the key `Tools/Python/summarize_perf_session.py`
     selects a session file's rows by to report every slot, counter, job type, disk I/O, tick part and hitch record per
     phase, cross-checked against the row it came from.
@@ -714,7 +715,7 @@ selection), and `PerfStore` (static; one `DomainReset`; native memory freed on `
 Editor assembly reload, after which commits are ignored rather than reallocating). `WorldFrameProfiler` is a facade:
 `Enabled` is `PerfStore.ForceSlots`, OR'ed with the tier, so a harness clearing it never disables a tier the player
 chose. `PerformanceMonitor` commits each frame's raw wall/CPU ticks and applies `Settings.perfMonitorTier` in
-`OnEnable` (which also runs after a Play-mode script reload) and live through `OnSettingChanged`; the tier is in `OverlayBenchmarkSettingsFromDisk`. `/perf stats` prints worst,
+`OnEnable` (which also runs after a Play-mode script reload) and live through `OnSettingChanged`; the tier is in `OverlayBenchmarkSettingsFromDisk` (removed 2026-10-10). `/perf stats` prints worst,
 p99, p50 and mean wall/CPU time over the ring, plus per-slot avg/p99/worst at Systems; `/perf tier` reads or sets the
 tier through the setting.
 
@@ -814,7 +815,8 @@ timing at all.
 **Left for later phases:** the hitch thresholds are not in `OverlayBenchmarkSettingsFromDisk`, so a benchmark run always
 detects with the defaults (33 ms / ×2.5) — PM-6, which owns benchmark comparability, decides whether they join the
 overlay; printing received/matched alongside a reported GPU time (so the match rate is always visible) fits PM-5's HUD
-or PM-6's export.
+or PM-6's export. *PM-6 added the thresholds to the overlay; since 2026-10-10 there is no overlay, and a run uses the
+file's thresholds on every launch path.*
 
 ### 7.4 PM-3 execution record (2026-10-04; confirmed in an IL2CPP Master build)
 
@@ -1113,7 +1115,7 @@ the store to disk, so an unattended player run is read from files rather than fr
   `PerfPhaseSummary`; `PerfWindowStats` gains a native-array overload over the same selection; `PerfFrameField.Count`.
 - **Report.** `PhaseMetrics.FrameStats` / `HasFrameStats` / `HitchFrames`; the Performance Monitor block, the overall
   frame-health lines and a Frame Health table per group in `BenchmarkReportGenerator`; the hitch thresholds in
-  `OverlayBenchmarkSettingsFromDisk`.
+  `OverlayBenchmarkSettingsFromDisk` (removed 2026-10-10).
 - **Tier floor.** `PerfStore.TierFloor`: the tier in force is the one set, raised to the floor. `BenchmarkController`
   raises it to Frame before its settle wait and clears it in `OnDestroy`.
 - **Export.** `PerfSessionExporter` and `PerfExportBlock`; `PerfStore.ConfigureExport` / `Exporter`, opened and closed
@@ -1264,6 +1266,9 @@ Answers 1–4 come from `EngineApiProbe_2026-10-03_13-52-20.log`: a `Windows - P
 
 ## Document History
 
+* **v1.16** - Benchmark settings (2026-10-10): `OverlayBenchmarkSettingsFromDisk` and the defaults pin it served are
+  removed, since every automated run already inherited the whole settings file; reports list each value that differs
+  from the defaults instead (a dated note under Option B, and markers where the shipped phases named the whitelist).
 * **v1.15** - ES-0 follow-ups (2026-10-10): benchmark Frame Health rows carry their frame range (§4.7) and
   `summarize_perf_session.py` reads session files per phase (§7.7); §4.9 lists the once-per-launch time-to-stable stamp
   (`StartupTimeline`, the roadmap's ES-0).
