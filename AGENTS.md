@@ -22,6 +22,7 @@ If a user request violates these constraints, REJECT the request, explain why it
 
 - **Do NOT manually edit:** `.meta`, `.prefab`, `.unity` (scene), or `.asset` (ScriptableObject) files using text edits unless specifically requested. Let the Unity Editor handle serialization.
 - **File operations** (moves, renames, deletes, merge conflicts, `[FormerlySerializedAs]`, orphaned `.meta` files) are covered by the `unity-file-ops` skill under `.agents/skills/`. The `.meta` GUID rule is authoritative there.
+- **No absolute machine paths in repo content** (docs, skills, agents, code comments, scripts): drive letters, user folders and install locations differ per machine and leak personal info. Use repo-relative paths (`../_backups/` for siblings), `%USERPROFILE%`/`Path.home()`, or placeholders like `<Editor install>`; keep this machine's real locations in agent memory, never in the repo.
 
 ## Unity Static Fields & Domain Reload
 
