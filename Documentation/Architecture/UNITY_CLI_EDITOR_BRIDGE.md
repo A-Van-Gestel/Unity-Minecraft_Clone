@@ -241,8 +241,8 @@ a Release build, and the IL2CPP linker strips them. **Measured on the RC 94 IL2C
 
 ## 9. Rollback
 
-The removed bridge is archived in
-`K:/Documenten/Projects/Unity - Make Minecraft in Unity 3D Tutorial/_backups/ai.assistant 2.6.0-pre.1 MCP bridge [2026-09-27].7z`:
+The removed bridge is archived outside the repo, in the `_backups/` folder beside it
+(`../_backups/ai.assistant 2.6.0-pre.1 MCP bridge [2026-09-27].7z` from the repo root):
 the patched embed, the relay binary, the pristine registry tarball (SHA-1
 `fc16ca46e2086e9df0eb56acc06ff8a649777879`), the patch script and guide, the `McpEval` harness,
 the old skill, the prior agent config, `SHA256SUMS.txt` and `RESTORE.md`. Before the removal, the

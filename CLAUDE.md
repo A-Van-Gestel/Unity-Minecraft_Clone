@@ -63,7 +63,7 @@ This is critical because you are working in a modern Unity 6 environment.
 - Before adding a `using` directive, verify with `get_namespace` if unsure.
 - Covers: all UnityEngine/UnityEditor modules, Input System, Addressables.
 - Does NOT cover: DOTween, VContainer, Newtonsoft.Json (third-party).
-- An empty result means "not indexed", never "does not exist". Fall back to the installed Editor's own docs (`C:/Unity/Editors/<version>/Editor/Data/Documentation/en/ScriptReference/`, pages named by fully-qualified member) — they also carry constraints a signature omits.
+- An empty result means "not indexed", never "does not exist". Fall back to the installed Editor's own docs (`<Editor install>/Editor/Data/Documentation/en/ScriptReference/`, the install folder shown in Unity Hub; pages named by fully-qualified member) — they also carry constraints a signature omits.
 
 ## Performance & Optimization
 

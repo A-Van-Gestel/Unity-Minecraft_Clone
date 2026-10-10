@@ -57,7 +57,7 @@ that tag after the commit is what makes the URL resolve.
 7. **Gather the metadata-line and Compatibility inputs** (see the template's header and
    `Compatibility` section):
     - **Build name** — the release is published under the build's own name, from the builds archive
-      at `C:\Projects\Unity\Minecraft Voxel Engine\_builds\` (e.g. `RC 83  World Scaling (WS-1 +
+      (a per-machine `_builds/` folder outside the repo) (e.g. `RC 83  World Scaling (WS-1 +
       WS-2 + WS-3)`). Take the newest entry matching the "to" date; ask if it is ambiguous. **Ask
       the user for the name** — never infer one from commit subjects — when the archive is
       unreachable (another machine, path moved) **or when it is reachable but holds no entry for
