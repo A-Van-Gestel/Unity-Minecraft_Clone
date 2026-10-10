@@ -32,9 +32,10 @@ a Store stub on this machine). Everything is stdlib-only unless `requirements.tx
 the scripts above that the pre-commit flow and the subagents depend on: `fold_into_commit`, `stage_hunks`,
 `audit_reserialize_guids`, `check_american_english`, `align_md_tables`, `check_twin_files`,
 `setup_agent_links` and `session_cost_report`, plus the doc checkers (`check_markdown_breaks`, `check_doc_refs`,
-`check_doc_links`, `check_doc_status`), `rename_tokens`, and `prove_red`'s argument and restore logic (its
-Editor half is stubbed). Each test builds its own throwaway directory or git repo under the system temp
-directory. Run it after changing one of those scripts, and add a test for each behavior you add or fix.
+`check_doc_links`, `check_doc_status`), `rename_tokens`, `summarize_perf_session`, `run_player`, and `prove_red`'s
+argument and restore logic (its Editor half is stubbed). Each test builds its own throwaway directory or git repo
+under the system temp directory. Run it after changing one of those scripts, and add a test for each behavior you
+add or fix.
 A known gap is recorded as an `expectedFailure` test that names it, so a fix shows up as an unexpected success.
 
 ## Setup
@@ -45,15 +46,16 @@ A known gap is recorded as an `expectedFailure` test that names it, so a fix sho
 
 ## Validation and measurement
 
-| Script                          | Does                                                                               |
-|---------------------------------|------------------------------------------------------------------------------------|
-| `prove_red.py`                  | Proves a validation suite goes red under a source mutation, restores byte for byte |
-| `session_cost_report.py`        | Claude Code session cost: main context, turn mix by category, subagents            |
-| `tabulate_tick_hitches.py`      | Tabulates Tick-led hitch records from player-run performance summaries             |
-| `summarize_perf_session.py`     | Per-phase slots, counters, jobs, I/O and hitches from a Capture session + report   |
-| `inspect_save_chunks.py`        | Decodes region files and identifies each chunk payload's historical layout         |
-| `verify_floordiv_parity.py`     | Exhaustive parity proof for the structure cell-election floor-div fix              |
-| `verify_liquid_noise_period.py` | Float32 model of `LiquidCore.hlsl`'s noise (the FLUID #20 evidence)                |
+| Script                          | Does                                                                                        |
+|---------------------------------|---------------------------------------------------------------------------------------------|
+| `prove_red.py`                  | Proves a validation suite goes red under a source mutation, restores byte for byte          |
+| `session_cost_report.py`        | Claude Code session cost: main context, turn mix by category, subagents                     |
+| `tabulate_tick_hitches.py`      | Tabulates Tick-led hitch records from player-run performance summaries                      |
+| `summarize_perf_session.py`     | Per-phase slots, counters, jobs, I/O and hitches from a Capture session + report            |
+| `run_player.py`                 | Runs one `-mc-run` session in a built player: timeout + kill, saved Player.log, report path |
+| `inspect_save_chunks.py`        | Decodes region files and identifies each chunk payload's historical layout                  |
+| `verify_floordiv_parity.py`     | Exhaustive parity proof for the structure cell-election floor-div fix                       |
+| `verify_liquid_noise_period.py` | Float32 model of `LiquidCore.hlsl`'s noise (the FLUID #20 evidence)                         |
 
 ## Generators and bulk edits
 

@@ -4,9 +4,9 @@ WHAT IT COVERS
     The git and Markdown helpers the pre-commit flow and the subagents depend on: fold_into_commit,
     stage_hunks, audit_reserialize_guids, check_american_english, align_md_tables, setup_agent_links,
     check_twin_files, session_cost_report; the doc checkers check_markdown_breaks, check_doc_refs,
-    check_doc_links, check_doc_status; rename_tokens; summarize_perf_session; and prove_red's argument and restore logic (its
-    Editor half is stubbed). Each test works in its own throwaway directory or git repository under the
-    system temp directory; nothing in this checkout is read or changed.
+    check_doc_links, check_doc_status; rename_tokens; summarize_perf_session; run_player; and prove_red's
+    argument and restore logic (its Editor half is stubbed). Each test works in its own throwaway directory or git
+    repository under the system temp directory; nothing in this checkout is read or changed.
 
 RUN
     python Tools/Python/tests/run_tests.py            # everything (~30 s)
