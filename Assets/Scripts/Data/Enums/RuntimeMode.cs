@@ -22,5 +22,12 @@ namespace Data.Enums
         /// gate). Driven by <c>FluidStressController</c>.
         /// </summary>
         FluidStress,
+
+        /// <summary>
+        /// Automated startup measurement: loads the fixed probe world, new or from its save, holds the player still at
+        /// spawn and reports the time-to-stable stamp (ES-0). Isolated saves like <see cref="Benchmark"/>. Driven by
+        /// <c>StartupProbeController</c>.
+        /// </summary>
+        StartupProbe,
     }
 }

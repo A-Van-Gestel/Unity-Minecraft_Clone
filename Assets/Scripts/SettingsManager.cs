@@ -1079,9 +1079,9 @@ public static class SettingsManager
     /// <returns>The singleton Settings object.</returns>
     public static Settings LoadSettings()
     {
-        // Benchmark mode: use deterministic defaults for gameplay settings,
+        // Benchmark and startup-probe modes: use deterministic defaults for gameplay settings,
         // but overlay user-configured benchmark-specific fields from disk.
-        if (WorldLaunchState.CurrentMode == RuntimeMode.Benchmark)
+        if (WorldLaunchState.CurrentMode is RuntimeMode.Benchmark or RuntimeMode.StartupProbe)
         {
             if (s_cachedSettings != null)
                 return s_cachedSettings;

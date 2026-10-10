@@ -9,7 +9,7 @@ namespace Launch
     public static class LaunchActionInstaller
     {
         /// <summary>The number of actions <see cref="CreateAll"/> returns.</summary>
-        public const int InstalledActionCount = 2;
+        public const int InstalledActionCount = 4;
 
         /// <summary>Creates every registered launch action.</summary>
         /// <returns>A fresh list, in registration order.</returns>
@@ -17,6 +17,8 @@ namespace Launch
         {
             new BenchmarkLaunchAction(),
             new FluidStressLaunchAction(),
+            new StartupNewLaunchAction(),
+            new StartupExistingLaunchAction(),
         };
     }
 }

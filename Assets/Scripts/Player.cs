@@ -101,6 +101,12 @@ public class Player : MonoBehaviour
             IsFlying = true;
             IsNoclipping = true;
         }
+        else if (WorldLaunchState.CurrentMode == RuntimeMode.StartupProbe)
+        {
+            // Held in place at spawn: the startup stamp ends as interrupted the moment the player leaves its start chunk.
+            gameObject.AddComponent<StartupProbeController>();
+            IsFlying = true;
+        }
     }
 
     private void Update()
