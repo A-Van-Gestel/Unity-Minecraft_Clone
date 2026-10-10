@@ -1,6 +1,6 @@
 # Performance Monitor & Logger Overhaul Design
 
-**Version:** 1.14  
+**Version:** 1.15  
 **Date:** 2026-10-06  
 **Status:** In progress — PM-0 ✅ complete (2026-10-03, Master answers in §8); PM-1 ✅ complete (2026-10-03, §7.2;
 confirmed in an IL2CPP Master build); PM-2 ✅ complete (2026-10-04, §7.3; confirmed in an IL2CPP Master build); PM-3 ✅
@@ -403,7 +403,10 @@ public enum LogLevel : byte { Off, Error, Warning, Info, Verbose }
   - **Report.** A "Performance Monitor" block (tier, and the hitch thresholds as the detector applies them), raw worst frame / hitch frames / collections in
     the overall summary, and a "Frame Health (every frame)" table per group: frames, wall p50/p99/worst, CPU p50/p99, GC
     p99, collections, hitches, GPU p99. The averaged columns stay. The hitch thresholds joined
-    `OverlayBenchmarkSettingsFromDisk`.
+    `OverlayBenchmarkSettingsFromDisk`. *ES-0 (2026-10-10):* the table also prints each phase's `First frame` / `End
+    frame` (`PerfPhaseSummary.FirstFrame` / `EndFrame`, culture-invariant), the key `Tools/Python/summarize_perf_session.py`
+    selects a session file's rows by to report every slot, counter, job type, disk I/O, tick part and hitch record per
+    phase, cross-checked against the row it came from.
   - **Session files** (Capture, while a world's `PerformanceMonitor` is enabled): `persistentDataPath/PerfLogs/
     PerfSession_<yyyy-MM-dd_HH-mm-ss-fff>.csv`, one row per frame — 9 frame columns, then every slot (`<Slot>_ms`) and
     every counter — ASCII, invariant formatting, an empty cell where a frame has no value. A new part (`_part02`, …)
@@ -451,6 +454,7 @@ the check. Whether a system has had a performance *analysis* pass is a different
 | Memory                                   | always-on history only                       | `PerformanceMonitor` (`Profiler.GetTotal*Memory`, managed heap) | not in `PerfStore`'s frame rows or hitch records                                                           |
 | Whole-phase statistics (PM-6)            | every tier; benchmarks run at Frame or above | `PerfPhaseRecorder`, fed each final row                         | frame fields only — slots and counters per phase are in the session file                                   |
 | Session and hitch files (PM-6)           | Capture                                      | `PerfSessionExporter`                                           | rows and hitch records lost to a full block pool, the size cap or a write failure are counted, not written |
+| Time to stable, once per launch (ES-0)   | every tier                                   | `StartupTimeline` (owned by `World`)                            | the startup coroutine's frames have no slot; the Editor's jitter never meets the settle rule               |
 
 **Main thread — slots (Systems tier, or forced).** Inside `World.Update` the slots are disjoint, so with the remainder
 they sum to the bracket:
@@ -1182,7 +1186,8 @@ perfMonitorTier=Capture` — all exit 0, no exception or export warning logged:
 - Frame-level phase statistics only (decision 4); per-slot ones per phase come from the session file.
 - The last frames of a hitch file and of a closed session can lack GPU time: rows are copied before their timings arrive.
 - A hitch file or part file allocates when opened (a few hundred bytes, on the writer thread).
-- No tool reads the session files yet; `Tools/Python/tabulate_tick_hitches.py` still reads Player.log.
+- No tool reads the session files yet; `Tools/Python/tabulate_tick_hitches.py` still reads Player.log. *(2026-10-10:
+  `Tools/Python/summarize_perf_session.py` now does, per benchmark phase — ES-0's re-measurement.)*
 - The received / matched frame-timing count beside a reported GPU time (§7.3) is still PM-5's.
 
 **Corrections found while planning:** §3.2's "benchmark mode forces Capture" would have removed the per-run tier choice
@@ -1259,6 +1264,9 @@ Answers 1–4 come from `EngineApiProbe_2026-10-03_13-52-20.log`: a `Windows - P
 
 ## Document History
 
+* **v1.15** - ES-0 follow-ups (2026-10-10): benchmark Frame Health rows carry their frame range (§4.7) and
+  `summarize_perf_session.py` reads session files per phase (§7.7); §4.9 lists the once-per-launch time-to-stable stamp
+  (`StartupTimeline`, the roadmap's ES-0).
 * **v1.14** - `DT-4` taken out of PM-5 (2026-10-06): it ran ahead as its own item (the archived DT-4 execution
   record), and §4.7 notes the Editor-only TMP string allocation any new HUD panel will meet.
 * **v1.13** - **PM-6 complete** (2026-10-06, §7.7; confirmed in an IL2CPP Master build): benchmark reports carry exact
@@ -1319,5 +1327,5 @@ Answers 1–4 come from `EngineApiProbe_2026-10-03_13-52-20.log`: a `Windows - P
 
 ---
 
-**Last Updated:** 2026-10-06  
+**Last Updated:** 2026-10-10  
 **Next Review:** when PM-5 starts (PM-6 complete 2026-10-06)
