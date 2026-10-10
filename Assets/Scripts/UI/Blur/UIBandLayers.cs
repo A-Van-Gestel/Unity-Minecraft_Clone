@@ -13,8 +13,9 @@ namespace UI.Blur
     /// "is this UI at all", and is what the renderer's own draw masks exclude; one layer covers every
     /// band.
     /// <para>
-    /// Nothing is cached: these are cheap lookups made when UI is built, never per frame, which keeps
-    /// this class free of mutable statics.
+    /// Nothing is cached, which keeps this class free of mutable statics and live to sorting layers
+    /// edited mid-session. The lookups the band composite makes every frame go straight to native ids
+    /// and allocate nothing.
     /// </para>
     /// </remarks>
     public static class UIBandLayers
@@ -26,7 +27,7 @@ namespace UI.Blur
         public const string UILayerName = "UI";
 
         /// <summary>Sorting layer for <see cref="UIBandId.Hud"/>, which keeps the project default.</summary>
-        public const string HudSortingLayerName = "Default";
+        public const string HudSortingLayerName = DEFAULT_SORTING_LAYER_NAME;
 
         /// <summary>Sorting layer for <see cref="UIBandId.Menus"/>.</summary>
         public const string MenusSortingLayerName = "UIBandMenus";
@@ -39,6 +40,12 @@ namespace UI.Blur
 
         /// <summary>Value the layer lookups return for a layer the project does not declare.</summary>
         private const int UNDEFINED_LAYER = -1;
+
+        /// <summary>Unique id of Unity's built-in Default sorting layer, and what an unknown name resolves to.</summary>
+        private const int DEFAULT_SORTING_LAYER_ID = 0;
+
+        /// <summary>Name of Unity's built-in Default sorting layer, the only name allowed to resolve to id 0.</summary>
+        private const string DEFAULT_SORTING_LAYER_NAME = "Default";
 
         /// <summary>The GameObject layer index UI renderers sit on, or -1 when undeclared.</summary>
         public static int UILayer => LayerMask.NameToLayer(UILayerName);
@@ -75,14 +82,21 @@ namespace UI.Blur
         /// </summary>
         /// <param name="band">The band to resolve.</param>
         /// <returns>The sorting layer value, or -1 when the layer is undeclared.</returns>
-        public static int SortingValueOf(UIBandId band)
-        {
-            string name = SortingLayerNameOf(band);
-            foreach (SortingLayer layer in SortingLayer.layers)
-                if (layer.name == name)
-                    return layer.value;
+        public static int SortingValueOf(UIBandId band) => SortingValueOf(SortingLayerNameOf(band));
 
-            return UNDEFINED_LAYER;
+        /// <summary>A sorting layer's position in the sorting layer order, resolved by name.</summary>
+        /// <param name="sortingLayerName">The sorting layer to resolve.</param>
+        /// <returns>The sorting layer value, or -1 when the layer is undeclared.</returns>
+        /// <remarks>
+        /// Read per frame, so it avoids <c>SortingLayer.layers</c>, which copies a fresh array. <c>NameToID</c>
+        /// answers an unknown name with 0, the id the Default layer always owns, so 0 is only trusted for Default.
+        /// </remarks>
+        public static int SortingValueOf(string sortingLayerName)
+        {
+            int id = SortingLayer.NameToID(sortingLayerName);
+            if (id == DEFAULT_SORTING_LAYER_ID && sortingLayerName != DEFAULT_SORTING_LAYER_NAME) return UNDEFINED_LAYER;
+
+            return SortingLayer.GetLayerValueFromID(id);
         }
 
         /// <summary>Whether every band resolves to its own declared sorting layer.</summary>

@@ -61,9 +61,9 @@ namespace Rendering
         /// <param name="source">Texture to blur, normally the active camera color.</param>
         /// <param name="iterations">Number of Kawase iterations.</param>
         /// <param name="downsample">Divisor applied to the camera target resolution.</param>
-        /// <param name="passLabel">Pass-name prefix, so bands stay separable in a frame capture.</param>
+        /// <param name="passNames">This band's pass names, so bands stay separable in a frame capture.</param>
         public void Record(RenderGraph renderGraph, UniversalCameraData cameraData, TextureHandle source,
-            int iterations, int downsample, string passLabel)
+            int iterations, int downsample, UIBlurPassNames passNames)
         {
             RenderTextureDescriptor desc = cameraData.cameraTargetDescriptor;
             desc.width /= downsample;
@@ -83,7 +83,7 @@ namespace Rendering
             int lastIteration = iterations - 1;
 
             AddKawaseBlitPass(renderGraph, source, lastIteration == 0 ? blurResult : tempA,
-                0.5f, passLabel + " Iter 0");
+                0.5f, passNames.Iteration(0));
 
             // Gentle offset progression [0.5, 0.5, 1.5, 1.5, ...]: each pair shares an offset before
             // stepping up, which avoids the blocky artifacts aggressive offsets give on a downsampled
@@ -94,24 +94,24 @@ namespace Rendering
                 float offset = 0.5f + step;
                 TextureHandle src = i % 2 == 1 ? tempA : tempB;
                 TextureHandle dst = i == lastIteration ? blurResult : (i % 2 == 1 ? tempB : tempA);
-                AddKawaseBlitPass(renderGraph, src, dst, offset, passLabel + " Iter " + i);
+                AddKawaseBlitPass(renderGraph, src, dst, offset, passNames.Iteration(i));
             }
 
-            PublishGlobal(renderGraph, blurResult, passLabel);
+            PublishGlobal(renderGraph, blurResult, passNames.SetGlobal);
         }
 
         /// <summary>Binds the blurred result as the <c>_UIBlurTexture</c> global.</summary>
         /// <param name="renderGraph">The graph to record into.</param>
         /// <param name="blurResult">The finished blur.</param>
-        /// <param name="passLabel">Pass-name prefix.</param>
+        /// <param name="passName">Name of the publish pass.</param>
         /// <remarks>
         /// An unsafe pass, because setting global state is not permitted inside a raster pass. Culling is
         /// disabled so the global is always rebound.
         /// </remarks>
-        private static void PublishGlobal(RenderGraph renderGraph, TextureHandle blurResult, string passLabel)
+        private static void PublishGlobal(RenderGraph renderGraph, TextureHandle blurResult, string passName)
         {
             using IUnsafeRenderGraphBuilder builder = renderGraph.AddUnsafePass(
-                passLabel + " Set Global", out SetGlobalPassData globalData);
+                passName, out SetGlobalPassData globalData);
             globalData.BlurredTexture = blurResult;
             builder.UseTexture(blurResult, AccessFlags.Read);
             builder.AllowPassCulling(false);

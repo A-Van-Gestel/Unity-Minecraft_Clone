@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using Editor.Dev;
 using Editor.Validation.Framework;
+using Rendering;
 using TMPro;
 using UI.Blur;
 using UI.Builders;
@@ -76,6 +77,10 @@ namespace Editor.Validation.UIBands
                     RunL18LateNestedContentOccupies),
                 new Scenario("L19 A disabled graphic vacates a band, and the always-occupied opt-out holds it",
                     RunL19DisabledGraphicAndForcedOccupancy),
+                new Scenario("L20 A band's sorting value matches the declared layers and allocates nothing",
+                    RunL20SortingValueLookup),
+                new Scenario("L21 A band's pass names keep their Render Graph Viewer text and are built once",
+                    RunL21PassNames),
             };
 
             return ValidationSuiteRunner.Execute("UI Band Layers", scenarios, KnownBugChannel.Bug,
@@ -935,6 +940,128 @@ namespace Editor.Validation.UIBands
             {
                 Object.DestroyImmediate(root);
             }
+        }
+
+        /// <summary>Name no project declares as a sorting layer, for the undeclared-layer path.</summary>
+        private const string UNDECLARED_SORTING_LAYER = "UIBandUndeclaredProbe";
+
+        /// <summary>Calls per allocation probe, so a per-call allocation cannot hide in one sample.</summary>
+        private const int ALLOCATION_PROBE_CALLS = 1000;
+
+        /// <summary>Highest iteration count the composite's settings slider allows.</summary>
+        private const int MAX_SLIDER_ITERATIONS = 8;
+
+        /// <summary>A sorting layer's value, found by scanning the declared layers by name.</summary>
+        /// <param name="name">The sorting layer to find.</param>
+        /// <returns>Its value, or -1 when no layer carries that name.</returns>
+        private static int ScanSortingValue(string name)
+        {
+            foreach (SortingLayer layer in SortingLayer.layers)
+                if (layer.name == name)
+                    return layer.value;
+
+            return -1;
+        }
+
+        /// <summary>L20 — the per-frame sorting lookup agrees with a full scan and allocates nothing.</summary>
+        /// <remarks>
+        /// The lookup trusts id 0 only for Default, because an unknown name resolves to 0 as well; the scan
+        /// is the oracle for that rule. The control proves the probe can see an allocation at all.
+        /// </remarks>
+        /// <returns>True when every assertion holds.</returns>
+        private static bool RunL20SortingValueLookup()
+        {
+            bool ok = true;
+
+            for (int i = 0; i < UIBandLayers.BandCount; i++)
+            {
+                UIBandId band = (UIBandId)i;
+                int expected = ScanSortingValue(UIBandLayers.SortingLayerNameOf(band));
+                int actual = UIBandLayers.SortingValueOf(band);
+                ok &= Check($"{band} resolves to its declared value {expected} (got {actual})", actual == expected);
+            }
+
+            int undeclared = UIBandLayers.SortingValueOf(UNDECLARED_SORTING_LAYER);
+            ok &= Check($"an undeclared sorting layer resolves to -1 (got {undeclared})", undeclared == -1);
+
+            int control = GcAllocProbe.Count(static () =>
+            {
+                SortingLayer[] unused = SortingLayer.layers;
+            });
+            if (!GcAllocProbe.IsLive("L20", "the SortingLayer.layers copy", control, ref ok)) return ok;
+
+            int allocations = GcAllocProbe.Count(static () =>
+            {
+                for (int call = 0; call < ALLOCATION_PROBE_CALLS; call++)
+                    for (int i = 0; i < UIBandLayers.BandCount; i++)
+                        UIBandLayers.SortingValueOf((UIBandId)i);
+            });
+            ok &= Check($"{ALLOCATION_PROBE_CALLS} lookups per band allocate nothing (got {allocations})",
+                allocations == 0);
+
+            return ok;
+        }
+
+        /// <summary>L21 — pass names keep their documented text and cost nothing after the first build.</summary>
+        /// <remarks>
+        /// The Hud literals are the ones the architecture doc tells a reader to look for in the Render Graph
+        /// Viewer, so a drifted format fails here rather than only in a capture.
+        /// </remarks>
+        /// <returns>True when every assertion holds.</returns>
+        private static bool RunL21PassNames()
+        {
+            string hudLabel = UIBandCompositeRendererFeature.BandLabelOf(UIBandId.Hud);
+            UIBlurPassNames hud = new UIBlurPassNames(hudLabel);
+
+            bool ok = Check($"the Hud band is labeled 'UI Band Hud' (got '{hudLabel}')", hudLabel == "UI Band Hud");
+            ok &= Check($"its first blur pass is 'UI Band Hud Iter 0' (got '{hud.Iteration(0)}')",
+                hud.Iteration(0) == "UI Band Hud Iter 0");
+            ok &= Check($"its publish pass is 'UI Band Hud Set Global' (got '{hud.SetGlobal}')",
+                hud.SetGlobal == "UI Band Hud Set Global");
+
+            string draw = UIBandCompositeRendererFeature.DrawPassNameOf(hudLabel);
+            ok &= Check($"its draw pass is 'UI Band Hud Draw' (got '{draw}')", draw == "UI Band Hud Draw");
+
+            for (int i = 0; i < UIBandLayers.BandCount; i++)
+            {
+                UIBandId band = (UIBandId)i;
+                string label = UIBandCompositeRendererFeature.BandLabelOf(band);
+                ok &= Check($"{band} is labeled 'UI Band {band}' (got '{label}')", label == $"UI Band {band}");
+            }
+
+            string[] first = new string[MAX_SLIDER_ITERATIONS];
+            bool formatted = true;
+            for (int i = 0; i < MAX_SLIDER_ITERATIONS; i++)
+            {
+                first[i] = hud.Iteration(i);
+                formatted &= first[i] == $"{hudLabel} Iter {i}";
+            }
+
+            ok &= Check($"iterations 0-{MAX_SLIDER_ITERATIONS - 1} are named '<label> Iter <i>'", formatted);
+
+            string beyondSlider = hud.Iteration(MAX_SLIDER_ITERATIONS + 1);
+            bool kept = true;
+            for (int i = 0; i < MAX_SLIDER_ITERATIONS; i++) kept &= ReferenceEquals(first[i], hud.Iteration(i));
+
+            ok &= Check("growing past the slider's range keeps every earlier name instance", kept);
+            ok &= Check($"a count past the slider's range is still named (got '{beyondSlider}')",
+                beyondSlider == $"{hudLabel} Iter {MAX_SLIDER_ITERATIONS + 1}");
+
+            int control = GcAllocProbe.Count(static () => UIBandCompositeRendererFeature.BandLabelOf(UIBandId.Menus));
+            if (!GcAllocProbe.IsLive("L21", "composing a label", control, ref ok)) return ok;
+
+            int allocations = GcAllocProbe.Count(() =>
+            {
+                for (int call = 0; call < ALLOCATION_PROBE_CALLS; call++)
+                {
+                    for (int i = 0; i < MAX_SLIDER_ITERATIONS; i++) hud.Iteration(i);
+                    _ = hud.SetGlobal;
+                }
+            });
+            ok &= Check($"{ALLOCATION_PROBE_CALLS} frames' worth of name reads allocate nothing (got {allocations})",
+                allocations == 0);
+
+            return ok;
         }
     }
 }

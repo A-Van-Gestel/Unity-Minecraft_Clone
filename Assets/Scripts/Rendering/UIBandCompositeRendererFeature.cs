@@ -36,6 +36,16 @@ namespace Rendering
         /// </summary>
         public const UIBandId BaseBand = UIBandId.Hud;
 
+        /// <summary>Pass-name prefix of a band, as the Render Graph Viewer lists it.</summary>
+        /// <param name="band">The band to name.</param>
+        /// <returns><c>"UI Band {band}"</c>; allocates, so the pass calls it once per band at construction.</returns>
+        public static string BandLabelOf(UIBandId band) => "UI Band " + band;
+
+        /// <summary>Name of a band's draw pass.</summary>
+        /// <param name="bandLabel">The band's pass-name prefix.</param>
+        /// <returns><c>"{bandLabel} Draw"</c>.</returns>
+        public static string DrawPassNameOf(string bandLabel) => bandLabel + " Draw";
+
         /// <summary>Settings exposed on the URP Renderer asset.</summary>
         [Serializable]
         public class Settings
@@ -130,6 +140,12 @@ namespace Rendering
             private readonly Settings _settings;
             private readonly UIBandId[] _walk = new UIBandId[UIBandLayers.BandCount];
 
+            /// <summary>Each band's blur pass names, indexed by band, built once instead of per frame.</summary>
+            private readonly UIBlurPassNames[] _blurNames = new UIBlurPassNames[UIBandLayers.BandCount];
+
+            /// <summary>Each band's draw pass name, indexed by band.</summary>
+            private readonly string[] _drawNames = new string[UIBandLayers.BandCount];
+
             /// <summary>Bands already reported as undeclared, so the warning does not repeat per frame.</summary>
             /// <remarks>
             /// An instance field rather than a static: the pass is rebuilt by <c>Create</c> on every
@@ -147,6 +163,12 @@ namespace Rendering
             {
                 _chain = chain;
                 _settings = settings;
+
+                for (int i = 0; i < UIBandLayers.BandCount; i++)
+                {
+                    _blurNames[i] = new UIBlurPassNames(BandLabelOf((UIBandId)i));
+                    _drawNames[i] = DrawPassNameOf(_blurNames[i].Label);
+                }
             }
 
             public void Dispose() => _chain.Dispose();
@@ -171,19 +193,19 @@ namespace Rendering
 
                     // An undeclared sorting layer resolves to -1, which collapses the band's filter to a
                     // range that matches nothing — the band would draw empty and still pay for its blur.
-                    if (UIBandLayers.SortingValueOf(band) < 0)
+                    int sortingValue = UIBandLayers.SortingValueOf(band);
+                    if (sortingValue < 0)
                     {
                         WarnUndeclaredBandOnce(band);
                         continue;
                     }
 
-                    string label = "UI Band " + band;
-
                     // Re-blur before every band, so this band's panels sample the bands already drawn.
                     _chain.Record(renderGraph, cameraData, resourceData.activeColorTexture,
-                        _settings.iterations, _settings.downsample, label);
+                        _settings.iterations, _settings.downsample, _blurNames[(int)band]);
 
-                    RecordBandDraw(renderGraph, renderingData, cameraData, lightData, resourceData, band, label);
+                    RecordBandDraw(renderGraph, renderingData, cameraData, lightData, resourceData,
+                        sortingValue, _drawNames[(int)band]);
                 }
             }
 
@@ -207,10 +229,10 @@ namespace Rendering
             /// <summary>Draws one band's renderers into the camera color.</summary>
             private void RecordBandDraw(RenderGraph renderGraph, UniversalRenderingData renderingData,
                 UniversalCameraData cameraData, UniversalLightData lightData,
-                UniversalResourceData resourceData, UIBandId band, string label)
+                UniversalResourceData resourceData, int sortingValue, string passName)
             {
                 using IRasterRenderGraphBuilder builder = renderGraph.AddRasterRenderPass(
-                    label + " Draw", out BandPassData passData);
+                    passName, out BandPassData passData);
 
                 // CommonTransparent, not CanvasOrder: CanvasOrder without SortingLayer reorders UI so a
                 // panel paints over its own child text, and the failure is silent — the panel still draws.
@@ -220,11 +242,11 @@ namespace Rendering
                 // Two filters, two questions: the GameObject layer says "this is UI", the sorting layer
                 // range says "this is that band". Banding on the sorting layer is what lets a band root
                 // route a whole subtree without touching any object in it.
-                short sortingValue = (short)UIBandLayers.SortingValueOf(band);
+                short bandValue = (short)sortingValue;
                 FilteringSettings filteringSettings =
                     new FilteringSettings(RenderQueueRange.transparent, UIBandLayers.UILayerMask)
                     {
-                        sortingLayerRange = new SortingLayerRange(sortingValue, sortingValue),
+                        sortingLayerRange = new SortingLayerRange(bandValue, bandValue),
                     };
 
                 passData.RendererList = renderGraph.CreateRendererList(
