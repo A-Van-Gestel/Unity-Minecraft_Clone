@@ -541,6 +541,11 @@ over frames is the obvious candidate *(inferred, unpriced)*. The guards exist (`
 `BH-4-BAND-EDGE`, the Y-band cross-chunk determinism stress). Score with `-mc-run startup-new` (drained → stable) and
 the benchmark's loading pass hitch records.
 
+*Run-to-run spread (2026-10-10, four `startup-new` runs of one Master build):* handoff 3.6–3.9 s and drained 5.2–5.5 s
+every time, but drained → stable took 4.4, 4.7, 7.7 and **75 s**. The variance lives entirely in the tail this item
+targets; the 75 s run's cause is unattributed (it ran at the probe's Systems tier, with no Capture session to
+read). Score ES-29 on the median of at least five runs per leg, and capture one long run at Capture to attribute it.
+
 ### Tier 2 — pipeline work on today's data model
 
 **ES-12 — Jobified lighting merge.** → `P-3`. 🟡 / 🟡. After ES-7 shrinks it, measure the internal split
@@ -1067,7 +1072,8 @@ saving is inferred from step 1's re-entry leg, not re-measured.
 
 ## Document History
 
-* **v1.16** - §5 (2026-10-10): automated runs read the whole settings file — the unused benchmark defaults pin and its
+* **v1.16** - ES-29 notes the drained → stable run-to-run spread (4.4–75 s over four Master runs of one build) and
+  scores on a five-run median. §5 (2026-10-10): automated runs read the whole settings file — the unused benchmark defaults pin and its
   `OverlayBenchmarkSettingsFromDisk` whitelist are removed — and every report lists the values that differ from the
   defaults, so rollback flags are switched with `-mc-set`.
 * **v1.15** - **ES-0 complete** (2026-10-10): the drain stamp shipped (`StartupTimeline`, `PipelineDrainPredicate`,
