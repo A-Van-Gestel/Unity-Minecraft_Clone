@@ -1,11 +1,12 @@
 # Engine Scaling Performance Roadmap
 
-**Version:** 1.18  
+**Version:** 1.19  
 **Date:** 2026-10-02  
 **Status:** In progress — `ES-0` ✅ complete (2026-10-10: drain stamp shipped, every-layer re-measurement in §2.6 — added
 `ES-29`), `ES-1`, `ES-2` and `ES-6.1` shipped (2026-10-02); ES-0's GC.Alloc attribution captured (2026-10-03, §2.2.1 —
 added `ES-26`/`ES-27`; PM-1's smoke capture added the `ES-28` quick win); `ES-26` ✅ shipped (2026-10-10: −75.9 % GC.Alloc
-per generated chunk); `ES-28` ✅ shipped (2026-10-10: the UI passes allocate nothing per frame); the rest is a
+per generated chunk); `ES-27` ✅ shipped (2026-10-10: pooled light queues, −92.6 % of their garbage, −59 MB managed heap at
+200 m/s); `ES-28` ✅ shipped (2026-10-10: the UI passes allocate nothing per frame); the rest is a
 near-to-far horizon, not scheduled. Tier 1 items are execution-sized; Tier 2/3
 items each need their own design or implementation plan. Re-verify the anchors named per item before
 starting (§8).  
@@ -514,6 +515,17 @@ merge and `ModifyVoxel` in `ApplyModifications`. `Reset` only `Clear()`s them (c
 had 0 misses, so the regrowth is pooled instances passing their own high-water mark *(inferred, not instrumented)*.
 Candidates: an initial capacity sized to the observed peak, or moving the queues native (ES-18a territory). The
 lighting-merge `List`/`HashSet` growth (0.5 KB per chunk) rides along.
+*Shipped 2026-10-10:* neither candidate — `Queue<T>` in Unity's class libraries cannot be resized after construction, and
+pre-sizing every pooled `ChunkData` (~1 530 at vd 10) to the observed p99 would hold ≈ 125 MB. The queues are rented
+instead, from two `ChunkPoolManager` pools, while a chunk has nodes pending; flushing them to a lighting job or resetting
+the chunk returns them. A new pooled queue starts at the p99 flush size (3 800 sky, 1 400 block nodes, Editor probe at
+200 m/s), and the idle caps are unload-boundary rows (8 under demand, 1 after the linger window), so the cost follows the
+frontier rather than the load area. Save-path reads never rent; bytes unchanged (B6). Guard: Serialization Round-Trip
+B17. IL2CPP re-capture: the queue sites **10.49 → 0.78 KB per generated chunk**, all garbage 30.7 → 20.3 KB (−33.8 %).
+Master against a same-session ES-26 control: **managed heap −59 MB at 200 m/s** (−20 MB at 10 m/s), GC per frame
+290–295 → 258–270 KB, collections fewer at 10–50 m/s and 20–21 vs 17–18 at 200 m/s, frame time neutral. The
+`ListPool`/`HashSetPool` growth stays (shared Unity pools; 0.5 KB per chunk). Report:
+[`ENGINE_SCALING_ES27_LIGHT_QUEUE_POOL_IL2CPP_2026-10-10`](../Performance/ENGINE_SCALING_ES27_LIGHT_QUEUE_POOL_IL2CPP_2026-10-10_BENCHMARK.md).
 
 **ES-28 — Stop the UI band/blur passes allocating every frame.** 🟢 / 🟢. Added 2026-10-03 from the PM-1 Play-mode
 smoke capture (Editor, 855 frames, GC.Alloc call stacks, a streaming world with the HUD up): **643.8 KB of the
@@ -654,11 +666,11 @@ constants + migration change. Prerequisites: ES-13, ES-18, ES-19.
 
 ### 4.1 Expected impact by symptom
 
-| Symptom          | Biggest levers (in order)                                                                                                                                                                                                                                                             |
-|------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Time-to-stable   | ES-0 (attributed 2026-10-10, §2.6) → ES-1, ES-2, ES-3 → **ES-29** (drained → stable), ES-4, ES-11, ES-13                                                                                                                                                                              |
-| Traversal spikes | ES-0 (see them; H-1 §2.2.1 refuted, **garbage attributed 2026-10-03**) → **ES-26** ✅ (−75.9 % of per-chunk garbage), ES-27, ES-9 (~12 %) → ES-6, ES-8, ES-7, ES-25 → ES-18a (heap); ES-10 after ES-26; **ES-28** ✅ (steady-state UI garbage gone); **ES-29** (loading-pass hitches) |
-| Height / vd 32   | ES-13 (200 k cap), ES-25, ES-19, ES-18, ES-20 + ES-21 + ES-23, ES-24                                                                                                                                                                                                                  |
+| Symptom          | Biggest levers (in order)                                                                                                                                                                                                                                                                                          |
+|------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Time-to-stable   | ES-0 (attributed 2026-10-10, §2.6) → ES-1, ES-2, ES-3 → **ES-29** (drained → stable), ES-4, ES-11, ES-13                                                                                                                                                                                                           |
+| Traversal spikes | ES-0 (see them; H-1 §2.2.1 refuted, **garbage attributed 2026-10-03**) → **ES-26** ✅ (−75.9 % of per-chunk garbage), **ES-27** ✅ (−33.8 % of the rest), ES-9 (~12 %) → ES-6, ES-8, ES-7, ES-25 → ES-18a (heap); ES-10 after ES-26; **ES-28** ✅ (steady-state UI garbage gone); **ES-29** (loading-pass hitches) |
+| Height / vd 32   | ES-13 (200 k cap), ES-25, ES-19, ES-18, ES-20 + ES-21 + ES-23, ES-24                                                                                                                                                                                                                                               |
 
 ---
 
@@ -707,7 +719,7 @@ constants + migration change. Prerequisites: ES-13, ES-18, ES-19.
 | **ES-11 — Stable-load bit**      | P-5 (⚠️ format)                                                                                                      |   🟡   | ES-0                | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | **ES-25 — Upload/vertex cuts**   | Rendering baseline, 16-bit indices, buffer capacity, per-section dirty upload, shared sub-quad grids, DepthOnly pass |   🟡   | ES-0                | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | **ES-26 — Serializer span copy** | Write section arrays without `ReadOnlySpan<T>.ToArray()` — byte-identical output                                     |   🟢   | —                   | ✅ 2026-10-10 (GC re-capture + 3 Master runs)                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| **ES-27 — BFS queue regrowth**   | Presize or nativize `ChunkData`'s lighting BFS queues                                                                |   🟢   | —                   | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| **ES-27 — BFS queue regrowth**   | Pool-rent `ChunkData`'s lighting BFS queues instead of growing one pair per pooled chunk                             |   🟢   | —                   | ✅ 2026-10-10 (GC re-capture + 3 Master runs vs a same-session control)                                                                                                                                                                                                                                                                                                                                                                                                    |
 | **ES-28 — UI pass garbage**      | Cache the UI band/blur Render Graph pass names and sorting values — ≈ 0.75 KB/frame of steady-state garbage          |   🟢   | —                   | ✅ 2026-10-10 (suite L20/L21 + Editor GC re-capture)                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | **ES-29 — Behavior tick spikes** | Banded / deduplicated fluid snapshots, the fluid-job wait, Grass-Burst                                               |   🟡   | —                   | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | **ES-12 — Jobified merge**       | P-3                                                                                                                  |   🟡   | ES-7                | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
@@ -1090,6 +1102,9 @@ saving is inferred from step 1's re-entry leg, not re-measured.
 
 ## Document History
 
+* **v1.19** - **ES-27 shipped** (2026-10-10): `ChunkData`'s BFS light queues are rented from `ChunkPoolManager` pools
+  while nodes are pending, sized at the measured p99 — the queue sites fall 10.49 → 0.78 KB per generated chunk and the
+  managed heap is 59 MB smaller at 200 m/s. ES-27 entry, plan row, status line and §4.1 traversal row.
 * **v1.18** - **ES-28 shipped** (2026-10-10): the UI band/blur passes build their Render Graph pass names once and
   resolve sorting values through native ids, so they allocate nothing per frame (Editor re-capture: 0 B from the
   four sites over 1 929 frames). ES-28 entry, plan row, status line and §4.1 traversal row; the entry's gate no longer
