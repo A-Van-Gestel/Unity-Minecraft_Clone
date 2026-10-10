@@ -13,6 +13,59 @@ This document outlines **open** bugs related to the current lighting implementat
 
 > All previously listed lighting bugs (01–08, 10–21) have been fixed. See [`_FIXED_BUGS.md`](./_FIXED_BUGS.md) for details.
 
+## Bug 23: Two Lighting Jobs Re-Schedule Every Frame Forever at View Distance 32
+
+**Severity:** Medium (a permanent ~0.8 ms/frame main-thread cost, and it stops any harness that waits for idle jobs)  
+**Status:** Open — observed 2026-10-10 in an IL2CPP Master player, not yet root-caused; no repro scenario yet
+
+**Description:**
+At view distance 32 the lighting pipeline never goes idle. From about four minutes into the run until the player was
+closed 23 minutes later, **exactly two lighting jobs completed and two were scheduled every frame**, while the
+generation queue, generation jobs, mesh queue and mesh jobs were all zero and the scheduler's waiting set held a
+constant 387 chunks. The merges changed nothing visible: 0.001 mesh jobs completed per frame over the same window.
+`WorldJobManager.HasActiveJobs` therefore never turns false, so the benchmark's `WaitForChunkPipelineToSettle`
+waited at "Ensure Generated — settling…" indefinitely.
+
+It differs from Bug 22, which parks chunks with **zero** jobs in flight: here the same small set is re-lit every
+frame.
+
+**Measured (Capture-tier session, frames 20 000–193 167, 173 170 frames):**
+
+| Quantity                                        | Value                    |
+|-------------------------------------------------|--------------------------|
+| Lighting jobs completed per frame               | 2.000 (max 4)            |
+| Lighting jobs in flight                         | 2                        |
+| Scheduler ready / waiting                       | 0 / **387** (constant)   |
+| Generation queue + jobs, mesh queue + jobs      | 0                        |
+| Mesh jobs completed per frame                   | 0.001                    |
+| `LightMerge` / `LightSchedule` main-thread time | 0.53 / 0.27 ms per frame |
+| Lighting job busy time / latency                | 0.11 ms / 15.8 ms (mean) |
+| Frame time (wall / CPU)                         | 7.97 / 4.02 ms (mean)    |
+
+**Intermittent.** An identical retry of the same build an hour later completed (the ensure sweep settled and the run
+wrote its report), so the livelock appeared in 1 of 2 vd-32 runs. The FP-10 / P-8 captures of 2026-08 also completed
+their vd-32 legs.
+
+**Not seen at view distance 10:** in the three vd-10 runs of the same build, frames with lighting jobs in flight
+while generation and meshing were idle numbered 320–352 of ~190 000, all transient.
+
+**Reproduction Steps:**
+
+1. Build `Windows - Production` and run
+   `"Minecraft Clone.exe" -force-d3d11 -mc-run benchmark -mc-set perfMonitorTier=Capture -mc-set viewDistance=32 -mc-mute -mc-quit`.
+2. The generation pass completes; in the failing run the benchmark then stops at "Ensure Generated — settling…"
+   (1 of 2 runs so far).
+3. The Capture session file (`PerfLogs/PerfSession_*.csv`) shows `LightInFlight` = 2 and `LightCompleted` = 2 on
+   every frame from then on.
+
+**Next diagnostic step.** Identify the two chunks and why each merge re-arms the other: log the coordinates and
+the scan arm (`LightingScanDecision`) of every lighting job scheduled once generation and meshing are idle. The
+`voxel-debugging` skill owns this; a deterministic repro then goes into the Lighting suite
+(`validation-driven-bugfix`).
+
+**Found by:** the ES-0 re-measurement (`ENGINE_SCALING_PERFORMANCE_ROADMAP.md` ES-0), whose vd-32 benchmark run it
+blocked.
+
 ## Bug 22: Light-Work Fail-Safe Keeps Promoting Parked Chunks in a Fully Quiesced World
 
 **Severity:** Low (diagnostic-visible only; no observed lighting defect)  
