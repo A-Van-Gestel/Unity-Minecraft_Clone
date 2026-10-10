@@ -1,13 +1,13 @@
 # Engine Scaling Performance Roadmap
 
-**Version:** 1.19  
+**Version:** 1.20  
 **Date:** 2026-10-02  
 **Status:** In progress — `ES-0` ✅ complete (2026-10-10: drain stamp shipped, every-layer re-measurement in §2.6 — added
 `ES-29`), `ES-1`, `ES-2` and `ES-6.1` shipped (2026-10-02); ES-0's GC.Alloc attribution captured (2026-10-03, §2.2.1 —
 added `ES-26`/`ES-27`; PM-1's smoke capture added the `ES-28` quick win); `ES-26` ✅ shipped (2026-10-10: −75.9 % GC.Alloc
 per generated chunk); `ES-27` ✅ shipped (2026-10-10: pooled light queues, −92.6 % of their garbage, −59 MB managed heap at
-200 m/s); `ES-28` ✅ shipped (2026-10-10: the UI passes allocate nothing per frame); the rest is a
-near-to-far horizon, not scheduled. Tier 1 items are execution-sized; Tier 2/3
+200 m/s — its re-capture added `ES-30`); `ES-28` ✅ shipped (2026-10-10: the UI passes allocate nothing per frame); the
+rest is a near-to-far horizon, not scheduled. Tier 1 items are execution-sized; Tier 2/3
 items each need their own design or implementation plan. Re-verify the anchors named per item before
 starting (§8).  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
@@ -442,6 +442,14 @@ sweep recommended:
    computed in the same loop (measure post-delivery mesh amplification first; check whether diagonal
    neighbors can be left with stale corner light — currently never re-meshed by a merge).
 
+*Observed 2026-10-10 (ES-27's queue probe, Editor, 200 m/s):* about 9 400 `ChunkData` resets per run still held
+skylight nodes (median 1 176) — counting the save snapshots and load shells that copy them, so fewer distinct chunks.
+Frontier chunks are unloaded with nodes pending, which are copied into the save snapshot, written and replayed on load.
+Before choosing a lever, measure how many distinct chunks unload unlit and what that merge work and replay cost; a
+candidate is skipping cross-chunk wake-up nodes for a chunk already past the unload boundary *(unpriced)*, and ES-10's
+persistence policy decides whether those nodes need saving at all. Report:
+[`ENGINE_SCALING_ES27_LIGHT_QUEUE_POOL_IL2CPP_2026-10-10`](../Performance/ENGINE_SCALING_ES27_LIGHT_QUEUE_POOL_IL2CPP_2026-10-10_BENCHMARK.md).
+
 **ES-8 — Budget the unbudgeted passes.** → `SL-2`. 🟡 / 🟡. Give `ApplyModifications` a ms ceiling
 with the retry contract the other passes use; move the disk-hit populate continuation into a budgeted
 pump, and move its `RecalculateCounts` to the deserialize thread via a flat opacity table (the
@@ -576,6 +584,21 @@ every time, but drained → stable took 4.4, 4.7, 7.7 and **75 s**. The variance
 targets; the 75 s run's cause is unattributed (it ran at the probe's Systems tier, with no Capture session to
 read). Score ES-29 on the median of at least five runs per leg, and capture one long run at Capture to attribute it.
 
+**ES-30 — Pre-size the lighting merge's pooled column sets and deferred-mod lists.** 🟢 / 🟢. Added 2026-10-10 from
+the ES-27 re-capture. The two pooled-collection sites left in the lighting path, IL2CPP at 200 m/s:
+- `WorldData.QueueSkylightRecalculation` — `HashSet<Vector2Int>` growth, **0.16 KB per generated chunk** (1 350 calls in
+  33 frames; ES-0: 0.22). `HashSetPool<Vector2Int>` is one shared pool: `RecalculateSkylight` fills a full 256-column set
+  while the pending-recalculation and dropped-update stores hold a few columns each, so a small set handed back to the
+  full path regrows, and that churn never settles. Every user keys its set to one chunk, so 256 columns is a hard
+  bound: `EnsureCapacity(VoxelData.ChunkWidth * VoxelData.ChunkWidth)` on each `Get` (it exists in Unity's
+  class libraries) lets every pooled set reach its final size once.
+- `WorldJobManager.MergeCompletedLightingJob` — `ListPool<DeferredLightMod>` growth in the deferred-mod route,
+  **0.38 KB per chunk** (15 calls in 12 frames; ES-0: 0.25). Unbounded — a neighbor pass can defer thousands of mods —
+  so pre-size it to an observed percentile, ES-27's method, or leave it as warm-up.
+
+Small (0.54 KB of the 20.3 KB per chunk left after ES-27); the gain is a pool state that converges instead of
+re-growing. Gate on the lighting suite, then a GC.Alloc re-capture showing neither site.
+
 ### Tier 2 — pipeline work on today's data model
 
 **ES-12 — Jobified lighting merge.** → `P-3`. 🟡 / 🟡. After ES-7 shrinks it, measure the internal split
@@ -666,11 +689,11 @@ constants + migration change. Prerequisites: ES-13, ES-18, ES-19.
 
 ### 4.1 Expected impact by symptom
 
-| Symptom          | Biggest levers (in order)                                                                                                                                                                                                                                                                                          |
-|------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Time-to-stable   | ES-0 (attributed 2026-10-10, §2.6) → ES-1, ES-2, ES-3 → **ES-29** (drained → stable), ES-4, ES-11, ES-13                                                                                                                                                                                                           |
-| Traversal spikes | ES-0 (see them; H-1 §2.2.1 refuted, **garbage attributed 2026-10-03**) → **ES-26** ✅ (−75.9 % of per-chunk garbage), **ES-27** ✅ (−33.8 % of the rest), ES-9 (~12 %) → ES-6, ES-8, ES-7, ES-25 → ES-18a (heap); ES-10 after ES-26; **ES-28** ✅ (steady-state UI garbage gone); **ES-29** (loading-pass hitches) |
-| Height / vd 32   | ES-13 (200 k cap), ES-25, ES-19, ES-18, ES-20 + ES-21 + ES-23, ES-24                                                                                                                                                                                                                                               |
+| Symptom          | Biggest levers (in order)                                                                                                                                                                                                                                                                                                 |
+|------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Time-to-stable   | ES-0 (attributed 2026-10-10, §2.6) → ES-1, ES-2, ES-3 → **ES-29** (drained → stable), ES-4, ES-11, ES-13                                                                                                                                                                                                                  |
+| Traversal spikes | ES-0 (see them; H-1 §2.2.1 refuted, **garbage attributed 2026-10-03**) → **ES-26** ✅ (−75.9 % of per-chunk garbage), **ES-27** ✅ (−33.8 % of the rest), ES-30, ES-9 (~12 %) → ES-6, ES-8, ES-7, ES-25 → ES-18a (heap); ES-10 after ES-26; **ES-28** ✅ (steady-state UI garbage gone); **ES-29** (loading-pass hitches) |
+| Height / vd 32   | ES-13 (200 k cap), ES-25, ES-19, ES-18, ES-20 + ES-21 + ES-23, ES-24                                                                                                                                                                                                                                                      |
 
 ---
 
@@ -722,6 +745,7 @@ constants + migration change. Prerequisites: ES-13, ES-18, ES-19.
 | **ES-27 — BFS queue regrowth**   | Pool-rent `ChunkData`'s lighting BFS queues instead of growing one pair per pooled chunk                             |   🟢   | —                   | ✅ 2026-10-10 (GC re-capture + 3 Master runs vs a same-session control)                                                                                                                                                                                                                                                                                                                                                                                                    |
 | **ES-28 — UI pass garbage**      | Cache the UI band/blur Render Graph pass names and sorting values — ≈ 0.75 KB/frame of steady-state garbage          |   🟢   | —                   | ✅ 2026-10-10 (suite L20/L21 + Editor GC re-capture)                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | **ES-29 — Behavior tick spikes** | Banded / deduplicated fluid snapshots, the fluid-job wait, Grass-Burst                                               |   🟡   | —                   | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| **ES-30 — Pooled set pre-size**  | Pre-size the lighting merge's pooled column sets (256) and deferred-mod lists — 0.54 KB/chunk                        |   🟢   | —                   | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | **ES-12 — Jobified merge**       | P-3                                                                                                                  |   🟡   | ES-7                | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | **ES-13 — Sky from heightmap**   | Frontier-seeded initial lighting                                                                                     |   🟡   | ES-12               | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | **ES-14 — Gen critical path**    | Worm cache, WG-1, WG-2                                                                                               |   🟡   | ES-0                | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
@@ -1102,6 +1126,9 @@ saving is inferred from step 1's re-entry leg, not re-measured.
 
 ## Document History
 
+* **v1.20** - New `ES-30` (2026-10-10, from the ES-27 re-capture): pre-size the lighting merge's pooled column sets
+  (bounded at 256) and deferred-mod lists; Tier 1b entry, plan row, §4.1 traversal row, status line. ES-7 gains the
+  probe's observation that frontier chunks unload with skylight nodes pending, which are saved and replayed.
 * **v1.19** - **ES-27 shipped** (2026-10-10): `ChunkData`'s BFS light queues are rented from `ChunkPoolManager` pools
   while nodes are pending, sized at the measured p99 — the queue sites fall 10.49 → 0.78 KB per generated chunk and the
   managed heap is 59 MB smaller at 200 m/s. ES-27 entry, plan row, status line and §4.1 traversal row.
