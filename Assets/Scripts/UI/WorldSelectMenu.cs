@@ -508,6 +508,7 @@ namespace UI
 
         private static void LoadGameScene()
         {
+            WorldLaunchState.MarkWorldSceneRequested();
             SceneManager.LoadScene("Scenes/World", LoadSceneMode.Single);
         }
 

@@ -37,6 +37,7 @@ namespace Launch
             WorldLaunchState.Seed = HARNESS_SEED;
             WorldLaunchState.IsNewGame = true;
 
+            WorldLaunchState.MarkWorldSceneRequested();
             SceneManager.LoadScene(WORLD_SCENE, LoadSceneMode.Single);
         }
     }

@@ -238,18 +238,8 @@ namespace Benchmarks
 
                 // Fill = populated terrain AND every measured pipeline stage drained — including the
                 // mesh apply tail the budgets deliberately defer (omitting it would bias the A/B toward
-                // budgets-ON, which pushes exactly that work past the old predicate). Since MP-6 retired
-                // the draw queue, in-flight MeshJobs IS that whole tail: the apply and the load-animation
-                // trigger both happen when the job merges. The mesh BUILD queue and the lighting waiting
-                // set are excluded on purpose: their steady state is the load-square perimeter ring,
-                // which can never be served (missing outer neighbors).
-                bool drained = world.GenerationRequestQueueCount == 0
-                               && world.JobManager.GenerationJobs.Count == 0
-                               && world.LightWorkReadyCount == 0
-                               && world.JobManager.LightingJobs.Count == 0
-                               && world.JobManager.MeshJobs.Count == 0;
-
-                if (drained && IsLoadSquarePopulated(world))
+                // budgets-ON, which pushes exactly that work past the old predicate).
+                if (PipelineDrainPredicate.IsDrained(world))
                 {
                     // Sustained settle so a transient lull cannot end the leg early.
                     settleFrames++;
@@ -279,29 +269,6 @@ namespace Benchmarks
                       $"avgFps={legs[index].Frames / legs[index].FillSeconds:F1} maxFrame={legs[index].MaxFrameMs:F1}ms " +
                       $"hitches50={hitches.ToString()} gateCloses={legs[index].GateCloses.ToString()}" +
                       (timedOut ? " TIMED OUT" : string.Empty));
-        }
-
-        /// <summary>Whether every chunk of the load square around the player is populated.</summary>
-        /// <param name="world">The live world.</param>
-        /// <returns>True when the square is fully populated.</returns>
-        private static bool IsLoadSquarePopulated(World world)
-        {
-            ChunkCoord center = world.PlayerChunkCoord;
-            int loadDist = world.settings.LoadDistance;
-
-            for (int dx = -loadDist; dx <= loadDist; dx++)
-            {
-                for (int dz = -loadDist; dz <= loadDist; dz++)
-                {
-                    if (!world.worldData.TryGetChunk(center.Neighbor(dx, dz).ToVoxelOrigin(), out ChunkData data)
-                        || !data.IsPopulated)
-                    {
-                        return false;
-                    }
-                }
-            }
-
-            return true;
         }
 
         /// <summary>Formats every leg plus the derived A/B ratios into one report file.</summary>

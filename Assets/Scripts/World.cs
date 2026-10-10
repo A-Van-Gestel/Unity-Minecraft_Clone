@@ -562,6 +562,13 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// </summary>
     private const float STARTUP_LOAD_TIMEOUT_SECONDS = 60f;
 
+    private readonly StartupTimeline _startupTimeline = new StartupTimeline();
+
+    private const float MILLISECONDS_PER_SECOND = 1000f;
+
+    /// <summary>This launch's time-to-stable stamp (ES-0); logged once when it gets its outcome.</summary>
+    public StartupTimeline StartupTimeline => _startupTimeline;
+
     /// <summary>
     /// Public accessor for world load state. True once <see cref="StartWorld"/> has fully completed.
     /// </summary>
@@ -671,6 +678,9 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         {
             Instance = this;
             appSaveDataPath = Application.persistentDataPath;
+
+            // ES-0: the time-to-stable stamp starts at the scene load request when one was made, else here.
+            _startupTimeline.MarkAwake(Time.realtimeSinceStartupAsDouble, WorldLaunchState.TakeWorldSceneRequest());
 
             // NOTE: JobManager is now created in StartWorld() after the world type is resolved.
 
@@ -1095,6 +1105,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
             yield return null;
         }
 
+        _startupTimeline.MarkLoadsDone(Time.realtimeSinceStartupAsDouble);
         Debug.Assert(_startupLoadsPending >= 0, "Startup load counter went negative — a load decremented twice.");
         if (_startupLoadsPending > 0)
         {
@@ -1153,6 +1164,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
 
         // Enable world loading logic
         _isWorldLoaded = true;
+        _startupTimeline.MarkHandoff(Time.realtimeSinceStartupAsDouble, PlayerChunkCoord);
     }
 
     /// <summary>
@@ -3125,6 +3137,19 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
 
         // After the bracket, so the monitor's own sampling is not reported as unattributed engine work.
         if (PerfStore.SlotsActive) SamplePerfCounters();
+
+        if (_startupTimeline.IsPending) TickStartupTimeline();
+    }
+
+    /// <summary>
+    /// Advances the time-to-stable stamp by one frame and logs it once it has an outcome. The drain test walks the load
+    /// square only while the stamp still waits for the drain and every stage is empty.
+    /// </summary>
+    private void TickStartupTimeline()
+    {
+        bool drained = _startupTimeline.NeedsDrainCheck && PipelineDrainPredicate.IsDrained(this);
+        if (_startupTimeline.Tick(Time.realtimeSinceStartupAsDouble, Time.unscaledDeltaTime * MILLISECONDS_PER_SECOND, drained, PlayerChunkCoord))
+            Debug.Log($"[Startup] Time to stable: {_startupTimeline.Describe()}");
     }
 
     /// <summary>

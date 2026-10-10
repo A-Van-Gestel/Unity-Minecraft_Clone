@@ -45,6 +45,32 @@ namespace Data
         [NoAutoStaticsCleanup] // reset in DomainReset
         public static int BorderRadius = 0;
 
+        /// <summary>The value of <see cref="WorldSceneRequestedAt"/> when no scene load request is pending.</summary>
+        public const double NoSceneRequest = -1.0;
+
+        /// <summary>
+        /// <see cref="Time.realtimeSinceStartupAsDouble"/> when the World scene load was requested, or
+        /// <see cref="NoSceneRequest"/>: the earliest instant a launch's elapsed time can be measured from, scene load
+        /// included.
+        /// </summary>
+        [NoAutoStaticsCleanup] // reset in DomainReset
+        public static double WorldSceneRequestedAt = NoSceneRequest;
+
+        /// <summary>Stamps the World scene load request; call right before loading the scene.</summary>
+        public static void MarkWorldSceneRequested() => WorldSceneRequestedAt = Time.realtimeSinceStartupAsDouble;
+
+        /// <summary>
+        /// Returns the pending scene load request and clears it, so a later World started without one (Play pressed in
+        /// the World scene) cannot inherit a stale stamp.
+        /// </summary>
+        /// <returns>The request time, or <see cref="NoSceneRequest"/>.</returns>
+        public static double TakeWorldSceneRequest()
+        {
+            double requestedAt = WorldSceneRequestedAt;
+            WorldSceneRequestedAt = NoSceneRequest;
+            return requestedAt;
+        }
+
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
         private static void DomainReset()
         {
@@ -54,6 +80,7 @@ namespace Data
             CurrentMode = RuntimeMode.Default;
             SelectedWorldType = WorldTypeID.Standard;
             BorderRadius = 0;
+            WorldSceneRequestedAt = NoSceneRequest;
         }
     }
 }
