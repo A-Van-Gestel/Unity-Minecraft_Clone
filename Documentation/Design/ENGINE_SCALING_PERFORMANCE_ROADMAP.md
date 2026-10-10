@@ -1,10 +1,11 @@
 # Engine Scaling Performance Roadmap
 
-**Version:** 1.16  
+**Version:** 1.17  
 **Date:** 2026-10-02  
 **Status:** In progress — `ES-0` ✅ complete (2026-10-10: drain stamp shipped, every-layer re-measurement in §2.6 — added
 `ES-29`), `ES-1`, `ES-2` and `ES-6.1` shipped (2026-10-02); ES-0's GC.Alloc attribution captured (2026-10-03, §2.2.1 —
-added `ES-26`/`ES-27`; PM-1's smoke capture added the `ES-28` quick win); the rest is a near-to-far horizon, not
+added `ES-26`/`ES-27`; PM-1's smoke capture added the `ES-28` quick win); `ES-26` ✅ shipped (2026-10-10: −75.9 % GC.Alloc
+per generated chunk); the rest is a near-to-far horizon, not
 scheduled. Tier 1 items are execution-sized; Tier 2/3
 items each need their own design or implementation plan. Re-verify the anchors named per item before
 starting (§8).  
@@ -468,7 +469,8 @@ regenerates on return (~1.5 ms worker time + lighting). Also fixes the comment d
 `World.cs:3825–3829`, which assumes unmodified chunks exist on the persist-light-pending arm.
 *GC, measured 2026-10-03:* the unload save path is 104.2 KB of the 127.4 KB per generated chunk at 200 m/s, so
 dropping unmodified saves would remove ~82 % of traversal garbage — but ES-26 removes ~77 % without the persistence
-trade-off. Decide this item after ES-26, on disk I/O and re-entry cost.
+trade-off. Decide this item after ES-26, on disk I/O and re-entry cost. *ES-26 shipped 2026-10-10: the save path left is
+6.0 KB per generated chunk, so this decision no longer carries a GC case.*
 
 **ES-11 — Skip lighting on stable disk loads.** → `P-5` (⚠️ format bump + AOT step). 🟡 / 🟡.
 
@@ -494,9 +496,16 @@ SetPass, vertices/frame, GPU ms, and the shaders' "SRP Batcher: compatible" line
 `ToArray()` — 20 480 B allocated per 16 KB write in an isolated Editor test, against 0 B for `Write(byte[], int, int)`.
 **98.5 KB of the 127.4 KB per generated chunk (77.3 %)**, all on ThreadPool save threads. Write the same bytes without
 the copy (e.g. through a reused per-thread scratch `byte[]` and the `byte[]` overload); whether
-`BaseStream.Write(ReadOnlySpan<byte>)` on the LZ4/GZip streams is allocation-free is unverified. The bytes on disk
+`BaseStream.Write(ReadOnlySpan<byte>)` on the LZ4/Deflate streams is allocation-free is unverified. The bytes on disk
 must not change: gate on the serialization round-trip and deserialization-robustness suites, then re-run the ES-0
 capture.
+*Shipped 2026-10-10:* `ChunkSerializer.WriteBulk` stages every bulk array in a per-thread 16 KB scratch and writes it
+through the `byte[]` overload (0 B on None / LZ4 / Deflate; `BaseStream.Write(span)` measured 2 KB per call on Deflate).
+Golden bytes (B6) unchanged. Re-capture: **127.4 → 30.7 KB per generated chunk (−75.9 %)**, the save path 104.2 → 6.0 KB,
+ThreadPool share 79.7 → 10.4 %. Three Master runs against the 10-10 baseline: 200 m/s collections 85 → 18–19, p99
+74.4–78.1 → 69.2–72.0 ms, p50 unchanged (lighting-merge-bound). The same series adds
+`DiskSaveRawBytes` and the compression ratio in `/perf stats`, deferred to this item by PM-4. Report:
+[`ENGINE_SCALING_ES26_SERIALIZER_SPAN_COPY_IL2CPP_2026-10-10`](../Performance/ENGINE_SCALING_ES26_SERIALIZER_SPAN_COPY_IL2CPP_2026-10-10_BENCHMARK.md).
 
 **ES-27 — Stop the lighting BFS queues regrowing.** 🟢 / 🟢. Added 2026-10-03 from the ES-0 capture (§2.2.1).
 `ChunkData`'s managed `Queue<LightQueueNode>` skylight/blocklight queues grow through `Queue<T>.SetCapacity` ~5 700
@@ -636,11 +645,11 @@ constants + migration change. Prerequisites: ES-13, ES-18, ES-19.
 
 ### 4.1 Expected impact by symptom
 
-| Symptom          | Biggest levers (in order)                                                                                                                                                                                                                                                        |
-|------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Time-to-stable   | ES-0 (attributed 2026-10-10, §2.6) → ES-1, ES-2, ES-3 → **ES-29** (drained → stable), ES-4, ES-11, ES-13                                                                                                                                                                         |
-| Traversal spikes | ES-0 (see them; H-1 §2.2.1 refuted, **garbage attributed 2026-10-03**) → **ES-26** (77 % of per-chunk garbage), ES-27, ES-9 (~12 %) → ES-6, ES-8, ES-7, ES-25 → ES-18a (heap); ES-10 after ES-26; ES-28 (steady-state UI garbage, every frame); **ES-29** (loading-pass hitches) |
-| Height / vd 32   | ES-13 (200 k cap), ES-25, ES-19, ES-18, ES-20 + ES-21 + ES-23, ES-24                                                                                                                                                                                                             |
+| Symptom          | Biggest levers (in order)                                                                                                                                                                                                                                                              |
+|------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Time-to-stable   | ES-0 (attributed 2026-10-10, §2.6) → ES-1, ES-2, ES-3 → **ES-29** (drained → stable), ES-4, ES-11, ES-13                                                                                                                                                                               |
+| Traversal spikes | ES-0 (see them; H-1 §2.2.1 refuted, **garbage attributed 2026-10-03**) → **ES-26** ✅ (−75.9 % of per-chunk garbage), ES-27, ES-9 (~12 %) → ES-6, ES-8, ES-7, ES-25 → ES-18a (heap); ES-10 after ES-26; ES-28 (steady-state UI garbage, every frame); **ES-29** (loading-pass hitches) |
+| Height / vd 32   | ES-13 (200 k cap), ES-25, ES-19, ES-18, ES-20 + ES-21 + ES-23, ES-24                                                                                                                                                                                                                   |
 
 ---
 
@@ -688,7 +697,7 @@ constants + migration change. Prerequisites: ES-13, ES-18, ES-19.
 | **ES-10 — Persistence policy**   | Open decision: keep saving unmodified terrain, or only edits                                                         |   🟢   | —                   | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | **ES-11 — Stable-load bit**      | P-5 (⚠️ format)                                                                                                      |   🟡   | ES-0                | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | **ES-25 — Upload/vertex cuts**   | Rendering baseline, 16-bit indices, buffer capacity, per-section dirty upload, shared sub-quad grids, DepthOnly pass |   🟡   | ES-0                | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| **ES-26 — Serializer span copy** | Write section arrays without `ReadOnlySpan<T>.ToArray()` — byte-identical output                                     |   🟢   | —                   | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| **ES-26 — Serializer span copy** | Write section arrays without `ReadOnlySpan<T>.ToArray()` — byte-identical output                                     |   🟢   | —                   | ✅ 2026-10-10 (GC re-capture + 3 Master runs)                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | **ES-27 — BFS queue regrowth**   | Presize or nativize `ChunkData`'s lighting BFS queues                                                                |   🟢   | —                   | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | **ES-28 — UI pass garbage**      | Cache the UI band/blur Render Graph pass names and sorting values — ≈ 0.75 KB/frame of steady-state garbage          |   🟢   | —                   | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | **ES-29 — Behavior tick spikes** | Banded / deduplicated fluid snapshots, the fluid-job wait, Grass-Burst                                               |   🟡   | —                   | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
@@ -1072,6 +1081,12 @@ saving is inferred from step 1's re-entry leg, not re-measured.
 
 ## Document History
 
+* **v1.17** - **ES-26 shipped** (2026-10-10): the serializer writes bulk arrays through a per-thread scratch and the
+  `byte[]` overload, with byte-identical output. Scored with ES-0's capture in an IL2CPP Development (Master) player:
+  127.4 → 30.7 KB of GC.Alloc per generated chunk; three Master runs: 200 m/s collections 85 → 18–19. ES-26 entry, plan row, status line, §4.1 traversal row, the ES-10
+  note and Next Review; "LZ4/GZip" corrected to LZ4/Deflate in the ES-26 entry.
+  Report: `Performance/ENGINE_SCALING_ES26_SERIALIZER_SPAN_COPY_IL2CPP_2026-10-10_BENCHMARK.md`.
+
 * **v1.16** - ES-29 notes the drained → stable run-to-run spread (4.4–75 s over four Master runs of one build) and
   scores on a five-run median. §5 (2026-10-10): automated runs read the whole settings file — the unused benchmark defaults pin and its
   `OverlayBenchmarkSettingsFromDisk` whitelist are removed — and every report lists the values that differ from the
@@ -1135,4 +1150,4 @@ saving is inferred from step 1's re-entry leg, not re-measured.
 ---
 
 **Last Updated:** 2026-10-10  
-**Next Review:** when ES-26 or ES-29 is scored against the 2026-10-10 baseline or ES-25's rendering baseline lands, or before any ES phase starts
+**Next Review:** when ES-29 is scored against the 2026-10-10 baseline or ES-25's rendering baseline lands, or before any ES phase starts
