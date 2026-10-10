@@ -53,6 +53,14 @@ namespace Serialization
         private const byte SECTION_FLAG_LIGHT_ONLY_UNIFORM_SKY = 0x02;
         private const byte SECTION_FLAG_LIGHT_ONLY_FULL = 0x03;
 
+        // Largest bulk array written in one call: a section's voxels (uint per voxel).
+        private const int BULK_SCRATCH_BYTES = ChunkMath.SECTION_VOLUME * sizeof(uint);
+
+        // Saves run concurrently on ThreadPool threads, so each thread stages its bulk writes in its own buffer.
+        [ThreadStatic]
+        [NoAutoStaticsCleanup] // per-thread scratch, overwritten before every use
+        private static byte[] s_tBulkScratch;
+
         /// <summary>
         /// Serializes a ChunkData object into a byte array buffer using the specified compression algorithm.
         /// </summary>
@@ -145,8 +153,7 @@ namespace Serialization
 
             // --- Height Map ---
             // Heightmap is fixed size (16*16 = 256 entries) -> 512 bytes
-            ReadOnlySpan<byte> hmBytes = MemoryMarshal.AsBytes(data.heightMap.AsSpan());
-            writer.Write(hmBytes);
+            WriteBulk(writer, MemoryMarshal.AsBytes(data.heightMap.AsSpan()));
 
             // --- Section Bitmask ---
             int sectionBitmask = 0;
@@ -381,8 +388,8 @@ namespace Serialization
                     // Flag 0x01: Voxels + full LightData (blocklight present or non-uniform sky)
                     writer.Write(SECTION_FLAG_VOXELS_AND_LIGHT);
                     writer.Write((ushort)section.nonAirCount);
-                    writer.Write(MemoryMarshal.AsBytes(section.voxels.AsSpan()));
-                    writer.Write(MemoryMarshal.AsBytes(section.LightData.AsSpan()));
+                    WriteBulk(writer, MemoryMarshal.AsBytes(section.voxels.AsSpan()));
+                    WriteBulk(writer, MemoryMarshal.AsBytes(section.LightData.AsSpan()));
                 }
                 else
                 {
@@ -390,7 +397,7 @@ namespace Serialization
                     writer.Write(SECTION_FLAG_VOXELS_UNIFORM_SKY);
                     writer.Write(uniformSkyLevel);
                     writer.Write((ushort)section.nonAirCount);
-                    writer.Write(MemoryMarshal.AsBytes(section.voxels.AsSpan()));
+                    WriteBulk(writer, MemoryMarshal.AsBytes(section.voxels.AsSpan()));
                 }
             }
             else if (hasBlocklight || hasAnyLight)
@@ -408,7 +415,7 @@ namespace Serialization
 
                     // Flag 0x03: Light-only + full LightData (blocklight or non-uniform sky)
                     writer.Write(SECTION_FLAG_LIGHT_ONLY_FULL);
-                    writer.Write(MemoryMarshal.AsBytes(section.LightData.AsSpan()));
+                    WriteBulk(writer, MemoryMarshal.AsBytes(section.LightData.AsSpan()));
                 }
             }
             // else: section has no blocks and no light — excluded from bitmask, never reaches here.
@@ -489,6 +496,19 @@ namespace Serialization
                 World.Instance.ChunkPool.ReturnChunkSection(section);
                 throw;
             }
+        }
+
+        /// <summary>
+        /// Writes <paramref name="source"/> through the calling thread's scratch buffer and the <c>byte[]</c> overload.
+        /// Unity's <c>BinaryWriter.Write(ReadOnlySpan&lt;byte&gt;)</c> copies the span into a new array on every call.
+        /// </summary>
+        /// <param name="writer">The binary writer.</param>
+        /// <param name="source">The bytes to write; at most <see cref="BULK_SCRATCH_BYTES"/> long.</param>
+        private static void WriteBulk(BinaryWriter writer, ReadOnlySpan<byte> source)
+        {
+            byte[] scratch = s_tBulkScratch ??= new byte[BULK_SCRATCH_BYTES];
+            source.CopyTo(scratch);
+            writer.Write(scratch, 0, source.Length);
         }
 
         /// <summary>
