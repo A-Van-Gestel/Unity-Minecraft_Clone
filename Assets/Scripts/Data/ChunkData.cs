@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using Helpers;
 using JetBrains.Annotations;
+using Jobs;
 using Jobs.BurstData;
 using Unity.Collections;
 using Unity.Scripting.LifecycleManagement;
@@ -239,17 +240,68 @@ namespace Data
 
         #endregion
 
+        // Rented from the chunk pool while nodes are pending and returned when flushed or reset, so warm queues
+        // serve whichever chunks need one.
         [NonSerialized]
-        private readonly Queue<LightQueueNode> _skylightBfsQueue = new Queue<LightQueueNode>();
+        private Queue<LightQueueNode> _skylightBfsQueue;
 
         [NonSerialized]
-        private readonly Queue<LightQueueNode> _blocklightBfsQueue = new Queue<LightQueueNode>();
+        private Queue<LightQueueNode> _blocklightBfsQueue;
 
-        public int SkylightQueueCount => _skylightBfsQueue.Count;
-        public int BlocklightQueueCount => _blocklightBfsQueue.Count;
+        // The pool each queue was rented from, or null when it was allocated with no world (editor harnesses). A queue
+        // goes back to its own pool, never to whichever world is live at release, so the pools' active counts stay exact.
+        [NonSerialized]
+        private ChunkPoolManager _skylightQueueOwner;
 
-        public Queue<LightQueueNode> SkylightBfsQueue => _skylightBfsQueue;
-        public Queue<LightQueueNode> BlocklightBfsQueue => _blocklightBfsQueue;
+        [NonSerialized]
+        private ChunkPoolManager _blocklightQueueOwner;
+
+        public int SkylightQueueCount => _skylightBfsQueue?.Count ?? 0;
+        public int BlocklightQueueCount => _blocklightBfsQueue?.Count ?? 0;
+
+        /// <summary>The skylight queue, rented on first access. Read through <see cref="TryGetSkylightQueue"/>, which never rents.</summary>
+        public Queue<LightQueueNode> SkylightBfsQueue => _skylightBfsQueue ??= RentQueue(LightChannel.Sky, out _skylightQueueOwner);
+
+        /// <summary>The blocklight queue, rented on first access. Read through <see cref="TryGetBlocklightQueue"/>, which never rents.</summary>
+        public Queue<LightQueueNode> BlocklightBfsQueue => _blocklightBfsQueue ??= RentQueue(LightChannel.Block, out _blocklightQueueOwner);
+
+        /// <summary>Gets the skylight queue when it holds pending nodes, without renting one.</summary>
+        /// <param name="queue">The queue, or null when there are no pending nodes.</param>
+        /// <returns>True when skylight nodes are pending.</returns>
+        public bool TryGetSkylightQueue(out Queue<LightQueueNode> queue)
+        {
+            queue = SkylightQueueCount > 0 ? _skylightBfsQueue : null;
+            return queue != null;
+        }
+
+        /// <summary>Gets the blocklight queue when it holds pending nodes, without renting one.</summary>
+        /// <param name="queue">The queue, or null when there are no pending nodes.</param>
+        /// <returns>True when blocklight nodes are pending.</returns>
+        public bool TryGetBlocklightQueue(out Queue<LightQueueNode> queue)
+        {
+            queue = BlocklightQueueCount > 0 ? _blocklightBfsQueue : null;
+            return queue != null;
+        }
+
+        // A reference test, not UnityEngine.Object's ==: rentals also run on ThreadPool threads (async chunk loads).
+        // Without a world (editor harnesses) the queue is allocated and has no owner, so its release drops it.
+        private static Queue<LightQueueNode> RentQueue(LightChannel channel, out ChunkPoolManager owner)
+        {
+            owner = World.Instance is { } world ? world.ChunkPool : null;
+            if (owner is null) return new Queue<LightQueueNode>();
+
+            return channel == LightChannel.Sky ? owner.RentSkylightQueue() : owner.RentBlocklightQueue();
+        }
+
+        private static void ReleaseQueue(LightChannel channel, ref Queue<LightQueueNode> queue, ref ChunkPoolManager owner)
+        {
+            if (queue == null) return;
+
+            if (channel == LightChannel.Sky) owner?.ReturnSkylightQueue(queue);
+            else owner?.ReturnBlocklightQueue(queue);
+            queue = null;
+            owner = null;
+        }
 
 
         /// <summary>Sentinel: this section index has no uniform-sky shortcut.</summary>
@@ -320,9 +372,9 @@ namespace Data
             ClearAllLightingWork();
             RemainingEdgeCheckRounds = 2;
 
-            // Clear Queues (retains capacity)
-            _skylightBfsQueue.Clear();
-            _blocklightBfsQueue.Clear();
+            // Return the rented queues (the pool clears them, keeping their capacity)
+            ReleaseQueue(LightChannel.Sky, ref _skylightBfsQueue, ref _skylightQueueOwner);
+            ReleaseQueue(LightChannel.Block, ref _blocklightBfsQueue, ref _blocklightQueueOwner);
 
             // Clear active-voxel buckets (retains native capacity; no-op until first registration allocates them).
             if (_activeGrass.IsCreated) _activeGrass.Clear();
@@ -497,8 +549,10 @@ namespace Data
 
             // Copy Queues
             // We move the queues from the loaded object (temp) to this object (live)
-            foreach (LightQueueNode node in loadedData.SkylightBfsQueue) AddToSkylightQueue(node.Position, node.OldLightLevel);
-            foreach (LightQueueNode node in loadedData.BlocklightBfsQueue) AddToBlocklightQueue(node.Position, node.OldLightLevel, node.OldBlockR, node.OldBlockG, node.OldBlockB);
+            if (loadedData.TryGetSkylightQueue(out Queue<LightQueueNode> loadedSky))
+                foreach (LightQueueNode node in loadedSky) AddToSkylightQueue(node.Position, node.OldLightLevel);
+            if (loadedData.TryGetBlocklightQueue(out Queue<LightQueueNode> loadedBlock))
+                foreach (LightQueueNode node in loadedBlock) AddToBlocklightQueue(node.Position, node.OldLightLevel, node.OldBlockR, node.OldBlockG, node.OldBlockB);
 
             // If loaded data had flags, transfer them
             if (loadedData.HasLightChangesToProcess) FlagLightWork();
@@ -1487,7 +1541,7 @@ namespace Data
         {
             if (World.Instance.settings.enableLighting)
             {
-                _blocklightBfsQueue.Enqueue(new LightQueueNode
+                BlocklightBfsQueue.Enqueue(new LightQueueNode
                 {
                     Position = localPos, OldLightLevel = oldLightLevel,
                     OldBlockR = oldR, OldBlockG = oldG, OldBlockB = oldB,
@@ -1505,7 +1559,7 @@ namespace Data
         {
             if (World.Instance.settings.enableLighting)
             {
-                _skylightBfsQueue.Enqueue(new LightQueueNode { Position = localPos, OldLightLevel = oldLightLevel });
+                SkylightBfsQueue.Enqueue(new LightQueueNode { Position = localPos, OldLightLevel = oldLightLevel });
                 FlagLightWork();
             }
         }
@@ -1534,7 +1588,8 @@ namespace Data
                 nativeQueue.Enqueue(node);
             }
 
-            // The managed queue is now empty and ready for new requests.
+            // The managed queue is empty: hand it back so the next chunk with pending nodes reuses it warm.
+            ReleaseQueue(LightChannel.Block, ref _blocklightBfsQueue, ref _blocklightQueueOwner);
             return nativeQueue;
         }
 
@@ -1562,7 +1617,8 @@ namespace Data
                 nativeQueue.Enqueue(node);
             }
 
-            // The managed queue is now empty and ready for new requests.
+            // The managed queue is empty: hand it back so the next chunk with pending nodes reuses it warm.
+            ReleaseQueue(LightChannel.Sky, ref _skylightBfsQueue, ref _skylightQueueOwner);
             return nativeQueue;
         }
 

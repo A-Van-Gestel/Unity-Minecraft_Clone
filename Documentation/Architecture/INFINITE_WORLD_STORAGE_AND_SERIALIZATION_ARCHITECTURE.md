@@ -564,11 +564,11 @@ public void PopulateFromSave(ChunkData loadedData)
     // Transfer compact uniform sky levels
     Array.Copy(loadedData.SectionUniformSkyLevel, SectionUniformSkyLevel, SectionUniformSkyLevel.Length);
 
-    // Copy lighting queues (RGB-aware)
-    foreach (var node in loadedData.SkylightBfsQueue)
-        AddToSkylightQueue(node.Position, node.OldLightLevel);
-    foreach (var node in loadedData.BlocklightBfsQueue)
-        AddToBlocklightQueue(node.Position, node.OldLightLevel, node.OldBlockR, node.OldBlockG, node.OldBlockB);
+    // Copy lighting queues (RGB-aware); TryGet reads never rent an empty queue
+    if (loadedData.TryGetSkylightQueue(out var loadedSky))
+        foreach (var node in loadedSky) AddToSkylightQueue(node.Position, node.OldLightLevel);
+    if (loadedData.TryGetBlocklightQueue(out var loadedBlock))
+        foreach (var node in loadedBlock) AddToBlocklightQueue(node.Position, node.OldLightLevel, node.OldBlockR, node.OldBlockG, node.OldBlockB);
 
     // Transfer pending flags
     if (loadedData.HasLightChangesToProcess) FlagLightWork();
@@ -657,9 +657,11 @@ public bool NeedsEdgeCheck { get => ...; set { ...; if (value) OnLightWorkFlagge
 **Layer 2: Per-Chunk Queues (Serialized)**
 
 ```csharp
-// In ChunkData.cs - These ARE saved to disk
-public Queue<LightQueueNode> SkylightBfsQueue;
-public Queue<LightQueueNode> BlocklightBfsQueue;
+// In ChunkData.cs - These ARE saved to disk. Rented from ChunkPoolManager while nodes are pending
+// (null otherwise); a chunk with none writes a 0 count and loads without renting. Each queue remembers
+// the pool it came from and goes back to that pool on flush or Reset.
+public Queue<LightQueueNode> SkylightBfsQueue => _skylightBfsQueue ??= RentQueue(LightChannel.Sky, out _skylightQueueOwner);
+public Queue<LightQueueNode> BlocklightBfsQueue => _blocklightBfsQueue ??= RentQueue(LightChannel.Block, out _blocklightQueueOwner);
 ```
 
 **Layer 3: Global Queue (LightingStateManager)**

@@ -878,15 +878,16 @@ namespace Serialization
                 }
             }
 
-            // Queue copying (Locking is correct)
-            lock (source.SkylightBfsQueue)
+            // Queue copying: the snapshot rents a queue only when the source has nodes pending. No lock: this runs
+            // on the main thread, the only writer of a live chunk's queues.
+            if (source.TryGetSkylightQueue(out Queue<LightQueueNode> skylightQueue))
             {
-                foreach (LightQueueNode item in source.SkylightBfsQueue) snapshot.SkylightBfsQueue.Enqueue(item);
+                foreach (LightQueueNode item in skylightQueue) snapshot.SkylightBfsQueue.Enqueue(item);
             }
 
-            lock (source.BlocklightBfsQueue)
+            if (source.TryGetBlocklightQueue(out Queue<LightQueueNode> blocklightQueue))
             {
-                foreach (LightQueueNode item in source.BlocklightBfsQueue) snapshot.BlocklightBfsQueue.Enqueue(item);
+                foreach (LightQueueNode item in blocklightQueue) snapshot.BlocklightBfsQueue.Enqueue(item);
             }
 
             return snapshot;

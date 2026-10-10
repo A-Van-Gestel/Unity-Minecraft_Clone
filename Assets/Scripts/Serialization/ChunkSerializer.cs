@@ -6,6 +6,7 @@ using System.Text;
 using System.Threading;
 using Data;
 using Helpers;
+using Jobs;
 using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 
@@ -226,9 +227,11 @@ namespace Serialization
             }
 
             // --- Write Lighting Queues ---
-            // Lock queues during serialization to prevent concurrent modification by the Main Thread
-            lock (data.SkylightBfsQueue) WriteLightQueue(writer, data.SkylightBfsQueue);
-            lock (data.BlocklightBfsQueue) WriteLightQueue(writer, data.BlocklightBfsQueue);
+            // The TryGet reads never rent a queue, so a chunk with nothing pending writes a bare 0 count.
+            data.TryGetSkylightQueue(out Queue<LightQueueNode> skylightQueue);
+            data.TryGetBlocklightQueue(out Queue<LightQueueNode> blocklightQueue);
+            WriteLightQueue(writer, skylightQueue);
+            WriteLightQueue(writer, blocklightQueue);
         }
 
         // --- Internal Read Logic ---
@@ -290,8 +293,8 @@ namespace Serialization
                 }
 
                 // --- Lighting ---
-                ReadLightQueue(reader, chunk.SkylightBfsQueue);
-                ReadLightQueue(reader, chunk.BlocklightBfsQueue);
+                ReadLightQueue(reader, chunk, LightChannel.Sky);
+                ReadLightQueue(reader, chunk, LightChannel.Block);
 
                 // If we loaded pending lights, flag the chunk for processing
                 if (chunk.SkylightQueueCount > 0 || chunk.BlocklightQueueCount > 0)
@@ -320,8 +323,9 @@ namespace Serialization
 
         private static void WriteLightQueue(BinaryWriter writer, Queue<LightQueueNode> queue)
         {
-            // Write Count
-            writer.Write(queue.Count);
+            // Write Count (a null queue has no pending nodes)
+            writer.Write(queue?.Count ?? 0);
+            if (queue == null) return;
 
             // Write Items
             foreach (LightQueueNode node in queue)
@@ -336,12 +340,17 @@ namespace Serialization
             }
         }
 
-        private static void ReadLightQueue(BinaryReader reader, Queue<LightQueueNode> queue)
+        private static void ReadLightQueue(BinaryReader reader, ChunkData chunk, LightChannel channel)
         {
             int count = reader.ReadInt32();
             // Sanity check to prevent OOM on corrupt data
             if (count is < 0 or > 100_000)
                 throw new InvalidDataException($"Invalid LightQueue count: {count}");
+
+            // An empty saved queue rents nothing.
+            if (count == 0) return;
+
+            Queue<LightQueueNode> queue = channel == LightChannel.Sky ? chunk.SkylightBfsQueue : chunk.BlocklightBfsQueue;
 
             for (int i = 0; i < count; i++)
             {

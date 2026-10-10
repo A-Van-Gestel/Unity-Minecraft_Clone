@@ -16,8 +16,9 @@ namespace Editor.Validation.SerializationRoundTrip
     /// <para><b>Charter split.</b> <c>Validate Deserialization Robustness</c> owns the FAILURE paths at the load
     /// boundary (truncated / garbage / wrong-version payloads → null, no throw, no pooled leak) and
     /// <c>Validate Save Durability</c> owns the retry/staging contract. This suite owns format FIDELITY:
-    /// round-trip identity, section-flag classification, golden bytes, the compression matrix, and (part 4–5)
-    /// <c>RegionFile</c> sector mechanics and the pending stores.</para>
+    /// round-trip identity, section-flag classification, golden bytes, the compression matrix, (part 4–5)
+    /// <c>RegionFile</c> sector mechanics and the pending stores, and (part 6, <c>ES-27</c>) the pooled light
+    /// queues the save path reads.</para>
     /// <para><b>Fixture independence.</b> The fixture palette uses test-local voxel ids rather than
     /// <c>BlockIDs</c> constants — this suite pins serialized bytes, so it must not move when
     /// <c>BlockDatabase.asset</c> is re-authored. See the palette block in the <c>.Fixture.cs</c> partial.</para>
@@ -94,6 +95,7 @@ namespace Editor.Validation.SerializationRoundTrip
                 new Scenario("B14: an oversized record throws ChunkTooLargeException and changes nothing", OversizedRecordThrowsTypedAndChangesNothing),
                 new Scenario("B15: pending skylight columns and blocklight mods survive save → load", PendingLightStoresSurviveSaveAndLoad),
                 new Scenario("B16: pending voxel mods survive save → load with position, id and meta intact", PendingModStoreSurvivesSaveAndLoad),
+                new Scenario("B17: light queues are pool-rented only while nodes are pending, returned on flush and reset, and reused warm", LightQueuesAreRentedOnlyWhilePending),
                 new Scenario("K04: a dense chunk with large pending light queues still saves and reloads", DenseChunkWithLargeLightQueuesSaves, "SERIALIZATION_BUGS §04"),
                 new Scenario("K08: an invalid pending column is rejected, not byte-truncated onto another column", InvalidPendingColumnsAreRejectedNotTruncated, "SERIALIZATION_BUGS §08"),
             };

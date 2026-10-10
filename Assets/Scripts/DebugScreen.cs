@@ -495,7 +495,8 @@ public class DebugScreen : MonoBehaviour
             _topLeftBuilder.Append(" ├ Chunks unused in Pool: ").AppendInteger(_world.ChunkPool.PooledChunks)
                 .Append(" | Borders unused in Pool: ").AppendInteger(_world.ChunkPool.PooledBorders).AppendLine();
             _topLeftBuilder.Append(" └ Data unused in Pool: ").AppendInteger(_world.ChunkPool.PooledData)
-                .Append(" | Sections unused in Pool: ").AppendInteger(_world.ChunkPool.PooledSections).AppendLine();
+                .Append(" | Sections unused in Pool: ").AppendInteger(_world.ChunkPool.PooledSections)
+                .Append(" | Light queues unused in Pool: ").AppendInteger(_world.ChunkPool.PooledLightQueues).AppendLine();
             _topLeftBuilder.Append("Total Chunks to Build Mesh: ");
             _world.AppendMeshQueueDebugInfo(_topLeftBuilder);
             _topLeftBuilder.AppendLine();

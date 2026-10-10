@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Data;
 using DebugVisualizations;
 using Helpers;
@@ -14,6 +15,8 @@ public class ChunkPoolManager
     // NOTE: Accessed by Background Serialization Threads + Main Thread
     private readonly ConcurrentDynamicPool<ChunkData> _dataPool;
     private readonly ConcurrentDynamicPool<ChunkSection> _sectionPool;
+    private readonly ConcurrentDynamicPool<Queue<LightQueueNode>> _skylightQueuePool;
+    private readonly ConcurrentDynamicPool<Queue<LightQueueNode>> _blocklightQueuePool;
 
     // Debug Pools
     private readonly DynamicPool<GameObject> _borderPool;
@@ -29,6 +32,13 @@ public class ChunkPoolManager
     public int ActiveSections => _sectionPool.ActiveCount;
     public int PooledData => _dataPool.PooledCount;
     public int PooledSections => _sectionPool.PooledCount;
+
+    /// <summary>Light BFS queues currently rented, both channels.</summary>
+    public int ActiveLightQueues => _skylightQueuePool.ActiveCount + _blocklightQueuePool.ActiveCount;
+
+    /// <summary>Light BFS queues idle in the pools, both channels.</summary>
+    public int PooledLightQueues => _skylightQueuePool.PooledCount + _blocklightQueuePool.PooledCount;
+
     public int PooledBorders => _borderPool.PooledCount;
     public int PooledVisualizers => _visualizerPool.PooledCount;
 
@@ -52,15 +62,30 @@ public class ChunkPoolManager
     private const int SPARE_ROWS_VISUAL = 2; // chunk/border/visualizer pools: view-distance rows
     private const int SPARE_ROWS_DATA = 4; // data/section pools: unload-boundary rows
 
+    // Light-queue pools: unload-boundary rows covering the queues in use while flying at 200 m/s (~240 per
+    // channel at vd 10, ES-27). A lower cap prunes queues the next frontier burst re-creates.
+    private const int SPARE_ROWS_LIGHT_QUEUE = 8;
+
     // A surplus above the soft (row) cap is reclaimed only after this long with NO pool demand
     // (any demand retains the whole surplus — deliberate: bounded by the hard cap). Scaled game
     // time: the window freezes together with the pools' prune timers while the game is paused.
     private const float LINGER_SECONDS = 90f;
 
+    /// <summary>
+    /// Capacity of a new pooled skylight queue: the p99 of skylight nodes flushed to a lighting job (3 761 in the
+    /// ES-27 Editor benchmark at 200 m/s), so a rented queue almost never regrows.
+    /// </summary>
+    public const int SkylightQueueCapacity = 3800;
+
+    /// <summary>Capacity of a new pooled blocklight queue: the p99 of blocklight nodes flushed (1 358, same run).</summary>
+    public const int BlocklightQueueCapacity = 1400;
+
     // Per-pool linger bookkeeping for PoolPruneDecision.Evaluate (the pure, suite-tested policy).
     private PoolPruneDecision.State _chunkPrune;
     private PoolPruneDecision.State _dataPrune;
     private PoolPruneDecision.State _sectionPrune;
+    private PoolPruneDecision.State _skylightQueuePrune;
+    private PoolPruneDecision.State _blocklightQueuePrune;
     private PoolPruneDecision.State _borderPrune;
     private PoolPruneDecision.State _visualizerPrune;
 
@@ -99,6 +124,25 @@ public class ChunkPoolManager
                 /* Data GC handled by runtime */
             },
             onReturnAction: sec => sec.Reset()
+        );
+
+        // Initialize light BFS queue pools (pre-sized queues, rented only while light nodes are pending)
+        _skylightQueuePool = new ConcurrentDynamicPool<Queue<LightQueueNode>>(
+            createFunc: () => new Queue<LightQueueNode>(SkylightQueueCapacity),
+            destroyAction: _ =>
+            {
+                /* Managed, GC'd */
+            },
+            onReturnAction: queue => queue.Clear()
+        );
+
+        _blocklightQueuePool = new ConcurrentDynamicPool<Queue<LightQueueNode>>(
+            createFunc: () => new Queue<LightQueueNode>(BlocklightQueueCapacity),
+            destroyAction: _ =>
+            {
+                /* Managed, GC'd */
+            },
+            onReturnAction: queue => queue.Clear()
         );
 
         // Initialize Border Pool
@@ -155,6 +199,15 @@ public class ChunkPoolManager
         _sectionPool.UpdatePruning(PoolPruneDecision.Evaluate(
             dataSoftCap * ChunkMath.SECTIONS_PER_CHUNK, dataHardCap * ChunkMath.SECTIONS_PER_CHUNK,
             _sectionPool.TotalGets, LINGER_SECONDS, now, ref _sectionPrune));
+
+        // Only chunks with pending light nodes hold a queue — a band near the load frontier, so the caps are
+        // rows, not the data pools' area: the startup burst is reclaimed rather than kept at ~60 KB a queue.
+        int queueSoftCap = unloadRow;
+        int queueHardCap = SPARE_ROWS_LIGHT_QUEUE * unloadRow;
+        _skylightQueuePool.UpdatePruning(PoolPruneDecision.Evaluate(queueSoftCap, queueHardCap,
+            _skylightQueuePool.TotalGets, LINGER_SECONDS, now, ref _skylightQueuePrune));
+        _blocklightQueuePool.UpdatePruning(PoolPruneDecision.Evaluate(queueSoftCap, queueHardCap,
+            _blocklightQueuePool.TotalGets, LINGER_SECONDS, now, ref _blocklightQueuePrune));
 
         // Fully cleanup ChunkBorder pool if disabled to free memory allocation.
         // Evaluate always runs so the demand bookkeeping never goes stale across a disable window.
@@ -244,6 +297,22 @@ public class ChunkPoolManager
     {
         _sectionPool.Return(section);
     }
+
+    /// <summary>Rents an empty skylight BFS queue, pre-sized so a typical chunk's pending nodes never regrow it.</summary>
+    /// <returns>An empty queue; hand it back through <see cref="ReturnSkylightQueue"/>.</returns>
+    public Queue<LightQueueNode> RentSkylightQueue() => _skylightQueuePool.Get();
+
+    /// <summary>Returns a skylight BFS queue rented through <see cref="RentSkylightQueue"/>; it is cleared on return.</summary>
+    /// <param name="queue">The queue to pool. Must no longer be referenced by its chunk.</param>
+    public void ReturnSkylightQueue(Queue<LightQueueNode> queue) => _skylightQueuePool.Return(queue);
+
+    /// <summary>Rents an empty blocklight BFS queue, pre-sized so a typical chunk's pending nodes never regrow it.</summary>
+    /// <returns>An empty queue; hand it back through <see cref="ReturnBlocklightQueue"/>.</returns>
+    public Queue<LightQueueNode> RentBlocklightQueue() => _blocklightQueuePool.Get();
+
+    /// <summary>Returns a blocklight BFS queue rented through <see cref="RentBlocklightQueue"/>; it is cleared on return.</summary>
+    /// <param name="queue">The queue to pool. Must no longer be referenced by its chunk.</param>
+    public void ReturnBlocklightQueue(Queue<LightQueueNode> queue) => _blocklightQueuePool.Return(queue);
 
     #endregion
 
@@ -342,9 +411,11 @@ public class ChunkPoolManager
         _chunkPool.Clear();
         _dataPool.Clear();
         _sectionPool.Clear();
+        _skylightQueuePool.Clear();
+        _blocklightQueuePool.Clear();
         _borderPool.Clear();
         _visualizerPool.Clear();
 
-        Debug.Log("[ChunkPoolManager] All pools [Chunks, ChunkData, ChunkSections, ChunkBorders, VoxelVisualizers] in the ChunkPool have been disposed of..");
+        Debug.Log("[ChunkPoolManager] All pools [Chunks, ChunkData, ChunkSections, LightQueues, ChunkBorders, VoxelVisualizers] in the ChunkPool have been disposed of..");
     }
 }

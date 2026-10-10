@@ -82,31 +82,34 @@ namespace Editor.Validation.DeserializationRobustness
             }
         }
 
-        /// <summary>Snapshot of the concurrent data/section pools' active counts, for leak balance checks.</summary>
+        /// <summary>Snapshot of the concurrent data/section/light-queue pools' active counts, for leak balance checks.</summary>
         private readonly struct PoolBalance
         {
             private readonly int _activeData;
             private readonly int _activeSections;
+            private readonly int _activeLightQueues;
 
             /// <summary>Captures the current active counts.</summary>
-            public static PoolBalance Capture() => new PoolBalance(
-                World.Instance.ChunkPool.ActiveData, World.Instance.ChunkPool.ActiveSections);
+            public static PoolBalance Capture() => new PoolBalance(World.Instance.ChunkPool.ActiveData,
+                World.Instance.ChunkPool.ActiveSections, World.Instance.ChunkPool.ActiveLightQueues);
 
-            private PoolBalance(int activeData, int activeSections)
+            private PoolBalance(int activeData, int activeSections, int activeLightQueues)
             {
                 _activeData = activeData;
                 _activeSections = activeSections;
+                _activeLightQueues = activeLightQueues;
             }
 
-            /// <summary>Asserts the active counts match this snapshot (no shell/section leaked).</summary>
+            /// <summary>Asserts the active counts match this snapshot (no shell, section or light queue leaked).</summary>
             /// <param name="label">Assertion label for the log.</param>
-            /// <returns>True when both pools are balanced.</returns>
+            /// <returns>True when every pool is balanced.</returns>
             public bool AssertUnchanged(string label)
             {
                 PoolBalance now = Capture();
                 return Check(
-                    $"{label} (data {_activeData.ToString()}→{now._activeData.ToString()}, sections {_activeSections.ToString()}→{now._activeSections.ToString()})",
-                    now._activeData == _activeData && now._activeSections == _activeSections);
+                    $"{label} (data {_activeData.ToString()}→{now._activeData.ToString()}, sections {_activeSections.ToString()}→{now._activeSections.ToString()}, light queues {_activeLightQueues.ToString()}→{now._activeLightQueues.ToString()})",
+                    now._activeData == _activeData && now._activeSections == _activeSections &&
+                    now._activeLightQueues == _activeLightQueues);
             }
         }
 
@@ -167,7 +170,7 @@ namespace Editor.Validation.DeserializationRobustness
             bool ok = Check($"{label}: returns null", result == null);
             // Guards a vacuous pass: proves the parse path actually ran and failed (not e.g. an empty payload).
             ok &= Check($"{label}: parse failure counted", ChunkSerializer.DeserializeFailures > failuresBefore);
-            ok &= balance.AssertUnchanged($"{label}: pools balanced (no shell/section leak)");
+            ok &= balance.AssertUnchanged($"{label}: pools balanced (no shell, section or light-queue leak)");
             if (result != null) World.Instance.ChunkPool.ReturnChunkData(result);
             return ok;
         }
