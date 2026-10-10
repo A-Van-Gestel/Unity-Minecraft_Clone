@@ -25,6 +25,8 @@ unity command build --profileName "Windows - Production" --outputPath "$OUT" --c
 unity command build --profileName "Windows - Development" --outputPath "$OUT" --options '["Development"]' --confirm true --result-only
 ```
 
+- Give `--outputPath` as a Windows path (`K:/…`). A Git-Bash path (`/k/…`, what `$(pwd)` prints) is taken as rooted
+  on the current drive, so the build lands in `K:\k\…`.
 - The call returns `queued` and a `buildId`; poll `unity command build_status --result-only` until it reports
   that `buildId` with `"status": "completed"` (an IL2CPP build takes several minutes — poll from a background
   shell). An earlier build's `completed` status lingers, so match the id.
@@ -50,6 +52,17 @@ The player otherwise inherits its settings file — `persistentDataPath/settings
 `<build>_Data/settings.json`, created with calibrated defaults on first launch.
 
 ## 3a. Flow A — unattended run
+
+Prefer the runner, which does everything below in one call — adds `-force-d3d11 -mc-mute -mc-quit`, kills on
+timeout, saves the run's `Player.log` under `Tools/Python/output/player_runs/`, and prints the report path (exit 0 =
+finished with a report). A build plus its runs can also go to the `player-runner` subagent in one spawn.
+
+```bash
+python Tools/Python/run_player.py --exe "<build>/Minecraft Clone.exe" --tag b1 --timeout 15 -- \
+    -mc-run benchmark -mc-set benchmarkGenerationSpeeds=200 -mc-set benchmarkLoadingSpeeds=50
+```
+
+By hand:
 
 ```powershell
 $p = Start-Process -FilePath $exe -ArgumentList @('-force-d3d11','-mc-run','benchmark',
