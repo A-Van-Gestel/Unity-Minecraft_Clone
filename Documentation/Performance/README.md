@@ -174,6 +174,19 @@ Those captures' **measurements remain valid** — they always ran the real produ
 only the header misdescribed it. Per the append-only rule the affected files are left untouched. But
 a capture whose *reasoning* leaned on either line (e.g. discounting a result as pessimistic because
 "safety checks were on") needs its conclusion revisited even though its numbers stand.
+
+#### What `-dirty` means, and the `Git dirty:` line (from 2026-10-11)
+
+`BuildStampBaker` runs before every other build hook (`callbackOrder` `int.MinValue`), so it sees the tree as the
+build found it — not the files other hooks write mid-build (the Performance Testing package's `TestRunBuilder`
+creates `Assets/Resources/PerformanceTestRun*.json` at order 0 and deletes them after the build). The check ignores
+the stamp itself and paths that never reach a player: `Documentation/`, `Tools/`, `.agents/`, `.claude/` and
+root-level `*.md`. Markdown under `Assets/` still counts.
+
+A dirty build adds a `Git dirty:` header line under `Git commit:` naming the first five paths (`(+N more)` for the
+rest), so a `-dirty` report says why. **Captures before this date** read `-dirty` on every build, clean or not, because
+`TestRunBuilder`'s files were always present when the stamp was baked: their suffix carries no information.
+
 #### Managed Code Variant governs instrumentation (from 2026-09-01, Unity 6.6)
 
 Unity 6.6 deprecates `DEVELOPMENT_BUILD` and moves diagnostic gating to a **Managed Code Variant**
