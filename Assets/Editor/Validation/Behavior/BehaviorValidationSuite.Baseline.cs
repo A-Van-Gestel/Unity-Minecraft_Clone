@@ -202,6 +202,9 @@ T11
             // ES-6.1 registration contract — see BehaviorValidationSuite.Baseline.ActiveRegistration.cs.
             scenarios.Add(new Scenario("BH-B13: active-voxel buckets stay exact once registered (job list, edits, Reset, step-4 wake)", Bh13_ActiveRegistrationFlag));
 
+            // ES-31 registration screen + two-sided population wake — see BehaviorValidationSuite.Baseline.RegistrationScreen.cs.
+            AddRegistrationScreenScenarios(scenarios);
+
             // BH-D1 old-vs-new differential (comparator self-test + driver-pair fixtures) — see BehaviorValidationSuite.Differential.cs.
             AddDifferentialScenarios(scenarios);
         }

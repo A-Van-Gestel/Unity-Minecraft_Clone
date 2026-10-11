@@ -7,6 +7,7 @@ using JetBrains.Annotations;
 using Jobs;
 using Jobs.BurstData;
 using Unity.Collections;
+using Unity.Jobs;
 using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
@@ -736,8 +737,11 @@ namespace Data
 
         /// <summary>
         /// Scans the populated chunk data for voxels that possess active behaviors (e.g., grass spreading) and
-        /// registers them in the active buckets for continuous tick processing.
+        /// registers the ones that can act on their next tick (the ES-31 screen, <see cref="ActiveVoxelScreen"/>) in
+        /// the active buckets for continuous tick processing.
         /// </summary>
+        /// <param name="registerAll">When true, registers every active-type voxel unscreened — for harnesses whose
+        /// workload is the seeded voxels themselves (the fluid-tick benchmark), never for gameplay.</param>
         /// <remarks>
         /// The scan for data with no generation-job list (loaded from disk, or from a generator without the scan
         /// pass), since active voxels are not persisted; a job list registers through
@@ -746,11 +750,17 @@ namespace Data
         /// <para><b>Parity invariant:</b> this managed scan and the Burst <see cref="Jobs.ActiveVoxelScanJob"/>
         /// must register the same active set — they MUST agree on both the active criterion
         /// (<see cref="World.IsActiveById"/> here vs <c>BlockTypeJobData.IsActive</c> there, co-built in one loop
-        /// in <c>World</c> init, so drift-proof) and the section/index convention. Change one path's criterion or
-        /// convention and you must change the other.</para>
+        /// in <c>World</c> init, so drift-proof), the screen (both call <see cref="ActiveVoxelScreen.MustRegister{TSource}"/>)
+        /// and the section/index convention. Change one path's criterion or convention and you must change the other.</para>
         /// </remarks>
-        public void RescanActiveVoxels()
+        public void RescanActiveVoxels(bool registerAll = false)
         {
+            if (!registerAll)
+            {
+                RegisterScreenedActiveVoxels();
+                return;
+            }
+
             bool[] isActiveById = World.Instance.IsActiveById;
 
             // Iterate through sections first to skip empty ones.
@@ -780,6 +790,51 @@ namespace Data
             }
 
             _activeVoxelsRegistered = true; // last, so a throw above leaves the rescan armed
+        }
+
+        // Runs generation's own Burst scan synchronously over a flat copy of the chunk: the screen reads every active
+        // voxel's neighbors, which managed code pays for per read, and one implementation keeps both paths' sets equal.
+        private void RegisterScreenedActiveVoxels()
+        {
+            // Most land chunks hold no active voxel at all: skip the copy and the job for them.
+            if (!HasAnyActiveVoxel(World.Instance.IsActiveById))
+            {
+                _activeVoxelsRegistered = true;
+                return;
+            }
+
+            NativeArray<uint> map = new NativeArray<uint>(ChunkMath.CHUNK_VOLUME, Allocator.TempJob,
+                NativeArrayOptions.UninitializedMemory);
+            NativeList<int> activeVoxels = new NativeList<int>(Allocator.TempJob);
+            try
+            {
+                FillJobVoxelMap(map);
+                new ActiveVoxelScanJob
+                {
+                    VoxelMap = map,
+                    BlockTypes = World.Instance.JobDataManager.BlockTypesJobData,
+                    ActiveVoxels = activeVoxels,
+                }.Run();
+                RegisterActiveVoxelsFromJob(activeVoxels);
+            }
+            finally
+            {
+                map.Dispose();
+                activeVoxels.Dispose();
+            }
+        }
+
+        private bool HasAnyActiveVoxel(bool[] isActiveById)
+        {
+            foreach (ChunkSection section in sections)
+            {
+                if (section == null || section.IsEmpty) continue;
+                foreach (uint packed in section.voxels)
+                    if (isActiveById[BurstVoxelDataBitMapping.GetId(packed)])
+                        return true;
+            }
+
+            return false;
         }
 
         /// <summary>

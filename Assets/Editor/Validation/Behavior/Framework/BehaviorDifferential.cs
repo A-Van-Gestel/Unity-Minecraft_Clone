@@ -129,7 +129,7 @@ namespace Editor.Validation.Behavior.Framework
         }
 
         /// <summary>Total-order comparator over <see cref="Vector3Int"/> by (x, y, z) — the canonical target ordering.</summary>
-        private sealed class PositionComparer : IComparer<Vector3Int>
+        internal sealed class PositionComparer : IComparer<Vector3Int>
         {
             public static readonly PositionComparer Instance = new PositionComparer();
 

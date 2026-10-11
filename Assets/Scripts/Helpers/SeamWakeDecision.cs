@@ -46,6 +46,11 @@ namespace Helpers
         /// <returns>The offset to add to the center chunk's voxel origin.</returns>
         public static Vector2Int NeighborVoxelOffset(int direction) => s_cardinalOffsets[direction];
 
+        /// <summary>Returns the opposite cardinal direction (W↔E, S↔N).</summary>
+        /// <param name="direction">Direction index: 0=W(−X), 1=E(+X), 2=S(−Z), 3=N(+Z).</param>
+        /// <returns>The direction pointing back.</returns>
+        public static int Opposite(int direction) => direction ^ 1;
+
         /// <summary>
         /// Describes the neighbor-local slab that faces the seam for a given direction — the only cells whose
         /// activity the center chunk's population can change.
@@ -63,30 +68,31 @@ namespace Helpers
         }
 
         /// <summary>
-        /// Re-registers the active-behavior voxels in <paramref name="neighbor"/>'s seam-facing slab that the
-        /// newly populated chunk could actually affect, waking work that quiesced while that chunk was still an
-        /// unpopulated placeholder.
+        /// Re-registers the active-behavior voxels in <paramref name="neighbor"/>'s seam-facing slab that the cells
+        /// across the seam in <paramref name="populated"/> could actually affect. Called both ways when a chunk
+        /// populates: on a neighbor's slab (work that quiesced against the placeholder) and on the populated chunk's
+        /// own slab (cells the registration screen left to this pass).
         /// </summary>
-        /// <param name="neighbor">The already-populated neighbor to wake. Must not be null.</param>
-        /// <param name="populated">The chunk that just became populated, whose facing slab gates the wake. Must not be null.</param>
+        /// <param name="neighbor">The chunk whose seam slab is woken. Must not be null.</param>
+        /// <param name="populated">The chunk across the seam, whose facing slab gates the wake. Must not be null.</param>
         /// <param name="direction">Direction of <paramref name="neighbor"/> from <paramref name="populated"/> (0=W, 1=E, 2=S, 3=N).</param>
         /// <param name="isActiveById">Flat "has ticking behavior" table (<c>World.IsActiveById</c>).</param>
         /// <param name="isSolidById">Flat solidity table (<c>World.IsSolidById</c>).</param>
+        /// <param name="blockTypes">The block palette (<c>World.BlockTypes</c>) for the fluid-source test.</param>
         /// <returns>The number of voxels re-registered — 0 when nothing across the seam can receive behavior.</returns>
         /// <remarks>
         /// The two slabs are walked as <b>pairs</b>: a neighbor voxel is only woken when the cell directly across
-        /// the seam could change its evaluation. A cell that is solid is a wall to every fluid predicate — exactly
-        /// what void already was — so it cannot. The one solid exception is <see cref="BlockIDs.Dirt"/>, which grass
+        /// the seam could change its evaluation. A level-0 fluid source is tested with the registration screen's own
+        /// rule (<see cref="ActiveVoxelScreen.CanSourceFlowInto"/>): it acts across a seam only by spreading into that
+        /// cell, so a source facing a wall or a source of its own fluid stays asleep — on an ocean seam, every cell.
+        /// Every other voxel uses the receive test: a solid cell is a wall to every fluid predicate — exactly what
+        /// void already was — so it cannot. The one solid exception is <see cref="BlockIDs.Dirt"/>, which grass
         /// converts (<c>BlockBehavior.IsConvertibleDirt</c>); it is named explicitly because it is the only solid
         /// block any behavior family targets today. <b>Add to this test if a family gains a solid target</b>, or
         /// that family will silently stop waking across seams.
-        /// <para><b>What this does and does not save.</b> It skips most of the slab for land and underground
-        /// populations, where the facing face is largely stone. It saves nothing on an <i>ocean</i> seam — water is
-        /// non-solid, so every cell passes — which is the densest case. Narrowing that further would mean
-        /// re-deciding activity here, duplicating <c>IsFluidActive</c> outside the tick; deliberately not done.</para>
         /// </remarks>
         public static int WakeSeamSlab(ChunkData neighbor, ChunkData populated, int direction,
-            bool[] isActiveById, bool[] isSolidById)
+            bool[] isActiveById, bool[] isSolidById, BlockType[] blockTypes)
         {
             SeamSlab(direction, out bool slabIsOnX, out int slabLocal);
 
@@ -116,17 +122,25 @@ namespace Helpers
                     int index = x + sectionY * ChunkMath.SECTION_SIZE +
                                 z * ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE;
 
-                    ushort id = BurstVoxelDataBitMapping.GetId(section.voxels[index]);
+                    uint packed = section.voxels[index];
+                    ushort id = BurstVoxelDataBitMapping.GetId(packed);
                     if (id >= isActiveById.Length || !isActiveById[id]) continue;
 
-                    // Same-Y sample first: it is the common admit and costs one raw array index. Only when it
-                    // rejects do we pay for the y+1 sample (grass's up-diagonal target), so the extra read lands
-                    // exclusively on cells we were about to skip.
-                    if (populatedSection != null &&
-                        !CanReceiveBehavior(populatedSection, populatedSlabLocal, slabIsOnX, sectionY, across, isSolidById) &&
-                        !CanReceiveGrassAbove(populated, populatedSlabLocal, slabIsOnX, startY + sectionY, across, isSolidById))
+                    if (populatedSection != null)
                     {
-                        continue;
+                        if (IsFluidSource(packed, id, blockTypes))
+                        {
+                            if (!SourceCanFlowAcross(populatedSection, populatedSlabLocal, slabIsOnX, sectionY, across, id, blockTypes))
+                                continue;
+                        }
+                        // Same-Y sample first: it is the common admit and costs one raw array index. Only when it
+                        // rejects do we pay for the y+1 sample (grass's up-diagonal target), so the extra read lands
+                        // exclusively on cells we were about to skip.
+                        else if (!CanReceiveBehavior(populatedSection, populatedSlabLocal, slabIsOnX, sectionY, across, isSolidById) &&
+                                 !CanReceiveGrassAbove(populated, populatedSlabLocal, slabIsOnX, startY + sectionY, across, isSolidById))
+                        {
+                            continue;
+                        }
                     }
 
                     neighbor.AddActiveVoxel(new Vector3Int(x, startY + sectionY, z), id);
@@ -135,6 +149,27 @@ namespace Helpers
             }
 
             return woken;
+        }
+
+        private static bool IsFluidSource(uint packed, ushort id, BlockType[] blockTypes) =>
+            id < blockTypes.Length && blockTypes[id].fluidType != FluidType.None &&
+            BurstVoxelDataBitMapping.GetFluidLevel(packed) == 0;
+
+        /// <summary>Whether a level-0 source could spread into (or stay active against) the cell across the seam.</summary>
+        private static bool SourceCanFlowAcross(ChunkSection populatedSection, int populatedSlabLocal, bool slabIsOnX,
+            int sectionY, int across, ushort sourceId, BlockType[] blockTypes)
+        {
+            int px = slabIsOnX ? populatedSlabLocal : across;
+            int pz = slabIsOnX ? across : populatedSlabLocal;
+
+            uint pPacked = populatedSection.voxels[px + sectionY * ChunkMath.SECTION_SIZE +
+                                                   pz * ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE];
+            ushort pId = BurstVoxelDataBitMapping.GetId(pPacked);
+            if (pId >= blockTypes.Length) return true; // unknown id — wake rather than silently skip
+
+            BlockType target = blockTypes[pId];
+            return ActiveVoxelScreen.CanSourceFlowInto(sourceId, pId, BurstVoxelDataBitMapping.GetFluidLevel(pPacked),
+                target.isSolid, (target.tags & BlockTags.REPLACEABLE) != 0);
         }
 
         /// <summary>

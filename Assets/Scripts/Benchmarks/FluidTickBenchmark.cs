@@ -291,7 +291,7 @@ namespace Benchmarks
 
         /// <summary>
         /// Builds <see cref="FluidScenario.ChunkCount"/> independent interior chunks, seeds each via the scenario,
-        /// registers active voxels through the production scan (<see cref="Chunk.OnDataPopulated"/>), and wires each
+        /// registers active voxels through the production scan (<see cref="ChunkData.RescanActiveVoxels"/>), and wires each
         /// into the live world via <c>World.RegisterSyntheticChunk</c>.
         /// </summary>
         private static List<Chunk> BuildChunks(FluidScenario scenario)
@@ -315,8 +315,9 @@ namespace Benchmarks
                 data.Chunk = chunk;
 
                 // Production active-voxel scan → fills the real per-family NativeHashSet buckets (the structure
-                // under measurement), exactly as the non-job populate path does.
-                chunk.OnDataPopulated();
+                // under measurement). Unscreened: the seeded voxels ARE the workload, and the registration screen
+                // would drop an inert scenario's every voxel, leaving nothing to time.
+                data.RescanActiveVoxels(registerAll: true);
 
                 World.Instance.RegisterSyntheticChunk(chunk);
                 chunks.Add(chunk);

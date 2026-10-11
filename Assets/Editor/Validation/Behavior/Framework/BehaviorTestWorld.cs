@@ -120,6 +120,14 @@ namespace Editor.Validation.Behavior.Framework
         /// </summary>
         public TickDriver Driver = TickDriver.Legacy;
 
+        /// <summary>
+        /// When true, every tick evaluates the active voxels in ascending (x, y, z) order instead of the model's set
+        /// order. A set's order follows its insertion and removal history (freed slots are reused), so two worlds
+        /// holding the same voxels after different histories enumerate them differently; this isolates a comparison
+        /// to WHICH voxels are registered (BH-B17).
+        /// </summary>
+        public bool CanonicalOrder;
+
         /// <summary>Grass voxel evaluations the <see cref="TickDriver.BurstHaloBand"/> driver took from the grass job, over all ticks.</summary>
         public int JobTickedGrassVoxels { get; private set; }
 
@@ -204,9 +212,13 @@ namespace Editor.Validation.Behavior.Framework
         /// <summary>Number of voxels currently registered as active (ticked each pass).</summary>
         public int ActiveVoxelCount => _activeVoxels.Count;
 
+        /// <summary>The voxels currently registered as active, in evaluation order (chunk-local positions).</summary>
+        public IReadOnlyCollection<Vector3Int> ActiveVoxels => _activeVoxels;
+
         /// <summary>
-        /// Writes a block at a chunk-local position and, mirroring initial active-voxel registration, marks it
-        /// active if its block type's <c>isActive</c> flag is set. Use during scenario setup.
+        /// Writes a block at a chunk-local position and, mirroring initial active-voxel registration of the final
+        /// fixture, marks it active if its block type's <c>isActive</c> flag is set (and unmarks a block it
+        /// overwrites). Use during scenario setup.
         /// </summary>
         /// <param name="x">Chunk-local X (0-15).</param>
         /// <param name="y">Chunk-local Y (0-127).</param>
@@ -218,6 +230,8 @@ namespace Editor.Validation.Behavior.Framework
             ChunkData.SetVoxel(x, y, z, BurstVoxelDataBitMapping.PackVoxelData(id, meta));
             if (PaletteOf(id).isActive)
                 _activeVoxels.Add(new Vector3Int(x, y, z));
+            else
+                _activeVoxels.Remove(new Vector3Int(x, y, z)); // an overwritten active block no longer registers
         }
 
         /// <summary>
@@ -351,6 +365,52 @@ namespace Editor.Validation.Behavior.Framework
         }
 
         /// <summary>
+        /// ES-31 — replaces the blanket registration <see cref="SetBlock"/> models with what production registers for a
+        /// freshly populated chunk: the registration screen's survivors (<see cref="ActiveVoxelScreen"/>) plus the edge
+        /// voxels the real <see cref="World.WakeSeamBehaviorNeighborhood"/> re-registers against the populated
+        /// neighbors. Call once the fixture is built. The model keeps its original order, so a driver evaluates the
+        /// survivors in the same relative order as a blanket run of the same fixture.
+        /// </summary>
+        /// <returns>The registered set (a subset of the blanket one).</returns>
+        public HashSet<Vector3Int> ApplyRegistrationScreen()
+        {
+            List<Vector3Int> blanket = new List<Vector3Int>(_activeVoxels);
+            ChunkDataScreenSource source = new ChunkDataScreenSource(ChunkData, _palette);
+            HashSet<Vector3Int> registered = new HashSet<Vector3Int>();
+            foreach (Vector3Int pos in blanket)
+                if (ActiveVoxelScreen.MustRegister(ref source, pos.x, pos.y, pos.z, ChunkData.GetVoxel(pos.x, pos.y, pos.z)))
+                    registered.Add(pos);
+
+            // The population wake runs on the screened buckets, as in production, and adds what it re-registers.
+            _activeVoxels.Clear();
+            _activeVoxels.UnionWith(registered);
+            ResetBucketsToModel();
+            _world.WakeSeamBehaviorNeighborhood(ChunkData.Position);
+            foreach (Vector3Int pos in ChunkData.ActiveVoxels)
+                registered.Add(pos);
+
+            _activeVoxels.Clear();
+            foreach (Vector3Int pos in blanket)
+                if (registered.Contains(pos))
+                    _activeVoxels.Add(pos);
+            ResetBucketsToModel();
+            return registered;
+        }
+
+        /// <summary>Empties the center's buckets of anything production put there, then mirrors the model back in.</summary>
+        private void ResetBucketsToModel()
+        {
+            _bucketSyncScratch.Clear();
+            _bucketSyncScratch.AddRange(ChunkData.ActiveVoxels);
+            foreach (Vector3Int pos in _bucketSyncScratch)
+                ChunkData.RemoveActiveVoxel(pos);
+
+            _bucketedFluids.Clear();
+            _bucketedGrass.Clear();
+            SyncBucketsToActives();
+        }
+
+        /// <summary>
         /// Lets scenarios drive the production <see cref="ChunkData.ModifyVoxel"/> on their own chunk data: gives the
         /// stub world the <see cref="World.JobDataManager"/> palette that its heightmap step reads (the harness's
         /// own apply path uses <c>SetVoxel</c> and never needs it). Built from the test palette; disposed with the
@@ -381,6 +441,14 @@ namespace Editor.Validation.Behavior.Framework
         /// </summary>
         /// <param name="voxelCell">The modified voxel-space cell whose 6 neighbors are woken.</param>
         public void WakeActiveNeighbors(Vector3Int voxelCell) => _world.WakeActiveNeighbors(voxelCell);
+
+        /// <summary>
+        /// Drives the production <see cref="World.ReplayPendingMods"/> on the center chunk — the pending-modification
+        /// replay a population runs. Needs <see cref="EnableModifyVoxel"/>. Production state only: read the result
+        /// through <see cref="ChunkData.IsVoxelActive"/>, not the harness model.
+        /// </summary>
+        /// <param name="pendingMods">The modifications to replay (voxel-space positions inside the center).</param>
+        public void ReplayPendingMods(List<VoxelMod> pendingMods) => _world.ReplayPendingMods(ChunkData, pendingMods);
 
         /// <summary>Returns the neighbor chunk at a voxel origin, creating + registering it in the stub store on first use.</summary>
         private ChunkData GetOrCreateNeighbor(Vector2Int origin)
@@ -595,6 +663,15 @@ namespace Editor.Validation.Behavior.Framework
         /// Any active voxel that classifies to no known family is appended last, so none is ever dropped.
         /// </summary>
         private List<Vector3Int> OrderActives()
+        {
+            List<Vector3Int> ordered = OrderActivesByDriver();
+            if (CanonicalOrder)
+                ordered.Sort(BehaviorDifferential.PositionComparer.Instance);
+            return ordered;
+        }
+
+        /// <summary>The driver's own order, before <see cref="CanonicalOrder"/> applies.</summary>
+        private List<Vector3Int> OrderActivesByDriver()
         {
             if (Driver == TickDriver.Legacy)
                 return new List<Vector3Int>(_activeVoxels);

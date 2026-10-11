@@ -11,7 +11,7 @@ namespace Editor.Validation.Behavior.Framework
     /// REAL <see cref="BlockIDs"/> values</b> — not test-local indices. The behavior code hardcodes block
     /// identities (<c>id == BlockIDs.Grass</c>, <c>BlockIDs.Dirt</c>, <c>BlockIDs.Air</c>), so the array slot
     /// for a block MUST equal its production ID or the <see cref="BlockBehavior"/> branches would take the
-    /// wrong path. The array is sized to cover the highest ID used (<see cref="BlockIDs.Lava"/>); unused
+    /// wrong path. The array is sized to cover the highest ID used (<see cref="BlockIDs.GrassBlades"/>); unused
     /// slots hold a harmless air-like inert block.
     /// </para>
     /// <para>
@@ -22,10 +22,10 @@ namespace Editor.Validation.Behavior.Framework
     /// </summary>
     public static class TestBehaviorBlockPalette
     {
-        /// <summary>Length of the palette array — covers IDs 0..<see cref="BlockIDs.Lava"/> (20). Ids outside
+        /// <summary>Length of the palette array — covers IDs 0..<see cref="BlockIDs.GrassBlades"/> (22). Ids outside
         /// this range are treated as inert by <c>BehaviorTestWorld.PaletteOf</c>, so this need not cover every
         /// <see cref="BlockIDs"/> value — only the blocks the scenarios actually place.</summary>
-        public const int Count = BlockIDs.Lava + 1;
+        public const int Count = BlockIDs.GrassBlades + 1;
 
         // Fluid/solid profiles, named per the "No Magic Numbers" convention. These mirror the documented
         // production water/lava parameters; keep them in sync if the real block data changes.
@@ -68,6 +68,12 @@ namespace Editor.Validation.Behavior.Framework
             // Lava: LavaLike, viscous, no infinite source — for later scenarios.
             palette[BlockIDs.Lava] = MakeFluid("TestLava", FluidType.LavaLike, LAVA_FLOW_LEVELS, LAVA_SPREAD_CHANCE,
                 infiniteSourceRegeneration: false);
+
+            // Grass blades: non-solid and REPLACEABLE, so a fluid source spreads into them — the cell type the
+            // registration screen (ES-31) must not mistake for a wall.
+            BlockType blades = MakeInert("TestGrassBlades");
+            blades.tags = BlockTags.REPLACEABLE;
+            palette[BlockIDs.GrassBlades] = blades;
 
             return palette;
         }

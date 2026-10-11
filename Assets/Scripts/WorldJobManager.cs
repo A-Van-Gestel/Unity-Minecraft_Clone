@@ -1370,13 +1370,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
 
                 // Check if any neighbors left pending mods for THIS chunk while it was unloaded.
                 if (_world.ModManager.TryGetModsForChunk(jobEntry.Key, out List<VoxelMod> pendingMods))
-                {
-                    foreach (VoxelMod mod in pendingMods)
-                    {
-                        Vector3Int localVoxelPos = _world.worldData.GetLocalVoxelPositionInChunk(mod.GlobalPosition);
-                        chunkData.ModifyVoxel(localVoxelPos, mod);
-                    }
-                }
+                    _world.ReplayPendingMods(chunkData, pendingMods);
 
                 // Check for pending lighting updates — only relevant when the lighting engine is active.
                 // When lighting is disabled, these entries would be orphaned (no BFS job to consume them)

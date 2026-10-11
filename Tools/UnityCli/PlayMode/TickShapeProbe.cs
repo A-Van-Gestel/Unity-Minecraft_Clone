@@ -8,8 +8,12 @@
 //         generation burst, and again a tick or two later to see what the first tick dropped.
 // TRAP    The buckets change every tick (1 s), so two samples a few seconds apart are different ticks; read `tick=`.
 //
-// Origin: ES-29's probe (an ocean teleport registered 702 k fluid voxels; 3.3 k remained a tick later). ES-31 sizes its
-// registration screen with the "edge" and "screenable" lines.
+// AUDIT   --entry UnityCli.TickShapeProbe.AuditSleepers — the registration contract on the live world: no unregistered
+//         active-type voxel may be one the tick would still act on (SLEEPERS=0). Refuses while modifications are queued.
+//
+// Origin: ES-29's probe (an ocean teleport registered 702 k fluid voxels; 3.3 k remained a tick later). The "screenable"
+// lines count registered voxels the ES-31 screen (ActiveVoxelScreen, in-chunk reads only) would drop — after the screen
+// shipped, mostly edge voxels the population seam wake registered.
 
 using System.Collections;
 using System.Collections.Generic;
@@ -36,6 +40,7 @@ namespace UnityCli
         private const int MAP_KB = ChunkMath.CHUNK_VOLUME * sizeof(uint) / BYTES_PER_KB;
         private const int W = ChunkMath.CHUNK_WIDTH;
         private const int MAX_SECTIONS_HISTOGRAM = ChunkMath.SECTIONS_PER_CHUNK;
+        private const int MAX_LISTED_SLEEPERS = 20;
 
         private static readonly Vector2Int[] s_neighborOffsets =
         {
@@ -51,7 +56,7 @@ namespace UnityCli
         /// <summary>
         /// Measures the ticking chunks' active buckets: fluid and grass voxel counts, the fluid bands' section depth, what
         /// the snapshot would copy as full maps, as bands and as bands copied once per chunk (the shipped arena), the
-        /// share of active voxels in chunk-edge columns, and an estimate of how many a chunk-only screen could drop.
+        /// share of active voxels in chunk-edge columns, and how many the registration screen would drop.
         /// </summary>
         /// <returns>A multi-line report.</returns>
         public static string Measure()
@@ -77,6 +82,7 @@ namespace UnityCli
                 ChunkData cd = ((Chunk)chunkMap[coord]).ChunkData;
                 if (cd == null) continue;
                 activeChunks++;
+                ChunkDataScreenSource screen = new ChunkDataScreenSource(cd, blockTypes);
 
                 NativeHashSet<int> fluids = Bucket(cd, "ActiveFluidsBucket");
                 if (fluids.IsCreated && fluids.Count > 0)
@@ -97,7 +103,7 @@ namespace UnityCli
                         fluidVoxels++;
                         Vector3Int p = Local(index);
                         if (IsEdge(p)) fluidEdge++;
-                        else if (FluidScreenable(cd, p, blockTypes)) fluidScreenable++;
+                        if (!ActiveVoxelScreen.MustRegister(ref screen, p.x, p.y, p.z, cd.GetVoxel(p.x, p.y, p.z))) fluidScreenable++;
                     }
                 }
 
@@ -116,23 +122,123 @@ namespace UnityCli
                         grassVoxels++;
                         Vector3Int p = Local(index);
                         if (IsEdge(p)) grassEdge++;
-                        else if (GrassScreenable(cd, p, blockTypes)) grassScreenable++;
+                        if (!ActiveVoxelScreen.MustRegister(ref screen, p.x, p.y, p.z, cd.GetVoxel(p.x, p.y, p.z))) grassScreenable++;
                     }
                 }
             }
 
             StringBuilder sb = new StringBuilder();
             sb.AppendLine($"tick={world.TickCounter} activeChunks={activeChunks}");
-            sb.AppendLine($"FLUID chunks={fluidChunks} voxels={fluidVoxels} edge={fluidEdge} screenable(estimate)={fluidScreenable}");
+            sb.AppendLine($"FLUID chunks={fluidChunks} voxels={fluidVoxels} edge={fluidEdge} screenable={fluidScreenable}");
             sb.Append("  band sections histogram (1..8):");
             for (int i = 1; i <= MAX_SECTIONS_HISTOGRAM; i++) sb.Append(' ').Append(bandHistogram[i]);
             sb.AppendLine();
             sb.AppendLine($"  copies: full maps {fullMaps * MAP_KB / BYTES_PER_KB} MB | banded {bandedFluid * SECTION_KB / BYTES_PER_KB} MB | " +
                           $"banded once per chunk {uniqueFluid.Count * SECTION_KB / BYTES_PER_KB} MB (upper bound: empty sections are not copied)");
-            sb.AppendLine($"GRASS chunks={grassChunks} voxels={grassVoxels} edge={grassEdge} screenable(estimate)={grassScreenable} " +
+            sb.AppendLine($"GRASS chunks={grassChunks} voxels={grassVoxels} edge={grassEdge} screenable={grassScreenable} " +
                           $"banded {bandedGrass * SECTION_KB / BYTES_PER_KB} MB");
             sb.AppendLine($"ALL banded once per chunk (fluid + grass, the shipped arena) {uniqueAll.Count * SECTION_KB / BYTES_PER_KB} MB");
             return sb.ToString();
+        }
+
+        /// <summary>
+        /// Audits the registration contract on the live world: every active-type voxel that no bucket holds must be one
+        /// the tick would drop unchanged — the managed <c>BlockBehavior.Active</c> is false and <c>Behave</c> emits nothing.
+        /// A voxel failing that is a sleeper nothing will wake. Chunks still awaiting their full registration
+        /// (<c>NeedsActiveVoxelRescan</c>) are skipped: they are unregistered by design until a visual attaches.
+        /// </summary>
+        /// <returns>A report: the audited counts, and up to <see cref="MAX_LISTED_SLEEPERS"/> offending voxels.</returns>
+        public static string AuditSleepers()
+        {
+            World world = Object.FindAnyObjectByType<World>();
+            if (world == null || !Application.isPlaying) return "no World in Play mode";
+
+            // A queued modification will wake its six neighbors when applied, so a sleeper beside one is not yet a
+            // fault. Refuse rather than report those as false failures.
+            ICollection queued = (ICollection)typeof(World).GetField("_modifications", BindingFlags.Instance | BindingFlags.NonPublic)
+                .GetValue(world);
+            if (queued.Count > 0) return $"REFUSED: {queued.Count} queued modifications — retry";
+
+            bool[] isActiveById = world.IsActiveById;
+            int chunks = 0, skippedUnregistered = 0;
+            long unregistered = 0, sleepers = 0, rejectedOnly = 0;
+            StringBuilder listed = new StringBuilder();
+
+            foreach (ChunkData cd in world.worldData.ChunkValues)
+            {
+                if (cd == null || !cd.IsPopulated) continue;
+                if (cd.NeedsActiveVoxelRescan)
+                {
+                    skippedUnregistered++;
+                    continue;
+                }
+
+                chunks++;
+                for (int s = 0; s < cd.sections.Length; s++)
+                {
+                    ChunkSection section = cd.sections[s];
+                    if (section == null || section.IsEmpty) continue;
+
+                    for (int i = 0; i < section.voxels.Length; i++)
+                    {
+                        ushort id = BurstVoxelDataBitMapping.GetId(section.voxels[i]);
+                        if (id >= isActiveById.Length || !isActiveById[id]) continue;
+
+                        Vector3Int p = new Vector3Int(i % ChunkMath.SECTION_SIZE,
+                            s * ChunkMath.SECTION_SIZE + i / ChunkMath.SECTION_SIZE % ChunkMath.SECTION_SIZE,
+                            i / (ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE));
+                        if (cd.IsVoxelActive(p)) continue;
+
+                        unregistered++;
+                        bool active = BlockBehavior.Active(cd, p);
+                        List<VoxelMod> mods = BlockBehavior.Behave(cd, p);
+                        int emitted = mods?.Count ?? 0;
+                        int accepted = emitted == 0 ? 0 : CountAccepted(world, mods);
+                        if (!active && accepted == 0)
+                        {
+                            if (emitted > 0) rejectedOnly++;
+                            continue;
+                        }
+
+                        sleepers++;
+                        if (sleepers <= MAX_LISTED_SLEEPERS)
+                            listed.AppendLine($"  chunk {cd.Position} local {p} id {id} active={active} mods={emitted} accepted={accepted}");
+                    }
+                }
+            }
+
+            return $"tick={world.TickCounter} auditedChunks={chunks} skippedAwaitingRegistration={skippedUnregistered} " +
+                   $"unregisteredActiveType={unregistered} rejectedOnly={rejectedOnly} SLEEPERS={sleepers}\n{listed}";
+        }
+
+        // Mirrors ApplyModifications' placement gate for the tick's mods (Live source, Default rule): a mod it would
+        // refuse changes nothing, so the voxel that emits only such mods is inert even though Behave returns them.
+        // rejectedOnly counts those — e.g. grass under a log, whose Dirt mod the placement mask refuses.
+        private static int CountAccepted(World world, List<VoxelMod> mods)
+        {
+            int accepted = 0;
+            foreach (VoxelMod mod in mods)
+            {
+                Vector3Int g = mod.GlobalPosition;
+                if (!world.worldData.TryGetVoxel(g.x, g.y, g.z, out VoxelState existing))
+                {
+                    accepted++; // an unpopulated target is deferred to the pending store, not refused
+                    continue;
+                }
+
+                BlockType existingProps = world.BlockTypes[existing.ID];
+                bool ok = mod.ID == BlockIDs.Air
+                    ? (existingProps.tags & BlockTags.UNBREAKABLE) == 0
+                    : mod.Rule switch
+                    {
+                        ReplacementRule.ForcePlace => (existingProps.tags & BlockTags.UNBREAKABLE) == 0,
+                        ReplacementRule.OnlyReplaceAir => existing.ID == BlockIDs.Air,
+                        _ => BlockTagUtility.CanReplaceForPlacement(world.BlockTypes[mod.ID], existingProps),
+                    };
+                if (ok) accepted++;
+            }
+
+            return accepted;
         }
 
         private static NativeHashSet<int> Bucket(ChunkData cd, string property) =>
@@ -181,59 +287,6 @@ namespace UnityCli
         {
             for (int s = first; s <= last; s++)
                 unique.Add(((long)ChunkMath.VoxelToChunk(origin.x) << 36) ^ ((long)(uint)ChunkMath.VoxelToChunk(origin.y) << 4) ^ s);
-        }
-
-        private static uint Voxel(ChunkData cd, Vector3Int p) => cd.GetVoxel(p.x, p.y, p.z);
-
-        private static ushort Id(ChunkData cd, Vector3Int p) => BurstVoxelDataBitMapping.GetId(Voxel(cd, p));
-
-        // ESTIMATE, not the tick's rules: a non-edge fluid source with no flowable cell below and every cardinal cell a
-        // solid non-fluid block or a source of the same fluid. It ignores block tags (e.g. REPLACEABLE), so read it as
-        // an order of magnitude for ES-31, never as proof that the voxel is inert.
-        private static bool FluidScreenable(ChunkData cd, Vector3Int p, BlockType[] blockTypes)
-        {
-            uint packed = Voxel(cd, p);
-            ushort id = BurstVoxelDataBitMapping.GetId(packed);
-            if (BurstVoxelDataBitMapping.GetFluidLevel(packed) != 0) return false;
-
-            if (p.y > 0)
-            {
-                ushort below = Id(cd, p + Vector3Int.down);
-                if (below != id && !blockTypes[below].isSolid) return false;
-            }
-
-            foreach (Vector3Int d in s_cardinals)
-            {
-                uint nb = Voxel(cd, p + d);
-                ushort nbId = BurstVoxelDataBitMapping.GetId(nb);
-                bool sameSource = nbId == id && BurstVoxelDataBitMapping.GetFluidLevel(nb) == 0;
-                bool solid = nbId != id && blockTypes[nbId].isSolid && blockTypes[nbId].fluidType == FluidType.None;
-                if (!sameSource && !solid) return false;
-            }
-
-            return true;
-        }
-
-        // ESTIMATE: a non-edge grass voxel with no solid block above and no convertible-dirt candidate (adjacent, one up,
-        // or under the air beside it), reading only this chunk.
-        private static bool GrassScreenable(ChunkData cd, Vector3Int p, BlockType[] blockTypes)
-        {
-            if (p.y + 1 < ChunkMath.CHUNK_HEIGHT && blockTypes[Id(cd, p + Vector3Int.up)].isSolid) return false;
-
-            foreach (Vector3Int d in s_cardinals)
-            {
-                if (ConvertibleDirt(cd, p + d) || ConvertibleDirt(cd, p + d + Vector3Int.up)) return false;
-                Vector3Int air = p + d;
-                if (Id(cd, air) == BlockIDs.Air && ConvertibleDirt(cd, air + Vector3Int.down)) return false;
-            }
-
-            return true;
-        }
-
-        private static bool ConvertibleDirt(ChunkData cd, Vector3Int p)
-        {
-            if (p.y < 0 || p.y + 1 >= ChunkMath.CHUNK_HEIGHT) return false;
-            return Id(cd, p) == BlockIDs.Dirt && Id(cd, p + Vector3Int.up) == BlockIDs.Air;
         }
     }
 }

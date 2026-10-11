@@ -1484,14 +1484,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                         if (logSaveDiagnostics)
                             Debug.Log($"[LoadOrGenerateChunk] Applying {pendingMods.Count} pending mods to chunk {chunkCoord}");
     #endif
-                        foreach (VoxelMod mod in pendingMods)
-                        {
-                            // Apply directly to data (fast)
-                            Vector3Int localVoxelPos = worldData.GetLocalVoxelPositionInChunk(mod.GlobalPosition);
-                            // We use a simplified set here or the standard ModifyVoxel
-                            // ModifyVoxel handles lighting queues automatically
-                            data.ModifyVoxel(localVoxelPos, mod);
-                        }
+                        ReplayPendingMods(data, pendingMods);
                     }
 
                     // The behavior tick's equivalent: neighbors whose seam voxels quiesced against this coord while
@@ -3433,8 +3426,9 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// now. Nothing else does it: population registers only the new chunk's own voxels
     /// (<see cref="ChunkData.RegisterActiveVoxelsFromJob"/> / <see cref="ChunkData.RescanActiveVoxels"/>), and
     /// <see cref="ApplyModifications"/>'s cross-chunk wake needs an applied mod next to the sleeping cell.
-    /// <para>The newly populated chunk's own side needs nothing — its full scan registers every active voxel it
-    /// has, and those evaluate against real neighbor data. Only the already-populated side was asleep.</para>
+    /// <para>The newly populated chunk's own seam slab is woken against each populated neighbor too: its full
+    /// registration screens with in-chunk reads only (<see cref="ActiveVoxelScreen"/>), leaving every cross-seam
+    /// read to this pass. A neighbor that populates later wakes that slab from its own call.</para>
     /// </summary>
     /// <param name="chunkPos">Voxel-origin position of the chunk that just became populated.</param>
     public void WakeSeamBehaviorNeighborhood(Vector2Int chunkPos)
@@ -3453,7 +3447,27 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
             if (!worldData.TryGetChunk(neighborPos, out ChunkData neighbor) || neighbor is not { IsPopulated: true })
                 continue;
 
-            SeamWakeDecision.WakeSeamSlab(neighbor, populated, direction, IsActiveById, IsSolidById);
+            SeamWakeDecision.WakeSeamSlab(neighbor, populated, direction, IsActiveById, IsSolidById, BlockTypes);
+            SeamWakeDecision.WakeSeamSlab(populated, neighbor, SeamWakeDecision.Opposite(direction),
+                IsActiveById, IsSolidById, BlockTypes);
+        }
+    }
+
+    /// <summary>
+    /// Applies the modifications other chunks left for a chunk while it held no data (structures that spilled across
+    /// its border), waking each modified cell's six neighbors. The replay bypasses <see cref="ApplyModifications"/>,
+    /// so without the wake a voxel the registration screen left asleep beside a replayed cell would never
+    /// re-evaluate against it.
+    /// </summary>
+    /// <param name="chunkData">The chunk that just became populated — the target of every mod.</param>
+    /// <param name="pendingMods">The mods <see cref="ModificationManager"/> held for it.</param>
+    public void ReplayPendingMods(ChunkData chunkData, List<VoxelMod> pendingMods)
+    {
+        foreach (VoxelMod mod in pendingMods)
+        {
+            // Applied directly to the data; ModifyVoxel handles the lighting queues and the bucket of the cell itself.
+            chunkData.ModifyVoxel(worldData.GetLocalVoxelPositionInChunk(mod.GlobalPosition), mod);
+            WakeActiveNeighbors(mod.GlobalPosition);
         }
     }
 

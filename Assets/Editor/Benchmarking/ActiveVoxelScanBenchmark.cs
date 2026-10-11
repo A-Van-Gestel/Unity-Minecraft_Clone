@@ -5,6 +5,7 @@ using System.IO;
 using System.Runtime.Serialization;
 using System.Text;
 using Data;
+using Data.JobData;
 using Data.WorldTypes;
 using Editor.DataGeneration;
 using Editor.Validation.Framework;
@@ -62,7 +63,8 @@ namespace Editor.Benchmarking
         private struct ScenarioResult
         {
             public string Label;
-            public double AvgActive;
+            public double AvgActive; // registered by the job (after the ES-31 screen)
+            public double AvgActiveType; // every voxel whose block type is active — the voxels the screen evaluates
             public double AvgNonEmptySections;
             public double OldUs; // managed deref, all voxels
             public double BitmaskUs; // flat bool[], all voxels
@@ -151,6 +153,19 @@ namespace Editor.Benchmarking
                     data.Dispose();
                 }
 
+                // The scan's workload is every active-type voxel, registered or screened; without any the timings
+                // below would measure an empty loop. (A batch the screen drops entirely is a valid result.)
+                long totalActiveType = 0;
+                foreach (uint[] map in maps)
+                foreach (uint packed in map)
+                {
+                    ushort id = BurstVoxelDataBitMapping.GetId(packed);
+                    if (id < isActiveById.Length && isActiveById[id]) totalActiveType++;
+                }
+
+                if (totalActiveType == 0)
+                    throw new InvalidOperationException("Vacuous batch: the generated chunks hold no active-type voxels.");
+
                 HashSet<Vector3Int> activeSet = new HashSet<Vector3Int>();
                 WarmupJob(maps[0], blockTypes); // first Run() includes Burst JIT — exclude it from timing
 
@@ -160,7 +175,7 @@ namespace Editor.Benchmarking
                 double[] reentrySamples = new double[REPEATS * CHUNK_COUNT];
                 double nonEmptySections = 0;
 
-                using (new StubWorld(db, isActiveById))
+                using (new StubWorld(db, isActiveById, runner.JobDataManager))
                 {
                     for (int r = 0; r < REPEATS; r++)
                     {
@@ -181,6 +196,7 @@ namespace Editor.Benchmarking
                 {
                     Label = label,
                     AvgActive = totalActive / (double)CHUNK_COUNT,
+                    AvgActiveType = totalActiveType / (double)CHUNK_COUNT,
                     AvgNonEmptySections = nonEmptySections / n,
                     OldUs = bestOld / n,
                     BitmaskUs = bestBitmask / n,
@@ -200,7 +216,8 @@ namespace Editor.Benchmarking
 
         private static void AppendScenario(StringBuilder sb, ScenarioResult r)
         {
-            sb.Append("== ").Append(r.Label).Append(" — avg active voxels/chunk = ").Append(r.AvgActive.ToString("F1")).Append(" ==\n");
+            sb.Append("== ").Append(r.Label).Append(" — avg active-type voxels/chunk = ").Append(r.AvgActiveType.ToString("F1"))
+                .Append(", registered after the screen = ").Append(r.AvgActive.ToString("F1")).Append(" ==\n");
             sb.Append("  T_old      (managed deref, all voxels) = ").Append(r.OldUs.ToString("F2")).Append(" µs\n");
             sb.Append("  T_bitmask  (flat bool[], all voxels)   = ").Append(r.BitmaskUs.ToString("F2")).Append(" µs   [Part B: load/replay]\n");
             sb.Append("  T_register (unpack job list only)      = ").Append(r.RegisterUs.ToString("F2")).Append(" µs   [Part A: gen main-thread]\n");
@@ -336,7 +353,6 @@ namespace Editor.Benchmarking
             firstTotalUs = 0;
             reentryTotalUs = 0;
             nonEmptySections = 0;
-            long totalRegistered = 0;
 
             for (int c = 0; c < maps.Length; c++)
             {
@@ -367,7 +383,6 @@ namespace Editor.Benchmarking
                         throw new InvalidOperationException(
                             $"Parity failed on chunk {c}: job list {jobLists[c].Length}, buckets after first scan " +
                             $"{afterFirst}, after re-entry {afterReentry}.");
-                    totalRegistered += afterFirst;
 
                     double firstUs = (t1 - t0) * ticksToUs;
                     double reentryUs = (t2 - t1) * ticksToUs;
@@ -383,9 +398,6 @@ namespace Editor.Benchmarking
                     data.Dispose();
                 }
             }
-
-            if (totalRegistered == 0)
-                throw new InvalidOperationException("Parity failed: the batch registered no active voxels at all.");
         }
 
         /// <summary>Total entries in a chunk's two active-voxel buckets (read by reflection: the buckets are internal).</summary>
@@ -411,7 +423,8 @@ namespace Editor.Benchmarking
             /// <summary>Installs the stub as <c>World.Instance</c>.</summary>
             /// <param name="db">The block database the stub serves as <c>World.BlockTypes</c>.</param>
             /// <param name="isActiveById">The active-id table the shipped scan reads.</param>
-            public StubWorld(BlockDatabase db, bool[] isActiveById)
+            /// <param name="jobDataManager">The job palette the shipped screened scan runs its Burst job with.</param>
+            public StubWorld(BlockDatabase db, bool[] isActiveById, JobDataManager jobDataManager)
             {
                 _previousInstance = World.Instance;
                 _worldGo = new GameObject("ActiveVoxelScanBenchmark_StubWorld");
@@ -423,6 +436,7 @@ namespace Editor.Benchmarking
                     world.settings = new Settings();
                     world.worldData = new WorldData("ActiveVoxelScanBenchmark", 0);
                     world.IsActiveById = isActiveById;
+                    world.JobDataManager = jobDataManager;
                     ValidationReflection.SetInstanceProperty(world, nameof(World.ChunkPool), new ChunkPoolManager(_worldGo.transform));
                     ValidationReflection.SetStaticProperty(typeof(World), nameof(World.Instance), world);
                 }

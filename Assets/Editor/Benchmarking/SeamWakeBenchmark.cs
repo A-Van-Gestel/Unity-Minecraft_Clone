@@ -87,12 +87,13 @@ namespace Editor.Benchmarking
 
             bool[] isActive = World.Instance.IsActiveById;
             bool[] isSolid = World.Instance.IsSolidById;
+            BlockType[] blockTypes = World.Instance.BlockTypes;
 
             int woken = 0;
             for (int i = 0; i < WARMUP; i++)
             {
                 ClearBucket(world.ChunkData);
-                woken = SeamWakeDecision.WakeSeamSlab(world.ChunkData, populated, 1, isActive, isSolid);
+                woken = SeamWakeDecision.WakeSeamSlab(world.ChunkData, populated, 1, isActive, isSolid, blockTypes);
             }
 
             double best = double.MaxValue;
@@ -101,7 +102,7 @@ namespace Editor.Benchmarking
             {
                 ClearBucket(world.ChunkData); // outside the timed region — resetting is not part of the pass
                 Stopwatch sw = Stopwatch.StartNew();
-                SeamWakeDecision.WakeSeamSlab(world.ChunkData, populated, 1, isActive, isSolid);
+                SeamWakeDecision.WakeSeamSlab(world.ChunkData, populated, 1, isActive, isSolid, blockTypes);
                 sw.Stop();
                 double us = sw.Elapsed.TotalMilliseconds * 1000.0;
                 best = Math.Min(best, us);

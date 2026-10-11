@@ -19,7 +19,8 @@ namespace Editor.Validation.Behavior
     /// must re-arm the rescan for the next lifecycle.
     /// <para>Every parity check compares the buckets against an independent replica — a full flat walk reading
     /// <c>BlockType.isActive</c> through <see cref="ChunkData.GetVoxel"/> — never against the scan or job it
-    /// would be validating.</para>
+    /// would be validating. A full registration screens (ES-31), so its replica keeps only the voxels
+    /// <see cref="ActiveVoxelScreen.MustRegister{TSource}"/> keeps; the screen itself is validated by BH-B16.</para>
     /// </summary>
     public static partial class BehaviorValidationSuite
     {
@@ -110,16 +111,30 @@ namespace Editor.Validation.Behavior
             return expected;
         }
 
+        /// <summary>The screened replica: the replica's voxels that the registration screen keeps.</summary>
+        /// <param name="data">The chunk data to walk.</param>
+        /// <returns>The local positions a full registration must register.</returns>
+        private static HashSet<Vector3Int> ScreenedReplicaSet(ChunkData data)
+        {
+            ChunkDataScreenSource source = new ChunkDataScreenSource(data, World.Instance.BlockTypes);
+            HashSet<Vector3Int> expected = new HashSet<Vector3Int>();
+            foreach (Vector3Int pos in ReplicaActiveSet(data))
+                if (ActiveVoxelScreen.MustRegister(ref source, pos.x, pos.y, pos.z, data.GetVoxel(pos.x, pos.y, pos.z)))
+                    expected.Add(pos);
+
+            return expected;
+        }
+
         /// <summary>
-        /// Asserts the chunk's buckets hold exactly the replica set — no missing and no extra voxel — and that each
+        /// Asserts the chunk's buckets hold exactly the expected set — no missing and no extra voxel — and that each
         /// voxel sits in its own family's bucket.
         /// </summary>
         /// <param name="label">The assertion label.</param>
         /// <param name="data">The chunk whose buckets are checked.</param>
+        /// <param name="expected">The positions that must be registered.</param>
         /// <returns>True when the sets are equal and every voxel is in its family's bucket.</returns>
-        private static bool CheckBucketsMatchReplica(string label, ChunkData data)
+        private static bool CheckBucketsMatch(string label, ChunkData data, HashSet<Vector3Int> expected)
         {
-            HashSet<Vector3Int> expected = ReplicaActiveSet(data);
             List<string> diffs = new List<string>();
 
             foreach (Vector3Int pos in expected)
@@ -197,10 +212,11 @@ namespace Editor.Validation.Behavior
         /// BH-B13 — six legs over the registration flag (<see cref="ChunkData.NeedsActiveVoxelRescan"/>):
         /// <list type="number">
         /// <item>populated data seeded only through <c>AddActiveVoxel</c> (a disk load's pending mods) still needs the rescan;</item>
-        /// <item>the real job list registers exactly the replica set and clears it;</item>
-        /// <item><c>ModifyVoxel</c> edits (add, remove, family change) keep the buckets exact without a rescan;</item>
+        /// <item>the real job list registers exactly the screened replica set and clears it;</item>
+        /// <item><c>ModifyVoxel</c> edits (add, remove, family change) keep the buckets exact without a rescan — each
+        /// edit registers its own cell when active, screened or not, and unregisters it otherwise;</item>
         /// <item><c>Reset</c> empties the buckets and re-arms the rescan;</item>
-        /// <item>the rescan registers the replica set and clears it;</item>
+        /// <item>the rescan registers the screened replica set and clears it, and <c>registerAll</c> the full one;</item>
         /// <item>the step-4 wake reaches a data-only neighbor's quiesced seam voxel.</item>
         /// </list>
         /// <para><b>Prove-red</b>, one at a time: drop <c>ModifyVoxel</c>'s bucket add (leg 3); skip the flag write in
@@ -226,9 +242,13 @@ namespace Editor.Validation.Behavior
                 FillRegistrationFixture(subject);
 
                 int fixtureActives = ReplicaActiveSet(subject).Count;
+                HashSet<Vector3Int> screenedReplica = ScreenedReplicaSet(subject);
                 bool passed = Check("BH-B13 fixture holds active voxels (non-vacuity)",
                     fixtureActives >= BH13_MIN_FIXTURE_ACTIVES,
                     $"replica found {fixtureActives.ToString()} actives, expected ≥ {BH13_MIN_FIXTURE_ACTIVES.ToString()}");
+                passed &= Check("BH-B13 the screen drops part of the fixture and keeps part (non-vacuity)",
+                    screenedReplica.Count > 0 && screenedReplica.Count < fixtureActives,
+                    $"screened replica {screenedReplica.Count.ToString()} of {fixtureActives.ToString()}");
 
                 // Leg 1 — a partial, AddActiveVoxel-only registration is not a full one.
                 passed &= Check("BH-B13 unpopulated data never asks for a rescan", !subject.NeedsActiveVoxelRescan,
@@ -242,8 +262,8 @@ namespace Editor.Validation.Behavior
                 NativeList<int> jobList = RunActiveVoxelScanJob(world, subject);
                 try
                 {
-                    passed &= Check("BH-B13 the job emitted every replica voxel", jobList.Length == fixtureActives,
-                        $"job emitted {jobList.Length.ToString()}, replica {fixtureActives.ToString()}");
+                    passed &= Check("BH-B13 the job emitted every screened replica voxel", jobList.Length == screenedReplica.Count,
+                        $"job emitted {jobList.Length.ToString()}, screened replica {screenedReplica.Count.ToString()}");
                     subject.RegisterActiveVoxelsFromJob(jobList);
                 }
                 finally
@@ -253,19 +273,25 @@ namespace Editor.Validation.Behavior
 
                 passed &= Check("BH-B13 job registration clears the rescan", !subject.NeedsActiveVoxelRescan,
                     "RegisterActiveVoxelsFromJob left the flag unset — every generated chunk would still rescan on view");
-                passed &= CheckBucketsMatchReplica("BH-B13 job list registers exactly the replica set", subject);
+                passed &= CheckBucketsMatch("BH-B13 job list registers exactly the screened replica set", subject, screenedReplica);
 
-                // Leg 3 — nothing rescans from here on, so every edit must keep the buckets exact.
+                // Leg 3 — nothing rescans from here on, so every edit must keep the buckets exact: the edited cell is
+                // registered when its new block is active (the tick decides, not the screen) and dropped otherwise.
+                HashSet<Vector3Int> expected = new HashSet<Vector3Int>(screenedReplica);
                 ModifySubject(subject, s_bh13PlacedWater, BlockIDs.Water);
+                expected.Add(s_bh13PlacedWater);
                 passed &= Check("BH-B13 edit premise: the placed water is active", ReplicaActiveSet(subject).Contains(s_bh13PlacedWater),
                     "the water placement did not land, so the parity below proves nothing about the add");
-                passed &= CheckBucketsMatchReplica("BH-B13 ModifyVoxel add (air → water) keeps the buckets exact", subject);
+                passed &= CheckBucketsMatch("BH-B13 ModifyVoxel add (air → water) keeps the buckets exact", subject, expected);
                 ModifySubject(subject, s_bh13GrassA, BlockIDs.Stone);
-                passed &= CheckBucketsMatchReplica("BH-B13 ModifyVoxel remove (grass → stone) keeps the buckets exact", subject);
+                expected.Remove(s_bh13GrassA);
+                passed &= CheckBucketsMatch("BH-B13 ModifyVoxel remove (grass → stone) keeps the buckets exact", subject, expected);
                 ModifySubject(subject, s_bh13WaterA, BlockIDs.Grass);
-                passed &= CheckBucketsMatchReplica("BH-B13 ModifyVoxel family change (water → grass) keeps the buckets exact", subject);
+                expected.Add(s_bh13WaterA);
+                passed &= CheckBucketsMatch("BH-B13 ModifyVoxel family change (water → grass) keeps the buckets exact", subject, expected);
                 ModifySubject(subject, s_bh13Lava, BlockIDs.Air);
-                passed &= CheckBucketsMatchReplica("BH-B13 ModifyVoxel remove (lava → air) keeps the buckets exact", subject);
+                expected.Remove(s_bh13Lava);
+                passed &= CheckBucketsMatch("BH-B13 ModifyVoxel remove (lava → air) keeps the buckets exact", subject, expected);
                 passed &= Check("BH-B13 edits do not re-arm the rescan", !subject.NeedsActiveVoxelRescan,
                     "an edit re-armed the rescan");
 
@@ -285,7 +311,14 @@ namespace Editor.Validation.Behavior
                 rescanned.RescanActiveVoxels();
                 passed &= Check("BH-B13 the rescan clears the flag", !rescanned.NeedsActiveVoxelRescan,
                     "RescanActiveVoxels left the flag unset — the chunk would rescan on every re-entry");
-                passed &= CheckBucketsMatchReplica("BH-B13 the rescan registers exactly the replica set", rescanned);
+                passed &= CheckBucketsMatch("BH-B13 the rescan registers exactly the screened replica set", rescanned,
+                    ScreenedReplicaSet(rescanned));
+                rescanned.Reset(s_bh13SubjectOrigin);
+                FillRegistrationFixture(rescanned);
+                rescanned.IsPopulated = true;
+                rescanned.RescanActiveVoxels(registerAll: true);
+                passed &= CheckBucketsMatch("BH-B13 the unscreened rescan registers exactly the full replica set", rescanned,
+                    ReplicaActiveSet(rescanned));
 
                 // Leg 6 — the step-4 wake into a data-only neighbor. The seeded −X neighbor is populated but its
                 // voxels are never registered (BehaviorTestWorld's read-only context), i.e. a quiesced seam source.
