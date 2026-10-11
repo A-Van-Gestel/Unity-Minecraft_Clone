@@ -1,6 +1,6 @@
 # Block Behavior Tick Architecture
 
-**Version:** 2.3  
+**Version:** 2.4  
 **Date:** 2026-07-26  
 **Status:** **Implemented (Stable)** — the whole TG-4 arc (Phases 0–4b + the Y-band optimization) is shipped,
 in-game confirmed, and its rollback flags were retired in the 2026-07-23 cleanup, so the parallel Y-band halo
@@ -119,6 +119,19 @@ again: they must stay exact through `ModifyVoxel` and the wakes alone, including
 and does not tick. That is why the step-4 wake (`World.WakeActiveNeighbors`) registers on the neighbor's
 `ChunkData` rather than its visual `Chunk`. Guarded by `BH-B13`.
 
+**A full registration is screened (ES-31).** Both full registrations run the one Burst `ActiveVoxelScanJob` — generation
+as its final pass, `RescanActiveVoxels` synchronously over a flat copy of the chunk (skipped for a chunk holding no
+active-type voxel) — and the job keeps only the voxels `Helpers/ActiveVoxelScreen` says can act on their next tick:
+- **fluids** — every flowing voxel; a level-0 source only when it can fall (the cell below is neither solid nor the same
+  fluid) or a cardinal cell is receptive (`CanSourceFlowInto`: air, a non-solid `REPLACEABLE` block, or the same fluid not
+  falling and deeper than level 1). Sources never decay or read above, so this is the tick's whole rule for them.
+- **grass** — when a solid block sits on it (it turns to dirt), or a cardinal column holds a convertible-dirt candidate.
+
+The screen reads only its own chunk; a read across a seam is left to the population seam wake (below). On an ocean
+burst in the Editor this registers ≈ 1.1 k fluid voxels where the blanket registration held ≈ 270 k. `registerAll` keeps
+the unscreened rescan for harnesses whose workload is the seeded voxels (`FluidTickBenchmark`). Guarded by `BH-B16`
+(every screened voxel is inert on the real jobs), `BH-B17` (screened-then-tick equals blanket-then-tick) and `BH-B13`.
+
 > [!IMPORTANT]
 > ### The tick has no readiness gate — registration is the whole contract
 > Unlike lighting and meshing, `World.TickChunksParallel` schedules a chunk on the sole condition that its
@@ -133,6 +146,19 @@ and does not tick. That is why the step-4 wake (`World.WakeActiveNeighbors`) reg
 > `ApplyModifications` needs an applied mod 6-adjacent to the sleeping cell. `World.WakeSeamBehaviorNeighborhood`
 > closes that loop from the two population sites (archived `_FIXED_BUGS.md` Fluid §18 and §19 are the two halves
 > of this contract; guarded by `BH-B8`–`BH-B11`).
+>
+> Since ES-31 a screened voxel is asleep from the start, so every path that changes a cell it reads must wake it:
+> - **the seam wake runs both ways** — it also wakes the newly populated chunk's own slab against each populated
+>   neighbor, since the screen deferred those reads; a level-0 source there is woken only across a cell it can spread
+>   into (`BH-B18`);
+> - **the pending-modification replay** (`World.ReplayPendingMods`, both population arms) wakes the six neighbors of
+>   each cell it changes, as `ApplyModifications` does (`BH-B19`);
+> - every fluid read is a six-neighbor, which `WakeActiveNeighbors` covers. Grass also reads up- and down-diagonally,
+>   which it does not: a diagonal change between registration and the first tick leaves screened grass asleep — the
+>   same exposure grass already had after its first tick dropped it.
+>
+> `Tools/UnityCli/PlayMode/TickShapeProbe.cs` `AuditSleepers` checks the contract on a live world: no unregistered
+> active-type voxel may be one the tick would still act on.
 
 ### 2.2 The fluid job and its neighbor halo
 
@@ -396,10 +422,9 @@ deliberately sequenced *after* the per-family layout existed, to avoid throwaway
 - **Snapshot levers — shipped as the section arena (ES-29, §2.2).** Banding the neighbor snapshots and copying each
   chunk once per tick both landed; edge-slab-only copies were not taken, since once each section is copied once the
   copy is no longer the tick's large part. Grass-Burst shipped with it (§2.3).
-- **Blanket registration (`ES-31`).** The generation scan and the disk rescan register every active-type voxel — every
-  water and grass voxel of a new chunk — and the first tick drops almost all of them. That first tick is now most of
-  what is left of the loading-pass spikes: the wait for the fluid jobs and the replay's removals scale with it. Filed
-  as `ES-31` in the engine scaling roadmap.
+- **Blanket registration — screened by `ES-31` (§2.1).** The generation scan and the disk rescan registered every
+  active-type voxel, and the first tick dropped almost all of them. Both now register only what the tick would act on;
+  the Master measurement is in the engine scaling roadmap's `ES-31` entry.
 - **Ticker pools are never pruned.** Each pool keeps its peak count; a fluid ticker holds ≈ 290 KB (its padded volume)
   since ES-29 dropped its snapshot buffers, a grass ticker a few KB.
 - **Frame-level context.** In steady state the tick is *not* the frame bottleneck: the sustained ocean frame is
@@ -681,6 +706,9 @@ the ones any future tick-path change must address.*
 
 ## Document History
 
+* **v2.4** - ES-31 (2026-10-11): §2.1 gains the registration screen (`Helpers/ActiveVoxelScreen`; the rescan now runs
+  the Burst scan job), the two-sided population seam wake and the pending-modification replay wake inside the
+  registration-contract box, and `BH-B16`–`BH-B19`; §7's blanket-registration item closed. The rest was not re-audited.
 * **v2.3** - ES-29 (2026-10-11): the tick's pre-tick snapshot is one shared section arena (§2.2, new subsection) and
   grass is Burst-ticked (§2.3 rewritten from "Grass stays managed"); §2 call tree redrawn with its line anchors
   re-verified; §2.4 emission order names the family; §4 gates (BH-D1[L|HB] now covers grass over 21 fixtures, BH-G
@@ -708,6 +736,7 @@ the ones any future tick-path change must address.*
 ---
 
 **Last Updated:** 2026-07-26 (promoted to `Architecture/` and restructured as an as-built system description)  
-**Next Review:** if a third behavior family is added (§7 — the collection layout assumes exactly Grass + Fluid), when
-`ES-31` changes what generation and the rescan register (§7), or if P-2 Layer 2 is built for the
+**Next Review:** if a third behavior family is added (§7 — the collection layout assumes exactly Grass + Fluid; it needs
+a screen rule in `ActiveVoxelScreen` too), if a behavior rule changes (the screen restates the tick's rules), or if P-2
+Layer 2 is built for the
 lighting/meshing/world-scaling reasons and this tick path could be simplified onto it (§3.2).
