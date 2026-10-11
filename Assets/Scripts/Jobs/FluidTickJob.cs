@@ -21,14 +21,14 @@ namespace Jobs
     /// disappears.
     /// <para>
     /// <b>Inputs are read-only and pre-tick:</b> both the "Behave" (emit) and "Active" (drop) halves read the same
-    /// <see cref="VoxelMap"/> snapshot, exactly as the managed tick does (mods are applied only after the whole
+    /// <see cref="PaddedVoxels"/> snapshot, exactly as the managed tick does (mods are applied only after the whole
     /// pass). The job appends emitted <see cref="VoxelMod"/>s to <see cref="Mods"/> and the flat indices of voxels
     /// that became inactive to <see cref="NowInactive"/>; the main thread drains both afterward (the unchanged
     /// <c>ApplyModifications</c> path + bucket removal).
     /// </para>
     /// <para>
-    /// <b>TG-4 — halo-padded reads.</b> The job gathers the center + its 8 horizontal neighbors into
-    /// <see cref="PaddedVoxels"/> (the <see cref="ChunkMath.FLUID_HALO"/>-wide volume) at the top of
+    /// <b>TG-4 — halo-padded reads.</b> The job gathers the center + its 8 horizontal neighbors from the tick's
+    /// section arena into <see cref="PaddedVoxels"/> (the <see cref="ChunkMath.FLUID_HALO"/>-wide volume) at the top of
     /// <see cref="Execute"/>, so <see cref="GetStateLocal"/> resolves reads up to 4 cells past a seam — letting
     /// <b>border</b> voxels tick in-job too. The caller feeds every active fluid index via
     /// <see cref="InteriorFluidIndices"/> with the real neighbor snapshots gathered into the halo. A missing neighbor
@@ -39,44 +39,22 @@ namespace Jobs
     public struct FluidTickJob : IJob
     {
         /// <summary>
-        /// The center chunk's section-contiguous packed voxel snapshot (the <see cref="ChunkMath.GetFlattenedIndexInChunk"/>
-        /// layout). Read directly for the source voxel (by flat index) and gathered into <see cref="PaddedVoxels"/>.
+        /// The tick's packed pre-tick voxel sections (<c>TickSnapshotArena</c>), shared read-only by every job of the
+        /// tick. Read only through <see cref="SectionTable"/>.
         /// </summary>
         [ReadOnly]
-        public NativeArray<uint> CenterVoxels;
+        public NativeArray<uint> ArenaSections;
 
-        // TG-4 Phase 4b: the 8 horizontal neighbor snapshots (section-contiguous full-chunk maps; compass directions
-        // match ChunkMath.GatherPaddedFluidVoxelsBand / Helpers.NeighborMapAssembler). The in-job gather scatters
-        // center + these into PaddedVoxels so BORDER voxels can resolve cross-chunk reads. A missing/ungenerated
-        // neighbor is passed as a created zero-length array (NOT default — job safety requires constructed
-        // containers), which the gather sentinel-fills with uint.MaxValue → read back as void (Has == false).
+        /// <summary>
+        /// Arena index of each (gather slot, section) this job reads — see <see cref="SectionArenaTable"/>. A missing
+        /// neighbor's entries read as void, exactly as the managed cross-chunk query returns null.
+        /// </summary>
         [ReadOnly]
-        public NativeArray<uint> VoxelW;
-
-        [ReadOnly]
-        public NativeArray<uint> VoxelE;
-
-        [ReadOnly]
-        public NativeArray<uint> VoxelS;
-
-        [ReadOnly]
-        public NativeArray<uint> VoxelN;
-
-        [ReadOnly]
-        public NativeArray<uint> VoxelSW;
-
-        [ReadOnly]
-        public NativeArray<uint> VoxelNW;
-
-        [ReadOnly]
-        public NativeArray<uint> VoxelSE;
-
-        [ReadOnly]
-        public NativeArray<uint> VoxelNE;
+        public NativeArray<int> SectionTable;
 
         /// <summary>
         /// The halo-padded fluid volume (<see cref="ChunkMath.PADDED_FLUID_VOLUME"/>, full height). Written ONCE by the
-        /// in-job gather at the top of <see cref="Execute"/> from <see cref="CenterVoxels"/> + the 8 neighbors, then
+        /// in-job gather at the top of <see cref="Execute"/> from the arena's center + 8 neighbor sections, then
         /// read-only for the rest of the pass (the job never mutates voxels). NOT <c>[ReadOnly]</c> — the gather writes
         /// it on the worker. <see cref="GetStateLocal"/> reads it shifted by <see cref="ChunkMath.FLUID_HALO"/>.
         /// </summary>
@@ -134,14 +112,10 @@ namespace Jobs
             long busyStart = Timer.Begin();
 
             // TG-4 Phase 4b: gather center + 8 neighbors into the halo-padded volume on this worker (the LI-1/P-2-Layer-1
-            // pattern), so border voxels' cross-chunk reads resolve from one contiguous buffer. For the interior-only
-            // path the neighbors are empty (sentinel halo) and the center region is identical to the old snapshot, so
-            // interior reads are byte-identical.
-            // Y-band gather: fills only [BandMinY, BandMinY+BandHeight) of the padded volume. The full-height path
-            // passes 0/CHUNK_HEIGHT (byte-identical to the pre-band gather); the band path passes the tight active
-            // band, making the copy independent of world height. GetStateLocal offsets its Y read by BandMinY.
-            ChunkMath.GatherPaddedFluidVoxelsBand(PaddedVoxels, CenterVoxels,
-                VoxelW, VoxelE, VoxelS, VoxelN, VoxelSW, VoxelNW, VoxelSE, VoxelNE, BandMinY, BandHeight);
+            // pattern), so border voxels' cross-chunk reads resolve from one contiguous buffer.
+            // Y-band gather: fills only [BandMinY, BandMinY+BandHeight) of the padded volume, the rows whose sections the
+            // arena holds for this job. GetStateLocal offsets its Y read by BandMinY.
+            ChunkMath.GatherPaddedFluidVoxelsBand(PaddedVoxels, ArenaSections, SectionTable, BandMinY, BandHeight);
 
             // Allocate the BFS scratch once for the whole pass (locals, threaded into the flow chain); CalculateFlowCost
             // Clear()s it per call. Replaces the prior per-call Temp NativeQueue + NativeHashSet allocation
@@ -155,7 +129,9 @@ namespace Jobs
 
                 ChunkMath.GetLocalPositionFromFlattenedIndex(index, out int x, out int y, out int z);
 
-                uint packed = CenterVoxels[index];
+                // Every source lies inside the band, so the gathered center region holds its pre-tick voxel.
+                uint packed = PaddedVoxels[ChunkMath.GetPaddedFluidIndex(x + ChunkMath.FLUID_HALO, y - BandMinY,
+                    z + ChunkMath.FLUID_HALO)];
                 ushort id = BurstVoxelDataBitMapping.GetId(packed);
 
                 // Stale-bucket guard: an index whose voxel is no longer a fluid emits nothing (Behave) and is

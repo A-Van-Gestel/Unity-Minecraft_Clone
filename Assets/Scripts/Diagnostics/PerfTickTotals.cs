@@ -14,15 +14,15 @@ namespace Diagnostics
     /// </summary>
     public struct PerfTickTotals
     {
-        /// <summary>Kilobytes in one full-chunk voxel map copied for a fluid job.</summary>
-        public const int SnapshotMapKb = ChunkMath.CHUNK_VOLUME * sizeof(uint) / BYTES_PER_KB;
+        /// <summary>Kilobytes in one voxel section copied into the tick's snapshot arena.</summary>
+        public const int SnapshotSectionKb = ChunkMath.SECTION_VOLUME * sizeof(uint) / BYTES_PER_KB;
 
         private const int BYTES_PER_KB = 1024;
 
         /// <summary>Building the active-chunk list, in <see cref="Stopwatch"/> ticks.</summary>
         public long ListTicks;
 
-        /// <summary>Preparing fluid chunks — bucket partition and voxel-map copies, plus first-use allocation — in ticks.</summary>
+        /// <summary>Preparing fluid chunks — bucket partition and section copies, plus first-use allocation — in ticks.</summary>
         public long PrepareTicks;
 
         /// <summary>Renting tickers and timing records, scheduling the jobs and flushing the batch, in ticks.</summary>
@@ -40,8 +40,11 @@ namespace Diagnostics
         /// <summary>Fluid chunks prepared for a job.</summary>
         public long FluidChunks;
 
-        /// <summary>Full-chunk voxel maps copied by those prepares; <see cref="SnapshotMapKb"/> each.</summary>
-        public long SnapshotMaps;
+        /// <summary>Active fluid voxels those prepares handed to the jobs.</summary>
+        public long FluidVoxels;
+
+        /// <summary>Voxel sections copied by those prepares; <see cref="SnapshotSectionKb"/> each.</summary>
+        public long SnapshotSections;
 
         /// <summary>Active grass voxels ticked.</summary>
         public long GrassVoxels;

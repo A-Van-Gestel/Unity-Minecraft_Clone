@@ -275,11 +275,8 @@ public class Chunk
     /// </summary>
     /// <param name="ticker">The chunk's prepared fluid runner (job already complete).</param>
     /// <param name="fluids">The active-fluids bucket (flat chunk indices) owned by <see cref="ChunkData"/>.</param>
-    /// <param name="removeScratch">A reusable scratch list for now-inactive indices; cleared on entry.</param>
-    private void ReplayFluids(FluidBurstTicker ticker, NativeHashSet<int> fluids, List<int> removeScratch)
+    private void ReplayFluids(FluidBurstTicker ticker, NativeHashSet<int> fluids)
     {
-        removeScratch.Clear();
-
         World world = World.Instance;
         NativeList<VoxelMod> jobMods = ticker.Mods;
         NativeList<int> modsPerSource = ticker.ModsPerSource;
@@ -294,12 +291,8 @@ public class Chunk
             modCursor += count;
         }
 
-        // Now-inactive indices come from the job (order-independent set removal).
-        NativeList<int> inactive = ticker.InactiveInterior;
-        foreach (int k in inactive)
-            removeScratch.Add(k);
-
-        foreach (int idx in removeScratch)
+        // Now-inactive indices come from the job, removed straight from its list in the order it wrote them.
+        foreach (int idx in ticker.InactiveInterior)
             fluids.Remove(idx);
     }
 
@@ -342,7 +335,7 @@ public class Chunk
                     // ticker is non-null for every chunk with active fluids (scheduled in Phase 1); the managed
                     // fallback only runs in the defensive null case.
                     if (ticker != null)
-                        ReplayFluids(ticker, fluids, toRemove);
+                        ReplayFluids(ticker, fluids);
                     else
                         TickFamily(fluids, toRemove);
                 }

@@ -5,22 +5,21 @@ using Jobs.Data;
 using Unity.Collections;
 using Unity.Jobs;
 using Unity.Mathematics;
-using UnityEngine;
 
 namespace Jobs
 {
     /// <summary>
     /// TG-4 Phase 3–4b — runs one chunk's <b>entire</b> fluid tick (interior AND border voxels) through the Burst
     /// <see cref="FluidTickJob"/>, border voxels resolving cross-chunk reads from a per-tick Y-banded
-    /// neighbor halo. Owns reusable native scratch (the voxel snapshot, the padded gather destination, the
-    /// 8 neighbor buffers, and the index/output lists) so the per-tick work allocates nothing after
-    /// warm-up. This keeps the per-chunk main-thread cost to a snapshot fill + a bucket partition + the
-    /// drain — the heavy flow compute runs in the job.
+    /// neighbor halo. The pre-tick voxels come from a <see cref="TickSnapshotArena"/> shared by every job of the tick;
+    /// the ticker owns only the padded gather destination, the job's section table and the index/output lists, so the
+    /// per-tick work allocates nothing after warm-up. This keeps the per-chunk main-thread cost to a bucket partition,
+    /// the band's arena request and the drain — the heavy flow compute runs in the job.
     /// <para>
     /// <b>One instance per in-flight chunk, not one shared instance.</b> The production tick
     /// (<see cref="World.TickChunksParallel"/>) schedules every active-fluid chunk's job concurrently, so
     /// each rents its own ticker from a <c>DynamicPool&lt;FluidBurstTicker&gt;</c> and returns it after the
-    /// drain. Sharing one ticker across chunks would hand the same scratch to jobs running in parallel —
+    /// drain. Sharing one ticker across chunks would hand the same padded volume to jobs running in parallel —
     /// the scratch is what makes an instance single-owner while its job is in flight.
     /// </para>
     /// <para>
@@ -30,29 +29,22 @@ namespace Jobs
     /// emission order fixed by the emitting voxel — is what makes the parallel tick byte-identical to the
     /// original single-threaded loop. <see cref="TryPrepare"/> and <see cref="Schedule"/> are separate so the main-thread
     /// copy can be timed apart from scheduling; <see cref="ScheduleFluids"/> is the pair in one call, and
-    /// <see cref="RunFluids"/> runs the same work serially with identical output (<c>Schedule == Run</c>).
+    /// <see cref="RunFluids"/> runs the same work serially with identical output (<c>Schedule == Run</c>). Those two
+    /// standalone paths prepare through an arena of the ticker's own; the production tick passes the shared one.
     /// </para>
     /// </summary>
     public sealed class FluidBurstTicker : IDisposable
     {
-        private NativeArray<uint> _snapshot;
-
         // TG-4 Phase 4b: the gather destination the FluidTickJob reads — halo-padded and allocated at FULL height
         // (ChunkMath.PADDED_FLUID_VOLUME), but each tick fills only the active Y-band as a leading prefix. The job's
         // GetStateLocal offsets its read by BandMinY, so padded row 0 is BandMinY — not Y=0.
         private NativeArray<uint> _paddedVoxels;
 
-        // A created zero-length array standing in for any neighbor that is absent, unloaded, or unpopulated (Fluid
-        // Bug 18 — see PrepareNeighbors): the gather sentinel-fills that neighbor's halo, so those border reads
-        // resolve to void exactly as the old out-of-chunk read did. Loaded neighbors use the real buffers below.
-        private NativeArray<uint> _emptyNeighbor;
+        // Arena index of each (slot, section) the job reads, filled by TickSnapshotArena.Request. An absent or
+        // unpopulated neighbor (Fluid Bug 18) maps to SectionArenaTable.MissingChunk, which the gather sentinel-fills
+        // so its border reads resolve to void exactly as the old out-of-chunk read did.
+        private NativeArray<int> _sectionTable;
 
-        // TG-4 Phase 4b halo mode: 8 owned full-chunk neighbor snapshot buffers (lazy) + the per-build selection
-        // (a real filled buffer when the neighbor is loaded, else _emptyNeighbor → sentinel halo → void). Compass
-        // order matches GatherPaddedFluidVoxelsBand' (w,e,s,n,sw,nw,se,ne) parameters and s_neighborOffsets.
-        private NativeArray<uint>[] _neighborBuffers;
-        private NativeArray<uint>[] _jobNeighbors;
-        private bool _neighborsAllocated;
         private NativeList<int> _interior;
         private NativeList<VoxelMod> _mods;
         private NativeList<int> _modsPerSource;
@@ -65,19 +57,11 @@ namespace Jobs
         private int _bandMinY;
         private int _bandHeight;
 
-        // Neighbor voxel-origin offsets in compass order (w,e,s,n,sw,nw,se,ne) — matches GatherPaddedFluidVoxelsBand and
-        // the shared Helpers.NeighborMapAssembler compass (N=+Z, S=−Z, E=+X, W=−X).
-        private static readonly Vector2Int[] s_neighborOffsets =
-        {
-            new Vector2Int(-ChunkMath.CHUNK_WIDTH, 0), // W
-            new Vector2Int(ChunkMath.CHUNK_WIDTH, 0), // E
-            new Vector2Int(0, -ChunkMath.CHUNK_WIDTH), // S
-            new Vector2Int(0, ChunkMath.CHUNK_WIDTH), // N
-            new Vector2Int(-ChunkMath.CHUNK_WIDTH, -ChunkMath.CHUNK_WIDTH), // SW
-            new Vector2Int(-ChunkMath.CHUNK_WIDTH, ChunkMath.CHUNK_WIDTH), // NW
-            new Vector2Int(ChunkMath.CHUNK_WIDTH, -ChunkMath.CHUNK_WIDTH), // SE
-            new Vector2Int(ChunkMath.CHUNK_WIDTH, ChunkMath.CHUNK_WIDTH), // NE
-        };
+        // The arena the last successful prepare filled the section table from; Schedule hands its sections to the job.
+        private TickSnapshotArena _arena;
+
+        // The standalone paths' own arena (RunFluids / ScheduleFluids), created on first use.
+        private TickSnapshotArena _ownArena;
 
         /// <summary>Voxel mods emitted by the most recent <see cref="RunFluids"/> (valid until the next call).</summary>
         public NativeList<VoxelMod> Mods => _mods;
@@ -101,10 +85,10 @@ namespace Jobs
         public NativeList<int> InteriorIndices => _interior;
 
         /// <summary>
-        /// Full-chunk voxel maps the most recent <see cref="TryPrepare"/> copied: the center plus each populated
-        /// neighbor, or 0 when it found no active fluid.
+        /// Sections the most recent <see cref="TryPrepare"/> copied into its arena — those of the band, in the center
+        /// and each populated neighbor, that no earlier request of the tick had copied — or 0 when it found no active fluid.
         /// </summary>
-        public int SnapshotMaps { get; private set; }
+        public int SnapshotSections { get; private set; }
 
         /// <summary>
         /// The serial (<c>.Run()</c>) fluid tick: ticks EVERY active fluid (interior AND border) of <paramref name="cd"/>
@@ -124,7 +108,7 @@ namespace Jobs
         /// </remarks>
         public void RunFluids(ChunkData cd, int tickCounter, NativeArray<BlockTypeJobData> blockTypes, WorldData worldData)
         {
-            if (TryPrepare(cd, worldData))
+            if (TryPrepare(cd, worldData, BeginOwnArena()))
                 BuildJob(cd, tickCounter, blockTypes).Run();
         }
 
@@ -143,7 +127,7 @@ namespace Jobs
         public JobHandle ScheduleFluids(ChunkData cd, int tickCounter, NativeArray<BlockTypeJobData> blockTypes, WorldData worldData,
             JobBusyTimer timer = default)
         {
-            if (!TryPrepare(cd, worldData))
+            if (!TryPrepare(cd, worldData, BeginOwnArena()))
                 return default;
 
             return Schedule(cd, tickCounter, blockTypes, timer);
@@ -151,21 +135,24 @@ namespace Jobs
 
         /// <summary>
         /// Clears the per-run outputs and partitions <see cref="ChunkData.ActiveFluidsBucket"/> for the tick: collects
-        /// <b>every</b> active fluid index for the job, sizes the active-fluid Y-band, then gathers the 8 neighbor
-        /// snapshots and the center. Shared by the serial (<see cref="RunFluids"/>) and parallel
-        /// (<see cref="ScheduleFluids"/>) paths, and public apart from <see cref="Schedule"/> so its copy can be timed alone.
+        /// <b>every</b> active fluid index for the job, sizes the active-fluid Y-band, then requests the band's sections
+        /// of the center and its 8 neighbors from <paramref name="arena"/>. Shared by the serial (<see cref="RunFluids"/>)
+        /// and parallel (<see cref="ScheduleFluids"/>) paths, and public apart from <see cref="Schedule"/> so the
+        /// production tick can prepare every chunk before it schedules any job (and time the copies alone).
         /// </summary>
         /// <param name="cd">The chunk whose fluids to prepare.</param>
-        /// <param name="worldData">The chunk store used to resolve the neighbor snapshots.</param>
+        /// <param name="worldData">The chunk store used to resolve the neighbors.</param>
+        /// <param name="arena">The tick's snapshot arena; its <see cref="TickSnapshotArena.BeginTick"/> must have run.</param>
         /// <returns>True if there is any active fluid (a job should run); false if the bucket is empty.</returns>
-        public bool TryPrepare(ChunkData cd, WorldData worldData)
+        public bool TryPrepare(ChunkData cd, WorldData worldData, TickSnapshotArena arena)
         {
             EnsureAllocated();
             _interior.Clear();
             _mods.Clear();
             _modsPerSource.Clear();
             _inactive.Clear();
-            SnapshotMaps = 0;
+            SnapshotSections = 0;
+            _arena = null;
 
             NativeHashSet<int> bucket = cd.ActiveFluidsBucket;
             if (!bucket.IsCreated || bucket.Count == 0)
@@ -189,16 +176,18 @@ namespace Jobs
             int bandMaxYExclusive = math.min(ChunkMath.CHUNK_HEIGHT, maxY + ChunkMath.FLUID_VERTICAL_REACH + 1);
             _bandHeight = bandMaxYExclusive - _bandMinY;
 
-            // Gather the 8 neighbor snapshots (for the border voxels) + the center snapshot, all pre-tick.
-            PrepareNeighbors(cd, worldData);
-            cd.FillJobVoxelMap(_snapshot);
-            SnapshotMaps++;
+            // Snapshot the band's sections of the center and the 8 neighbors (for the border voxels), all pre-tick.
+            int firstSection = _bandMinY / ChunkMath.SECTION_SIZE;
+            int lastSection = (_bandMinY + _bandHeight - 1) / ChunkMath.SECTION_SIZE;
+            SnapshotSections = arena.Request(cd, worldData, firstSection, lastSection, GatherSlot.Count, _sectionTable);
+            _arena = arena;
             return true;
         }
 
         /// <summary>
         /// Schedules the fluid job over the state the last successful <see cref="TryPrepare"/> of <paramref name="cd"/>
-        /// left in this ticker. Call it only after that returned true.
+        /// left in this ticker. Call it only after that returned true, and only once no further request will grow the
+        /// arena that prepare used.
         /// </summary>
         /// <param name="cd">The chunk passed to <see cref="TryPrepare"/>.</param>
         /// <param name="tickCounter">The current tick salt (<c>World.TickCounter</c>) for the viscosity RNG.</param>
@@ -208,46 +197,13 @@ namespace Jobs
         public JobHandle Schedule(ChunkData cd, int tickCounter, NativeArray<BlockTypeJobData> blockTypes, JobBusyTimer timer = default) =>
             BuildJob(cd, tickCounter, blockTypes, timer).Schedule();
 
-        /// <summary>
-        /// Fills the owned neighbor buffers from the 8 loaded neighbor chunks (pre-tick snapshots) and points
-        /// <see cref="_jobNeighbors"/> at them; a missing/unloaded neighbor points at <see cref="_emptyNeighbor"/>
-        /// (zero-length → the gather sentinel-fills it → border reads resolve to void, matching managed GetVoxelState).
-        /// <para><b>Populated, not merely present (Fluid Bug 18):</b> an <b>unpopulated placeholder</b> counts as
-        /// missing. Its sections are all null, so <see cref="ChunkData.FillJobVoxelMap"/> would zero-fill the buffer
-        /// and hand the job a full column of <c>Air</c> — which border fluids read as free space and flow into,
-        /// emitting cross-chunk mods that <c>World.ApplyModifications</c> then persists via
-        /// <c>ModManager.AddPendingMod</c> and replays over the neighbor's real terrain once it generates.</para>
-        /// </summary>
-        private void PrepareNeighbors(ChunkData cd, WorldData worldData)
-        {
-            EnsureNeighborsAllocated();
-            for (int i = 0; i < s_neighborOffsets.Length; i++)
-            {
-                Vector2Int origin = cd.Position + s_neighborOffsets[i];
-                if (worldData != null && worldData.TryGetChunk(origin, out ChunkData neighbor) && neighbor != null &&
-                    neighbor.IsPopulated)
-                {
-                    neighbor.FillJobVoxelMap(_neighborBuffers[i]);
-                    _jobNeighbors[i] = _neighborBuffers[i];
-                    SnapshotMaps++;
-                }
-                else
-                {
-                    _jobNeighbors[i] = _emptyNeighbor;
-                }
-            }
-        }
-
-        /// <summary>Builds the fluid job over the prepared snapshot + neighbor halo + indices and this ticker's outputs.</summary>
+        /// <summary>Builds the fluid job over the prepared arena sections + indices and this ticker's outputs.</summary>
         private FluidTickJob BuildJob(ChunkData cd, int tickCounter, NativeArray<BlockTypeJobData> blockTypes,
             JobBusyTimer timer = default) =>
             new FluidTickJob
             {
-                CenterVoxels = _snapshot,
-                // Neighbor selection set by PrepareNeighbors: a real snapshot per loaded neighbor, else the empty
-                // (sentinel) neighbor for a missing one. Compass order: 0=W,1=E,2=S,3=N,4=SW,5=NW,6=SE,7=NE.
-                VoxelW = _jobNeighbors[0], VoxelE = _jobNeighbors[1], VoxelS = _jobNeighbors[2], VoxelN = _jobNeighbors[3],
-                VoxelSW = _jobNeighbors[4], VoxelNW = _jobNeighbors[5], VoxelSE = _jobNeighbors[6], VoxelNE = _jobNeighbors[7],
+                ArenaSections = _arena.Sections,
+                SectionTable = _sectionTable,
                 PaddedVoxels = _paddedVoxels,
                 BlockTypes = blockTypes,
                 InteriorFluidIndices = _interior.AsArray(),
@@ -267,14 +223,8 @@ namespace Jobs
             if (_allocated)
                 return;
 
-            _snapshot = new NativeArray<uint>(ChunkMath.CHUNK_VOLUME, Allocator.Persistent);
             _paddedVoxels = new NativeArray<uint>(ChunkMath.PADDED_FLUID_VOLUME, Allocator.Persistent);
-            _emptyNeighbor = new NativeArray<uint>(0, Allocator.Persistent); // created, zero-length → gather sentinel
-            // The selection array starts all-empty; PrepareNeighbors swaps in the real buffers per loaded neighbor.
-            // The full-chunk neighbor buffers themselves are allocated lazily on first neighbor gather.
-            _jobNeighbors = new NativeArray<uint>[s_neighborOffsets.Length];
-            for (int i = 0; i < _jobNeighbors.Length; i++)
-                _jobNeighbors[i] = _emptyNeighbor;
+            _sectionTable = new NativeArray<int>(SectionArenaTable.Length, Allocator.Persistent);
             _interior = new NativeList<int>(256, Allocator.Persistent);
             _mods = new NativeList<VoxelMod>(256, Allocator.Persistent);
             _modsPerSource = new NativeList<int>(256, Allocator.Persistent);
@@ -282,16 +232,12 @@ namespace Jobs
             _allocated = true;
         }
 
-        /// <summary>Lazily allocates the 8 full-chunk neighbor snapshot buffers on first neighbor gather.</summary>
-        private void EnsureNeighborsAllocated()
+        /// <summary>Starts a tick on this ticker's own arena, for the standalone paths.</summary>
+        private TickSnapshotArena BeginOwnArena()
         {
-            if (_neighborsAllocated)
-                return;
-
-            _neighborBuffers = new NativeArray<uint>[s_neighborOffsets.Length];
-            for (int i = 0; i < _neighborBuffers.Length; i++)
-                _neighborBuffers[i] = new NativeArray<uint>(ChunkMath.CHUNK_VOLUME, Allocator.Persistent);
-            _neighborsAllocated = true;
+            _ownArena ??= new TickSnapshotArena();
+            _ownArena.BeginTick();
+            return _ownArena;
         }
 
         /// <summary>Disposes the reusable native scratch. Call once when the owner (World) tears down.</summary>
@@ -300,16 +246,11 @@ namespace Jobs
             if (!_allocated)
                 return;
 
-            if (_snapshot.IsCreated) _snapshot.Dispose();
             if (_paddedVoxels.IsCreated) _paddedVoxels.Dispose();
-            if (_emptyNeighbor.IsCreated) _emptyNeighbor.Dispose();
-            if (_neighborsAllocated)
-            {
-                for (int i = 0; i < _neighborBuffers.Length; i++)
-                    if (_neighborBuffers[i].IsCreated)
-                        _neighborBuffers[i].Dispose();
-                _neighborsAllocated = false;
-            }
+            if (_sectionTable.IsCreated) _sectionTable.Dispose();
+            _ownArena?.Dispose();
+            _ownArena = null;
+            _arena = null;
 
             if (_interior.IsCreated) _interior.Dispose();
             if (_mods.IsCreated) _mods.Dispose();

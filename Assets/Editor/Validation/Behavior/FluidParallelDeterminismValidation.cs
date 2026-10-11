@@ -1,7 +1,10 @@
 using System.Collections.Generic;
+using System.Reflection;
+using System.Runtime.Serialization;
 using Data;
 using Editor.Dev;
 using Editor.Validation.Behavior.Framework;
+using Editor.Validation.Framework;
 using Helpers;
 using Jobs;
 using Jobs.BurstData;
@@ -16,16 +19,17 @@ namespace Editor.Validation.Behavior
     /// TG-4 fluid-tick parallel determinism gate. Proves that <b>parallel</b> fluid scheduling (<c>.Schedule()</c>)
     /// produces <b>byte-identical</b> output to the <b>serial</b> path (<c>.Run()</c>) and is identical
     /// <b>run-to-run</b> (no data race): capture serial baselines, then schedule the work concurrently on pooled
-    /// tickers — each with its own snapshot + neighbor-halo scratch, exactly as <c>World.TickChunksParallel</c> does —
-    /// and assert every concurrent result equals its baseline, over <see cref="ROUNDS"/> rounds. A divergence means
-    /// scratch bled between concurrent jobs, the schedule path differs from run, or a handle was read before completion.
+    /// tickers and assert every concurrent result equals its baseline, over <see cref="ROUNDS"/> rounds. A divergence
+    /// means scratch bled between concurrent jobs, the schedule path differs from run, or a handle was read before
+    /// completion.
     /// <para>
-    /// <b><see cref="RunHaloBand"/>:</b> the shipped Y-band halo path (<see cref="FluidBurstTicker.ScheduleFluids"/> vs
-    /// <see cref="FluidBurstTicker.RunFluids"/>) over a 3×3 grid of <b>distinct</b> chunks scheduled concurrently —
-    /// each ticker fills its own 8 neighbor-snapshot buffers (<c>FluidBurstTicker._neighborBuffers</c>) from
-    /// <b>different</b> neighbor data, the cross-job race surface. The behavior suite (BH-D1[L|HB]) guards the serial
-    /// path + the job's per-voxel parity; this guards the parallel scheduling correctness on top. (The World-level
-    /// drain orchestration + grass interleaving are exercised in-game.)
+    /// <b><see cref="RunHaloBand"/>:</b> the shipped Y-band halo path over a 3×3 grid of <b>distinct</b> chunks, in two
+    /// shapes. First each ticker schedules through <see cref="FluidBurstTicker.ScheduleFluids"/> on its own arena, the
+    /// per-ticker race surface. Then the production <c>World.TickChunksParallel</c> ticks all nine through the one
+    /// shared <see cref="TickSnapshotArena"/>: every chunk prepared before any job is scheduled, each section copied
+    /// once for every job that reads it, and the drained modification stream in snapshot order. The behavior suite
+    /// (BH-D1[L|HB]) guards the serial path + the job's per-voxel parity; this guards the parallel scheduling and the
+    /// shared snapshot on top.
     /// </para>
     /// </summary>
     public static class FluidParallelDeterminismValidation
@@ -34,6 +38,10 @@ namespace Editor.Validation.Behavior
         private const int FIXED_TICK = 1; // fixed tick salt so the viscosity RNG is deterministic
         private const int FLOOR_Y = 63;
         private const int FLUID_Y = 64;
+
+        // Sections the shared arena copies for the grid: every chunk's band covers sections 3–4 (the floor at 63, the
+        // water at 64) and each of the nine chunks is copied once, though its own job and up to eight neighbors' read it.
+        private const int GRID_ARENA_SECTIONS = 9 * 2;
 
         // Phase 4b cross-seam scenario: an interior center origin so all 8 neighbor coords are in-world (the
         // IsVoxelInWorld bound SetNeighborBlock requires) and can be seeded. Chunk coord (8,8).
@@ -44,12 +52,11 @@ namespace Editor.Validation.Behavior
         /// <see cref="FluidBurstTicker.RunFluids"/>) over a <b>multi-chunk</b> cross-seam flood.
         /// Floods a 3×3 grid of <b>distinct</b> chunks — each registered in the shared <see cref="WorldData"/> so it is
         /// its neighbors' neighbor, each with <b>different</b> content — and schedules all 9 concurrently, exactly as
-        /// <c>World.TickChunksParallel</c> does. This exercises the Phase-4b race surface: the per-ticker
-        /// neighbor-snapshot buffers. <see cref="FluidBurstTicker.PrepareNeighbors"/> fills them on the main thread at
-        /// schedule time, but the job reads them later (after completion), so each in-flight job needs its <b>own</b>
-        /// buffers that a subsequent chunk's prepare can't overwrite — a shared/bled buffer would feed a job the wrong
-        /// neighbor and diverge. Each chunk's parallel output must equal its own serial <see cref="FluidBurstTicker.RunFluids"/>
-        /// baseline, over <see cref="ROUNDS"/> rounds (run-to-run identity). The band extent is computed per-ticker
+        /// <c>World.TickChunksParallel</c> does. This exercises the Phase-4b race surface: each in-flight job's padded
+        /// volume and section table must be its own, or a later chunk's prepare would feed an earlier job the wrong
+        /// neighbor and diverge; and the shared arena must hand every job the right sections. Each chunk's parallel
+        /// output must equal its own serial <see cref="FluidBurstTicker.RunFluids"/> baseline, over <see cref="ROUNDS"/>
+        /// rounds (run-to-run identity). The band extent is computed per-ticker
         /// from each chunk's own active fluids, so this also guards that band sizing is deterministic across the serial
         /// baseline, the concurrent schedule, and run-to-run.
         /// </summary>
@@ -59,6 +66,7 @@ namespace Editor.Validation.Behavior
         private static void RunHaloInternal()
         {
             using BehaviorTestWorld rig = new BehaviorTestWorld(s_haloCenterOrigin);
+            rig.EnableModifyVoxel(); // gives the stub World the job palette StressWorldTick's real tick schedules with
             WorldData wd = rig.WorldData;
 
             // Build a 3×3 grid of distinct flooded chunks around the center, each registered in the shared WorldData so
@@ -114,6 +122,7 @@ namespace Editor.Validation.Behavior
                 }
 
                 int failures = StressMultiChunk(chunks, baselines, wd, rig.BlockTypesJob);
+                failures += StressWorldTick(chunks, baselines);
 
                 int totalMods = 0, totalFluids = 0;
                 foreach (TickerOutput b in baselines)
@@ -125,8 +134,9 @@ namespace Editor.Validation.Behavior
                 if (failures == 0)
                 {
                     Debug.Log($"<color=green>[PASS] Fluid parallel determinism (cross-chunk halo, Y-band): {chunks.Count} distinct " +
-                              $"chunks × {ROUNDS} concurrent rounds byte-identical to per-chunk serial baselines " +
-                              $"({totalFluids} fluids, {totalMods} mods; center reads 8 distinct neighbors).</color>");
+                              $"chunks × {ROUNDS} concurrent rounds, on per-ticker arenas and through World.TickChunksParallel's " +
+                              $"shared arena, byte-identical to per-chunk serial baselines ({totalFluids} fluids, {totalMods} mods; " +
+                              $"center reads 8 distinct neighbors; {GRID_ARENA_SECTIONS} sections copied per shared tick).</color>");
                 }
                 else
                 {
@@ -189,6 +199,103 @@ namespace Editor.Validation.Behavior
 
             pool.Clear(); // disposes every pooled ticker
             return failures;
+        }
+
+        /// <summary>
+        /// The production shape: ticks all <paramref name="chunks"/> through <c>World.TickChunksParallel</c> on the rig's
+        /// stub World, so every job reads the one shared <see cref="TickSnapshotArena"/>. Each round re-seeds the buckets
+        /// the drain emptied (the drain only enqueues modifications, so the voxels stay at their seeded state), then
+        /// asserts the drained stream equals the baselines' modifications concatenated in snapshot order, each chunk's
+        /// bucket lost exactly its baseline's inactive voxels, and the arena copied <see cref="GRID_ARENA_SECTIONS"/>
+        /// sections. Returns the divergence count (0 = pass).
+        /// </summary>
+        private static int StressWorldTick(List<ChunkData> chunks, TickerOutput[] baselines)
+        {
+            World world = World.Instance;
+            Queue<VoxelMod> modifications = (Queue<VoxelMod>)ValidationReflection.GetInstanceField(world, "_modifications");
+            MethodInfo tick = typeof(World).GetMethod("TickChunksParallel", BindingFlags.NonPublic | BindingFlags.Instance);
+            List<Chunk> snapshot = new List<Chunk>(chunks.Count);
+            foreach (ChunkData c in chunks)
+            {
+                Chunk chunk = (Chunk)FormatterServices.GetUninitializedObject(typeof(Chunk));
+                chunk.ChunkData = c;
+                snapshot.Add(chunk);
+            }
+
+            List<VoxelMod> expected = new List<VoxelMod>();
+            foreach (TickerOutput b in baselines)
+                expected.AddRange(b.Mods);
+
+            int failures = 0;
+            try
+            {
+                for (int round = 0; round < ROUNDS; round++)
+                {
+                    for (int i = 0; i < chunks.Count; i++)
+                        SeedChunkFlood(chunks[i], i % 3 - 1, i / 3 - 1);
+                    modifications.Clear();
+
+                    tick.Invoke(world, new object[] { snapshot });
+
+                    if (!SameStream(modifications, expected, out string why))
+                    {
+                        Debug.LogError($"[FAIL] World tick (round {round}) drained stream diverged from the serial baselines: {why}");
+                        failures++;
+                    }
+
+                    for (int i = 0; i < chunks.Count; i++)
+                    {
+                        int expectedLeft = baselines[i].Interior.Length - baselines[i].Inactive.Length;
+                        if (chunks[i].GetActiveVoxelCount() != expectedLeft)
+                        {
+                            Debug.LogError($"[FAIL] World tick (round {round}) chunk {i} kept {chunks[i].GetActiveVoxelCount()} " +
+                                           $"active fluids, expected {expectedLeft} after its baseline's inactive removals.");
+                            failures++;
+                        }
+                    }
+
+                    TickSnapshotArena arena = (TickSnapshotArena)ValidationReflection.GetInstanceField(world, "_tickArena");
+                    if (arena == null || arena.SectionsCopied != GRID_ARENA_SECTIONS)
+                    {
+                        Debug.LogError($"[FAIL] World tick (round {round}) copied {(arena == null ? 0 : arena.SectionsCopied)} " +
+                                       $"sections into the shared arena, expected {GRID_ARENA_SECTIONS} (each chunk's band once).");
+                        failures++;
+                    }
+                }
+            }
+            finally
+            {
+                modifications.Clear();
+                // World.OnDestroy, which frees the ticker pool and the arena, never runs for this edit-mode stub.
+                (ValidationReflection.GetInstanceField(world, "_fluidTickerPool") as DynamicPool<FluidBurstTicker>)?.Clear();
+                (ValidationReflection.GetInstanceField(world, "_tickArena") as TickSnapshotArena)?.Dispose();
+            }
+
+            return failures;
+        }
+
+        private static bool SameStream(Queue<VoxelMod> queue, List<VoxelMod> expected, out string why)
+        {
+            if (queue.Count != expected.Count)
+            {
+                why = $"mod count {queue.Count} vs {expected.Count}";
+                return false;
+            }
+
+            int i = 0;
+            foreach (VoxelMod mod in queue)
+            {
+                if (!mod.Equals(expected[i]))
+                {
+                    why = $"mod[{i}] {mod} vs {expected[i]}";
+                    return false;
+                }
+
+                i++;
+            }
+
+            why = null;
+            return true;
         }
 
         /// <summary>

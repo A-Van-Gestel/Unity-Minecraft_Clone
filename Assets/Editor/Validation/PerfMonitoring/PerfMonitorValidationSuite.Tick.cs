@@ -24,8 +24,11 @@ namespace Editor.Validation.PerfMonitoring
         /// <summary>Where the seeded grass voxel sits: away from the fluid row, with air all around, so it emits nothing.</summary>
         private static readonly Vector3Int s_grassCell = new Vector3Int(8, 40, 8);
 
-        /// <summary>The center map plus the one populated neighbor the tick fixture seeds.</summary>
-        private const int TICK_SNAPSHOT_MAPS = 2;
+        /// <summary>
+        /// Sections the tick copies: the fluid row's band spans sections 3–4, and of those only the center's section 4
+        /// holds voxels — empty sections, the seeded neighbor's included, read the shared air section uncopied.
+        /// </summary>
+        private const int TICK_SNAPSHOT_SECTIONS = 1;
 
         private const int TICK_FRAMES = 2;
 
@@ -53,8 +56,9 @@ namespace Editor.Validation.PerfMonitoring
                 long bracketTicks = Stopwatch.GetTimestamp() - bracketStart;
                 PerfTickTotals first = TickTotals(world);
 
-                bool ok = Check("A real tick counts one fluid chunk, the center and one neighbor map, and one grass voxel",
-                    first.FluidChunks == 1 && first.SnapshotMaps == TICK_SNAPSHOT_MAPS && first.GrassVoxels == 1);
+                bool ok = Check("A real tick counts one fluid chunk, its row of fluid voxels, one copied section and one grass voxel",
+                    first.FluidChunks == 1 && first.FluidVoxels == VoxelData.ChunkWidth
+                    && first.SnapshotSections == TICK_SNAPSHOT_SECTIONS && first.GrassVoxels == 1);
                 ok &= Check("Prepare, schedule, wait, grass and replay are each timed",
                     first.PrepareTicks > 0 && first.ScheduleTicks > 0 && first.WaitTicks > 0 && first.GrassTicks > 0 && first.ReplayTicks > 0);
                 ok &= Check("The active-chunk list belongs to the caller, so a direct tick leaves it at 0", first.ListTicks == 0);
@@ -65,9 +69,10 @@ namespace Editor.Validation.PerfMonitoring
 
                 InvokeWorldPrivate(world, "SampleTickCounters");
                 PerfStore.CommitFrame(Readings(1, 1));
-                ok &= Check("The counters carry the counts: one chunk, two maps in KB, one grass voxel, one ticker created",
+                ok &= Check("The counters carry the counts: one chunk, its fluid voxels, one section in KB, one grass voxel, one ticker created",
                     PerfStore.SumCounter(PerfCounter.TickFluidChunks) == 1
-                    && PerfStore.SumCounter(PerfCounter.TickSnapshotKb) == TICK_SNAPSHOT_MAPS * PerfTickTotals.SnapshotMapKb
+                    && PerfStore.SumCounter(PerfCounter.TickFluidVoxels) == VoxelData.ChunkWidth
+                    && PerfStore.SumCounter(PerfCounter.TickSnapshotKb) == TICK_SNAPSHOT_SECTIONS * PerfTickTotals.SnapshotSectionKb
                     && PerfStore.SumCounter(PerfCounter.TickGrassVoxels) == 1
                     && PerfStore.SumCounter(PerfCounter.FluidTickerPoolMisses) == 1);
                 ok &= Check("Each time counter carries its own part, in microseconds", TimeCountersMatch(first));
@@ -90,8 +95,9 @@ namespace Editor.Validation.PerfMonitoring
             }
             finally
             {
-                // World.OnDestroy, which frees the ticker pool, never runs for this edit-mode stub.
+                // World.OnDestroy, which frees the ticker pool and the snapshot arena, never runs for this edit-mode stub.
                 (ValidationReflection.GetInstanceField(world, "_fluidTickerPool") as DynamicPool<FluidBurstTicker>)?.Clear();
+                (ValidationReflection.GetInstanceField(world, "_tickArena") as TickSnapshotArena)?.Dispose();
             }
         });
 

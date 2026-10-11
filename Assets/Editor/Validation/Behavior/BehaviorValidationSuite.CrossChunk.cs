@@ -41,6 +41,10 @@ namespace Editor.Validation.Behavior
         private const int BH4_SPLIT_HIGH_FLOOR_Y = 70; // high cluster floor (low cluster stays at BH4_FLOOR_Y)
         private const int BH4_EDGE_FLOOR_Y = 15; // section-0 top; source sits at 16 (section-1 base)
 
+        // BH-4-BAND-TOP: the source sits on a section's top row, so the band's last row (source + reach) is the next
+        // section's first — the one case where the arena must copy a section that holds only the band's top edge.
+        private const int BH4_TOP_FLOOR_Y = 30; // source at 31 (section-1 top), cap at 32 (section-2 base)
+
         /// <summary>The BH-4 cross-chunk fixtures, appended to <see cref="DifferentialFixtures"/>.</summary>
         private static List<DiffFixture> CrossChunkFixtures() => new List<DiffFixture>
         {
@@ -51,6 +55,7 @@ namespace Editor.Validation.Behavior
             new DiffFixture("BH-4-MISSING", BuildBh4MissingNeighborWorld, BH4_TICKS),
             new DiffFixture("BH-4-SPLIT-Y", BuildBh4SplitYWorld, BH4_TICKS),
             new DiffFixture("BH-4-BAND-EDGE", BuildBh4BandEdgeWorld, BH4_TICKS),
+            new DiffFixture("BH-4-BAND-TOP", BuildBh4BandTopWorld, BH4_TICKS),
         };
 
         /// <summary>Floors a rectangular center region with stone at <see cref="BH4_FLOOR_Y"/> (inclusive bounds).</summary>
@@ -182,6 +187,32 @@ namespace Editor.Validation.Behavior
                 world.SetNeighborBlock(-1, 0, x, BH4_EDGE_FLOOR_Y, z, BlockIDs.Stone);
 
             world.SetBlock(2, BH4_EDGE_FLOOR_Y + 1, BH4_MID, BlockIDs.Water, meta: 0); // source at y=16 (section seam)
+            return world;
+        }
+
+        /// <summary>
+        /// BH-4-BAND-TOP (ES-29 section arena): BH-4-BAND-EDGE one section up and mirrored to the top edge — a −X-border
+        /// source at y=31, the top row of section 1, over a stone floor at <see cref="BH4_TOP_FLOOR_Y"/> and under a stone
+        /// cap at y=32, the base of section 2. The band <c>[30, 33)</c> ends on section 2's first row, so the arena must
+        /// copy section 2 for that single row; rounding the band's last row down to the wrong section leaves the gather
+        /// reading an uncopied section, which the arena source refuses (collections checks) and BH-D1[L|HB] sees as a diff.
+        /// </summary>
+        private static BehaviorTestWorld BuildBh4BandTopWorld()
+        {
+            BehaviorTestWorld world = new BehaviorTestWorld(s_bh4CenterOrigin);
+
+            for (int x = 0; x <= 6; x++)
+            for (int z = BH4_MID - 2; z <= BH4_MID + 2; z++)
+            {
+                world.SetBlock(x, BH4_TOP_FLOOR_Y, z, BlockIDs.Stone); // floor (band lower edge, below-read)
+                world.SetBlock(x, BH4_TOP_FLOOR_Y + 2, z, BlockIDs.Stone); // cap (band upper edge, next section's base)
+            }
+
+            for (int x = 13; x <= 15; x++)
+            for (int z = BH4_MID - 2; z <= BH4_MID + 2; z++)
+                world.SetNeighborBlock(-1, 0, x, BH4_TOP_FLOOR_Y, z, BlockIDs.Stone);
+
+            world.SetBlock(2, BH4_TOP_FLOOR_Y + 1, BH4_MID, BlockIDs.Water, meta: 0); // source at y=31 (section top)
             return world;
         }
     }

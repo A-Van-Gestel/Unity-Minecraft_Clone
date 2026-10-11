@@ -50,6 +50,7 @@ namespace Editor.Validation
             scenarios.Add(new Scenario("Padded Gather Y-Band (band-local destination rows)", RunPaddedGatherYBand));
             scenarios.Add(new Scenario("Padded Light Gather + ExtractCenterLight Round-Trip", RunPaddedLightGatherAndExtract));
             scenarios.Add(new Scenario("Padded Fluid Gather == Per-Cell Oracle (halo 4, bandCount)", RunPaddedFluidGather));
+            scenarios.Add(new Scenario("Padded Fluid Gather from a Section Arena == Per-Cell Oracle", RunPaddedFluidGatherFromArena));
         }
 
         // ── Fixture helpers ──────────────────────────────────────────────────────────────────────────
@@ -133,6 +134,40 @@ namespace Editor.Validation
             }
 
             return chunks;
+        }
+
+        /// <summary>
+        /// Packs sections <paramref name="firstSection"/>..<paramref name="lastSection"/> of the nine chunks into a
+        /// section arena and fills its table, the way the behavior tick's arena does. Slots are packed in REVERSE order,
+        /// so a table that ignored its offsets would read the wrong chunk; an uncreated slot maps to
+        /// <see cref="SectionArenaTable.MissingChunk"/> and every other section to <see cref="SectionArenaTable.NotRequested"/>.
+        /// </summary>
+        private static void PackArena(NativeArray<uint>[] chunks, int firstSection, int lastSection,
+            out NativeArray<uint> arena, out NativeArray<int> table)
+        {
+            int sectionsPerSlot = lastSection - firstSection + 1;
+            arena = new NativeArray<uint>(NB_COUNT * sectionsPerSlot * ChunkMath.SECTION_VOLUME, Allocator.Persistent);
+            table = new NativeArray<int>(SectionArenaTable.Length, Allocator.Persistent);
+            for (int i = 0; i < table.Length; i++)
+                table[i] = SectionArenaTable.NotRequested;
+
+            int next = 0;
+            for (int slot = NB_COUNT - 1; slot >= 0; slot--)
+            {
+                for (int section = firstSection; section <= lastSection; section++)
+                {
+                    int entry = slot * ChunkMath.SECTIONS_PER_CHUNK + section;
+                    if (!chunks[slot].IsCreated)
+                    {
+                        table[entry] = SectionArenaTable.MissingChunk;
+                        continue;
+                    }
+
+                    NativeArray<uint>.Copy(chunks[slot], section * ChunkMath.SECTION_VOLUME, arena, next, ChunkMath.SECTION_VOLUME);
+                    table[entry] = next;
+                    next += ChunkMath.SECTION_VOLUME;
+                }
+            }
         }
 
         private static void DisposeChunks(NativeArray<uint>[] chunks)
@@ -653,15 +688,17 @@ namespace Editor.Validation
 
             NativeArray<uint>[] chunks = null;
             NativeArray<uint> padded = default;
+            NativeArray<uint> arena = default;
+            NativeArray<int> table = default;
 
             try
             {
                 chunks = CreateVoxelChunks();
                 padded = new NativeArray<uint>(ChunkMath.PADDED_FLUID_VOLUME, Allocator.Persistent);
+                PackArena(chunks, bandMinY / ChunkMath.SECTION_SIZE,
+                    (bandMinY + TEST_BAND_HEIGHT - 1) / ChunkMath.SECTION_SIZE, out arena, out table);
 
-                ChunkMath.GatherPaddedFluidVoxelsBand(padded, chunks[NB_CENTER], chunks[NB_W], chunks[NB_E],
-                    chunks[NB_S], chunks[NB_N], chunks[NB_SW], chunks[NB_NW], chunks[NB_SE], chunks[NB_NE],
-                    bandMinY, TEST_BAND_HEIGHT);
+                ChunkMath.GatherPaddedFluidVoxelsBand(padded, arena, table, bandMinY, TEST_BAND_HEIGHT);
 
                 int diffs = ComparePaddedAgainstOracle("Padded Fluid Gather", padded, chunks,
                     bandMinY, TEST_BAND_HEIGHT, halo, width);
@@ -680,11 +717,81 @@ namespace Editor.Validation
             }
             finally
             {
+                if (table.IsCreated) table.Dispose();
+                if (arena.IsCreated) arena.Dispose();
                 if (padded.IsCreated) padded.Dispose();
                 DisposeChunks(chunks);
             }
 
             Debug.Log("[PASS] Padded Fluid Gather == Per-Cell Oracle (halo 4, bandCount)");
+            return true;
+        }
+
+        /// <summary>
+        /// The section-arena side of the fluid gather: one neighbor absent (its runs must be the sentinel), a band that
+        /// straddles a section boundary (two table entries per slot), and slots packed in reverse order. A positive
+        /// control then asks for a row whose section was never packed: with collections checks on, the gather must
+        /// throw rather than read it.
+        /// </summary>
+        private static bool RunPaddedFluidGatherFromArena()
+        {
+            const int halo = ChunkMath.FLUID_HALO;
+            const int width = ChunkMath.PADDED_FLUID_WIDTH;
+            const int bandMinY = ChunkMath.SECTION_SIZE * 2 - TEST_BAND_HEIGHT / 2; // straddles sections 1 and 2
+
+            int firstSection = bandMinY / ChunkMath.SECTION_SIZE;
+            int lastSection = (bandMinY + TEST_BAND_HEIGHT - 1) / ChunkMath.SECTION_SIZE;
+
+            NativeArray<uint>[] chunks = null;
+            NativeArray<uint> padded = default;
+            NativeArray<uint> arena = default;
+            NativeArray<int> table = default;
+
+            try
+            {
+                chunks = CreateVoxelChunks(NB_NE);
+                padded = new NativeArray<uint>(ChunkMath.PADDED_FLUID_VOLUME, Allocator.Persistent);
+                PackArena(chunks, firstSection, lastSection, out arena, out table);
+
+                ChunkMath.GatherPaddedFluidVoxelsBand(padded, arena, table, bandMinY, TEST_BAND_HEIGHT);
+
+                int diffs = ComparePaddedAgainstOracle("Padded Fluid Gather (section arena)", padded, chunks,
+                    bandMinY, TEST_BAND_HEIGHT, halo, width);
+                if (diffs > 0)
+                {
+                    Debug.LogError($"[FAIL] Padded Fluid Gather from a Section Arena — {diffs.ToString()} mismatch(es)" +
+                                   (diffs > MAX_PADDED_DIFF_LINES ? $" ({MAX_PADDED_DIFF_LINES.ToString()} shown)." : "."));
+                    return false;
+                }
+
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+                bool threw = false;
+                try
+                {
+                    ChunkMath.GatherPaddedFluidVoxelsBand(padded, arena, table, (lastSection + 1) * ChunkMath.SECTION_SIZE, 1);
+                }
+                catch (System.InvalidOperationException)
+                {
+                    threw = true;
+                }
+
+                if (!threw)
+                {
+                    Debug.LogError("[FAIL] Padded Fluid Gather from a Section Arena — gathering a row whose section was " +
+                                   "never packed did not throw; a band bug would read stale arena data silently.");
+                    return false;
+                }
+#endif
+            }
+            finally
+            {
+                if (table.IsCreated) table.Dispose();
+                if (arena.IsCreated) arena.Dispose();
+                if (padded.IsCreated) padded.Dispose();
+                DisposeChunks(chunks);
+            }
+
+            Debug.Log("[PASS] Padded Fluid Gather from a Section Arena == Per-Cell Oracle");
             return true;
         }
     }

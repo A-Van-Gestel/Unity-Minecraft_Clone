@@ -1218,6 +1218,19 @@ namespace Data
         }
 
         /// <summary>
+        /// Copies one section's raw voxels into <paramref name="destination"/> — the per-section form of
+        /// <see cref="FillJobVoxelMap"/>, used by the behavior tick's section arena. The section must exist; a null
+        /// section is all air and callers point at a shared zeroed section instead.
+        /// </summary>
+        /// <param name="sectionIndex">The section to copy (0 = bottom).</param>
+        /// <param name="destination">The buffer receiving <see cref="ChunkMath.SECTION_VOLUME"/> voxels.</param>
+        /// <param name="destinationStart">Where in <paramref name="destination"/> the section starts.</param>
+        public void CopySectionVoxels(int sectionIndex, NativeArray<uint> destination, int destinationStart)
+        {
+            NativeArray<uint>.Copy(sections[sectionIndex].voxels, 0, destination, destinationStart, ChunkMath.SECTION_VOLUME);
+        }
+
+        /// <summary>
         /// Fills a caller-provided full-chunk buffer with this chunk's ushort light map, reconstructing
         /// compact uniform-sky sections, in the section-contiguous layout the Burst jobs expect (null
         /// sections zero-filled). Writes EVERY element. Shared by the production job-input fill

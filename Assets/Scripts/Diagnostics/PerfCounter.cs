@@ -156,7 +156,7 @@ namespace Diagnostics
         /// <summary>Behavior-tick time spent building the active-chunk list, in microseconds.</summary>
         TickListUs,
 
-        /// <summary>Behavior-tick time spent preparing fluid chunks — partitions, voxel-map copies, first-use allocation — in microseconds.</summary>
+        /// <summary>Behavior-tick time spent preparing fluid chunks — partitions, section copies, first-use allocation — in microseconds.</summary>
         TickPrepareUs,
 
         /// <summary>Behavior-tick time spent renting tickers and scheduling the fluid jobs, in microseconds.</summary>
@@ -174,7 +174,10 @@ namespace Diagnostics
         /// <summary>Fluid chunks the behavior tick prepared a job for.</summary>
         TickFluidChunks,
 
-        /// <summary>Kilobytes of voxel maps copied for those fluid jobs.</summary>
+        /// <summary>Active fluid voxels those jobs ticked.</summary>
+        TickFluidVoxels,
+
+        /// <summary>Kilobytes of voxel sections copied into the tick's snapshot arena for those jobs.</summary>
         TickSnapshotKb,
 
         /// <summary>Active grass voxels the behavior tick ticked.</summary>

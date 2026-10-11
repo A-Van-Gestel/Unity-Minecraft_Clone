@@ -240,13 +240,14 @@ namespace Helpers
         /// Y (<c>gy = bandMinY + by</c>); destination rows are written at the <b>band-local</b> Y (<c>by</c>), so the
         /// padded buffer holds only <paramref name="bandCount"/> rows (a band-sized prefix of a full-height
         /// allocation). The full-height gather is just the special case <c>bandMinY = 0, bandCount = CHUNK_HEIGHT</c>
-        /// (the lighting gathers pass their LI-2 band); the TG-4 Y-band fluid gather passes the tight active-fluid band
-        /// (see <see cref="GatherPaddedFluidVoxelsBand"/>). A missing neighbor (uncreated/empty array) fills its
+        /// (the lighting gathers pass their LI-2 band). A missing neighbor (uncreated/empty array) fills its
         /// region with <paramref name="sentinel"/>, reproducing the per-neighbor missing-source sentinel. Writes
         /// EVERY padded cell <b>in the band</b>; rows outside the band are never touched (callers reading band-local
         /// Y must guard their own bounds). Parameterized by <paramref name="halo"/> + <paramref name="paddedWidth"/>
-        /// so the same body serves the lighting halo (2, width 20) and the wider fluid halo (4, width 24) — see the
-        /// <see cref="GatherPaddedVoxels"/>/<see cref="GatherPaddedLight"/>/<see cref="GatherPaddedFluidVoxelsBand"/> wrappers.
+        /// so any halo geometry fits — see the <see cref="GatherPaddedVoxels"/>/<see cref="GatherPaddedLight"/> wrappers.
+        /// The fluid gather (<see cref="GatherPaddedFluidVoxelsBand"/>) has the same row structure but reads a section
+        /// arena; routing this lighting body through a source abstraction to share it cost the lighting job 10–28 % in
+        /// the Editor (ES-29 A/B), so the two are kept apart and the Chunk Math suite pins both to one per-cell oracle.
         /// <para>
         /// Each padded horizontal row (fixed <c>by</c>, pz — <paramref name="paddedWidth"/> cells of X) is built as
         /// three contiguous runs: the <paramref name="halo"/>-wide West halo, the 16-wide center span, and the
@@ -337,16 +338,87 @@ namespace Helpers
         /// to <c>[minActiveY − reach, maxActiveY + reach]</c> drops no read the full-height gather would have served,
         /// while making the per-tick copy independent of world height. Destination rows are band-local
         /// (<c>py = y − bandMinY</c>), so <c>FluidTickJob.GetStateLocal</c> must offset its Y read by the same
-        /// <paramref name="bandMinY"/> and treat out-of-band Y as void. Thin typed wrapper over
-        /// <see cref="GatherPaddedRange{T}"/> bound to the <see cref="FLUID_HALO"/> geometry.
+        /// <paramref name="bandMinY"/> and treat out-of-band Y as void.
+        /// <para>
+        /// The sources are the behavior tick's packed section arena: each run's section is looked up in the job's
+        /// <see cref="SectionArenaTable"/> (a run never crosses a section — X is the fastest axis and sections are
+        /// full-width slabs). Rows are built exactly as <see cref="GatherPaddedRange{T}"/> builds them: West halo,
+        /// 16-wide center span, East halo, with the pz band picking the south/center/north slots once per row. A
+        /// <see cref="SectionArenaTable.MissingChunk"/> run is stamped <c>uint.MaxValue</c>.
+        /// </para>
         /// </summary>
+        /// <param name="padded">The padded fluid volume to fill.</param>
+        /// <param name="arenaSections">The tick's packed sections.</param>
+        /// <param name="sectionTable">The job's <see cref="SectionArenaTable.Length"/>-entry section table.</param>
         /// <param name="bandMinY">The global Y of the band's first row (band-local Y 0). Maps to source <c>gy = bandMinY + py</c>.</param>
         /// <param name="bandCount">The number of Y rows in the band; the padded prefix written is <c>bandCount × PADDED_FLUID_HORIZONTAL_AREA</c>.</param>
-        public static void GatherPaddedFluidVoxelsBand(NativeArray<uint> padded,
-            NativeArray<uint> center, NativeArray<uint> w, NativeArray<uint> e, NativeArray<uint> s, NativeArray<uint> n,
-            NativeArray<uint> sw, NativeArray<uint> nw, NativeArray<uint> se, NativeArray<uint> ne, int bandMinY, int bandCount)
+        public static void GatherPaddedFluidVoxelsBand(NativeArray<uint> padded, NativeArray<uint> arenaSections,
+            NativeArray<int> sectionTable, int bandMinY, int bandCount)
         {
-            GatherPaddedRange(padded, center, w, e, s, n, sw, nw, se, ne, bandMinY, bandCount, FLUID_HALO, PADDED_FLUID_WIDTH, uint.MaxValue);
+            const int halo = FLUID_HALO;
+            const int paddedWidth = PADDED_FLUID_WIDTH;
+            for (int by = 0; by < bandCount; by++)
+            {
+                int gy = bandMinY + by; // global source Y (band-local destination Y is `by`)
+                for (int pz = 0; pz < paddedWidth; pz++)
+                {
+                    int lz;
+                    int west, mid, east;
+                    if (pz < halo) // South side
+                    {
+                        lz = pz + CHUNK_WIDTH - halo;
+                        west = GatherSlot.SouthWest;
+                        mid = GatherSlot.South;
+                        east = GatherSlot.SouthEast;
+                    }
+                    else if (pz >= CHUNK_WIDTH + halo) // North side
+                    {
+                        lz = pz - CHUNK_WIDTH - halo;
+                        west = GatherSlot.NorthWest;
+                        mid = GatherSlot.North;
+                        east = GatherSlot.NorthEast;
+                    }
+                    else // Center row
+                    {
+                        lz = pz - halo;
+                        west = GatherSlot.West;
+                        mid = GatherSlot.Center;
+                        east = GatherSlot.East;
+                    }
+
+                    int rowBase = by * PADDED_FLUID_HORIZONTAL_AREA + pz * paddedWidth;
+
+                    CopyArenaRun(arenaSections, sectionTable, west, GetFlattenedIndexInChunk(CHUNK_WIDTH - halo, gy, lz),
+                        padded, rowBase, halo);
+                    CopyArenaRun(arenaSections, sectionTable, mid, GetFlattenedIndexInChunk(0, gy, lz),
+                        padded, rowBase + halo, CHUNK_WIDTH);
+                    CopyArenaRun(arenaSections, sectionTable, east, GetFlattenedIndexInChunk(0, gy, lz),
+                        padded, rowBase + CHUNK_WIDTH + halo, halo);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Copies one run of one slot out of the section arena into the padded volume, or stamps it
+        /// <c>uint.MaxValue</c> for a missing chunk. A run in a section the job never requested is a band bug: it throws
+        /// under collections checks (an Editor/safety build) instead of reading another chunk's stale arena data.
+        /// </summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private static void CopyArenaRun(NativeArray<uint> arenaSections, NativeArray<int> sectionTable, int slot, int srcStart,
+            NativeArray<uint> padded, int dstStart, int length)
+        {
+            int start = SectionArenaTable.ArenaIndex(sectionTable, slot, srcStart);
+            if (start >= 0)
+            {
+                CopyRun(arenaSections, start, padded, dstStart, length, uint.MaxValue);
+                return;
+            }
+
+#if ENABLE_UNITY_COLLECTIONS_CHECKS
+            if (start == SectionArenaTable.NotRequested)
+                throw new InvalidOperationException("GatherPaddedFluidVoxelsBand: a run lies in a section outside the job's band.");
+#endif
+            for (int k = 0; k < length; k++) padded[dstStart + k] = uint.MaxValue;
         }
 
         /// <summary>

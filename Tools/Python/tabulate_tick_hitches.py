@@ -6,8 +6,8 @@ WHAT THIS DOES
     run end:` block and prints, per hitch record whose top slot is `Tick`:
       - the frame's worst wall time, the Tick slot, and the part `/perf hitches` named as leading it;
       - the six timed parts (TickListUs ... TickFluidReplayUs) in ms, and "other" = Tick minus their sum;
-      - the counts: fluid chunks prepared, snapshot KB copied, grass voxels, fluid-ticker pool misses, and
-        the fluid jobs' summed worker busy time (FluidBusyUs).
+      - the counts: fluid chunks prepared, fluid voxels ticked, snapshot KB copied, grass voxels, fluid-ticker
+        pool misses, and the fluid jobs' summed worker busy time (FluidBusyUs).
     It closes each log with the held-record count and how many records each part led.
 
 WHAT IT READS / WRITES
@@ -48,7 +48,7 @@ PARTS = [
     ("TickFluidReplayUs", "Replay"),
 ]
 
-COUNTS = ["TickFluidChunks", "TickSnapshotKb", "TickGrassVoxels", "FluidTickerPoolMisses", "FluidBusyUs"]
+COUNTS = ["TickFluidChunks", "TickFluidVoxels", "TickSnapshotKb", "TickGrassVoxels", "FluidTickerPoolMisses", "FluidBusyUs"]
 
 MICROSECONDS_PER_MILLISECOND = 1000.0
 
@@ -73,10 +73,10 @@ def format_record(line):
     led = re.search(r"Tick led by (\w+)", line).group(1)
     parts_ms = [read_counter(line, counter) / MICROSECONDS_PER_MILLISECOND for counter, _ in PARTS]
     other = tick - sum(parts_ms)
-    chunks, snapshot_kb, grass_voxels, pool_misses, fluid_busy_us = (read_counter(line, name) for name in COUNTS)
+    chunks, fluid_voxels, snapshot_kb, grass_voxels, pool_misses, fluid_busy_us = (read_counter(line, name) for name in COUNTS)
     parts_text = " ".join(f"{label.lower()} {ms:6.2f}" for (_, label), ms in zip(PARTS, parts_ms))
     return (f"  worst {worst:7.2f}  Tick {tick:6.2f}  led {led:<8} {parts_text}  other {other:5.2f} | "
-            f"chunks {chunks:4}  snapKB {snapshot_kb:7}  grassVox {grass_voxels:6}  poolMiss {pool_misses:3}  "
+            f"chunks {chunks:4}  fluidVox {fluid_voxels:7}  snapKB {snapshot_kb:7}  grassVox {grass_voxels:6}  poolMiss {pool_misses:3}  "
             f"fluidBusy {fluid_busy_us / MICROSECONDS_PER_MILLISECOND:7.1f} ms")
 
 
