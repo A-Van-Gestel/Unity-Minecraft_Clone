@@ -89,6 +89,7 @@ Newest first within each arc. **Superseded** means a later capture withdrew or c
 
 | Capture                                                                                                                                 | Date       | Status                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 |-----------------------------------------------------------------------------------------------------------------------------------------|------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| [`ENGINE_SCALING_ES29_BEHAVIOR_TICK_IL2CPP_2026-10-11`](ENGINE_SCALING_ES29_BEHAVIOR_TICK_IL2CPP_2026-10-11_BENCHMARK.md)               | 2026-10-11 | **GO for ES-29 (prepare + grass).** Master, 5 startup + 3 vd-10 + 1 vd-32 runs per leg against a same-session ES-27 control: Tick-led hitch records 9–11 → 0–2 per vd-10 run, copies 2.0 → 0.16 MB per frame at 200 m/s, grass off the main thread, drained → stable median 19.2 → 10.2 s, −400 MB at vd 10 and a 5.65 GB vd-32 peak. The wait → `ES-31`; an unexplained +5 % `LightMerge` per job at 200 m/s awaits a control build of ES-29's base                                                                           |
 | [`ENGINE_SCALING_ES27_LIGHT_QUEUE_POOL_IL2CPP_2026-10-10`](ENGINE_SCALING_ES27_LIGHT_QUEUE_POOL_IL2CPP_2026-10-10_BENCHMARK.md)         | 2026-10-10 | **GO (GC + memory) for ES-27.** The ES-26 GC.Alloc capture re-run on pooled light queues (IL2CPP Development/Master player, 200 m/s): the queue sites 10.49 → 0.78 KB per generated chunk, all garbage 30.7 → 20.3 KB. 3 Master runs against 3 same-session runs of the ES-26 build: managed heap −59 MB at 200 m/s, frame time neutral. Records ≈ 14 ms of p99 machine drift since the ES-26 runs.                                                                                                                            |
 | [`ENGINE_SCALING_ES26_SERIALIZER_SPAN_COPY_IL2CPP_2026-10-10`](ENGINE_SCALING_ES26_SERIALIZER_SPAN_COPY_IL2CPP_2026-10-10_BENCHMARK.md) | 2026-10-10 | **GO (GC) for ES-26.** The ES-0 GC.Alloc capture re-run on the change (IL2CPP Development/Master player + Editor screening): 127.4 → 30.7 KB per generated chunk (−75.9 %), `WriteSection` gone, save path 104.2 → 6.0 KB; bytes on disk unchanged. Three Master runs: 200 m/s collections 85 → 18–19, p99 ≈ 6 ms lower, p50 unchanged (lighting-merge-bound).                                                                                                                                                                 |
 | [`ENGINE_SCALING_ES0_REMEASURE_IL2CPP_2026-10-10`](ENGINE_SCALING_ES0_REMEASURE_IL2CPP_2026-10-10_BENCHMARK.md)                         | 2026-10-10 | **Current — baseline, no behavior change.** First capture with every monitor layer at once (3 Master runs at vd 10 + vd 32, Capture tier, read per phase by `summarize_perf_session.py`): 200 m/s is lighting-merge-bound (≈ 0.41 ms merge per lighting job), the behavior tick leads the loading-pass hitches (`ES-29`), garbage re-confirmed at 127.4 KB per generated chunk, ES-28 at 0.78 KB per frame in a player, vd 32 saturates from 50 m/s (Lighting Bug 23). The baseline ES-7/ES-12/ES-26…ES-29 are scored against. |
@@ -117,6 +118,27 @@ Newest first within each arc. **Superseded** means a later capture withdrew or c
 3. Run the in-engine benchmark against the **pre-change** code on your machine — this gives you a "drift-corrected" baseline number. Hardware drift between machines is real; the absolute numbers in the file are less reliable than your local relative measurements.
 4. Apply your change.
 5. Re-run the benchmark and compare against your local baseline (not the file's). The regression budget applies to the relative delta.
+
+### Separate-build A/Bs: the A leg is built from the change's exact base (from 2026-10-11)
+
+When the two legs cannot share one build (no flag switches the change), the **A (before) leg is a fresh Master build
+of the exact commit the B (after) build starts from** — never a build kept from an earlier item. A kept build may
+predate or postdate other commits, and a `-dirty` hash cannot show what its tree held, so a delta between the legs can
+come from code the change never touched and nothing can tell the two apart. ES-29 is the case that set this rule: its A
+leg was the kept ES-27 build (`442ad4ef-dirty`), and a +5 % `LightMerge` per lighting job at 200 m/s could not be
+attributed (see its report).
+
+1. Record the base: `git rev-parse HEAD` before the change's first commit, or with the change still uncommitted.
+2. Build A from that commit with a clean tree — `git stash -u` the uncommitted change (new files and their `.meta`
+   go with it; the Editor must not be in Play mode), build, `git stash pop`. A's report must read
+   `Git commit: <base>` with no `-dirty`.
+3. Build B from the change on top of that base: its report reads `<base>-dirty` (change uncommitted) or the change's
+   own commit, whose parent is the base.
+4. Same build profile, same session, legs alternated, the same run count per leg. Check both reports' `Git commit:`
+   lines before reading any number.
+
+Kept builds stay useful as cross-session references (how far the machine drifted since an earlier report), never as an
+A leg.
 
 ## How to capture
 

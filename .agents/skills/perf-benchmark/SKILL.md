@@ -102,7 +102,13 @@ first as its own commit.
   launch, so a pass `Ceiling`-bound in the Editor can be `Quota`-bound in Master IL2CPP — read the
   player's stop-reason table before targeting it.
 - **Prefer A/B legs over the same build** (flag-switched: e.g. `managed` / `halo-full` /
-  `halo-band`) — one build, one session, per-leg rows. Separate builds add noise and doubt. In a
+  `halo-band`) — one build, one session, per-leg rows. Separate builds add noise and doubt.
+- **Separate builds: build the A leg from the change's exact base commit** — never reuse a build kept from an earlier
+  item, which can differ by unrelated commits (ES-29's A leg was the kept ES-27 build, and a +5 % `LightMerge` delta could
+  not be attributed). `git stash -u` the change, build A from the clean base (its report must read `Git commit:
+  <base>`, no `-dirty`), `git stash pop`, build B (`<base>-dirty`). Do the stash and pop yourself between two
+  `player-runner` builds — it never touches the tree. Procedure: `Documentation/Performance/README.md` §"Separate-build
+  A/Bs". In a
   player, put the flag on `Settings` and switch legs with `-mc-set`. Automated runs (benchmark, startup probe, fluid
   stress) use the whole settings file plus session overrides; there is no defaults pin. A fresh player build's file
   holds the calibrated defaults; an Editor run uses `Assets/settings.json`, which holds dev-tuned values (job caps,
