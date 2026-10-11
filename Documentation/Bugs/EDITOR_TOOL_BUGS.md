@@ -69,27 +69,3 @@ filtering by those channels in the vein of the existing tag filter. Scope it as 
 overhaul covering every channel worth surfacing, not just sound material.
 
 ---
-
-## 04. A failed `git status` stamps a build clean
-
-**Severity:** Low (edge case; benchmark provenance)  
-**Files:** `Assets/Scripts/Benchmarks/BenchmarkEnvironment.cs` — `TryQueryGit`
-
-**Found:** 2026-10-11, while fixing the `-dirty` stamp (archived as `_FIXED_BUGS.md` Editor Tooling #01). Not observed
-in a real build.
-
-`TryQueryGit` sets `dirty` only when the status query succeeds with output. When `TryRunGit(STATUS_ARGUMENTS, …)`
-fails instead — the 2 s `GIT_TIMEOUT_MS` on a cold or very large tree, a non-zero exit, an exception — `dirty` stays
-`false`, and the stamp and report show the bare hash with no `Git dirty:` line. The hash query succeeded, so nothing
-in the header says the cleanliness check never ran. The check fails open: the one error it can make is claiming a
-clean tree.
-
-**Impact:** a dirty build could pass as a clean A leg under the separate-build A/B rule
-(`Documentation/Performance/README.md`). It needs the status query to fail while `rev-parse` succeeds moments
-earlier, so it is unlikely.
-
-**Proposed fix:** fail closed. When the status query fails, set `dirty = true` and put its sentinel in `dirtyPaths`
-(e.g. `(git status failed: git timeout)`), so the report reads `<hash>-dirty` plus a `Git dirty:` line saying why.
-It over-reports instead of hiding, which matches how the path filter treats unlisted paths.
-
----

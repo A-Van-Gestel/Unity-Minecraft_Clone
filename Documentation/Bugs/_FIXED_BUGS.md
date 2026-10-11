@@ -2379,3 +2379,45 @@ fix files; a build from the committed, clean tree is stamped with the bare hash 
 information — see `Documentation/Performance/README.md` §"What `-dirty` means".
 
 ---
+
+### ~~02. A failed `git status` stamps a build clean~~ (EDITOR_TOOL_BUGS.md §04)
+
+**Severity:** Low (edge case; benchmark provenance)  
+**Files:** `Assets/Scripts/Benchmarks/BenchmarkEnvironment.cs` — `TryQueryGit`  
+**Fixed:** October 2026
+
+**Found:** 2026-10-11, while fixing the `-dirty` stamp (archived as `_FIXED_BUGS.md` Editor Tooling #01). Not observed
+in a real build.
+
+`TryQueryGit` sets `dirty` only when the status query succeeds with output. When `TryRunGit(STATUS_ARGUMENTS, …)`
+fails instead — the 2 s `GIT_TIMEOUT_MS` on a cold or very large tree, a non-zero exit, an exception — `dirty` stays
+`false`, and the stamp and report show the bare hash with no `Git dirty:` line. The hash query succeeded, so nothing
+in the header says the cleanliness check never ran. The check fails open: the one error it can make is claiming a
+clean tree.
+
+**Impact:** a dirty build could pass as a clean A leg under the separate-build A/B rule
+(`Documentation/Performance/README.md`). It needs the status query to fail while `rev-parse` succeeds moments
+earlier, so it is unlikely.
+
+**Proposed fix (as filed):** fail closed. When the status query fails, set `dirty = true` and put its sentinel in
+`dirtyPaths` (e.g. `(git status failed: git timeout)`), so the report reads `<hash>-dirty` plus a `Git dirty:` line
+saying why. It over-reports instead of hiding, which matches how the path filter treats unlisted paths.
+
+**Root cause:** `TryRunGit` returned `false` both for a failure and for empty output — and a clean `git status` prints
+nothing — so the caller could not tell "clean" from "unchecked" and treated both as clean. A second path to the same
+result: an exit-0 run whose stdout read never completed fell back to an empty string.
+
+**Resolution:**
+- `TryRunGit` takes `allowEmptyOutput`; only the status query sets it, so empty output is success and every other
+  outcome is a failure.
+- `TryQueryGit` fails closed: a failed status query sets `dirty`, with `git status failed <sentinel>` as the
+  `Git dirty:` text.
+- An unread stdout is now a failure (`(git output unreadable)`), never empty output; a non-zero exit reports
+  `(git exited N)` instead of the misleading `(not a git repo)`.
+
+**Verified:** in the Editor, `GIT_CONFIG_*` environment variables set `status.showUntrackedFiles=bogus`, which makes
+`git status` exit 128 while `rev-parse` still succeeds. Before the fix: `dirty=False []`, the same as a clean tree.
+After: `dirty=True [git status failed (git exited 128)]`; a clean tree still reads `dirty=False []` and a dirty tree
+still lists its paths. Not reproducible through a normal build, since a healthy git never takes this path.
+
+---
