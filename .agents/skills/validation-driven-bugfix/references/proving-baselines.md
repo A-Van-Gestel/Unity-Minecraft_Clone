@@ -17,6 +17,11 @@ writing a baseline, running a prove-red, or writing "closed" into a doc.
 - **Confirm the red is the assertion, not a throw.** The runner catches a scenario's exception and
   reports it as failed. Read `ScenarioResult.Exception` (null for a real assertion) and check the
   `[FAIL]` line quotes the measured value. A red with an exception attached proves nothing.
+- **A mutation in Burst-reached code can outlive its restore.** ES-31 (2026-10-11): after a mutation of a
+  generic helper called from a Burst job was restored, the Editor kept running the *mutated* Burst code — a
+  clean script rebuild and an emptied `Library/BurstCache/JIT` did not clear it; only a further real IL change to
+  that helper did. The managed `Execute()` stayed correct, so only `.Run()`/`Schedule` paths lied. After restoring,
+  compare a job's `.Run()` against its managed `Execute()` on one input before trusting any later result.
 - **Write the `Prove-red:` docstring after the run**, transcribing the mutation that actually went red.
   One written while authoring is a prediction; when the evidence also lives in a fidelity-doc table,
   reconcile both in one step.

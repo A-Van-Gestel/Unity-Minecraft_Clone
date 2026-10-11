@@ -68,7 +68,7 @@ Retry it; it is not a hang.
 | See what a view shows                  | `capture_scene_view` / `capture_game_view` → `Assets/AgentCaptures~/`, then read the PNG  |
 | Profiler data                          | `run_script` on `Tools/UnityCli/Profiler/ProfilerQueries.cs`                              |
 | Load/drive a world in Play mode, capture | `run_script` on `Tools/UnityCli/PlayMode/WorldRig.cs` (recipe `playmode-world`)         |
-| Behavior-tick input on a live world      | `run_script` on `Tools/UnityCli/PlayMode/TickShapeProbe.cs` (`Measure`, after `WorldRig.Launch`) |
+| Behavior-tick input on a live world      | `run_script` on `Tools/UnityCli/PlayMode/TickShapeProbe.cs` (`Measure`, after `WorldRig.Launch`; `AuditSleepers` checks the registration contract) |
 
 ## Routing
 
