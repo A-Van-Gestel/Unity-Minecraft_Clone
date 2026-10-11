@@ -37,6 +37,9 @@ namespace Data
         private bool _gitDirty;
 
         [SerializeField]
+        private string _gitDirtyPaths = string.Empty;
+
+        [SerializeField]
         private string _il2CppConfiguration = UnknownValue;
 
         [SerializeField]
@@ -69,6 +72,12 @@ namespace Data
 
         /// <summary>Whether the working tree had uncommitted changes when the build ran.</summary>
         public bool GitDirty => _isBaked && _gitDirty;
+
+        /// <summary>
+        /// The first few paths that made the build <c>-dirty</c>, so a dirty report says why; empty when
+        /// the tree was clean or the stamp was never baked.
+        /// </summary>
+        public string GitDirtyPaths => _isBaked ? _gitDirtyPaths : string.Empty;
 
         /// <summary>
         /// IL2CPP compiler configuration (<c>Debug</c>/<c>Release</c>/<c>Master</c>). Distinct from

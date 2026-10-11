@@ -70,6 +70,11 @@ namespace Benchmarks
                 sb.AppendLine($"Build GUID:     {buildGUID}");
 
             sb.AppendLine($"Git commit:     {DescribeGitCommit(stamp)}");
+
+            string dirtyPaths = DescribeGitDirtyPaths(stamp);
+            if (dirtyPaths.Length > 0)
+                sb.AppendLine($"Git dirty:      {dirtyPaths}");
+
             sb.AppendLine($"Git branch:     {DescribeGitBranch(stamp)}");
             sb.AppendLine();
 
@@ -315,10 +320,27 @@ namespace Benchmarks
         {
 #if UNITY_EDITOR
             // `branch` carries its own sentinel when the query fails, so the result is reportable either way.
-            TryQueryGit(out _, out string branch, out _);
+            TryQueryGit(out _, out string branch, out _, out _);
             return branch;
 #else
             return stamp && stamp.IsBaked ? stamp.GitBranch : BuildStamp.UnknownValue;
+#endif
+        }
+
+        /// <summary>
+        /// Describes which paths made the commit <c>-dirty</c>: queried live in the Editor, read from
+        /// the stamp in a player.
+        /// </summary>
+        /// <param name="stamp">The baked stamp; unused in the Editor, which queries git directly.</param>
+        /// <returns>The first few dirty paths, or an empty string when the tree was clean or unknown.</returns>
+        // ReSharper disable once UnusedParameter.Local — used only in the non-Editor branch below.
+        private static string DescribeGitDirtyPaths(BuildStamp stamp)
+        {
+#if UNITY_EDITOR
+            TryQueryGit(out _, out _, out _, out string dirtyPaths);
+            return dirtyPaths;
+#else
+            return stamp && stamp.IsBaked ? stamp.GitDirtyPaths : string.Empty;
 #endif
         }
 
@@ -368,7 +390,7 @@ namespace Benchmarks
         private static string GetGitCommitHash()
         {
 #if UNITY_EDITOR
-            return TryQueryGit(out string commit, out _, out bool dirty)
+            return TryQueryGit(out string commit, out _, out bool dirty, out _)
                 ? (dirty ? commit + "-dirty" : commit)
                 : commit; // On failure `commit` already carries the explanatory sentinel.
 #else
@@ -386,14 +408,19 @@ namespace Benchmarks
         /// <param name="commit">Short commit hash on success; an explanatory sentinel on failure.</param>
         /// <param name="branch">Current branch name, or <c>HEAD</c> when detached.</param>
         /// <param name="dirty">
-        /// <c>true</c> when the working tree has uncommitted changes, ignoring the build stamp itself
-        /// (see <see cref="STATUS_ARGUMENTS"/>).
+        /// <c>true</c> when the working tree has uncommitted changes, ignoring the build stamp itself and
+        /// paths that cannot reach a build (see <see cref="STATUS_ARGUMENTS"/>).
+        /// </param>
+        /// <param name="dirtyPaths">
+        /// The first few paths that made the tree dirty (see <see cref="SummarizeStatusPaths"/>), or an
+        /// empty string when it is clean.
         /// </param>
         /// <returns><c>true</c> when the commit hash was obtained.</returns>
-        public static bool TryQueryGit(out string commit, out string branch, out bool dirty)
+        public static bool TryQueryGit(out string commit, out string branch, out bool dirty, out string dirtyPaths)
         {
             branch = "(unknown)";
             dirty = false;
+            dirtyPaths = string.Empty;
 
             if (!TryRunGit("rev-parse --short HEAD", out commit)) return false;
 
@@ -402,26 +429,65 @@ namespace Benchmarks
 
             // A non-empty porcelain listing means tracked changes, untracked files, or both. Any of
             // those makes the bare hash an over-claim, so the distinction is not worth splitting.
-            dirty = TryRunGit(STATUS_ARGUMENTS, out string statusOutput) &&
-                    !string.IsNullOrWhiteSpace(statusOutput);
+            if (TryRunGit(STATUS_ARGUMENTS, out string statusOutput) && !string.IsNullOrWhiteSpace(statusOutput))
+            {
+                dirty = true;
+                dirtyPaths = SummarizeStatusPaths(statusOutput);
+            }
 
             return true;
         }
 
         /// <summary>
-        /// Working-tree cleanliness query, with the build stamp asset excluded.
+        /// Reduces a porcelain status listing to its first <see cref="DIRTY_PATHS_SHOWN"/> paths, so a
+        /// <c>-dirty</c> stamp can say what made it dirty.
+        /// </summary>
+        /// <param name="statusOutput">Output of <see cref="STATUS_ARGUMENTS"/>.</param>
+        /// <returns>Comma-separated paths, suffixed with how many were left out.</returns>
+        private static string SummarizeStatusPaths(string statusOutput)
+        {
+            string[] lines = statusOutput.Split(new[] { '\n' }, StringSplitOptions.RemoveEmptyEntries);
+            StringBuilder sb = new StringBuilder();
+            int shown = Math.Min(lines.Length, DIRTY_PATHS_SHOWN);
+
+            for (int i = 0; i < shown; i++)
+            {
+                // Each line is a two-character status code, a space, then the path. TryRunGit trims the
+                // output, which strips the first line's leading blank status column (" M path"), so split
+                // on the first space of the trimmed line rather than at a fixed offset.
+                string line = lines[i].Trim();
+                int separator = line.IndexOf(' ');
+
+                if (i > 0) sb.Append(", ");
+                sb.Append(separator < 0 ? line : line.Substring(separator + 1).TrimStart());
+            }
+
+            if (lines.Length > shown) sb.Append($" (+{lines.Length - shown} more)");
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Working-tree cleanliness query, scoped to paths that can change a player.
         /// </summary>
         /// <remarks>
         /// The stamp is rewritten on every bake (its timestamp field always changes), so counting it
         /// would make the tree permanently dirty from the previous build onward and <c>-dirty</c> would
         /// stop distinguishing anything. Excluding it is what keeps the suffix meaningful.
+        /// <para>Docs, agent files and repo tooling never reach a build, so they are excluded too. The
+        /// <c>*.md</c> glob matches the repo root only: markdown under <c>Assets/</c> imports as a
+        /// <c>TextAsset</c> and still counts. Anything not listed counts, so a new folder over-reports.</para>
         /// <para>The <c>:(top)</c> magic prefixes are load-bearing: this runs with a working directory
         /// of <c>Assets/</c>, so a repo-root-relative pathspec is required — a plain <c>.</c> would
         /// silently scope the whole query to <c>Assets/</c> and stop seeing changes under
         /// <c>ProjectSettings/</c> or <c>Documentation/</c>.</para>
         /// </remarks>
         private const string STATUS_ARGUMENTS =
-            "status --porcelain -- :(top) :(exclude,top)Assets/Resources/Data/BuildStamp.asset";
+            "status --porcelain -- :(top) :(exclude,top)Assets/Resources/Data/BuildStamp.asset " +
+            ":(exclude,top)Documentation :(exclude,top)Tools :(exclude,top).agents :(exclude,top).claude " +
+            ":(exclude,top,glob)*.md";
+
+        /// <summary>How many dirty paths a stamp or report lists before summarizing the rest as a count.</summary>
+        private const int DIRTY_PATHS_SHOWN = 5;
 
         /// <summary>How long a single git invocation may run before it is killed.</summary>
         private const int GIT_TIMEOUT_MS = 2000;

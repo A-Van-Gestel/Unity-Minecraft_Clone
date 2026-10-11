@@ -25,8 +25,9 @@ namespace Editor.ProjectUtilities
 
         private const string MENU_PATH = "Minecraft Clone/Bake Build Stamp";
 
-        // Runs after GameVersionManager (order 0) so build-time mutations stay in a predictable order.
-        public int callbackOrder => 10;
+        // Runs before every other build hook: several write into the tree (the Performance Testing package's
+        // TestRunBuilder drops run-info JSON into Assets/Resources/), which would stamp a clean tree -dirty.
+        public int callbackOrder => int.MinValue;
 
         /// <summary>
         /// Called automatically by Unity right before a build starts. Bakes the stamp for the
@@ -63,7 +64,7 @@ namespace Editor.ProjectUtilities
             }
 
             NamedBuildTarget namedTarget = ResolveNamedBuildTarget(target);
-            BenchmarkEnvironment.TryQueryGit(out string commit, out string branch, out bool dirty);
+            BenchmarkEnvironment.TryQueryGit(out string commit, out string branch, out bool dirty, out string dirtyPaths);
             BurstAotFlags burst = ReadBurstAotSettings(target);
 
             // Edit through SerializedObject so the private [SerializeField] backing fields stay
@@ -72,6 +73,7 @@ namespace Editor.ProjectUtilities
             so.FindProperty("_gitCommit").stringValue = dirty ? commit + "-dirty" : commit;
             so.FindProperty("_gitBranch").stringValue = branch;
             so.FindProperty("_gitDirty").boolValue = dirty;
+            so.FindProperty("_gitDirtyPaths").stringValue = dirtyPaths;
             so.FindProperty("_il2CppConfiguration").stringValue =
                 PlayerSettings.GetScriptingBackend(namedTarget) == ScriptingImplementation.IL2CPP
                     ? PlayerSettings.GetIl2CppCompilerConfiguration(namedTarget).ToString()
@@ -91,6 +93,7 @@ namespace Editor.ProjectUtilities
 
             Debug.Log($"[BuildStampBaker] Baked stamp for {target}: " +
                       $"commit={so.FindProperty("_gitCommit").stringValue}, branch={branch}, " +
+                      (dirty ? $"dirtyPaths=[{dirtyPaths}], " : "") +
                       $"config={so.FindProperty("_il2CppConfiguration").stringValue}, " +
                       $"burstSafetyChecks={burst.SafetyChecks}, burstOptimizations={burst.Optimizations}");
         }

@@ -16,6 +16,7 @@ MonoBehaviour:
   _gitCommit: (unstamped build)
   _gitBranch: (unstamped build)
   _gitDirty: 0
+  _gitDirtyPaths: 
   _il2CppConfiguration: (unstamped build)
   _scriptingBackend: (unstamped build)
   _burstSafetyChecks: 0
