@@ -359,6 +359,9 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     //     through FluidTickJob, border voxels reading a per-tick Y-band neighbor halo). See FluidBurstTicker. ---
     private DynamicPool<FluidBurstTicker> _fluidTickerPool;
 
+    // ES-29: the Burst grass tick's per-chunk runners, pooled like the fluid ones.
+    private DynamicPool<GrassBurstTicker> _grassTickerPool;
+
     // The tick's pre-tick voxel snapshot, shared read-only by every tick job (ES-29). Disposed in OnDestroy.
     private TickSnapshotArena _tickArena;
 
@@ -366,6 +369,9 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     private readonly List<Chunk> _parallelFluidChunks = new List<Chunk>();
     private readonly List<FluidBurstTicker> _parallelFluidTickers = new List<FluidBurstTicker>();
     private readonly List<JobHandle> _parallelFluidHandles = new List<JobHandle>();
+    private readonly List<Chunk> _parallelGrassChunks = new List<Chunk>();
+    private readonly List<GrassBurstTicker> _parallelGrassTickers = new List<GrassBurstTicker>();
+    private readonly List<JobHandle> _parallelGrassHandles = new List<JobHandle>();
 
     // Per scheduled fluid job, aligned with _parallelFluidTickers: its busy-time record and schedule time (0 = untimed).
     private readonly List<int> _parallelFluidTimingRecords = new List<int>();
@@ -377,6 +383,10 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// <summary>Lazily-created pool of per-chunk fluid runners for the parallel tick (one in-flight per scheduled chunk). Cleared in <c>OnDestroy</c>.</summary>
     private DynamicPool<FluidBurstTicker> FluidTickerPool =>
         _fluidTickerPool ??= new DynamicPool<FluidBurstTicker>(() => new FluidBurstTicker(), t => t.Dispose());
+
+    /// <summary>Lazily-created pool of per-chunk grass runners for the parallel tick. Cleared in <c>OnDestroy</c>.</summary>
+    private DynamicPool<GrassBurstTicker> GrassTickerPool =>
+        _grassTickerPool ??= new DynamicPool<GrassBurstTicker>(() => new GrassBurstTicker(), t => t.Dispose());
 
     /// <summary>The behavior tick's shared snapshot arena, created on first use.</summary>
     private TickSnapshotArena TickArena => _tickArena ??= new TickSnapshotArena();
@@ -808,6 +818,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         // 2. Dispose of the persistent global data.
         JobDataManager?.Dispose();
         _fluidTickerPool?.Clear(); // disposes every pooled per-chunk fluid ticker (all returned between ticks)
+        _grassTickerPool?.Clear();
         _tickArena?.Dispose(); // no tick job is in flight between ticks
         _tickArena = null;
 
@@ -2533,20 +2544,21 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     }
 
     /// <summary>
-    /// TG-4 — ticks all active chunks with the fluid jobs <b>parallelized across chunks</b>:
+    /// TG-4 / ES-29 — ticks all active chunks with the fluid and grass jobs <b>parallelized across chunks</b>:
     /// <list type="number">
-    /// <item><b>Prepare</b> — for every chunk with active fluids, acquire a pooled <see cref="FluidBurstTicker"/>
-    /// and copy its Y-band's sections, and its neighbors', into the tick's shared <see cref="TickSnapshotArena"/>
-    /// (each section once per tick, however many jobs read it). Every chunk is prepared before any job is
-    /// scheduled, because a scheduled job holds the arena and it cannot grow under it.</item>
-    /// <item><b>Schedule</b> — schedule each prepared chunk's <see cref="FluidTickJob"/> on a worker (each chunk has
-    /// its own ticker, so the in-flight jobs never share a padded volume). Every fluid — interior AND border — ticks
-    /// in-job via the Y-band neighbor halo.</item>
+    /// <item><b>Prepare</b> — for every chunk with active fluids (and, separately, active grass), acquire a pooled
+    /// <see cref="FluidBurstTicker"/> (<see cref="GrassBurstTicker"/>) and copy its Y-band's sections, and its
+    /// neighbors', into the tick's shared <see cref="TickSnapshotArena"/> (each section once per tick, however many
+    /// jobs read it). Every chunk is prepared before any job is scheduled, because a scheduled job holds the arena
+    /// and it cannot grow under it.</item>
+    /// <item><b>Schedule</b> — schedule each prepared chunk's <see cref="FluidTickJob"/> and <see cref="GrassTickJob"/>
+    /// on a worker (each chunk has its own tickers, so the in-flight jobs never share scratch). Every fluid —
+    /// interior AND border — ticks in-job via the Y-band neighbor halo.</item>
     /// <item><b>Complete</b> — flush + complete all scheduled handles.</item>
-    /// <item><b>Drain</b> — walk the chunks in the <b>same snapshot order</b> and run each chunk's managed work
-    /// (grass + the fluid replay using its pre-computed ticker results), then return the ticker to the pool.</item>
+    /// <item><b>Drain</b> — walk the chunks in the <b>same snapshot order</b> and replay each chunk's grass and then
+    /// its fluid results, then return the tickers to their pools.</item>
     /// </list>
-    /// Fluid emission <i>order</i> is fixed by the emitting voxel's (chunk-order, bucket-order) — never the target —
+    /// Emission <i>order</i> is fixed by the emitting voxel's (chunk-order, family, bucket-order) — never the target —
     /// and the drain is serial in the deterministic chunk-iteration order, so the emitted <see cref="VoxelMod"/>
     /// stream is byte-identical to a single serial loop even with cross-chunk targets; only the compute moves off
     /// the main thread. Also the benchmark entry point (<c>FluidTickBenchmark</c>) drives this exact path.
@@ -2559,17 +2571,22 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         _parallelFluidHandles.Clear();
         _parallelFluidTimingRecords.Clear();
         _parallelFluidScheduleTimestamps.Clear();
+        _parallelGrassChunks.Clear();
+        _parallelGrassTickers.Clear();
+        _parallelGrassHandles.Clear();
         TickSnapshotArena arena = TickArena;
         arena.BeginTick();
 
         try
         {
-            // Phase 1: prepare every chunk that has active fluids. The lists stay paired by index (a default handle and
-            // an empty timing record until Phase 2) so the finally can return every ticker even if a prepare throws.
+            // Phase 1: prepare every chunk that has active grass or fluids. The lists stay paired by index (a default
+            // handle and an empty timing record until Phase 2) so the finally can return every ticker even if a prepare throws.
             foreach (Chunk chunk in snapshot)
             {
                 if (chunk.ChunkData == null)
                     continue;
+
+                PrepareGrass(chunk, arena);
 
                 NativeHashSet<int> fluids = chunk.ChunkData.ActiveFluidsBucket;
                 if (!fluids.IsCreated || fluids.Count == 0)
@@ -2610,6 +2627,16 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                 PerfTickTotals.Lap(ref _tickTotals.ScheduleTicks, lap);
             }
 
+            long grassLap = PerfStore.Begin();
+            for (int i = 0; i < _parallelGrassTickers.Count; i++)
+            {
+                GrassBurstTicker ticker = _parallelGrassTickers[i];
+                if (ticker.Indices.Length > 0)
+                    _parallelGrassHandles[i] = ticker.Schedule(_parallelGrassChunks[i].ChunkData, _tickCounter, JobDataManager.BlockTypesJobData);
+            }
+
+            PerfTickTotals.Lap(ref _tickTotals.ScheduleTicks, grassLap);
+
             // Kick the scheduled jobs onto worker threads so they actually run in parallel before we block on them.
             long phaseLap = PerfStore.Begin();
             JobHandle.ScheduleBatchedJobs();
@@ -2618,11 +2645,14 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
             // Phase 3: complete all scheduled jobs.
             for (int i = 0; i < _parallelFluidHandles.Count; i++)
                 _parallelFluidHandles[i].Complete();
+            for (int i = 0; i < _parallelGrassHandles.Count; i++)
+                _parallelGrassHandles[i].Complete();
             PerfTickTotals.Lap(ref _tickTotals.WaitTicks, phaseLap);
 
-            // Phase 4: drain serially in the same snapshot order. A cursor pairs each fluid chunk with its ticker
-            // (Phase 1 added chunks in this same order, so the cursor stays aligned without a lookup).
+            // Phase 4: drain serially in the same snapshot order. Cursors pair each chunk with its fluid and grass
+            // tickers (Phase 1 added chunks in this same order, so the cursors stay aligned without a lookup).
             int fluidCursor = 0;
+            int grassCursor = 0;
             foreach (Chunk chunk in snapshot)
             {
                 if (chunk.ChunkData == null)
@@ -2637,26 +2667,57 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                     fluidCursor++;
                 }
 
-                chunk.DrainTick(ticker, ref _tickTotals);
+                GrassBurstTicker grassTicker = null;
+                if (grassCursor < _parallelGrassChunks.Count && ReferenceEquals(_parallelGrassChunks[grassCursor], chunk))
+                    grassTicker = _parallelGrassTickers[grassCursor++];
+
+                chunk.DrainTick(ticker, grassTicker, ref _tickTotals);
                 if (fluidJob >= 0) EndFluidJobTiming(fluidJob);
             }
         }
         finally
         {
             // Ensure no job is still in flight before its ticker scratch is reused — a no-op on the normal path
-            // (Phase 2 already completed them), but on an exceptional throw mid-schedule/drain this drains the
+            // (Phase 3 already completed them), but on an exceptional throw mid-schedule/drain this drains the
             // still-running jobs so returning their tickers can't hand live, job-written scratch back to the pool.
             for (int i = 0; i < _parallelFluidHandles.Count; i++)
                 _parallelFluidHandles[i].Complete();
+            for (int i = 0; i < _parallelGrassHandles.Count; i++)
+                _parallelGrassHandles[i].Complete();
 
             // Return every acquired ticker to the pool for reuse next tick, and any timing record a throw left unconsumed.
             foreach (FluidBurstTicker ticker in _parallelFluidTickers)
                 FluidTickerPool.Return(ticker);
+            foreach (GrassBurstTicker ticker in _parallelGrassTickers)
+                GrassTickerPool.Return(ticker);
             foreach (int timingRecord in _parallelFluidTimingRecords)
                 JobManager?.CancelJobTiming(timingRecord);
 
             arena.EndTick(); // every job that read it completed above
         }
+    }
+
+    /// <summary>
+    /// Phase 1 of <see cref="TickChunksParallel"/> for one chunk's grass: rents a <see cref="GrassBurstTicker"/> and
+    /// prepares it into the tick's arena when the chunk has active grass. The ticker joins the per-tick lists before
+    /// its prepare so the tick's finally returns it even if the prepare throws.
+    /// </summary>
+    private void PrepareGrass(Chunk chunk, TickSnapshotArena arena)
+    {
+        NativeHashSet<int> grass = chunk.ChunkData.ActiveGrassBucket;
+        if (!grass.IsCreated || grass.Count == 0)
+            return;
+
+        long lap = PerfStore.Begin();
+        GrassBurstTicker ticker = GrassTickerPool.Get();
+        _parallelGrassChunks.Add(chunk);
+        _parallelGrassTickers.Add(ticker);
+        _parallelGrassHandles.Add(default);
+        lap = PerfTickTotals.Lap(ref _tickTotals.ScheduleTicks, lap);
+
+        bool prepared = ticker.TryPrepare(chunk.ChunkData, worldData, arena);
+        if (PerfTickTotals.Lap(ref _tickTotals.PrepareTicks, lap) != 0L && prepared)
+            _tickTotals.SnapshotSections += ticker.SnapshotSections;
     }
 
     /// <summary>

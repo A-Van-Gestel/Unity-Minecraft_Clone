@@ -86,7 +86,7 @@ namespace Editor.Validation.Behavior
         /// </summary>
         private static bool Bh8_NoSpreadIntoPlaceholderBurst()
         {
-            int count = CountModsIntoPlaceholder(TickDriver.FluidBurstHaloBand, out string detail);
+            int count = CountModsIntoPlaceholder(TickDriver.BurstHaloBand, out string detail);
             if (count == 0)
             {
                 Debug.Log("[PASS] BH-B8: no fluid mods emitted into the unpopulated placeholder neighbor (Burst path).");
@@ -113,7 +113,7 @@ namespace Editor.Validation.Behavior
         private static bool Bh10_SeamWakesWhenPlaceholderPopulates()
         {
             using BehaviorTestWorld world = new BehaviorTestWorld(s_bh4CenterOrigin);
-            world.Driver = TickDriver.FluidBurstHaloBand;
+            world.Driver = TickDriver.BurstHaloBand;
 
             // Source at the −X seam, boxed in on every in-chunk side so the placeholder is its only way out.
             world.SetBlock(0, PLACEHOLDER_FLOOR_Y, PLACEHOLDER_LANE_Z, BlockIDs.Stone); // floor
@@ -170,7 +170,7 @@ namespace Editor.Validation.Behavior
         private static bool Bh11_SeamWakeCoversGrass()
         {
             using BehaviorTestWorld world = new BehaviorTestWorld(s_bh4CenterOrigin);
-            world.Driver = TickDriver.FluidBurstHaloBand;
+            world.Driver = TickDriver.BurstHaloBand;
 
             // Grass on the −X seam, sitting on stone, with stone (not dirt) all around it in-chunk so no in-chunk
             // target can keep it awake. Air above keeps the grass itself alive (grass under a solid turns to dirt).

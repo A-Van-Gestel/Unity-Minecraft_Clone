@@ -17,7 +17,7 @@ namespace Editor.Validation.Behavior.Framework
     /// Selects how <see cref="BehaviorTestWorld"/> orders active-voxel evaluation within a tick — the modeled
     /// production tick driver. <see cref="Legacy"/> reproduces the original single-set traversal (the parity oracle);
     /// <see cref="SplitFamily"/> reproduces the per-behavior-family split (evaluate all grass, then all fluids);
-    /// <see cref="FluidBurstHaloBand"/> reproduces the shipped Burst fluid path. The <b>BH-D1</b> differential pits
+    /// <see cref="BurstHaloBand"/> reproduces the shipped Burst tick. The <b>BH-D1</b> differential pits
     /// each against <see cref="Legacy"/> under the §4.3 canonicalization.
     /// </summary>
     public enum TickDriver
@@ -29,13 +29,13 @@ namespace Editor.Validation.Behavior.Framework
         SplitFamily,
 
         /// <summary>
-        /// The shipped TG-4 fluid path: grass-then-fluid order, but <b>every</b> fluid voxel (interior AND border) is
-        /// evaluated by the real Burst <see cref="FluidTickJob"/> via <see cref="FluidBurstTicker.RunFluids"/>,
-        /// border voxels reading the per-tick active-fluid <b>Y-band</b> neighbor halo gathered from the seeded
-        /// neighbor chunks. Grass stays managed. <b>BH-D1[L|HB]</b> pits this against <see cref="Legacy"/> over all
-        /// fixtures (incl. the BH-4 cross-chunk cases) as the end-to-end parity gate.
+        /// The shipped tick: grass-then-fluid order, with <b>every</b> grass voxel evaluated by the real Burst
+        /// <see cref="GrassTickJob"/> via <see cref="GrassBurstTicker.RunGrass"/> and every fluid voxel (interior AND
+        /// border) by the real <see cref="FluidTickJob"/> via <see cref="FluidBurstTicker.RunFluids"/>, border voxels
+        /// reading the seeded neighbor chunks through the tick's section arena. <b>BH-D1[L|HB]</b> pits this against
+        /// <see cref="Legacy"/> over all fixtures (incl. the BH-4 cross-chunk cases) as the end-to-end parity gate.
         /// </summary>
-        FluidBurstHaloBand,
+        BurstHaloBand,
     }
 
     /// <summary>
@@ -84,17 +84,18 @@ namespace Editor.Validation.Behavior.Framework
         private readonly BlockType[] _palette;
         private readonly BlockType _inert;
 
-        private NativeArray<BlockTypeJobData> _blockTypesJob; // built from the palette for the FluidBurstHaloBand driver
+        private NativeArray<BlockTypeJobData> _blockTypesJob; // built from the palette for the BurstHaloBand driver
         private JobDataManager _jobDataManager; // opt-in (EnableModifyVoxel); owns its own palette copy
 
-        // The REAL production runner — the FluidBurstHaloBand driver drives this (not a hand-copy) so BH-D1[L|HB]
-        // exercises the shipped snapshot/halo/job/ModsPerSource path, not a twin that could drift from it.
+        // The REAL production runners — the BurstHaloBand driver drives these (not hand-copies) so BH-D1[L|HB]
+        // exercises the shipped arena/halo/job/ModsPerSource path, not a twin that could drift from it.
         private readonly FluidBurstTicker _fluidTicker = new FluidBurstTicker();
+        private readonly GrassBurstTicker _grassTicker = new GrassBurstTicker();
 
-        // The ticker reads ChunkData.ActiveFluidsBucket; the harness's own active model (_activeVoxels) is mirrored
-        // into it each tick by SyncFluidBucketToActives. _bucketedFluids tracks what we put there so stale fluids
-        // can be evicted.
+        // The tickers read ChunkData's family buckets; the harness's own active model (_activeVoxels) is mirrored into
+        // them each tick by SyncBucketsToActives. These track what we put there so stale voxels can be evicted.
         private readonly HashSet<Vector3Int> _bucketedFluids = new HashSet<Vector3Int>();
+        private readonly HashSet<Vector3Int> _bucketedGrass = new HashSet<Vector3Int>();
         private readonly List<Vector3Int> _bucketSyncScratch = new List<Vector3Int>();
 
         private readonly HashSet<Vector3Int> _activeVoxels = new HashSet<Vector3Int>();
@@ -119,6 +120,9 @@ namespace Editor.Validation.Behavior.Framework
         /// </summary>
         public TickDriver Driver = TickDriver.Legacy;
 
+        /// <summary>Grass voxel evaluations the <see cref="TickDriver.BurstHaloBand"/> driver took from the grass job, over all ticks.</summary>
+        public int JobTickedGrassVoxels { get; private set; }
+
         /// <summary>
         /// Stands up the stub world + palette and an all-air center chunk at <paramref name="centerChunkVoxelOrigin"/>.
         /// </summary>
@@ -138,7 +142,7 @@ namespace Editor.Validation.Behavior.Framework
                 _palette = TestBehaviorBlockPalette.Create();
                 _inert = _palette[BlockIDs.Air]; // inert default for out-of-palette ids (see PaletteOf)
 
-                // Blittable copy of the palette for the FluidBurstHaloBand driver's FluidTickJob (mirrors
+                // Blittable copy of the palette for the BurstHaloBand driver's jobs (mirrors
                 // World.JobDataManager.BlockTypesJobData, built from the same BlockType source).
                 _blockTypesJob = new NativeArray<BlockTypeJobData>(_palette.Length, Allocator.Persistent);
                 for (int i = 0; i < _palette.Length; i++)
@@ -289,7 +293,7 @@ namespace Editor.Validation.Behavior.Framework
         /// <exception cref="InvalidOperationException">No placeholder exists at that coord to populate.</exception>
         /// <remarks>
         /// The harness drives its tick from <see cref="_activeVoxels"/>, and
-        /// <see cref="SyncFluidBucketToActives"/> <b>evicts</b> anything in <see cref="ChunkData"/>'s bucket that
+        /// <see cref="SyncBucketsToActives"/> <b>evicts</b> anything in <see cref="ChunkData"/>'s buckets that
         /// the model does not know about — so a production-side wake would be silently undone on the next tick and
         /// the scenario would fail for the wrong reason. After running the real pass this re-reads the center's
         /// seam slab through the public <see cref="ChunkData.IsVoxelActive"/> and absorbs whatever production
@@ -323,7 +327,7 @@ namespace Editor.Validation.Behavior.Framework
             // NEXT tick's sync, so without this the bucket still holds last tick's quiesced voxels — and the mirror
             // below would read them back as "woken" no matter what the production pass did (a false green this
             // scenario was written to catch). Production's drain has already removed them by this point.
-            SyncFluidBucketToActives();
+            SyncBucketsToActives();
 
             neighbor.IsPopulated = true;
 
@@ -419,11 +423,10 @@ namespace Editor.Validation.Behavior.Framework
             // chosen by the modeled driver (Legacy single-set vs SplitFamily per-family) — the variable BH-D1 tests.
             List<Vector3Int> ordered = OrderActives();
 
-            // FluidBurstHaloBand: precompute the job-ticked fluids' (mods, active) via the real FluidTickJob over a
-            // pre-tick snapshot, keyed by position — mirroring production's parallel drain. ALL fluids are job-ticked
-            // (border voxels via the Y-band neighbor halo; grass stays managed). Null for the managed-only drivers.
-            Dictionary<Vector3Int, FluidJobResult> jobResults =
-                Driver == TickDriver.FluidBurstHaloBand ? RunFluidJob() : null;
+            // BurstHaloBand: precompute every grass and fluid voxel's (mods, active) via the real Burst jobs over a
+            // pre-tick snapshot, keyed by position — mirroring production's parallel drain. Null for the managed drivers.
+            Dictionary<Vector3Int, JobResult> jobResults =
+                Driver == TickDriver.BurstHaloBand ? RunBurstJobs() : null;
 
             List<VoxelEval> evals = new List<VoxelEval>(ordered.Count);
             Queue<VoxelMod> pending = new Queue<VoxelMod>();
@@ -434,9 +437,9 @@ namespace Editor.Validation.Behavior.Framework
                 List<VoxelMod> copy;
                 bool active;
 
-                if (jobResults != null && jobResults.TryGetValue(pos, out FluidJobResult jr))
+                if (jobResults != null && jobResults.TryGetValue(pos, out JobResult jr))
                 {
-                    // Interior fluid — its Behave/Active were computed by the Burst job (over the same pre-tick state).
+                    // Its Behave/Active were computed by the Burst job (over the same pre-tick state).
                     copy = jr.Mods;
                     active = jr.Active;
                 }
@@ -466,13 +469,13 @@ namespace Editor.Validation.Behavior.Framework
             return new TickRecord(_tick, evals);
         }
 
-        /// <summary>The Burst job's per-voxel result for one interior fluid: its emitted mods (null if none) and active flag.</summary>
-        private readonly struct FluidJobResult
+        /// <summary>A Burst job's per-voxel result: its emitted mods (null if none) and active flag.</summary>
+        private readonly struct JobResult
         {
             public readonly List<VoxelMod> Mods;
             public readonly bool Active;
 
-            public FluidJobResult(List<VoxelMod> mods, bool active)
+            public JobResult(List<VoxelMod> mods, bool active)
             {
                 Mods = mods;
                 Active = active;
@@ -480,39 +483,43 @@ namespace Editor.Validation.Behavior.Framework
         }
 
         /// <summary>
-        /// Drives the <b>real</b> production runner <see cref="FluidBurstTicker.RunFluids"/> (Y-band halo) over this
-        /// chunk's fluid voxels and returns each voxel's (mods, active) keyed by position. Unlike a hand-rolled copy,
-        /// this exercises the shipped snapshot + neighbor halo + <see cref="FluidTickJob"/> + <c>ModsPerSource</c>
-        /// split, so BH-D1[L|HB] guards the actual orchestration (not a twin that could drift). The harness's own
-        /// active model is first mirrored into <see cref="ChunkData.ActiveFluidsBucket"/> (the set the runner reads)
-        /// by <see cref="SyncFluidBucketToActives"/>; results are mapped back to positions via the runner's
-        /// <see cref="FluidBurstTicker.InteriorIndices"/>. Every fluid is job-ticked (border voxels via the neighbor
-        /// halo gathered from the harness's seeded neighbor chunks in <c>worldData</c>); grass stays managed.
+        /// Drives the <b>real</b> production runners <see cref="GrassBurstTicker.RunGrass"/> and
+        /// <see cref="FluidBurstTicker.RunFluids"/> over this chunk's grass and fluid voxels and returns each voxel's
+        /// (mods, active) keyed by position. Unlike hand-rolled copies, this exercises the shipped arena + neighbor halo
+        /// + jobs + <c>ModsPerSource</c> split, so BH-D1[L|HB] guards the actual orchestration. The harness's own
+        /// active model is first mirrored into <see cref="ChunkData"/>'s family buckets (the runners' input) by
+        /// <see cref="SyncBucketsToActives"/>; results are mapped back to positions via each runner's index list. Both
+        /// runners read the pre-tick state (neither mutates the chunk), so their order here does not matter.
         /// </summary>
-        private Dictionary<Vector3Int, FluidJobResult> RunFluidJob()
+        private Dictionary<Vector3Int, JobResult> RunBurstJobs()
         {
-            Dictionary<Vector3Int, FluidJobResult> results = new Dictionary<Vector3Int, FluidJobResult>();
+            Dictionary<Vector3Int, JobResult> results = new Dictionary<Vector3Int, JobResult>();
+            SyncBucketsToActives();
 
-            // Mirror the harness active set into ChunkData's fluid bucket (the runner's input), then run it via the
-            // shipped Y-band halo path.
-            SyncFluidBucketToActives();
+            _grassTicker.RunGrass(ChunkData, _tick, _blockTypesJob, _world.worldData);
+            JobTickedGrassVoxels += _grassTicker.Indices.Length;
+            AddJobResults(results, _grassTicker.Indices, _grassTicker.Mods, _grassTicker.ModsPerSource, _grassTicker.InactiveIndices);
+
             _fluidTicker.RunFluids(ChunkData, _tick, _blockTypesJob, _world.worldData);
+            AddJobResults(results, _fluidTicker.InteriorIndices, _fluidTicker.Mods, _fluidTicker.ModsPerSource,
+                _fluidTicker.InactiveInterior);
+            return results;
+        }
 
-            NativeList<int> interiorIndices = _fluidTicker.InteriorIndices;
-            if (interiorIndices.Length == 0)
-                return results;
-
-            NativeList<VoxelMod> mods = _fluidTicker.Mods;
-            NativeList<int> perSource = _fluidTicker.ModsPerSource;
-
+        /// <summary>
+        /// Splits one job's flat mod list back into per-source runs (<paramref name="perSource"/> is parallel to
+        /// <paramref name="indices"/>) and records each source's (mods, active) by position; a zero-mod source records
+        /// null, matching Behave's "return null when no mods".
+        /// </summary>
+        private static void AddJobResults(Dictionary<Vector3Int, JobResult> results, NativeList<int> indices,
+            NativeList<VoxelMod> mods, NativeList<int> perSource, NativeList<int> inactive)
+        {
             HashSet<int> inactiveSet = new HashSet<int>();
-            foreach (int k in _fluidTicker.InactiveInterior)
+            foreach (int k in inactive)
                 inactiveSet.Add(k);
 
-            // Split the flat mod list back into per-source runs (ModsPerSource is parallel to InteriorIndices), keyed
-            // by each source's position. Use null for a zero-mod source to match Behave's "return null when no mods".
             int modCursor = 0;
-            for (int i = 0; i < interiorIndices.Length; i++)
+            for (int i = 0; i < indices.Length; i++)
             {
                 int count = perSource[i];
                 List<VoxelMod> srcMods = null;
@@ -524,29 +531,36 @@ namespace Editor.Validation.Behavior.Framework
                 }
 
                 modCursor += count;
-                int flat = interiorIndices[i];
+                int flat = indices[i];
                 ChunkMath.GetLocalPositionFromFlattenedIndex(flat, out int x, out int y, out int z);
-                results[new Vector3Int(x, y, z)] = new FluidJobResult(srcMods, !inactiveSet.Contains(flat));
+                results[new Vector3Int(x, y, z)] = new JobResult(srcMods, !inactiveSet.Contains(flat));
             }
-
-            return results;
         }
 
         /// <summary>
-        /// Mirrors the harness's active-voxel model (<see cref="_activeVoxels"/>) into
-        /// <see cref="ChunkData.ActiveFluidsBucket"/> — the set <see cref="FluidBurstTicker.RunFluids"/>
-        /// partitions — so the real runner sees exactly the active fluids the harness is tracking. The harness uses
-        /// <c>SetVoxel</c> (which bypasses the bucket maintenance <c>ModifyVoxel</c> does), so the bucket must be
-        /// reconciled each tick: evict previously-bucketed voxels that are no longer active fluids, then register
-        /// every active fluid (idempotent). Only fluids are mirrored; grass stays on the managed path.
+        /// Mirrors the harness's active-voxel model (<see cref="_activeVoxels"/>) into <see cref="ChunkData"/>'s two
+        /// family buckets — the sets the real runners partition — so they see exactly the active voxels the harness is
+        /// tracking. The harness uses <c>SetVoxel</c> (which bypasses the bucket maintenance <c>ModifyVoxel</c> does),
+        /// so the buckets are reconciled each tick: first evict, from both families, every previously-bucketed voxel
+        /// that is no longer an active member of its family, then register every active voxel (idempotent). Evicting
+        /// both before registering either keeps a voxel that changed family from being removed after its re-add.
         /// </summary>
-        private void SyncFluidBucketToActives()
+        private void SyncBucketsToActives()
+        {
+            EvictStale(ChunkData.BehaviorFamily.Fluid, _bucketedFluids);
+            EvictStale(ChunkData.BehaviorFamily.Grass, _bucketedGrass);
+            RegisterActives(ChunkData.BehaviorFamily.Fluid, _bucketedFluids);
+            RegisterActives(ChunkData.BehaviorFamily.Grass, _bucketedGrass);
+        }
+
+        /// <summary>Removes from the buckets every voxel of <paramref name="bucketed"/> no longer an active <paramref name="family"/> member.</summary>
+        private void EvictStale(ChunkData.BehaviorFamily family, HashSet<Vector3Int> bucketed)
         {
             _bucketSyncScratch.Clear();
-            foreach (Vector3Int pos in _bucketedFluids)
+            foreach (Vector3Int pos in bucketed)
             {
                 ushort id = BurstVoxelDataBitMapping.GetId(ChunkData.GetVoxel(pos.x, pos.y, pos.z));
-                if (!_activeVoxels.Contains(pos) || ChunkData.ClassifyFamily(id) != ChunkData.BehaviorFamily.Fluid)
+                if (!_activeVoxels.Contains(pos) || ChunkData.ClassifyFamily(id) != family)
                 {
                     ChunkData.RemoveActiveVoxel(pos);
                     _bucketSyncScratch.Add(pos);
@@ -554,12 +568,16 @@ namespace Editor.Validation.Behavior.Framework
             }
 
             foreach (Vector3Int pos in _bucketSyncScratch)
-                _bucketedFluids.Remove(pos);
+                bucketed.Remove(pos);
+        }
 
+        /// <summary>Registers every active <paramref name="family"/> voxel of the model in its bucket, recording it in <paramref name="bucketed"/>.</summary>
+        private void RegisterActives(ChunkData.BehaviorFamily family, HashSet<Vector3Int> bucketed)
+        {
             foreach (Vector3Int pos in _activeVoxels)
             {
                 ushort id = BurstVoxelDataBitMapping.GetId(ChunkData.GetVoxel(pos.x, pos.y, pos.z));
-                if (ChunkData.ClassifyFamily(id) == ChunkData.BehaviorFamily.Fluid && _bucketedFluids.Add(pos))
+                if (ChunkData.ClassifyFamily(id) == family && bucketed.Add(pos))
                     ChunkData.AddActiveVoxel(pos, id);
             }
         }
@@ -754,6 +772,7 @@ namespace Editor.Validation.Behavior.Framework
             ValidationReflection.SetStaticProperty(typeof(World), nameof(World.Instance), _previousInstance);
 
             _fluidTicker.Dispose();
+            _grassTicker.Dispose();
             ChunkData?.Dispose();
             foreach (ChunkData neighbor in _neighbors.Values)
                 neighbor.Dispose();

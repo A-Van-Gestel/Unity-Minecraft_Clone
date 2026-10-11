@@ -39,9 +39,16 @@ namespace Editor.Validation.Behavior
         private const int FLOOR_Y = 63;
         private const int FLUID_Y = 64;
 
-        // Sections the shared arena copies for the grid: every chunk's band covers sections 3–4 (the floor at 63, the
-        // water at 64) and each of the nine chunks is copied once, though its own job and up to eight neighbors' read it.
-        private const int GRID_ARENA_SECTIONS = 9 * 2;
+        // Sections the shared arena copies for the grid: every chunk's fluid band covers sections 3–4 (the floor at 63,
+        // the water at 64) and its grass band section 2, and each of the nine chunks is copied once, though its own jobs
+        // and up to eight neighbors' read it.
+        private const int GRID_ARENA_SECTIONS = 9 * 3;
+
+        // Grass seeded per grid chunk, at an X shifted by the chunk's salt: one under a stone cap (a deterministic dirt
+        // modification at a chunk-specific position) and one beside convertible dirt (stays active).
+        private const int GRASS_Y = 40;
+        private const int CAPPED_GRASS_Z = 2;
+        private const int ACTIVE_GRASS_Z = 8;
 
         // Phase 4b cross-seam scenario: an interior center origin so all 8 neighbor coords are in-world (the
         // IsVoxelInWorld bound SetNeighborBlock requires) and can be seeded. Chunk coord (8,8).
@@ -122,7 +129,7 @@ namespace Editor.Validation.Behavior
                 }
 
                 int failures = StressMultiChunk(chunks, baselines, wd, rig.BlockTypesJob);
-                failures += StressWorldTick(chunks, baselines);
+                failures += StressWorldTick(chunks, baselines, GrassBaselines(chunks, wd, rig.BlockTypesJob));
 
                 int totalMods = 0, totalFluids = 0;
                 foreach (TickerOutput b in baselines)
@@ -207,9 +214,10 @@ namespace Editor.Validation.Behavior
         /// the drain emptied (the drain only enqueues modifications, so the voxels stay at their seeded state), then
         /// asserts the drained stream equals the baselines' modifications concatenated in snapshot order, each chunk's
         /// bucket lost exactly its baseline's inactive voxels, and the arena copied <see cref="GRID_ARENA_SECTIONS"/>
-        /// sections. Returns the divergence count (0 = pass).
+        /// sections. Grass rides along: each chunk's grass baseline precedes its fluid baseline in the expected stream, as
+        /// the drain replays grass first. Returns the divergence count (0 = pass).
         /// </summary>
-        private static int StressWorldTick(List<ChunkData> chunks, TickerOutput[] baselines)
+        private static int StressWorldTick(List<ChunkData> chunks, TickerOutput[] baselines, TickerOutput[] grassBaselines)
         {
             World world = World.Instance;
             Queue<VoxelMod> modifications = (Queue<VoxelMod>)ValidationReflection.GetInstanceField(world, "_modifications");
@@ -223,8 +231,11 @@ namespace Editor.Validation.Behavior
             }
 
             List<VoxelMod> expected = new List<VoxelMod>();
-            foreach (TickerOutput b in baselines)
-                expected.AddRange(b.Mods);
+            for (int i = 0; i < chunks.Count; i++)
+            {
+                expected.AddRange(grassBaselines[i].Mods);
+                expected.AddRange(baselines[i].Mods);
+            }
 
             int failures = 0;
             try
@@ -245,11 +256,12 @@ namespace Editor.Validation.Behavior
 
                     for (int i = 0; i < chunks.Count; i++)
                     {
-                        int expectedLeft = baselines[i].Interior.Length - baselines[i].Inactive.Length;
+                        int expectedLeft = baselines[i].Interior.Length - baselines[i].Inactive.Length +
+                                           grassBaselines[i].Interior.Length - grassBaselines[i].Inactive.Length;
                         if (chunks[i].GetActiveVoxelCount() != expectedLeft)
                         {
                             Debug.LogError($"[FAIL] World tick (round {round}) chunk {i} kept {chunks[i].GetActiveVoxelCount()} " +
-                                           $"active fluids, expected {expectedLeft} after its baseline's inactive removals.");
+                                           $"active voxels, expected {expectedLeft} after its baselines' inactive removals.");
                             failures++;
                         }
                     }
@@ -268,10 +280,36 @@ namespace Editor.Validation.Behavior
                 modifications.Clear();
                 // World.OnDestroy, which frees the ticker pool and the arena, never runs for this edit-mode stub.
                 (ValidationReflection.GetInstanceField(world, "_fluidTickerPool") as DynamicPool<FluidBurstTicker>)?.Clear();
+                (ValidationReflection.GetInstanceField(world, "_grassTickerPool") as DynamicPool<GrassBurstTicker>)?.Clear();
                 (ValidationReflection.GetInstanceField(world, "_tickArena") as TickSnapshotArena)?.Dispose();
             }
 
             return failures;
+        }
+
+        /// <summary>
+        /// Serial grass baselines, one per chunk, on the stub World's tick salt (the one <c>World.TickChunksParallel</c>
+        /// uses); the grass job's spread roll depends on it, unlike the water's.
+        /// </summary>
+        private static TickerOutput[] GrassBaselines(List<ChunkData> chunks, WorldData wd, NativeArray<BlockTypeJobData> blockTypes)
+        {
+            TickerOutput[] grass = new TickerOutput[chunks.Count];
+            GrassBurstTicker ticker = new GrassBurstTicker();
+            try
+            {
+                for (int i = 0; i < chunks.Count; i++)
+                {
+                    ticker.RunGrass(chunks[i], World.Instance.TickCounter, blockTypes, wd);
+                    grass[i] = new TickerOutput(ToArray(ticker.Mods), ToArray(ticker.ModsPerSource),
+                        ToArray(ticker.InactiveIndices), ToArray(ticker.Indices));
+                }
+            }
+            finally
+            {
+                ticker.Dispose();
+            }
+
+            return grass;
         }
 
         private static bool SameStream(Queue<VoxelMod> queue, List<VoxelMod> expected, out string why)
@@ -303,7 +341,8 @@ namespace Editor.Validation.Behavior
         /// edge/corner column is a <b>Tier-2 border</b> voxel that reads the neighbor halo. The level gradient is
         /// shifted by a per-cell <paramref name="dx"/>/<paramref name="dz"/> salt so <b>each chunk's content differs</b>:
         /// adjacent chunks therefore present different neighbor snapshots, which is what makes a shared/bled neighbor
-        /// buffer observable (identical content would mask it).
+        /// buffer observable (identical content would mask it). Two grass voxels at a salt-shifted X ride along at
+        /// <see cref="GRASS_Y"/>, far below the water's band, for the World-tick stress.
         /// </summary>
         private static void SeedChunkFlood(ChunkData c, int dx, int dz)
         {
@@ -318,6 +357,13 @@ namespace Editor.Validation.Behavior
                 c.SetVoxel(x, FLUID_Y, z, BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Water, meta));
                 c.AddActiveVoxel(new Vector3Int(x, FLUID_Y, z), BlockIDs.Water);
             }
+
+            c.SetVoxel(salt, GRASS_Y, CAPPED_GRASS_Z, BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Grass, 0));
+            c.SetVoxel(salt, GRASS_Y + 1, CAPPED_GRASS_Z, BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Stone, 0));
+            c.AddActiveVoxel(new Vector3Int(salt, GRASS_Y, CAPPED_GRASS_Z), BlockIDs.Grass);
+            c.SetVoxel(salt, GRASS_Y, ACTIVE_GRASS_Z, BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Grass, 0));
+            c.SetVoxel(salt + 1, GRASS_Y, ACTIVE_GRASS_Z, BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Dirt, 0));
+            c.AddActiveVoxel(new Vector3Int(salt, GRASS_Y, ACTIVE_GRASS_Z), BlockIDs.Grass);
         }
 
         /// <summary>

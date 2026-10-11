@@ -266,20 +266,20 @@ public class Chunk
     }
 
     /// <summary>
-    /// Drains a chunk's fluid tick from an <b>already prepared</b> <paramref name="ticker"/> (its
-    /// <see cref="FluidTickJob"/> already run/completed): replays every source's precomputed mods in the captured
-    /// bucket-enumeration order, then applies the now-inactive removals. Every fluid (interior AND border) is
-    /// job-ticked via the Y-band neighbor halo, so replay is a single ordered walk of the job output — the emitted
-    /// <see cref="VoxelMod"/> stream is byte-identical to a single serial loop even with cross-chunk targets
+    /// Drains one family's completed tick job (<see cref="FluidTickJob"/> or <see cref="GrassTickJob"/>): replays every
+    /// source's precomputed mods in the captured bucket-enumeration order, then applies the now-inactive removals.
+    /// Every voxel of the family is job-ticked, so replay is a single ordered walk of the job output — the emitted
+    /// <see cref="VoxelMod"/> stream is byte-identical to the managed serial loop even with cross-chunk targets
     /// (emission order is fixed by the emitting voxel's bucket order, never the target).
     /// </summary>
-    /// <param name="ticker">The chunk's prepared fluid runner (job already complete).</param>
-    /// <param name="fluids">The active-fluids bucket (flat chunk indices) owned by <see cref="ChunkData"/>.</param>
-    private void ReplayFluids(FluidBurstTicker ticker, NativeHashSet<int> fluids)
+    /// <param name="jobMods">The job's emitted mods.</param>
+    /// <param name="modsPerSource">The job's per-source mod run lengths, in bucket order.</param>
+    /// <param name="inactive">The job's now-inactive flat indices.</param>
+    /// <param name="bucket">The family's active-voxel bucket (flat chunk indices) owned by <see cref="ChunkData"/>.</param>
+    private static void ReplayJobOutput(NativeList<VoxelMod> jobMods, NativeList<int> modsPerSource, NativeList<int> inactive,
+        NativeHashSet<int> bucket)
     {
         World world = World.Instance;
-        NativeList<VoxelMod> jobMods = ticker.Mods;
-        NativeList<int> modsPerSource = ticker.ModsPerSource;
 
         // Replay every source's precomputed job-mod run in bucket order (the mod cursor stays in lockstep with
         // ModsPerSource by construction — both come from the same single partition pass).
@@ -292,19 +292,19 @@ public class Chunk
         }
 
         // Now-inactive indices come from the job, removed straight from its list in the order it wrote them.
-        foreach (int idx in ticker.InactiveInterior)
-            fluids.Remove(idx);
+        foreach (int idx in inactive)
+            bucket.Remove(idx);
     }
 
     /// <summary>
-    /// TG-4 — drains one chunk's tick in the parallel path: grass on the managed path, and fluids replayed from the
-    /// supplied pre-completed <paramref name="ticker"/> (or the managed <see cref="TickFamily"/> when
-    /// <paramref name="ticker"/> is null — a grass-only chunk). The fluid job was already scheduled+completed in
-    /// parallel by <see cref="World.TickChunksParallel"/>.
+    /// TG-4 / ES-29 — drains one chunk's tick in the parallel path: grass, then fluids, each replayed from its
+    /// pre-completed ticker (or ticked on the managed <see cref="TickFamily"/> when that ticker is null). The jobs were
+    /// already scheduled and completed in parallel by <see cref="World.TickChunksParallel"/>.
     /// </summary>
     /// <param name="ticker">The chunk's prepared fluid runner (job complete), or null if none was scheduled.</param>
-    /// <param name="totals">The performance monitor's tick totals, charged with the grass tick and the fluid replay.</param>
-    public void DrainTick(FluidBurstTicker ticker, ref PerfTickTotals totals)
+    /// <param name="grassTicker">The chunk's prepared grass runner (job complete), or null if none was scheduled.</param>
+    /// <param name="totals">The performance monitor's tick totals, charged with the grass and fluid replays.</param>
+    public void DrainTick(FluidBurstTicker ticker, GrassBurstTicker grassTicker, ref PerfTickTotals totals)
     {
         if (ChunkData == null) return;
 
@@ -322,7 +322,13 @@ public class Chunk
             {
                 long grassStart = PerfStore.Begin();
                 using (s_tickGrassMarker.Auto())
-                    TickFamily(grass, toRemove);
+                {
+                    // grassTicker is non-null for every chunk with active grass; the managed loop is the defensive fallback.
+                    if (grassTicker != null)
+                        ReplayJobOutput(grassTicker.Mods, grassTicker.ModsPerSource, grassTicker.InactiveIndices, grass);
+                    else
+                        TickFamily(grass, toRemove);
+                }
                 if (PerfTickTotals.Lap(ref totals.GrassTicks, grassStart) != 0L)
                     totals.GrassVoxels += grassCount;
             }
@@ -335,7 +341,7 @@ public class Chunk
                     // ticker is non-null for every chunk with active fluids (scheduled in Phase 1); the managed
                     // fallback only runs in the defensive null case.
                     if (ticker != null)
-                        ReplayFluids(ticker, fluids);
+                        ReplayJobOutput(ticker.Mods, ticker.ModsPerSource, ticker.InactiveInterior, fluids);
                     else
                         TickFamily(fluids, toRemove);
                 }

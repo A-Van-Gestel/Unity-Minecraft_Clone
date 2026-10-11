@@ -67,6 +67,9 @@ namespace Editor.Validation.Behavior
             // BH-4 (TG-4 Phase 4b): cross-chunk Tier-2 border fixtures. Green under today's managed-border drivers;
             // the prove-red → green gate for the Phase-4b halo driver (see BehaviorValidationSuite.CrossChunk.cs).
             fixtures.AddRange(CrossChunkFixtures());
+
+            // BH-G (ES-29): grass at the seams, at the world bounds and over random terrain, for the Burst grass job.
+            fixtures.AddRange(GrassJobFixtures());
             return fixtures;
         }
 
@@ -98,8 +101,10 @@ namespace Editor.Validation.Behavior
                 () => BhD1_DifferentialOverFixtures("BH-D1[L|L]", TickDriver.Legacy, TickDriver.Legacy)));
             scenarios.Add(new Scenario("BH-D1: legacy vs split-family over all fixtures (§4.3 reorder gate)",
                 () => BhD1_DifferentialOverFixtures("BH-D1[L|S]", TickDriver.Legacy, TickDriver.SplitFamily)));
-            scenarios.Add(new Scenario("BH-D1: legacy vs fluid-Burst-halo-band over all fixtures (TG-4 Y-band end-to-end gate)",
-                () => BhD1_DifferentialOverFixtures("BH-D1[L|HB]", TickDriver.Legacy, TickDriver.FluidBurstHaloBand)));
+            scenarios.Add(new Scenario("BH-D1: legacy vs Burst-halo-band over all fixtures (fluid + grass jobs, end-to-end gate)",
+                () => BhD1_DifferentialOverFixtures("BH-D1[L|HB]", TickDriver.Legacy, TickDriver.BurstHaloBand)));
+            scenarios.Add(new Scenario("BH-G: the grass fixtures reach the grass job and spread (BH-D1[L|HB] non-vacuity)",
+                BhG_GrassFixturesReachTheJob));
         }
 
         /// <summary>

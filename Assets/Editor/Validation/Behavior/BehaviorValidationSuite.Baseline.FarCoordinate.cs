@@ -41,7 +41,7 @@ namespace Editor.Validation.Behavior
         private static BehaviorTestWorld BuildFarSeamGrassWorld(Vector2Int centerOrigin, bool seedNeighbor)
         {
             BehaviorTestWorld world = new BehaviorTestWorld(centerOrigin);
-            world.Driver = TickDriver.FluidBurstHaloBand;
+            world.Driver = TickDriver.BurstHaloBand;
 
             // Grass on the −X seam sitting on stone, boxed in by stone in-chunk so no in-chunk cell is convertible.
             // Air above the grass keeps it grass (grass under a solid turns to dirt and would confound the assertion).

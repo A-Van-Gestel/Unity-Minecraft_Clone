@@ -25,10 +25,11 @@ namespace Editor.Validation.PerfMonitoring
         private static readonly Vector3Int s_grassCell = new Vector3Int(8, 40, 8);
 
         /// <summary>
-        /// Sections the tick copies: the fluid row's band spans sections 3–4, and of those only the center's section 4
-        /// holds voxels — empty sections, the seeded neighbor's included, read the shared air section uncopied.
+        /// Sections the tick copies: the fluid row's band spans sections 3–4 and the grass voxel's section 2, and of
+        /// those only the center's sections 4 and 2 hold voxels — empty sections, the seeded neighbor's included, read
+        /// the shared air section uncopied.
         /// </summary>
-        private const int TICK_SNAPSHOT_SECTIONS = 1;
+        private const int TICK_SNAPSHOT_SECTIONS = 2;
 
         private const int TICK_FRAMES = 2;
 
@@ -95,8 +96,9 @@ namespace Editor.Validation.PerfMonitoring
             }
             finally
             {
-                // World.OnDestroy, which frees the ticker pool and the snapshot arena, never runs for this edit-mode stub.
+                // World.OnDestroy, which frees the ticker pools and the snapshot arena, never runs for this edit-mode stub.
                 (ValidationReflection.GetInstanceField(world, "_fluidTickerPool") as DynamicPool<FluidBurstTicker>)?.Clear();
+                (ValidationReflection.GetInstanceField(world, "_grassTickerPool") as DynamicPool<GrassBurstTicker>)?.Clear();
                 (ValidationReflection.GetInstanceField(world, "_tickArena") as TickSnapshotArena)?.Dispose();
             }
         });
