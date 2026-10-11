@@ -645,7 +645,10 @@ six-neighbor wake covers every fluid read the screen relies on, but grass's up-d
 them are not six-neighbors of the grass, and the pending-mod replay on load must wake what it changes. Plan it with the
 `chunk-lifecycle` skill; gate it with a differential of screen-then-tick against blanket-then-tick over the BH fixtures
 and random terrain, plus the seam-wake scenarios (BH-B8–B13). Score it on the Master loading pass's `TickWaitUs`,
-`TickFluidReplayUs` and `TickFluidVoxels`.
+`TickFluidReplayUs` and `TickFluidVoxels`. Size it first with `Tools/UnityCli/PlayMode/TickShapeProbe.cs` on a generation
+burst: on the ES-29 ocean teleport it counted 568 k fluid voxels, 25 % of them in chunk-edge columns, and its rough
+chunk-only predicate flagged 75 % as screenable — but also 36 of the 1 765 still active a tick later, so that predicate
+is a sizing estimate, not a safe screen.
 
 ### Tier 2 — pipeline work on today's data model
 
