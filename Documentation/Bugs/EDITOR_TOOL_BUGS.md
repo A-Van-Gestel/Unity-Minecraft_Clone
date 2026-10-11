@@ -69,28 +69,3 @@ filtering by those channels in the vein of the existing tag filter. Scope it as 
 overhaul covering every channel worth surfacing, not just sound material.
 
 ---
-
-## 03. A clean build is stamped `-dirty` — the dirty check excludes only the stamp asset
-
-**Severity:** Implementation (benchmark provenance)
-**Files:** `Assets/Scripts/Benchmarks/BenchmarkEnvironment.cs` — `TryQueryGit` / `STATUS_ARGUMENTS`;
-`Assets/Editor/ProjectUtilities/BuildStampBaker.cs` — `Bake`
-
-**Found:** 2026-10-11, ES-31's Master A/B. The A leg was built from a clean tree (the change stashed, `git status`
-empty), yet its reports read `Git commit: 586f27e8-dirty` — the same line as the B leg, which really was dirty. The
-separate-build A/B rule (`Documentation/Performance/README.md`) requires the A report to read the base **without**
-`-dirty`, so the stamp currently cannot show that an A leg was clean.
-
-**Cause (likely, not instrumented):** the dirty check is `git status --porcelain` over the whole repository with one
-exclusion, `Assets/Resources/Data/BuildStamp.asset`. The build itself also rewrites other Unity-owned files before the
-stamp is baked — the player-runner restored `Assets/UniversalRenderPipelineGlobalSettings.asset` (and the stamp) after
-each build — so any such write marks a clean tree dirty.
-
-**Proposed fix:** make the check judge what can change the player, not the whole tree:
-- extend the exclusion list with the files the build pipeline itself rewrites (URP global settings; anything else found
-  by diffing `git status` immediately before and after a build of a clean tree);
-- ignore paths that cannot influence a build — `Documentation/`, `.agents/`, `Tools/`, markdown — so a docs-only change
-  does not mark a player dirty either;
-- consider recording which paths made it dirty (the first few) in the stamp, so a `-dirty` report says why.
-
----

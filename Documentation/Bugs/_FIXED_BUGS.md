@@ -2331,3 +2331,51 @@ harnesses must use an explicit `CommandBuffer`.
 open.
 
 ---
+
+## Editor Tooling
+
+### ~~01. A clean build is stamped `-dirty` — the dirty check excludes only the stamp asset~~ (EDITOR_TOOL_BUGS.md §03)
+
+**Severity:** Implementation (benchmark provenance)  
+**Files:** `Assets/Scripts/Benchmarks/BenchmarkEnvironment.cs` — `TryQueryGit` / `STATUS_ARGUMENTS`;
+`Assets/Editor/ProjectUtilities/BuildStampBaker.cs` — `Bake`  
+**Fixed:** October 2026
+
+**Found:** 2026-10-11, ES-31's Master A/B. The A leg was built from a clean tree (the change stashed, `git status`
+empty), yet its reports read `Git commit: 586f27e8-dirty` — the same line as the B leg, which really was dirty. The
+separate-build A/B rule (`Documentation/Performance/README.md`) requires the A report to read the base **without**
+`-dirty`, so the stamp currently cannot show that an A leg was clean.
+
+**Cause as filed (disproved, see below):** the dirty check is `git status --porcelain` over the whole repository with one
+exclusion, `Assets/Resources/Data/BuildStamp.asset`. The build itself also rewrites other Unity-owned files before the
+stamp is baked — the player-runner restored `Assets/UniversalRenderPipelineGlobalSettings.asset` (and the stamp) after
+each build — so any such write marks a clean tree dirty.
+
+**Proposed fix (as filed):** make the check judge what can change the player, not the whole tree:
+- extend the exclusion list with the files the build pipeline itself rewrites (URP global settings; anything else found
+  by diffing `git status` immediately before and after a build of a clean tree);
+- ignore paths that cannot influence a build — `Documentation/`, `.agents/`, `Tools/`, markdown — so a docs-only change
+  does not mark a player dirty either;
+- consider recording which paths made it dirty (the first few) in the stamp, so a `-dirty` report says why.
+
+**Root cause (proven 2026-10-11 by a red Master build that recorded the dirty paths):** not the URP global settings.
+The Performance Testing package's `TestRunBuilder.OnPreprocessBuild` (`callbackOrder` 0) writes two untracked files,
+`Assets/Resources/PerformanceTestRunInfo.json` and `PerformanceTestRunSettings.json`, and deletes them in
+`OnPostprocessBuild`. `BuildStampBaker` baked at order 10, after them, so every player build since the stamp existed
+read `-dirty`, clean tree or not. URP's `m_RuntimeSettings` write lands on disk *after* the bake and never reached the
+stamp.
+
+**Resolution** (`54c232f3`, docs `fc2f7e6b`):
+- `BuildStampBaker.callbackOrder` is `int.MinValue`: the stamp sees the tree before any other build hook writes to it.
+- `STATUS_ARGUMENTS` also excludes `Documentation/`, `Tools/`, `.agents/`, `.claude/` and root-level `*.md`; markdown
+  under `Assets/` still counts, and an unlisted path over-reports rather than hiding a change.
+- The stamp records the first five dirty paths (`BuildStamp.GitDirtyPaths`), and the report prints a `Git dirty:` line
+  under `Git commit:`, so a `-dirty` report says why.
+
+**Verified:** the green build's bake ran before `TestRunBuilder` (Editor.log order) and listed only the then-uncommitted
+fix files; a build from the committed, clean tree is stamped with the bare hash (user-confirmed).
+
+**Consequence for old captures:** every `-dirty` suffix in a Performance report before 2026-10-11 carries no
+information — see `Documentation/Performance/README.md` §"What `-dirty` means".
+
+---
