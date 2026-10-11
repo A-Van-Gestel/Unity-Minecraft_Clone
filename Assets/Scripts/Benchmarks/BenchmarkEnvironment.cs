@@ -409,11 +409,12 @@ namespace Benchmarks
         /// <param name="branch">Current branch name, or <c>HEAD</c> when detached.</param>
         /// <param name="dirty">
         /// <c>true</c> when the working tree has uncommitted changes, ignoring the build stamp itself and
-        /// paths that cannot reach a build (see <see cref="STATUS_ARGUMENTS"/>).
+        /// paths that cannot reach a build (see <see cref="STATUS_ARGUMENTS"/>), or when the status
+        /// query failed and cleanliness is unknown.
         /// </param>
         /// <param name="dirtyPaths">
-        /// The first few paths that made the tree dirty (see <see cref="SummarizeStatusPaths"/>), or an
-        /// empty string when it is clean.
+        /// The first few paths that made the tree dirty (see <see cref="SummarizeStatusPaths"/>), why the
+        /// status query failed, or an empty string when the tree is clean.
         /// </param>
         /// <returns><c>true</c> when the commit hash was obtained.</returns>
         public static bool TryQueryGit(out string commit, out string branch, out bool dirty, out string dirtyPaths)
@@ -427,9 +428,16 @@ namespace Benchmarks
             if (TryRunGit("rev-parse --abbrev-ref HEAD", out string branchOutput))
                 branch = branchOutput;
 
+            // A failed query cannot vouch for a clean tree, so it fails closed: dirty, with the failure as
+            // the reason. Over-reporting is the only safe error for provenance.
+            if (!TryRunGit(STATUS_ARGUMENTS, out string statusOutput, allowEmptyOutput: true))
+            {
+                dirty = true;
+                dirtyPaths = $"git status failed {statusOutput}";
+            }
             // A non-empty porcelain listing means tracked changes, untracked files, or both. Any of
             // those makes the bare hash an over-claim, so the distinction is not worth splitting.
-            if (TryRunGit(STATUS_ARGUMENTS, out string statusOutput) && !string.IsNullOrWhiteSpace(statusOutput))
+            else if (statusOutput.Length > 0)
             {
                 dirty = true;
                 dirtyPaths = SummarizeStatusPaths(statusOutput);
@@ -511,8 +519,12 @@ namespace Benchmarks
         /// </summary>
         /// <param name="arguments">Arguments passed to the <c>git</c> executable.</param>
         /// <param name="output">Trimmed stdout on success; an explanatory sentinel on failure.</param>
-        /// <returns><c>true</c> when git exited 0 with non-empty output.</returns>
-        private static bool TryRunGit(string arguments, out string output)
+        /// <param name="allowEmptyOutput">
+        /// Whether empty output counts as success — true for queries where empty is an answer, such as a
+        /// clean <c>status</c>.
+        /// </param>
+        /// <returns><c>true</c> when git exited 0 and its output was read (and non-empty, unless allowed).</returns>
+        private static bool TryRunGit(string arguments, out string output, bool allowEmptyOutput = false)
         {
             try
             {
@@ -560,20 +572,23 @@ namespace Benchmarks
                 Task.WaitAll(new Task[] { stdoutTask, stderrTask }, DRAIN_TIMEOUT_MS);
                 Observe(stderrTask);
 
-                // RanToCompletion, not IsCompleted: a faulted or canceled read is also "completed", and
-                // reading .Result on one throws rather than yielding the empty fallback intended here.
-                string stdout = stdoutTask.Status == TaskStatus.RanToCompletion
-                    ? stdoutTask.Result
-                    : string.Empty;
-
                 if (proc.ExitCode != 0)
                 {
-                    output = "(not a git repo)";
+                    output = $"(git exited {proc.ExitCode})";
                     return false;
                 }
 
-                output = stdout.Trim();
-                if (string.IsNullOrEmpty(output))
+                // RanToCompletion, not IsCompleted: a faulted or canceled read is also "completed", and
+                // reading .Result on one throws. An unread stdout is a failure, never empty output, or a
+                // status query whose listing was lost would pass for a clean tree.
+                if (stdoutTask.Status != TaskStatus.RanToCompletion)
+                {
+                    output = "(git output unreadable)";
+                    return false;
+                }
+
+                output = stdoutTask.Result.Trim();
+                if (string.IsNullOrEmpty(output) && !allowEmptyOutput)
                 {
                     output = "(empty)";
                     return false;

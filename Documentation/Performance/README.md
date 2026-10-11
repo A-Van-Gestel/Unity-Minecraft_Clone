@@ -184,7 +184,8 @@ the stamp itself and paths that never reach a player: `Documentation/`, `Tools/`
 root-level `*.md`. Markdown under `Assets/` still counts.
 
 A dirty build adds a `Git dirty:` header line under `Git commit:` naming the first five paths (`(+N more)` for the
-rest), so a `-dirty` report says why. **Captures before this date** read `-dirty` on every build, clean or not, because
+rest), so a `-dirty` report says why. A status query that fails (timeout, git error) also reads `-dirty`, with
+`Git dirty: git status failed (…)`: an unchecked tree is never reported clean. **Captures before this date** read `-dirty` on every build, clean or not, because
 `TestRunBuilder`'s files were always present when the stamp was baked: their suffix carries no information.
 
 #### Managed Code Variant governs instrumentation (from 2026-09-01, Unity 6.6)
