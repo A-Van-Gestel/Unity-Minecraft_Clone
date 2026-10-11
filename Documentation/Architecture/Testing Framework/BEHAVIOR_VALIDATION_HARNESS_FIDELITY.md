@@ -20,7 +20,10 @@ added **parallel-vs-serial determinism gates** (`FluidParallelDeterminismValidat
 Y-band)`**) — N concurrent pooled tickers byte-identical to the serial baseline + run-to-run, interior and over a 3×3
 distinct-chunk grid. **BH-4 (Tier-2 cross-chunk) is CLOSED** (2026-06-24); the **Y-band is SHIPPED** (2026-06-27) with
 its `BH-4-SPLIT-Y` (vertically-split) + `BH-4-BAND-EDGE` (section-boundary) fixtures. **As of 2026-10-03,
-`Validate Behavior` runs 18 scenarios:** the eight above, BH-B8–B13 (§4) and the four BH-D1 differentials.  
+`Validate Behavior` runs 18 scenarios:** the eight above, BH-B8–B13 (§4) and the four BH-D1 differentials. **ES-29
+(2026-10-11)** made grass a Burst job too: the shipped-path driver is now `BurstHaloBand` (fluid + grass jobs), BH-D1
+gained `BH-4-BAND-TOP` and the five `BH-G` grass fixtures (21 in all), and a 19th scenario guards the grass leg's
+non-vacuity (see the BH-4 entry, §3).  
 **Created:** 2026-06-20 (as a Design draft) · **Promoted:** 2026-06-21 · **BH-D1 + parallel gates built:** 2026-06-23/24  
 **Author intent:** the parity guard that lets the **TG-4** (per-behavior native collections) and **TG-5**
 (Burst function-pointer dispatch) optimizations in
@@ -300,6 +303,22 @@ two cells write the same neighbor. The driver must replicate production's order:
   one border chunk) alongside `BH-4-BAND-EDGE` (source on a y%16 section seam, real voxel on both ±reach edges) — 7
   BH-4 fixtures total. The Y-band halo is diffed full-vs-band via **`BH-D1[H|HB]`** and legacy-vs-band via
   **`BH-D1[L|HB]`** (prove-red confirmed), with a Y-band parallel determinism gate (`… Cross-Chunk Halo, Y-band`).
+- **Section-arena + Grass-Burst follow-up (ES-29, 2026-10-11):** the tick now snapshots through one shared section
+  arena and ticks grass in `GrassTickJob`, so the shipped-path driver became `BurstHaloBand`: `BehaviorTestWorld`
+  mirrors its active model into both family buckets each tick and takes every grass and fluid voxel's result from the
+  real `GrassBurstTicker.RunGrass` / `FluidBurstTicker.RunFluids`. New fixtures (the two band-top ones and BH-G-MIXED
+  were added after a prove-red mutant passed without them):
+  - `BH-4-BAND-TOP` — a source on a section's top row, so the band ends on the next section's first row (the arena
+    must copy that section for one row; `BH-4-BAND-EDGE`'s band ends mid-section).
+  - `BH-G-SEAMS`, `BH-G-BOUNDS`, `BH-G-RANDOM`, `BH-G-BAND-TOP`, `BH-G-MIXED` (`BehaviorValidationSuite.GrassJob.cs`) —
+    grass spreading across each cardinal seam (adjacent, up-diagonal, spread-down) and into a placeholder, at the
+    world's top and bottom rows, over seeded random terrain, with its highest read on a section's first row, and with
+    candidates of all three kinds so the pick depends on the loops' order. 48 ticks each, so the 2 % roll fires.
+  - **`BH-G` non-vacuity** — each BH-G fixture under `BurstHaloBand` must have the grass job tick ≥ 100 voxels and emit
+    ≥ 3 spreads, or `[L|HB]`'s grass leg could pass with the job doing nothing.
+  The determinism gate also drives the production `World.TickChunksParallel` over its 3×3 grid on the shared arena, with
+  grass alongside the water: the drained stream must equal the per-chunk serial baselines (grass before fluid), each
+  bucket must lose exactly its baselines' inactive voxels, and the arena must copy each band section once (27 sections).
 - **Effort:** 🟡 medium (as estimated).
 
 ### BH-5 — `Active`/`Behave` contract invariant · **RETRACTED (2026-06-20) — not a valid invariant**

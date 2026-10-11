@@ -1,6 +1,6 @@
 # Block Behavior Tick Architecture
 
-**Version:** 2.2  
+**Version:** 2.3  
 **Date:** 2026-07-26  
 **Status:** **Implemented (Stable)** — the whole TG-4 arc (Phases 0–4b + the Y-band optimization) is shipped,
 in-game confirmed, and its rollback flags were retired in the 2026-07-23 cleanup, so the parallel Y-band halo
@@ -65,21 +65,28 @@ The tick runs **once per `VoxelData.TickLength`**, parallel across chunks, with 
 
 ```
 World.Update()
-└─ ProcessTickUpdates()                          // World.cs:2483 — bumps _tickCounter, snapshots active chunks
-   └─ TickChunksParallel(snapshot)                // World.cs:2527 — schedule-all → ScheduleBatchedJobs → complete → drain
-      ├─ per chunk: rent FluidBurstTicker from DynamicPool<FluidBurstTicker>
-      │             ├─ TryPrepare(chunkData, worldData)
-      │             │  └─ acquire 9 pre-tick neighbor voxel snapshots (center + 8 horizontal)
-      │             └─ Schedule(chunkData, tickCounter, blockTypes, timer) → JobHandle
-      │                ├─ gather the snapshots into a Y-banded padded buffer on the WORKER thread
-      │                └─ FluidTickJob: flow, decay, falling/waterfall reset, infinite-source
-      │                   regeneration, TG-3 viscosity RNG → NativeList<VoxelMod> + ModsPerSource
-      └─ after JobHandle.Complete(), serially in chunk-snapshot order:
-         └─ Chunk.DrainTick(ticker, ref tickTotals) // Chunk.cs:314
-            ├─ TickFamily(grassBucket, …)          // Chunk.cs:235 — grass stays MANAGED, main-thread
-            ├─ ReplayFluids(ticker, fluidBucket, …)// Chunk.cs:279 — replays job mods in bucket order
-            └─ (after DrainTick) the job's busy-time record → WorldJobManager.EndJobTiming(Fluids, …)
-World.Update() (after all chunks ticked)
+└─ ProcessTickUpdates()                          // World.cs:2518 — bumps _tickCounter, snapshots active chunks
+   └─ TickChunksParallel(snapshot)                // World.cs:2567 — prepare all → schedule all → complete → drain
+      ├─ TickSnapshotArena.BeginTick()            // the tick's shared pre-tick voxel snapshot (§2.2)
+      ├─ Phase 1, per chunk in snapshot order:
+      │  ├─ active grass?  rent GrassBurstTicker → TryPrepare(chunkData, worldData, arena)
+      │  │                 └─ arena.Request: the grass band's sections of the center + 4 cardinal neighbors
+      │  └─ active fluids? rent FluidBurstTicker → TryPrepare(chunkData, worldData, arena)
+      │                    └─ arena.Request: the fluid band's sections of the center + 8 neighbors
+      ├─ Phase 2: Schedule every prepared FluidTickJob (with its JobBusyTimer record) and GrassTickJob
+      │  ├─ FluidTickJob: gather the band from the arena into a Y-banded padded buffer on the WORKER thread, then
+      │  │                flow, decay, falling/waterfall reset, infinite-source regeneration, TG-3 viscosity RNG
+      │  └─ GrassTickJob: reads the arena directly — dirt under a solid block, reservoir-sampled spread, active test
+      │     (both → NativeList<VoxelMod> + ModsPerSource + the now-inactive indices)
+      ├─ Phase 3: ScheduleBatchedJobs → Complete() every handle
+      ├─ Phase 4, serially in chunk-snapshot order:
+      │  └─ Chunk.DrainTick(fluidTicker, grassTicker, ref tickTotals) // Chunk.cs:307
+      │     ├─ ReplayJobOutput(grass job)          // Chunk.cs:279 — replays job mods in bucket order, drops inactive
+      │     ├─ ReplayJobOutput(fluid job)
+      │     ├─ (TickFamily — Chunk.cs:235 — only for a family whose ticker is missing: the managed fallback)
+      │     └─ (after DrainTick) the fluid job's busy-time record → WorldJobManager.EndJobTiming(Fluids, …)
+      └─ finally: complete every handle, return the tickers to their pools, arena.EndTick()
+World.Update() (next frame)
 └─ ApplyModifications()                           // unchanged: placement gate, support cascade,
                                                   //   Step-4 six-neighbor re-activation
 ```
@@ -91,7 +98,7 @@ The active set lives on **`ChunkData`** — the data it describes — not on the
 `AddActiveVoxel` / `RemoveActiveVoxel` / `ClassifyFamily` / `GetActiveVoxelCount` / `IsVoxelActive` /
 `ActiveVoxels` / `Dispose`, and the two full-registration paths `RegisterActiveVoxelsFromJob` /
 `RescanActiveVoxels`. `Chunk` keeps only the **tick orchestration** (`DrainTick`/`TickFamily`/
-`ReplayFluids`, reading `ChunkData.ActiveGrassBucket`/`ActiveFluidsBucket`) plus thin delegations.
+`ReplayJobOutput`, reading `ChunkData.ActiveGrassBucket`/`ActiveFluidsBucket`) plus thin delegations.
 
 Sets, not lists: the registration sinks re-add already-active voxels (Step-4 re-activation, `ModifyVoxel`) and
 rely on set **dedup** plus O(1) remove. Buckets are allocated **lazily per family** (a grass-only or ocean-only
@@ -134,8 +141,8 @@ the managed `BlockBehavior.Fluids` rules. `Jobs/FluidBurstTicker.cs` owns the pe
 `TryPrepare` + `Schedule` (production, timed apart for the performance monitor), `ScheduleFluids` (the same pair in
 one call) and `RunFluids` (the `.Run()` serial-determinism oracle the harness drives).
 
-Border voxels read across chunk seams through a **per-tick 9-snapshot neighbor halo**, gathered on the worker
-thread. Its dimensions are grounded in the job's *measured* read reach, not assumption:
+Border voxels read across chunk seams through a **per-tick neighbor halo**, gathered on the worker thread from the
+tick's section arena (below). Its dimensions are grounded in the job's *measured* read reach, not assumption:
 
 | Axis           | Reach | Why                                                                                                                                                                                                                                                         |
 |----------------|-------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -144,7 +151,8 @@ thread. Its dimensions are grounded in the job's *measured* read reach, not assu
 
 **Y-band sizing.** Since the only sources are the chunk's active fluids and the vertical reach is ±1, *every*
 read lands in `[minActiveY − 1, maxActiveY + 1]`. `FluidBurstTicker.TryPrepare` scans the bucket for
-min/max Y and sets `_bandMinY = max(0, minActiveY − FLUID_VERTICAL_REACH)` / `_bandHeight`; `FluidTickJob`
+min/max Y, sets `_bandMinY = max(0, minActiveY − FLUID_VERTICAL_REACH)` / `_bandHeight`, and requests the sections
+those rows cover from the arena; `FluidTickJob`
 carries `BandMinY`/`BandHeight` and `GetStateLocal` reads at band-local `py = y − BandMinY`. The band is a
 tight **superset** of every read (mirroring `LIGHTING_HALO = MAX_LIGHTING_BFS_REACH`), so it is byte-identical
 to a full-height halo while making the per-tick copy **independent of world height**. Out-of-band reads are
@@ -155,29 +163,71 @@ there is zero per-tick allocation and the full copy-time win. The band is *not* 
 `[minY−1, maxY+1]` is both correct and faster.
 
 **Source-of-truth constants:** `FLUID_HALO = 4`, `FLUID_VERTICAL_REACH = 1`, `PADDED_FLUID_WIDTH = 24`, plus
-`FluidTierClassifier.MaxFlowSearchDepth` / `HorizontalNeighborOffset` (halo width + spread geometry). The
-drift-critical shared gather body is `ChunkMath.GatherPaddedRange<T>`, also used by `GatherPaddedVoxels` /
-`GatherPaddedLight` / `GatherPaddedFluidVoxelsBand` — one core, several intent-named wrappers.
+`FluidTierClassifier.MaxFlowSearchDepth` / `HorizontalNeighborOffset` (halo width + spread geometry). The fluid gather,
+`ChunkMath.GatherPaddedFluidVoxelsBand`, builds each padded row exactly as the lighting gathers' shared
+`ChunkMath.GatherPaddedRange<T>` does (West halo, center span, East halo), but resolves every run through the job's
+section table. The two row loops are deliberately separate: routing the lighting body through a source abstraction
+so both could share it cost the lighting job 10–28 % in the Editor (ES-29 interleaved A/B), so instead the Chunk
+Math suite pins both gathers to one per-cell oracle.
 
 A missing or ungenerated neighbor must read exactly as managed `GetVoxelState` did: the gather's
 `uint.MaxValue` sentinel maps to `Has = false`.
 
-### 2.3 Grass stays managed
+**The pre-tick snapshot — one shared section arena (ES-29).** The jobs never read live chunk data. Each tick,
+`Jobs/TickSnapshotArena` copies every section any job will read into one packed native list, which all of the tick's
+jobs read concurrently:
 
-Grass ticks on the main thread via `Chunk.TickFamily`. This is deliberate, not an omission: the profile gate
-measured grass at **0.044 µs/voxel (~12× cheaper than fluid)**, so there is no frame win to capture, and a
-periodic grass tick would pay per-tick snapshot + schedule/complete **job latency** on a workload too small to
-amortize it. Grass-Burst is a trivial follow-on reusing the fluid scaffolding **only if** a profile shows grass
-costing a frame — and one now does: the PM-8 traversal capture (IL2CPP Master, 2026-10-05) measured the grass tick
-at ≈ 0.4 µs per voxel, 19–27 ms per tick at 44–69 k active grass voxels (§7). No `ES-*` item has taken it on yet.
+- A prepare asks for its band — the section range covering its rows — of its chunk and of its neighbors
+  (`TickSnapshotArena.Request`). The arena copies a (chunk, section) the first time any job asks for it and hands every
+  later request the same copy, so a chunk read by its own jobs and by up to eight neighbors' is copied once, and only
+  where a band reaches. A null section is all air and points at a shared zeroed section instead of being copied.
+- Each job carries a `Helpers/SectionArenaTable` of 9 slots × 8 sections: the arena index of a copied section,
+  `MissingChunk` for an absent or **unpopulated** neighbor (Fluid Bug 18 — `Request` takes only populated chunks, so a
+  placeholder reads as void, exactly as `ChunkData.GetState` returns null), or `NotRequested` outside the band. Reading
+  a `NotRequested` section is a band bug: the gather and the grass job throw on it under collections checks.
+- **Every chunk is prepared before any job is scheduled.** A scheduled job holds the arena, so it may grow only while
+  nothing reads it; `EndTick`, after every job completed, gives back capacity beyond four times what the tick used.
+- The standalone paths (`RunFluids`, `ScheduleFluids`, `RunGrass`) prepare through an arena of the ticker's own.
+
+Before ES-29 each ticker copied nine full 128 KB maps — its chunk and every populated neighbor — whatever the band. On
+the first tick of a newly generated ocean (Editor, seed 4242, vd 10: 181 fluid chunks, 702 k registered fluid voxels,
+bands 4–5 sections deep) that was 187 MB; banding alone halves it, and banding plus one copy per chunk brings it to
+≈ 15 MB (10–15 MB measured in Play mode).
+
+### 2.3 Grass is Burst-ticked (ES-29)
+
+Grass ticks in `Jobs/GrassTickJob.cs`, a 1:1 port of the grass branch of `BlockBehavior.Behave` + `Active`: grass under
+a solid block turns to dirt; otherwise it reservoir-samples its convertible-dirt candidates (adjacent, one above
+adjacent, and spread-down — in `BlockBehavior`'s order) and spreads onto one with `VoxelData.GrassSpreadChance`; it
+stays active while any candidate exists. `Jobs/GrassBurstTicker.cs` is its pooled per-chunk runner, the counterpart of
+`FluidBurstTicker`.
+
+- **Reads.** Grass reads one cell across a seam, never diagonally, and from one row below to two above its own, so a
+  prepare requests the band `[minY − 1, maxY + 2]` of the chunk and its four cardinal neighbors. The job reads the arena
+  directly through its section table — no padded volume. Y outside the world and an absent or unpopulated neighbor
+  read as void, as `ChunkData.GetState` returns null.
+- **Determinism.** The spread RNG is `BlockBehavior`'s per-voxel, per-tick seed (`math.hash` of the global position
+  mixed with the tick salt), and each source's mods are recorded per `ModsPerSource` run in bucket order, so the replay
+  enqueues the stream the managed loop did.
+- **Stale entries.** Bucket maintenance moves a voxel out of the grass bucket whenever its id changes, so an entry that
+  is no longer grass emits nothing and is dropped — what `Behave`/`Active` do for a non-grass, non-fluid voxel.
+- **Why now.** Grass first stayed managed: the TG-4 profile gate measured it at 0.044 µs/voxel, too small to pay a
+  job's snapshot and latency. The PM-8 traversal capture (IL2CPP Master, 2026-10-05) then measured 19–27 ms per tick at
+  44–69 k active grass voxels. Those voxels are the generation scan's blanket registration — `ActiveVoxelScanJob`
+  registers every grass voxel of a new chunk, and the first tick drops almost all of them (Editor: 17.8 k on a land
+  teleport → 459 → 106 two ticks later). With the shared arena the job's input costs little; in Play mode the grass
+  part of the tick fell from 38 ms to 0.6 ms on the same burst.
+
+The managed grass branch of `BlockBehavior.Behave` stays as the BH-D1 legacy oracle and as `DrainTick`'s fallback.
 
 ### 2.4 Why the parallel tick is byte-identical
 
 Border voxels read across seams *and* can emit into neighbors, yet the drained `VoxelMod` stream matches the
 original serial single loop exactly. The mechanism:
 
-- Emission **order** is fixed by the *emitting* voxel's `(chunk-snapshot-order, bucket-order)` — never by the
-  target. Each job records `ModsPerSource` so the replay preserves bucket order.
+- Emission **order** is fixed by the *emitting* voxel's `(chunk-snapshot-order, family, bucket-order)` — never by the
+  target; within a chunk, grass replays before fluids, as the managed drain ran them. Each job records `ModsPerSource`
+  so the replay preserves bucket order.
 - The **drain stays serial in chunk-snapshot order**, so cross-chunk targets cannot interleave differently.
 - Cross-chunk emission needs no special routing: `FluidTickJob.Emit` writes a **global**-position `VoxelMod`
   that the unchanged `ApplyModifications` already routes correctly.
@@ -285,19 +335,22 @@ tick-path change.
 
 **Why `BlockBehavior.Fluids` still exists.** The managed `Behave`/`Active` implementation was deliberately
 **not** deleted in the 2026-07-23 cleanup — it is the permanent BH-D1 `Legacy` parity oracle, driven directly by
-`BehaviorTestWorld.Tick`. Only its *production* call sites were removed. Likewise `FluidBurstTicker.RunFluids`
-(the `.Run()` path) is kept as the serial determinism oracle proving `Schedule == Run`; neither is dead code.
+`BehaviorTestWorld.Tick`. Only its *production* call sites were removed. The managed grass branch plays the same role
+for `GrassTickJob` (and stays reachable from `DrainTick` as a fallback). Likewise `FluidBurstTicker.RunFluids` and
+`GrassBurstTicker.RunGrass` (the `.Run()` paths) are kept as the serial oracles proving `Schedule == Run`; none of
+these is dead code.
 
 **Surviving gates (post-cleanup):**
 
-| Gate                                                             | What it proves                                                                                            |
-|------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------|
-| `BH-D1[L\|L]`                                                    | comparator self-check (both drivers legacy → must report identical)                                       |
-| `BH-D1[L\|S]`                                                    | storage-split reorder is behavior-equivalent                                                              |
-| **`BH-D1[L\|HB]`**                                               | **legacy vs the shipped `FluidBurstHaloBand` driver over all 15 fixtures** — the end-to-end parity oracle |
-| `Validate Fluid Parallel Determinism (Cross-Chunk Halo, Y-band)` | 3×3 distinct chunks, byte-identical to serial + run-to-run stable                                         |
+| Gate                                                             | What it proves                                                                                                                                                                                            |
+|------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `BH-D1[L\|L]`                                                    | comparator self-check (both drivers legacy → must report identical)                                                                                                                                       |
+| `BH-D1[L\|S]`                                                    | storage-split reorder is behavior-equivalent                                                                                                                                                              |
+| **`BH-D1[L\|HB]`**                                               | **legacy vs the shipped `BurstHaloBand` driver (fluid + grass jobs) over all 21 fixtures** — the end-to-end parity oracle                                                                                 |
+| `BH-G` non-vacuity                                               | the BH-G grass fixtures reach the grass job and spread, so `[L\|HB]`'s grass leg compares real output                                                                                                     |
+| `Validate Fluid Parallel Determinism (Cross-Chunk Halo, Y-band)` | 3×3 distinct chunks, byte-identical to serial + run-to-run stable — per-ticker arenas, then the production `World.TickChunksParallel` on the shared arena (drained stream, buckets, sections copied once) |
 
-Behavior suite: **12 scenarios**. The historical per-phase gate configurations, and which were retired when
+Behavior suite: **19 scenarios**. The historical per-phase gate configurations, and which were retired when
 their production path ceased to exist, are in **Appendix A.3**.
 
 > **Fixture note.** The seven golden fixtures (BH-B1…B7) are each single-family, so under the split-family
@@ -324,14 +377,14 @@ deliberately sequenced *after* the per-family layout existed, to avoid throwaway
 
 ## 6. Constraint compliance
 
-| Constraint           | How this system satisfies it                                                                                                                                                                                                                                                                    |
-|----------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Packed-`uint` voxels | The tick reads and writes packed voxel state only; no per-voxel objects. Falling-bit encoding shared via `BurstVoxelDataBitMapping`.                                                                                                                                                            |
-| Burst compatibility  | `FluidTickJob` uses only blittable inputs (`BlockTypeJobData`, `NativeHashSet<int>` snapshots, padded native buffers) and `Unity.Mathematics`; no managed references, no interpolated-string logging.                                                                                           |
-| No hot-path GC       | Per-ticker scratch is pooled (`DynamicPool<FluidBurstTicker>`); the padded volume is persistent per ticker; buckets are retained across pool recycle. `CalculateFlowCost`'s BFS scratch is one reused queue/visited per `Execute` (threaded locals — Burst rejects per-job container *fields*). |
-| Pooling              | `DynamicPool<FluidBurstTicker>`, `Helpers/ActiveVoxelListPool`, and the `ChunkData` pool's `destroyAction` for bucket disposal.                                                                                                                                                                 |
-| Serialization        | **Zero on-disk change** — active voxels are derived runtime state and are never persisted. No AOT migration exists for this system.                                                                                                                                                             |
-| Pool-reset safety    | Buckets `Clear()`ed in `ChunkData.Reset`, disposed via the pool's `destroyAction`.                                                                                                                                                                                                              |
+| Constraint           | How this system satisfies it                                                                                                                                                                                                                                                                                                                                                               |
+|----------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Packed-`uint` voxels | The tick reads and writes packed voxel state only; no per-voxel objects. Falling-bit encoding shared via `BurstVoxelDataBitMapping`.                                                                                                                                                                                                                                                       |
+| Burst compatibility  | `FluidTickJob` uses only blittable inputs (`BlockTypeJobData`, `NativeHashSet<int>` snapshots, padded native buffers) and `Unity.Mathematics`; no managed references, no interpolated-string logging.                                                                                                                                                                                      |
+| No hot-path GC       | Per-ticker scratch is pooled (`DynamicPool<FluidBurstTicker>`, `DynamicPool<GrassBurstTicker>`); the padded volume is persistent per fluid ticker; the section arena keeps its capacity between ticks; buckets are retained across pool recycle. `CalculateFlowCost`'s BFS scratch is one reused queue/visited per `Execute` (threaded locals — Burst rejects per-job container *fields*). |
+| Pooling              | `DynamicPool<FluidBurstTicker>`, `DynamicPool<GrassBurstTicker>`, the retained `TickSnapshotArena`, `Helpers/ActiveVoxelListPool`, and the `ChunkData` pool's `destroyAction` for bucket disposal.                                                                                                                                                                                         |
+| Serialization        | **Zero on-disk change** — active voxels are derived runtime state and are never persisted. No AOT migration exists for this system.                                                                                                                                                                                                                                                        |
+| Pool-reset safety    | Buckets `Clear()`ed in `ChunkData.Reset`, disposed via the pool's `destroyAction`.                                                                                                                                                                                                                                                                                                         |
 
 ---
 
@@ -340,19 +393,20 @@ deliberately sequenced *after* the per-family layout existed, to avoid throwaway
 - **Family count.** Only Grass and Fluid exist today. A third `isActive` block family would need its own
   bucket + job before the collection layout is considered final — confirm none is planned before treating §2.1
   as closed.
-- **Grass-Burst** remains available as a follow-on (§2.3). Grass now has a profile showing it costing frames: in
-  a 200 m/s traversal (IL2CPP Master, 2026-10-05) the managed grass tick took 19–27 ms at 44–69 k active grass
-  voxels and led 8 of 22 `Tick`-led hitch records.
-- **Reserved gather levers** (not scheduled): band the neighbor `FillJobVoxelMap` snapshots themselves
-  (edge-slab-only, section-aligned), and snapshot dedup (each unique chunk gathered once per tick). The TG-4 A/B
-  found the copy a small term on its flood scenarios, but the same traversal measured it at 26–39 ms of a 51–87 ms
-  `Tick` at 229–273 fluid chunks — nine 128 KB maps per chunk, ≈ 0.11–0.14 ms each chunk. The guards for both
-  levers already exist: the vertically-split `BH-4-SPLIT-Y` fixture (water at y=11 + y=71 in one border chunk),
-  the section-boundary `BH-4-BAND-EDGE` fixture, and the Y-band cross-chunk determinism stress.
+- **Snapshot levers — shipped as the section arena (ES-29, §2.2).** Banding the neighbor snapshots and copying each
+  chunk once per tick both landed; edge-slab-only copies were not taken, since once each section is copied once the
+  copy is no longer the tick's large part. Grass-Burst shipped with it (§2.3).
+- **Blanket registration (`ES-31`).** The generation scan and the disk rescan register every active-type voxel — every
+  water and grass voxel of a new chunk — and the first tick drops almost all of them. That first tick is now most of
+  what is left of the loading-pass spikes: the wait for the fluid jobs and the replay's removals scale with it. Filed
+  as `ES-31` in the engine scaling roadmap.
+- **Ticker pools are never pruned.** Each pool keeps its peak count; a fluid ticker holds ≈ 290 KB (its padded volume)
+  since ES-29 dropped its snapshot buffers, a grass ticker a few KB.
 - **Frame-level context.** In steady state the tick is *not* the frame bottleneck: the sustained ocean frame is
   **lighting-dominated (~66 %)** with the tick at ~2 %. Spikes differ — during fast traversal the tick leads the
   hitch records, split between the copy above, the wait for the fluid jobs, and the grass tick
-  ([`PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md`](../Design/PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md) §7.6).
+  ([`PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md`](../Design/PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md) §7.6); ES-29
+  took out the copy and the grass tick ([`ENGINE_SCALING_PERFORMANCE_ROADMAP.md`](../Design/ENGINE_SCALING_PERFORMANCE_ROADMAP.md)).
   **TG-5** (function-pointer dispatch, no parallel re-architecture) was the documented lighter alternative and was
   never needed.
 
@@ -543,7 +597,7 @@ survives.
 > ⚠️ **Correction to the 4b row (2026-07-26).** The TG-4 design document recorded that gate as "all **15**
 > fixtures", but 15 is the *post-Y-band* total: `BH-4-SPLIT-Y` and `BH-4-BAND-EDGE` were added one phase
 > later, as the Y-band row itself states. At Phase 4b only **13** fixtures existed, and the row is
-> corrected above. The 15-fixture figure is accurate for the Y-band gate and for `BH-D1[L|HB]` today.
+> corrected above. The 15-fixture figure is accurate for the Y-band gate as it shipped; `BH-D1[L|HB]` runs 21 since ES-29 (§4).
 
 ## A.4 Substrate sequencing analysis (pre-decision)
 
@@ -627,6 +681,11 @@ the ones any future tick-path change must address.*
 
 ## Document History
 
+* **v2.3** - ES-29 (2026-10-11): the tick's pre-tick snapshot is one shared section arena (§2.2, new subsection) and
+  grass is Burst-ticked (§2.3 rewritten from "Grass stays managed"); §2 call tree redrawn with its line anchors
+  re-verified; §2.4 emission order names the family; §4 gates (BH-D1[L|HB] now covers grass over 21 fixtures, BH-G
+  non-vacuity, the determinism gate's shared-arena World tick) and the scenario count; §6 pooling rows; §7 open items
+  (snapshot levers shipped, blanket registration → `ES-31`, unpruned ticker pools). The rest was not re-audited.
 * **v2.2** - PM-8 (2026-10-05): §2 call tree shows `TryPrepare` + `Schedule` and `DrainTick`'s tick totals, with its
   line anchors re-verified; §7's Grass-Burst, gather-lever and frame-level bullets carry the IL2CPP Master traversal
   measurements (grass 19–27 ms, snapshot copy 26–39 ms at 229–273 fluid chunks), and §2.3 notes its "only if a profile
@@ -650,5 +709,5 @@ the ones any future tick-path change must address.*
 
 **Last Updated:** 2026-07-26 (promoted to `Architecture/` and restructured as an as-built system description)  
 **Next Review:** if a third behavior family is added (§7 — the collection layout assumes exactly Grass + Fluid), when
-an `ES-*` item takes on Grass-Burst (§2.3) or the reserved gather levers (§7), or if P-2 Layer 2 is built for the lighting/meshing/world-scaling
-reasons and this tick path could be simplified onto it (§3.2).
+`ES-31` changes what generation and the rescan register (§7), or if P-2 Layer 2 is built for the
+lighting/meshing/world-scaling reasons and this tick path could be simplified onto it (§3.2).

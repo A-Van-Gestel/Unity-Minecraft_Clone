@@ -185,10 +185,10 @@ Unlike lighting and meshing, `World.TickChunksParallel` schedules a chunk's flui
 This is not automatic: `ChunkData.GetVoxel` returns `0` (= `Air`) for a null section and
 `ChunkData.FillJobVoxelMap` zero-fills them, so a placeholder looks like a clean column of air to any reader that only null-checks. Both fluid read paths enforce the invariant explicitly:
 
-| Path       | Enforcement                                                                                                                                                                                                              |
-|------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Burst halo | `FluidBurstTicker.PrepareNeighbors` requires `IsPopulated`; otherwise the slot points at the empty buffer, which `GatherPaddedFluidVoxelsBand` sentinel-fills (`uint.MaxValue`) → `GetStateLocal` reports `Has == false` |
-| Managed    | `WorldData.TryGetVoxel` resolves populated chunks only (checked live, after the last-chunk cache), so `GetVoxelState` → `ChunkData.GetState` returns null                                                                |
+| Path       | Enforcement                                                                                                                                                                                                                                                                              |
+|------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Burst halo | `TickSnapshotArena.Request` requires `IsPopulated`; otherwise the neighbor's section-table entries are `SectionArenaTable.MissingChunk`, which `GatherPaddedFluidVoxelsBand` sentinel-fills (`uint.MaxValue`) → `GetStateLocal` reports `Has == false`, and `GrassTickJob` reads as void |
+| Managed    | `WorldData.TryGetVoxel` resolves populated chunks only (checked live, after the last-chunk cache), so `GetVoxelState` → `ChunkData.GetState` returns null                                                                                                                                |
 
 Dropping either check reintroduces Fluid Bug 18 (archived in `_FIXED_BUGS.md` → Fluid §18 — not to be confused with Lighting §18): border fluids read the placeholder ring as free space, spread into it, and
 `ApplyModifications` persists the resulting cross-chunk mods via `ModManager.AddPendingMod` — which replays them over the neighbor's real terrain once it generates. Guarded by baselines **BH-B8** (Burst path) and **BH-B9**

@@ -460,17 +460,17 @@ the check. Whether a system has had a performance *analysis* pass is a different
 **Main thread — slots (Systems tier, or forced).** Inside `World.Update` the slots are disjoint, so with the remainder
 they sum to the bracket:
 
-| Slot(s)                                                                                     | Covers                                                                                                                                                                                  |
-|---------------------------------------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `Tick`                                                                                      | `ProcessTickUpdates`: active-chunk snapshot, per-chunk fluid prepare, scheduling, the `Complete()` wait, and the drain (grass tick, fluid replay) — split by the `Tick*` counters below |
-| `Apply`                                                                                     | `ApplyModifications`                                                                                                                                                                    |
-| `LightMerge`, `LightStagingDrain`, `LightFailSafeScan`, `LightSchedule`, `LightQueueProbe`  | the lighting passes; `LightQueueProbe` exists only in instrumented builds                                                                                                               |
-| `MeshProcess`, `MeshSchedule`                                                               | completed-mesh apply and upload; mesh-queue drain                                                                                                                                       |
-| `GenerationProcess`, `GenerationAdmission`                                                  | completed-generation pass; admission of queued requests                                                                                                                                 |
-| `WorldTime`, `BiomeTracker`, `OriginShift`, `TeleportHold`, `BorderToggle`, `Visualization` | the smaller `World.Update` regions, each probed around its call                                                                                                                         |
-| `ViewDistance`, `Unload`                                                                    | the crossing rebuild (all three callers, including the cloud rebuild it starts) and the unload pass                                                                                     |
-| `SaveRetryDrain`, `ChunkPoolPrune`                                                          | one pending failed-save retry; the pools' prune (`ChunkPoolManager.Update`, a plain method)                                                                                             |
-| `WorldUnattributed`                                                                         | the bracket minus the slots recorded inside it                                                                                                                                          |
+| Slot(s)                                                                                     | Covers                                                                                                                                                                                          |
+|---------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `Tick`                                                                                      | `ProcessTickUpdates`: active-chunk snapshot, per-chunk grass and fluid prepare, scheduling, the `Complete()` wait, and the drain (grass and fluid replay) — split by the `Tick*` counters below |
+| `Apply`                                                                                     | `ApplyModifications`                                                                                                                                                                            |
+| `LightMerge`, `LightStagingDrain`, `LightFailSafeScan`, `LightSchedule`, `LightQueueProbe`  | the lighting passes; `LightQueueProbe` exists only in instrumented builds                                                                                                                       |
+| `MeshProcess`, `MeshSchedule`                                                               | completed-mesh apply and upload; mesh-queue drain                                                                                                                                               |
+| `GenerationProcess`, `GenerationAdmission`                                                  | completed-generation pass; admission of queued requests                                                                                                                                         |
+| `WorldTime`, `BiomeTracker`, `OriginShift`, `TeleportHold`, `BorderToggle`, `Visualization` | the smaller `World.Update` regions, each probed around its call                                                                                                                                 |
+| `ViewDistance`, `Unload`                                                                    | the crossing rebuild (all three callers, including the cloud rebuild it starts) and the unload pass                                                                                             |
+| `SaveRetryDrain`, `ChunkPoolPrune`                                                          | one pending failed-save retry; the pools' prune (`ChunkPoolManager.Update`, a plain method)                                                                                                     |
+| `WorldUnattributed`                                                                         | the bracket minus the slots recorded inside it                                                                                                                                                  |
 
 Outside `World.Update` (a slot here may contain world work it triggers, e.g. a console teleport):
 
@@ -507,14 +507,17 @@ bytes), saves on every path (serialize and write time, payload bytes and their u
 it covers, and the operations in flight. Region files touched outside it — the migration step, the world list — and the
 non-chunk files (`level.dat`, pending modifications, pending lighting) are not counted.
 
-**Counters (Systems tier).** 57, sampled in `World.SamplePerfCounters`:
+**Counters (Systems tier).** 58, sampled in `World.SamplePerfCounters`:
 - *Gauges (14):* the pipeline queues and jobs in flight (`GenerationQueue`, `GenerationInFlight`, `LightReady`,
   `LightWaiting`, `LightInFlight`, `MeshQueue`, `MeshInFlight`, `ModificationQueue`), residency (`ResidentChunks`,
   `ActiveChunks`, `ActiveSections`), the native pools' idle stock (`JobArraysPooled`, `MeshOutputsPooled`) and `IoInFlight`.
-- *Per-frame counts (43):* pool misses (section, chunk data, job array, mesh output, save buffer); completed / latency /
+- *Per-frame counts (44):* pool misses (section, chunk data, job array, mesh output, save buffer); completed / latency /
   busy for each of the five job types, and `UntimedJobs`; the twelve disk I/O counts; the behavior tick's six timed parts
   (`TickListUs`, `TickPrepareUs`, `TickScheduleUs`, `TickWaitUs`, `TickGrassUs`, `TickFluidReplayUs`, from
-  `PerfTickTotals`), its counts (`TickFluidChunks`, `TickSnapshotKb`, `TickGrassVoxels`) and `FluidTickerPoolMisses`.
+  `PerfTickTotals`), its counts (`TickFluidChunks`, `TickFluidVoxels`, `TickSnapshotKb`, `TickGrassVoxels`) and
+  `FluidTickerPoolMisses`. Since ES-29, `TickSnapshotKb` counts the sections the tick's shared arena actually copied
+  (16 KB each, grass and fluid prepares together), `TickPrepareUs` includes the grass prepares, and `TickGrassUs` is
+  the grass jobs' replay — the grass rules run on workers, inside `TickWaitUs`.
   The tick's drain bookkeeping and ticker returns are timed by no part: `/perf stats` shows them as the average "Other".
 
 **Known gaps.**

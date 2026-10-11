@@ -1,13 +1,14 @@
 # Engine Scaling Performance Roadmap
 
-**Version:** 1.20  
+**Version:** 1.21  
 **Date:** 2026-10-02  
 **Status:** In progress — `ES-0` ✅ complete (2026-10-10: drain stamp shipped, every-layer re-measurement in §2.6 — added
 `ES-29`), `ES-1`, `ES-2` and `ES-6.1` shipped (2026-10-02); ES-0's GC.Alloc attribution captured (2026-10-03, §2.2.1 —
 added `ES-26`/`ES-27`; PM-1's smoke capture added the `ES-28` quick win); `ES-26` ✅ shipped (2026-10-10: −75.9 % GC.Alloc
 per generated chunk); `ES-27` ✅ shipped (2026-10-10: pooled light queues, −92.6 % of their garbage, −59 MB managed heap at
-200 m/s — its re-capture added `ES-30`); `ES-28` ✅ shipped (2026-10-10: the UI passes allocate nothing per frame); the
-rest is a near-to-far horizon, not scheduled. Tier 1 items are execution-sized; Tier 2/3
+200 m/s — its re-capture added `ES-30`); `ES-28` ✅ shipped (2026-10-10: the UI passes allocate nothing per frame);
+`ES-29` ✅ shipped (2026-10-11: shared section arena + Burst grass — Tick-led hitches 9–11 → 0–2 per vd-10 run; its
+probe added `ES-31`); the rest is a near-to-far horizon, not scheduled. Tier 1 items are execution-sized; Tier 2/3
 items each need their own design or implementation plan. Re-verify the anchors named per item before
 starting (§8).  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
@@ -584,6 +585,28 @@ every time, but drained → stable took 4.4, 4.7, 7.7 and **75 s**. The variance
 targets; the 75 s run's cause is unattributed (it ran at the probe's Systems tier, with no Capture session to
 read). Score ES-29 on the median of at least five runs per leg, and capture one long run at Capture to attribute it.
 
+*Shipped 2026-10-11:* two of the three levers, measured in
+[`ENGINE_SCALING_ES29_BEHAVIOR_TICK_IL2CPP_2026-10-11_BENCHMARK.md`](../Performance/ENGINE_SCALING_ES29_BEHAVIOR_TICK_IL2CPP_2026-10-11_BENCHMARK.md)
+(Master, same-session control of the ES-27 build):
+- **The prepare's copies** — one shared section arena per tick (`Jobs/TickSnapshotArena`): every prepare asks for its
+  band's sections of its chunk and neighbors, each (chunk, section) is copied once per tick, empty sections are never
+  copied, and every chunk is prepared before any job is scheduled. 2.0 → 0.16 MB copied per frame at 200 m/s; 44.9 →
+  4.9 MB per post-drain tick. Banding alone would have halved an ocean burst (bands are 4–5 sections deep there); one
+  copy per chunk is the larger lever. The tickers' own snapshot buffers are gone: ≈ 400 MB less memory at vd 10, and
+  the vd-32 peak fell 6372 → 5649 MB.
+- **The grass tick** — `Jobs/GrassTickJob` on the same arena, exact against the managed rules (BH-D1[L|HB] + the BH-G
+  fixtures): 10–29 ms → ≈ 0.1 ms in the hitch records.
+- Result: Tick-led run-end hitch records 9 / 11 / 10 → 2 / 1 / 0 per vd-10 run (15 → 10 at vd 32, now wait-led), and
+  drained → stable median 19.2 → 10.2 s over five runs per leg; the tick no longer leads that tail (`LightMerge`,
+  `MeshSchedule` and slot-less frames do — the "held back only by the prepare" reading above was a third of the story).
+
+**The wait was not taken.** The probe found what it waits on: generation registers every water and grass voxel of a new
+chunk and the first tick drops almost all of them (an ocean burst: 702 k → 3.3 k fluid voxels a tick later), so the
+wait, the replay's removals and the remaining prepare (the bucket partition) scale with that first tick. Spreading the
+fan-out over frames would hide the wait at the cost of a freshness hazard (stale modifications applied over newer
+edits, recycled chunks); removing the cause is `ES-31`. *Open:* the after leg's 200 m/s frames ran longer (+5 %
+`LightMerge` per lighting job) on code ES-29 does not touch; it needs a control build of ES-29's base (see the report).
+
 **ES-30 — Pre-size the lighting merge's pooled column sets and deferred-mod lists.** 🟢 / 🟢. Added 2026-10-10 from
 the ES-27 re-capture. The two pooled-collection sites left in the lighting path, IL2CPP at 200 m/s:
 - `WorldData.QueueSkylightRecalculation` — `HashSet<Vector2Int>` growth, **0.16 KB per generated chunk** (1 350 calls in
@@ -598,6 +621,31 @@ the ES-27 re-capture. The two pooled-collection sites left in the lighting path,
 
 Small (0.54 KB of the 20.3 KB per chunk left after ES-27); the gain is a pool state that converges instead of
 re-growing. Gate on the lighting suite, then a GC.Alloc re-capture showing neither site.
+
+**ES-31 — Register only the voxels that can act: screen the blanket active-voxel registration.** 🟡 / 🟡. Added
+2026-10-11 from ES-29's probe. Generation registers **every** active-type voxel of a new chunk —
+`ActiveVoxelScanJob` adds each id whose `BlockTypeJobData.IsActive` is set, so every water and grass voxel — and the
+disk rescan (`ChunkData.RescanActiveVoxels`) does the same. The first tick then evaluates them all and drops almost all
+of them. Editor probe (seed 4242, vd 10): an ocean teleport registered **702 k fluid voxels in 181 chunks**, 3.3 k a
+tick later; a land teleport **17.8 k grass voxels**, 459 a tick later and 106 the tick after. What ES-29 left of the
+loading-pass tick spikes scales with that first tick:
+- **the wait** for the fluid jobs — their worker time is the per-voxel evaluation of the blanket;
+- **the replay's removals** — one `NativeHashSet.Remove` per dropped voxel on the main thread (4–10 ms per tick in PM-8);
+- **the bucket partition** inside each prepare, and **the bands** — a whole ocean column is registered, so a new ocean
+  chunk's fluid band is 4–5 sections deep instead of the surface's one.
+
+The lever is to screen at registration with the tick's own rules, reading only the chunk: drop a voxel only when its
+reads prove it can neither emit nor stay active — for a fluid, a source whose cell below and four cardinal cells are
+solid or the same fluid's sources; for grass, no convertible-dirt candidate and no solid block on top. A voxel whose
+reads cross a seam stays registered unless the seam wake (`World.WakeSeamBehaviorNeighborhood`) is shown to cover it.
+
+**The hazard is the registration contract** (`BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md` §2.1: the tick has no readiness
+gate, so registration is the whole contract). A screened voxel ticks again only when something wakes it. The Step-4
+six-neighbor wake covers every fluid read the screen relies on, but grass's up-diagonal candidates and the air above
+them are not six-neighbors of the grass, and the pending-mod replay on load must wake what it changes. Plan it with the
+`chunk-lifecycle` skill; gate it with a differential of screen-then-tick against blanket-then-tick over the BH fixtures
+and random terrain, plus the seam-wake scenarios (BH-B8–B13). Score it on the Master loading pass's `TickWaitUs`,
+`TickFluidReplayUs` and `TickFluidVoxels`.
 
 ### Tier 2 — pipeline work on today's data model
 
@@ -689,11 +737,11 @@ constants + migration change. Prerequisites: ES-13, ES-18, ES-19.
 
 ### 4.1 Expected impact by symptom
 
-| Symptom          | Biggest levers (in order)                                                                                                                                                                                                                                                                                                 |
-|------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Time-to-stable   | ES-0 (attributed 2026-10-10, §2.6) → ES-1, ES-2, ES-3 → **ES-29** (drained → stable), ES-4, ES-11, ES-13                                                                                                                                                                                                                  |
-| Traversal spikes | ES-0 (see them; H-1 §2.2.1 refuted, **garbage attributed 2026-10-03**) → **ES-26** ✅ (−75.9 % of per-chunk garbage), **ES-27** ✅ (−33.8 % of the rest), ES-30, ES-9 (~12 %) → ES-6, ES-8, ES-7, ES-25 → ES-18a (heap); ES-10 after ES-26; **ES-28** ✅ (steady-state UI garbage gone); **ES-29** (loading-pass hitches) |
-| Height / vd 32   | ES-13 (200 k cap), ES-25, ES-19, ES-18, ES-20 + ES-21 + ES-23, ES-24                                                                                                                                                                                                                                                      |
+| Symptom          | Biggest levers (in order)                                                                                                                                                                                                                                                                                                    |
+|------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Time-to-stable   | ES-0 (attributed 2026-10-10, §2.6) → ES-1, ES-2, ES-3 → **ES-29** ✅ (drained → stable median 19.2 → 10.2 s), ES-4, ES-11, ES-13                                                                                                                                                                                             |
+| Traversal spikes | ES-0 (see them; H-1 §2.2.1 refuted, **garbage attributed 2026-10-03**) → **ES-26** ✅ (−75.9 % of per-chunk garbage), **ES-27** ✅ (−33.8 % of the rest), ES-30, ES-9 (~12 %) → ES-6, ES-8, ES-7, ES-25 → ES-18a (heap); ES-10 after ES-26; **ES-28** ✅ (steady-state UI garbage gone); **ES-29** ✅ (loading-pass hitches) |
+| Height / vd 32   | ES-13 (200 k cap), ES-25, ES-19, ES-18, ES-20 + ES-21 + ES-23, ES-24                                                                                                                                                                                                                                                         |
 
 ---
 
@@ -744,8 +792,9 @@ constants + migration change. Prerequisites: ES-13, ES-18, ES-19.
 | **ES-26 — Serializer span copy** | Write section arrays without `ReadOnlySpan<T>.ToArray()` — byte-identical output                                     |   🟢   | —                   | ✅ 2026-10-10 (GC re-capture + 3 Master runs)                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | **ES-27 — BFS queue regrowth**   | Pool-rent `ChunkData`'s lighting BFS queues instead of growing one pair per pooled chunk                             |   🟢   | —                   | ✅ 2026-10-10 (GC re-capture + 3 Master runs vs a same-session control)                                                                                                                                                                                                                                                                                                                                                                                                    |
 | **ES-28 — UI pass garbage**      | Cache the UI band/blur Render Graph pass names and sorting values — ≈ 0.75 KB/frame of steady-state garbage          |   🟢   | —                   | ✅ 2026-10-10 (suite L20/L21 + Editor GC re-capture)                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| **ES-29 — Behavior tick spikes** | Banded / deduplicated fluid snapshots, the fluid-job wait, Grass-Burst                                               |   🟡   | —                   | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| **ES-29 — Behavior tick spikes** | Banded / deduplicated fluid snapshots, the fluid-job wait, Grass-Burst                                               |   🟡   | —                   | ✅ 2026-10-11 (snapshot arena + Burst grass; wait → ES-31; 5+3+1 Master runs per leg)                                                                                                                                                                                                                                                                                                                                                                                      |
 | **ES-30 — Pooled set pre-size**  | Pre-size the lighting merge's pooled column sets (256) and deferred-mod lists — 0.54 KB/chunk                        |   🟢   | —                   | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| **ES-31 — Screen registration**  | Register only voxels that can act, instead of every water/grass voxel of a new chunk                                 |   🟡   | —                   | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | **ES-12 — Jobified merge**       | P-3                                                                                                                  |   🟡   | ES-7                | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | **ES-13 — Sky from heightmap**   | Frontier-seeded initial lighting                                                                                     |   🟡   | ES-12               | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | **ES-14 — Gen critical path**    | Worm cache, WG-1, WG-2                                                                                               |   🟡   | ES-0                | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
@@ -1126,6 +1175,10 @@ saving is inferred from step 1's re-entry leg, not re-measured.
 
 ## Document History
 
+* **v1.21** - **ES-29 shipped** (2026-10-11): the behavior tick's prepare copies each section once per tick into a
+  shared arena and grass is Burst-ticked; the wait was not taken. ES-29 entry (shipped note + why not the wait), plan
+  row, §4.1 rows, status line. New **`ES-31`** (Tier 1b): screen generation's and the rescan's blanket active-voxel
+  registration, from ES-29's probe.
 * **v1.20** - New `ES-30` (2026-10-10, from the ES-27 re-capture): pre-size the lighting merge's pooled column sets
   (bounded at 256) and deferred-mod lists; Tier 1b entry, plan row, §4.1 traversal row, status line. ES-7 gains the
   probe's observation that frontier chunks unload with skylight nodes pending, which are saved and replayed.
@@ -1205,5 +1258,5 @@ saving is inferred from step 1's re-entry leg, not re-measured.
 
 ---
 
-**Last Updated:** 2026-10-10  
-**Next Review:** when ES-29 is scored against the 2026-10-10 baseline or ES-25's rendering baseline lands, or before any ES phase starts
+**Last Updated:** 2026-10-11  
+**Next Review:** when the ES-29 report's 200 m/s observation is controlled (a build of ES-29's base), when ES-25's rendering baseline lands, or before any ES phase starts
