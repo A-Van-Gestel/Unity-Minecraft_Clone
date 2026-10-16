@@ -38,7 +38,6 @@ RUN
 import argparse
 import csv
 import os
-import statistics
 import sys
 from collections import Counter
 from pathlib import Path
@@ -89,7 +88,8 @@ def drain_index(rows):
 
 
 def median_or_zero(values):
-    return statistics.median(values) if values else 0.0
+    """Nearest-rank median, the rank ceil(n/2) value, as PerfWindowStats.NearestRankIndex picks it."""
+    return sorted(values)[(len(values) + 1) // 2 - 1] if values else 0.0
 
 
 def attribute(label, rows):
