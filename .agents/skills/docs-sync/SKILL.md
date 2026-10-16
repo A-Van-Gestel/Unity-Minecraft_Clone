@@ -34,34 +34,61 @@ Documentation/
 └── Bugs/, Archived/  (handled by archive-fixed-bug, not this skill)
 ```
 
-**Code area → primary doc** (non-exhaustive — confirm with the graph, do not trust this list blindly if it looks stale):
+**Code area → primary doc** (non-exhaustive — confirm with the graph, do not trust this list blindly if it looks stale).
+Backticked repo paths in the left column are machine-read: a token ending in `/` is a folder prefix, one
+with `*` a glob, anything else an exact file. Bare names are prose for the reader. A row without paths is
+judged by subject. Doc paths are relative to `Documentation/`.
 
-| Code area                                                                                                                                 | Primary doc                                                                                                               |
-|-------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------|
-| `World.cs`, `WorldJobManager.cs`, `ChunkPoolManager.cs`, chunk state flags                                                                | `Architecture/CHUNK_LIFECYCLE_PIPELINE.md`                                                                                |
-| Voxel bit-packing, `ChunkData` layout, block ID encoding                                                                                  | `Architecture/DATA_STRUCTURES.md`                                                                                         |
-| Packed voxel **metadata** bits, block orientation/facing, BlockDatabase metadata authoring                                                | `Architecture/PER_BLOCK_METADATA_SCHEMAS.md`                                                                              |
-| World-type architecture, `Data/WorldTypes/`, `IChunkGenerator` implementations, world-gen pipeline selection                              | `Architecture/World Generation/MODULAR_WORLD_GENERATION_&_WORLD_TYPES.md`                                                 |
-| 3D density terrain shape, domain warping, multi-noise (continentalness/erosion/peaks-valleys), strata/lodes, `StandardChunkGenerationJob` | `Architecture/World Generation/PROCEDURAL_TERRAIN_GENERATION.md`                                                          |
-| Cave carving — worm carvers (trunk + local), zone attenuation, noise/mask seeking, Cheese/Noodle/Spaghetti modes, cave isolation filter   | `Architecture/World Generation/CAVE_GENERATION.md` (+ `cave-tuning` skill)                                                |
-| Sub-chunk / section meshing — `MeshGenerationJob`, `MeshPostProcessJob`, `SectionRenderer` (incl. its vertex `Layout`), `Chunk.ApplyMeshData`, `MeshingScheduleDecision` | `Architecture/SUB_CHUNK_MESHING_ARCHITECTURE.md`                                              |
-| Lighting BFS jobs, skylight/blocklight propagation                                                                                        | `Architecture/LIGHTING_SYSTEM_OVERVIEW.md`                                                                                |
-| Block-behavior tick — `FluidTickJob`, `FluidBurstTicker`, `BlockBehavior.*`, `ChunkData`'s active-voxel buckets, `World.TickChunksParallel` | `Architecture/BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md`                                                                        |
-| Floating origin — `WorldOrigin`, origin shift/re-anchor, `ChunkRelativePosition`, Unity↔voxel space conversions                            | `Architecture/WORLD_SCALING_FLOATING_ORIGIN.md` (+ `Guides/COORDINATE_SPACES_GUIDE.md`)                                   |
-| Command console — `Commands/`, `CommandEngine`, `ConsoleUI`, command registration                                                          | `Architecture/COMMAND_CONSOLE_SYSTEM.md`                                                                                  |
-| Lighting **validation suite** / harness (`Assets/Editor/Validation/Lighting/`) changes                                                    | `Architecture/Testing Framework/LIGHTING_VALIDATION_HARNESS_FIDELITY.md` (living doc; + `validation-driven-bugfix` skill) |
-| Region files, `ChunkStorageManager`, LZ4/GZip serialization                                                                               | `Architecture/INFINITE_WORLD_STORAGE_AND_SERIALIZATION_ARCHITECTURE.md`                                                   |
-| Save format / on-disk schema changes                                                                                                      | `Architecture/AOT_WORLD_MIGRATION_SYSTEM.md` (+ `serialization-migration` skill)                                          |
-| Sub-voxel collision, collision bounds                                                                                                     | `Architecture/SUB_VOXEL_COLLISION_SYSTEM.md`                                                                              |
-| Fluid rendering, shoreline blending                                                                                                       | `Architecture/FLUID_SHORELINE_RENDERING.md`                                                                               |
-| Submersion overlay, the shared eye query, `FluidSurfaceResolver`, `UnderwaterOverlayRendererFeature`                                      | `Architecture/UNDERWATER_AND_SUBMERSION_RENDERING.md`                                                                     |
-| Profiler markers, performance instrumentation                                                                                             | `Architecture/PERFORMANCE_PROFILER_OVERHAUL.md` + `Performance/`                                                          |
-| Reflection-based settings menu, `SettingsUIGenerator`, `SettingFieldAttribute`, `Settings`/`DevSettings` fields                           | `Architecture/DATA_DRIVEN_SETTINGS_UI.md`                                                                                 |
-| Agent ↔ Editor bridge — Unity CLI usage, `com.unity.pipeline`, `Tools/UnityCli/`, the `unity-editor` skill                                | `Architecture/UNITY_CLI_EDITOR_BRIDGE.md` (+ `unity-editor` skill)                                                        |
-| Burst jobs, Burst-compatibility patterns                                                                                                  | `Guides/BURST_COMPILER_GUIDE.md`                                                                                          |
-| Optimization patterns, GC avoidance, pooling                                                                                              | `Guides/GENERAL_OPTIMIZATION_GUIDE.md`                                                                                    |
-| Directory layout / new architectural folder                                                                                               | `Guides/PROJECT_STRUCTURE.md`                                                                                             |
-| Naming, bracing, const conventions                                                                                                        | `Guides/CODING_STYLE_GUIDE.md`                                                                                            |
+| Code area | Primary doc |
+|---|---|
+| Chunk lifecycle — `Assets/Scripts/World.cs`, `Assets/Scripts/WorldJobManager.cs`, `Assets/Scripts/ChunkPoolManager.cs`, chunk state flags | `Architecture/CHUNK_LIFECYCLE_PIPELINE.md` |
+| Voxel bit-packing, `ChunkData` layout, block ID encoding — `Assets/Scripts/Data/ChunkData.cs`, `Assets/Scripts/Data/ChunkSection.cs`, `Assets/Scripts/Data/VoxelState.cs`, `Assets/Scripts/Jobs/BurstData/BurstVoxelDataBitMapping.cs`, `Assets/Scripts/Jobs/BurstData/LightBitMapping.cs` | `Architecture/DATA_STRUCTURES.md` |
+| Packed voxel **metadata** bits, block orientation/facing, BlockDatabase metadata authoring — `Assets/Scripts/Jobs/BurstData/BurstVoxelDataBitMapping.cs` | `Architecture/PER_BLOCK_METADATA_SCHEMAS.md` |
+| `BlockDatabase` ownership and loading (`World.BlockDatabase`, `ResourceLoader`) — `Assets/Scripts/Data/BlockDatabase.cs`, `Assets/Scripts/Helpers/ResourceLoader.cs` | `Architecture/BLOCK_DATABASE_DECOUPLING.md` |
+| World-type architecture, `IChunkGenerator` implementations, world-gen pipeline selection — `Assets/Scripts/Data/WorldTypes/`, `Assets/Scripts/Jobs/Generators/` | `Architecture/World Generation/MODULAR_WORLD_GENERATION_&_WORLD_TYPES.md` |
+| 3D density terrain shape, domain warping, multi-noise (continentalness/erosion/peaks-valleys), strata/lodes — `Assets/Scripts/Jobs/StandardChunkGenerationJob.cs` | `Architecture/World Generation/PROCEDURAL_TERRAIN_GENERATION.md` |
+| Cave carving — worm carvers (trunk + local), zone attenuation, noise/mask seeking, Cheese/Noodle/Spaghetti modes, cave isolation filter — `Assets/Scripts/Jobs/StandardWormCarverJob.cs`, `Assets/Scripts/Jobs/CaveIsolationFilterJob.cs`, `Assets/Scripts/Jobs/Data/StandardCaveLayerJobData.cs` | `Architecture/World Generation/CAVE_GENERATION.md` (+ `cave-tuning` skill) |
+| Sub-chunk / section meshing — `Chunk.ApplyMeshData`, the vertex `Layout` — `Assets/Scripts/Jobs/MeshGenerationJob.cs`, `Assets/Scripts/Jobs/MeshPostProcessJob.cs`, `Assets/Scripts/SectionRenderer.cs`, `Assets/Scripts/Chunk.cs`, `Assets/Scripts/Helpers/MeshingScheduleDecision.cs`, `Assets/Scripts/Helpers/VoxelMeshHelper.cs` | `Architecture/SUB_CHUNK_MESHING_ARCHITECTURE.md` |
+| Lighting BFS jobs, skylight/blocklight propagation, light scheduling — `Assets/Scripts/Jobs/NeighborhoodLightingJob.cs`, `Assets/Scripts/Jobs/Data/LightingJobData.cs`, `Assets/Scripts/Jobs/BurstData/LightAttenuation.cs`, `Assets/Scripts/Helpers/Light*.cs`, `Assets/Scripts/Helpers/CrossChunkLightModApplier.cs`, `Assets/Scripts/Helpers/SkylightColumnRouting.cs`, `Assets/Scripts/Data/LightingWork.cs`, `Assets/Scripts/Serialization/LightingStateManager.cs` | `Architecture/LIGHTING_SYSTEM_OVERVIEW.md` |
+| Smooth lighting / AO and RGB light in the shaders — `Assets/Shaders/Includes/VoxelLighting.hlsl`, `Assets/Scripts/Data/Enums/SmoothLightingQuality.cs` | `Architecture/SMOOTH_AND_RGB_LIGHTING.md` |
+| Block-behavior tick — `ChunkData`'s active-voxel buckets, `World.TickChunksParallel` — `Assets/Scripts/Jobs/FluidTickJob.cs`, `Assets/Scripts/Jobs/FluidBurstTicker.cs`, `Assets/Scripts/Jobs/GrassTickJob.cs`, `Assets/Scripts/Jobs/GrassBurstTicker.cs`, `Assets/Scripts/Jobs/ActiveVoxelScanJob.cs`, `Assets/Scripts/BlockBehavior*.cs` | `Architecture/BLOCK_BEHAVIOR_TICK_ARCHITECTURE.md` |
+| Floating origin — origin shift/re-anchor, Unity↔voxel space conversions — `Assets/Scripts/Helpers/WorldOrigin.cs`, `Assets/Scripts/Helpers/ChunkMath.cs`, `Assets/Scripts/Data/WorldTypes/ChunkRelativePosition.cs` | `Architecture/WORLD_SCALING_FLOATING_ORIGIN.md` (+ `Guides/COORDINATE_SPACES_GUIDE.md`) |
+| Command console, command registration — `Assets/Scripts/Commands/`, `Assets/Scripts/UI/ConsoleUI.cs` | `Architecture/COMMAND_CONSOLE_SYSTEM.md` |
+| Lighting **validation suite** / harness changes — `Assets/Editor/Validation/Lighting/` | `Architecture/Testing Framework/LIGHTING_VALIDATION_HARNESS_FIDELITY.md` (living doc; + `validation-driven-bugfix` skill), `Architecture/Testing Framework/LIGHTING_FRAME_SIMULATOR_DESIGN.md` for its frame simulator |
+| Behavior validation harness — `Assets/Editor/Validation/Behavior/` | `Architecture/Testing Framework/BEHAVIOR_VALIDATION_HARNESS_FIDELITY.md` |
+| Chunk-pipeline validation harness — `Assets/Editor/Validation/ChunkPipeline/` | `Architecture/Testing Framework/CHUNK_PIPELINE_VALIDATION_HARNESS_FIDELITY.md` |
+| Meshing validation harness — `Assets/Editor/Validation/Meshing/` | `Architecture/Testing Framework/MESHING_VALIDATION_HARNESS_FIDELITY.md` |
+| Region files, `ChunkStorageManager`, LZ4/GZip serialization — `Assets/Scripts/Serialization/` | `Architecture/INFINITE_WORLD_STORAGE_AND_SERIALIZATION_ARCHITECTURE.md` |
+| Save format / on-disk schema changes — `Assets/Scripts/Serialization/Migration/`, `Assets/Scripts/Serialization/ChunkSerializer.cs` | `Architecture/AOT_WORLD_MIGRATION_SYSTEM.md` (+ `serialization-migration` skill) |
+| Sub-voxel collision, collision bounds — `Assets/Scripts/Physics/`, `Assets/Scripts/PlayerInteraction.cs` | `Architecture/SUB_VOXEL_COLLISION_SYSTEM.md` |
+| Fluid rendering, shoreline blending — `Assets/Shaders/Includes/LiquidCore.hlsl`, `Assets/Shaders/UberLiquidShader.shader`, `Assets/Scripts/Jobs/BurstData/BurstFluidFlowUtility.cs` | `Architecture/FLUID_SHORELINE_RENDERING.md` |
+| Submersion overlay, the shared eye query — `Assets/Scripts/Helpers/FluidSurfaceResolver.cs`, `Assets/Scripts/Rendering/UnderwaterOverlayRendererFeature.cs`, `Assets/Editor/Validation/UnderwaterRender/` | `Architecture/UNDERWATER_AND_SUBMERSION_RENDERING.md` |
+| Sky, sun/moon, day/night, atmospheric fog — `Assets/Scripts/Sky/`, `Assets/Scripts/WorldTimeManager.cs`, `Assets/Shaders/SkyboxShader.shader`, `Assets/Editor/WorldTools/Sky*.cs`, `Assets/Editor/Validation/Celestial/` | `Architecture/SKY_AND_CELESTIAL_RENDERING.md` |
+| Runtime uGUI construction — `Assets/Scripts/UI/Builders/` | `Architecture/RUNTIME_UI_FACTORY.md` (+ `game-ui` skill) |
+| Banded UI blur backdrop — `Assets/Scripts/UI/Blur/`, `Assets/Scripts/Rendering/UIBand*.cs`, `Assets/Scripts/Rendering/UIBlur*.cs`, `Assets/Shaders/UIBlurBlit.shader`, `Assets/Shaders/MaskedUIBlur.shader`, `Assets/Editor/Validation/UIBlur/`, `Assets/Editor/Validation/UIBands/` | `Architecture/UI_BLUR_BACKDROP_SYSTEM.md` |
+| Toast notifications — `Assets/Scripts/UI/Toast/` | `Architecture/TOAST_NOTIFICATION_SYSTEM.md` |
+| Profiler markers, performance instrumentation — `Assets/Scripts/DebugScreen.cs`, `Assets/Scripts/PerformanceMonitor.cs` | `Architecture/PERFORMANCE_PROFILER_OVERHAUL.md` + `Performance/` |
+| Perf capture — `PerfStore`, hitch detection, perf session export — `Assets/Scripts/Diagnostics/`, `Assets/Editor/Validation/PerfMonitoring/` | `Design/PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md` |
+| Sound engine — `Assets/Scripts/Audio/`, `Assets/Editor/SoundEditor/`, `Assets/Editor/Validation/SoundEngine/` | `Design/SOUND_ENGINE_DESIGN.md` |
+| Reflection-based settings menu, `SettingFieldAttribute`, `Settings`/`DevSettings` fields — `Assets/Scripts/UI/SettingsUIGenerator.cs`, `Assets/Scripts/UI/Attributes/`, `Assets/Scripts/SettingsManager.cs` | `Architecture/DATA_DRIVEN_SETTINGS_UI.md` |
+| Agent ↔ Editor bridge — Unity CLI usage, `com.unity.pipeline` — `Tools/UnityCli/`, `.agents/skills/unity-editor/` | `Architecture/UNITY_CLI_EDITOR_BRIDGE.md` (+ `unity-editor` skill) |
+| Hand-written HLSL — `Assets/Shaders/` | `Guides/SHADER_CONVENTIONS.md` |
+| Burst jobs, Burst-compatibility patterns | `Guides/BURST_COMPILER_GUIDE.md` |
+| Optimization patterns, GC avoidance, pooling | `Guides/GENERAL_OPTIMIZATION_GUIDE.md` |
+| Directory layout / new architectural folder | `Guides/PROJECT_STRUCTURE.md` |
+| Naming, bracing, const conventions | `Guides/CODING_STYLE_GUIDE.md` |
+| Copy-in debug methods for diagnosing chunk/lighting state | `Guides/DEBUG_METHODS_EXAMPLES.md` |
+
+`Tools/Python/doc_impact_map.py` checks every changed path against this table and the no-doc list below,
+so no path is skipped. It proposes candidates only; Step 2 decides:
+
+```bash
+python Tools/Python/doc_impact_map.py                    # working tree vs HEAD + untracked
+python Tools/Python/doc_impact_map.py --range A..B       # also --staged, --paths <p>...
+```
+
+Exit 2 means the table did not parse: never read it as "no docs affected". Exit 3 means a path in the
+table matches no tracked file, so that row has gone stale: fix the row in the same change.
 
 **Use CodeGraph to understand the changed CODE — not to find the docs.** `Documentation/` is markdown
 and is not in the graph at all, so locating a doc is always a Glob/Grep job. Per `CLAUDE.md`:
@@ -80,18 +107,23 @@ Any hit is a doc that references your change and may need updating.
 
 **Where there is deliberately no owning doc.** The tree covers the **DOTS engine core** — chunk
 lifecycle, world generation, lighting, meshing, serialization, block-behavior tick, sub-voxel
-collision, floating origin, sky rendering, the command console, and the reflection settings UI.
-It deliberately does **not** cover the gameplay/glue layers, so "no match" there is a real answer,
-not a lookup failure:
+collision, floating origin, sky rendering, the command console, the reflection settings UI, and the
+runtime UI infrastructure (UI factory, blur backdrop, toasts). It deliberately does **not** cover the
+gameplay/glue layers, so "no match" there is a real answer, not a lookup failure (the table above
+wins where a path is in both):
 
-- Player input & controls (`Assets/Scripts/Input/`), spawning (`Spawn/`), block placement &
-  interaction (`Placement/`), and general UI/HUD beyond the settings generator.
-- Utility and debug glue — `Helpers/`, `Config/`, `Attributes/`, `DebugVisualizations/`.
-- Most of `Assets/Editor/` tooling (`BlockEditor/`, `AtlasPacker/`, `StructureEditor/`,
-  `WorldTools/`, `DataGeneration/`, `PropertyDrawers/`, …). The exception is
-  `Assets/Editor/Validation/` (lighting harness), which has a fidelity doc and the
-  `validation-driven-bugfix` skill.
-- `Legacy/` and third-party `Libraries/` — undocumented by design.
+- Player input & controls (`Assets/Scripts/Input/`, `Assets/Scripts/InputManager.cs`), spawning
+  (`Assets/Scripts/Spawn/`), block placement & interaction (`Assets/Scripts/Placement/`), and
+  menus/HUD screens built on the UI infrastructure.
+- Utility and debug glue — `Assets/Scripts/Helpers/`, `Assets/Scripts/Config/`,
+  `Assets/Scripts/Attributes/`, `Assets/Scripts/DebugVisualizations/`.
+- Most of the Editor tooling (`Assets/Editor/BlockEditor/`, `Assets/Editor/AtlasPacker/`,
+  `Assets/Editor/StructureEditor/`, `Assets/Editor/WorldTools/`, `Assets/Editor/DataGeneration/`,
+  `Assets/Editor/PropertyDrawers/`, …). The exceptions are the validation harnesses with a fidelity
+  doc in the table (+ the `validation-driven-bugfix` skill).
+- `Assets/Scripts/Legacy/` and third-party `Assets/Scripts/Libraries/` — undocumented by design.
+- Agent tooling — `.agents/`, `CLAUDE.md`, `AGENTS.md`, `Tools/` — documented by the skills, the
+  twin files and `Tools/Python/README.md` themselves, not by `Documentation/`.
 
 When a change lands only in these areas and alters no documented system, the verdict is
 **no-op / surface-the-gap**, never `needs-new-doc` on reflex. This list is category-level, not
