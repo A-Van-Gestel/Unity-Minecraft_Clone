@@ -8,9 +8,10 @@ WHAT IT IS FOR
 
 HOW IT MATCHES
     Only backticked tokens containing '/' in a table row's left column match: a token ending in '/'
-    is a folder prefix, one with '*' a glob, anything else an exact path. Bare names (`ChunkData`)
-    are prose for the reader. In the no-doc bullets a bare file name (`CLAUDE.md`) matches too. A
-    path a table row matches is never also reported as no-doc. `.meta` files are ignored.
+    is a folder prefix, one with '*' a glob whose '*' stays within one folder, anything else an exact
+    path. Bare names (`ChunkData`) are prose for the reader. In the no-doc bullets a bare file name
+    (`CLAUDE.md`) matches too. A path a table row matches is never also reported as no-doc. `.meta`
+    files are ignored.
 
 READS   the skill file and git. WRITES nothing.
 
@@ -30,7 +31,6 @@ EXIT CODES
        table has gone stale and that row maps nothing
 """
 import argparse
-import fnmatch
 import os
 import re
 import subprocess
@@ -58,9 +58,14 @@ def is_path_pattern(token):
     return "/" in token and " " not in token
 
 
+def glob_regex(pattern):
+    """`*` stays inside one folder, as in a shell glob (fnmatch would let it cross `/`)."""
+    return re.compile("".join("[^/]*" if c == "*" else re.escape(c) for c in pattern) + r"\Z")
+
+
 def matches(pattern, path):
     if "*" in pattern:
-        return fnmatch.fnmatchcase(path, pattern)
+        return glob_regex(pattern).match(path) is not None
     if pattern.endswith("/"):
         return path.startswith(pattern)
     return path == pattern

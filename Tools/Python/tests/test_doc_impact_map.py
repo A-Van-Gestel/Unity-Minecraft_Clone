@@ -71,6 +71,11 @@ class DocImpactMapTests(unittest.TestCase):
         no_doc = self.section(out, "Deliberately no doc")
         self.assertIn("Assets/Scripts/Helpers/ (1 paths)", no_doc)
 
+    def test_glob_star_does_not_cross_into_subfolders(self):
+        code, out = self.run_map("--paths", "Assets/Scripts/Helpers/Lighting/Foo.cs")
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("Foo.cs", self.section(out, "Candidate docs"))
+
     def test_no_doc_bullets_include_continuations_and_bare_file_names_only(self):
         code, out = self.run_map("--paths", "Assets/Scripts/Config/Cfg.cs", "CLAUDE.md", ".agents/x.md")
         self.assertEqual(code, 0, out)
