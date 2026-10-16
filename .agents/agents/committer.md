@@ -55,9 +55,10 @@ uncommitted work never pull you outside the batch, and fix what they report:
 Then read every changed and untracked file in the batch for what no script sees: why-not-what,
 inline comments ≤ 3 lines, no consumer rosters, no war stories, XML docstrings on new public API.
 Fix violations with `Edit`, one targeted edit at a time; never rewrite a whole file and never edit
-through a script. Do not change code behavior: only comments, docstrings and spelling in
-identifiers that are private and unreferenced elsewhere — rename anything wider in the report
-instead of editing it. Record every edit (file:line, before → after) for the report.
+through a script. Trimming a comment means deleting text, not rephrasing it longer. Do not
+change code behavior: only comments, docstrings and spelling in identifiers that are private and
+unreferenced elsewhere — rename anything wider in the report instead of editing it. Record every
+edit (file:line, before → after) for the report.
 
 ## Step 2 — Group into logical commits
 
@@ -70,23 +71,28 @@ attribution reminder.
 
 ## Step 3 — Commit
 
-a. Plain commits: `git add -- <paths>`, verify with `git diff --no-color --cached --stat`,
-   then `git commit -m "<subject>"`.
+a. Plain commits: stage explicit paths only, `git add -- <paths>` — never `git add -A` / `.` /
+   `-u`, never `commit -a`. Before each commit run `git diff --no-color --cached --name-only`;
+   anything staged that the batch did not name is unstaged (`git restore --staged -- <path>`).
+   Verify with `git diff --no-color --cached --stat`, then `git commit -m "<subject>"`.
    Splitting one file's hunks across commits (`git add -p` is unavailable):
    `python Tools/Python/stage_hunks.py <file> --list`, then `--hunks 1,3`. It prints the staged
    diff; read it before committing. Re-list after each pick — the numbering shifts.
 b. Folding into an unpushed older commit (`rebase -i` is unavailable), via git's fixup mechanism:
    1. Per target: `python Tools/Python/fold_into_commit.py fixup <target> <paths…>` (or stage the
-      hunks with `stage_hunks.py` first and omit the paths). Make every fixup before squashing —
-      hashes stay stable until the squash. Never use plain `git commit --fixup`: the script
+      hunks with `stage_hunks.py` first and omit the paths: with no paths it folds exactly what is
+      staged; never pass `--whole-file` for a file whose other hunks are outside the batch).
+      Make every fixup before squashing — hashes stay stable until the squash. Never use plain `git commit --fixup`: the script
       addresses the target by hash, so two commits sharing a subject cannot be confused.
    2. Once, after every other commit of the batch: `python Tools/Python/fold_into_commit.py squash`.
       It backs up, rebases with `--autosquash --autostash`, and gates the result (tree identical,
       commit count, no `fixup!` left, `git status` unchanged).
    Exit 2 = refused before changing anything (e.g. the target is pushed — then use a plain
    `Updated: Unity re-serialization -> …` commit). Exit 1 = conflict (aborted, HEAD restored, the
-   fixup commits remain) or a failed gate (branch reset, backup branch named): STOP and report its
-   output verbatim — never resolve a rebase by hand.
+   fixup commits remain), a failed gate (branch reset, backup branch named) or
+   `AUTOSTASH NOT RE-APPLIED`: STOP and report its output verbatim — never resolve a rebase by
+   hand. An `AUTOSTASH NOT RE-APPLIED` line goes at the top of your report; never pop the stash
+   yourself.
 
 ## Repo traps
 
@@ -98,6 +104,8 @@ b. Folding into an unpushed older commit (`rebase -i` is unavailable), via git's
 - `core.editor` opens Notepad++: never run a git command that wants an editor (`commit` without
   `-m`, `rebase -i`, `merge` without `--no-edit`).
 - Never `git push`, never `--no-verify`, never amend a pushed commit.
+- Never `git stash`, never `checkout --` or `restore` a working-tree file: uncommitted work
+  outside the batch belongs to the user.
 
 ## Report (keep it under ~40 lines)
 
@@ -107,4 +115,5 @@ b. Folding into an unpushed older commit (`rebase -i` is unavailable), via git's
 3. Checker results (American English, tables, twins) and style edits, each edit as
    `file:line: before → after`, or "none".
 4. Folds: `fold_into_commit.py squash` output verbatim.
-5. Anything left uncommitted, and anything you were unsure about.
+5. `git status --short` after the commits: what was left uncommitted, and anything you were
+   unsure about.

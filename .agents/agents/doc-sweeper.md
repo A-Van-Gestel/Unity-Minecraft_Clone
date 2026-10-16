@@ -39,7 +39,8 @@ Given IDs or terms (e.g. `DT-4`, `PerfStore`, `in-game check pending`), find eve
 
 - Use `grep -rn --color=never -F` per term (add `-i` only when asked) and include the exact
   command lines you ran plus the hit count per term in the report — a sweep with zero hits must
-  show the command so the parent can tell "no mentions" from "wrong path".
+  show the command so the parent can tell "no mentions" from "wrong path". Count with `… | wc -l`
+  on the same command, never by hand.
 - Return each hit as `path:line: <the line, trimmed to ~160 chars>`, grouped by file.
 - If the parent says what the current truth is (e.g. "DT-4 is closed"), add a tag per hit:
   `[STALE?]` when the line plainly contradicts it, `[OK]` when it agrees, `[?]` otherwise. Tag;
@@ -61,5 +62,6 @@ Given IDs or terms (e.g. `DT-4`, `PerfStore`, `in-game check pending`), find eve
 
 ## Report
 
-Under ~40 lines for checkers; for sweeps, every hit (that list is the deliverable). Lead with a
-one-line summary: checkers clean/dirty with counts, and sweep hit totals.
+Under ~40 lines for checkers; for sweeps, every hit (that list is the deliverable — never truncate
+it; past ~150 hits, say so and ask the parent to narrow the paths instead of sampling). Lead with
+a one-line summary: checkers clean/dirty with counts, and sweep hit totals per term and per tag.
