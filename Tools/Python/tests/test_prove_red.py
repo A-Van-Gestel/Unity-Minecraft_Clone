@@ -20,6 +20,9 @@ ORIGINAL = b"line one\r\nint value = 1;\r\nline three\r\n"
 SUITE = "Minecraft Clone/Dev/Validate X"
 GREEN = ["[PASS] B7", "ALL 9 X BASELINE TESTS PASSED."]
 RED = ["[FAIL] B7 broke", "1 OF 9 X BASELINE TESTS FAILED — REGRESSION."]
+# Validate All's verdict when the per-suite [FAIL] lines have rolled out of the console tail.
+VALIDATE_ALL_RED = ["<color=red>VALIDATE ALL: REGRESSION — 1 of 400 baselines failed across 1 suite(s).</color> (3m)"]
+VALIDATE_ALL_GREEN = ["<color=green>VALIDATE ALL: all 400 baselines across 9 suites PASSED.</color> (3m)"]
 
 
 class MutateTests(unittest.TestCase):
@@ -66,7 +69,68 @@ class MutateTests(unittest.TestCase):
                          ["⚠️ STALE-CODE WARNING: validation may be running against out-of-date compiled code.",
                           *GREEN]):
             with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(RuntimeError, msg=messages):
-                prove_red.suite_failures(messages, "run")
+                prove_red.suite_verdict(messages, "run")
+
+    def test_the_summary_line_decides_red(self):
+        cases = [(VALIDATE_ALL_RED, True), (VALIDATE_ALL_GREEN, False), (RED, True), (GREEN, False),
+                 (["[FAIL] B7 inside a known-bug scenario", *GREEN], False)]
+        for messages, red in cases:
+            with contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(prove_red.suite_verdict(messages, "run")[0], red, messages)
+
+    def test_a_validate_all_run_where_a_suite_ran_nothing_has_no_verdict(self):
+        with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(RuntimeError):
+            prove_red.suite_verdict(["VALIDATE ALL: no baseline failed, but a suite ran nothing — treat as "
+                                     "suspicious. (3m total)"], "run")
+
+    def test_evidence_includes_the_failed_baselines_list(self):
+        messages = ["1 OF 9 X BASELINE TESTS FAILED — REGRESSION.", "Failed baselines (1):\n  • B7 broke (2 ms)"]
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(prove_red.suite_verdict(messages, "run")[1], ["• B7 broke (2 ms)"])
+
+
+class RunSuiteTests(unittest.TestCase):
+    """run_suite against a stubbed CLI: the wait slices and the dropped-entry check."""
+
+    def run_suite(self, max_wait, waits_still_running, before, after):
+        self.timeouts = timeouts = []
+        consoles = iter([before, after])
+        clock = [0.0]
+
+        def unity(*args, timeout=600):
+            if args[:2] == ("job", "wait"):
+                seconds = int(args[args.index("--timeout") + 1])
+                timeouts.append(seconds)
+                clock[0] += seconds
+                still_running = len(timeouts) <= waits_still_running
+                return mock.Mock(returncode=prove_red.STILL_RUNNING_EXIT_CODE if still_running else 0, stdout="")
+            return mock.Mock(returncode=0, stdout='{"jobId": "abc123"}', stderr="")
+
+        with mock.patch.object(prove_red, "unity", unity), \
+                mock.patch.object(prove_red, "console_entries", lambda: next(consoles)), \
+                mock.patch.object(prove_red.time, "monotonic", lambda: clock[0]):
+            return prove_red.run_suite("Menu/Suite", max_wait), timeouts
+
+    def test_a_suite_past_max_wait_times_out_after_a_cut_last_slice(self):
+        with self.assertRaises(prove_red.SuiteTimedOut):
+            self.run_suite(100, waits_still_running=5, before=[(10, "old")], after=[])
+        self.assertEqual(self.timeouts, [90, 10])
+
+    def test_a_suite_that_finishes_in_the_last_slice_returns_its_messages(self):
+        messages, timeouts = self.run_suite(100, waits_still_running=1, before=[(10, "old")], after=[(11, "x")])
+        self.assertEqual((messages, timeouts), (["x"], [90, 10]))
+
+    def test_a_gap_after_the_last_seen_entry_marks_the_run_dropped(self):
+        messages, _ = self.run_suite(100, 0, before=[(10, "old")], after=[(15, "late"), (16, "summary")])
+        self.assertEqual(messages, [prove_red.DROPPED_MARKER, "late", "summary"])
+        messages, _ = self.run_suite(100, 0, before=[(10, "old")], after=[(10, "old"), (11, "a"), (12, "b")])
+        self.assertEqual(messages, ["a", "b"])
+
+    def test_the_suite_wait_leaves_room_for_the_restore_compile(self):
+        with mock.patch.object(prove_red.time, "monotonic", lambda: 0.0):
+            budget = prove_red.Budget(300, max_wait=600)
+            budget.longest_compile = 40
+            self.assertEqual(budget.suite_wait(), 260)
 
 
 class EditorStub:
@@ -171,6 +235,25 @@ class RestoreTests(BatchTestCase):
         self.assertIn("none matched --expect", out)
         self.assert_restored(out)
 
+    def test_a_red_summary_without_fail_lines_is_red(self):
+        self.editor.mutated_messages = VALIDATE_ALL_RED
+        code, out = self.run_main("int value = 1;")
+        self.assertEqual(code, 0, out)
+        self.assert_restored(out)
+
+    def test_fail_lines_under_a_green_summary_survive(self):
+        self.editor.mutated_messages = ["[FAIL] B7 inside a known-bug scenario", *GREEN]
+        code, out = self.run_main("int value = 1;")
+        self.assertEqual(code, 1, out)
+        self.assertIn("summary does not count", out)
+
+    def test_expect_on_a_red_run_with_dropped_entries_proves_nothing(self):
+        self.editor.mutated_messages = [prove_red.DROPPED_MARKER, *VALIDATE_ALL_RED]
+        code, out = self.run_main("int value = 1;", expect=r"\bB7\b")
+        self.assertEqual(code, 2, out)
+        self.assertIn("--expect cannot be checked", out)
+        self.assert_restored(out)
+
     def test_mutation_that_does_not_compile_exits_2_and_restores(self):
         self.editor.compile_errors = [0, 3, 0]  # the start-of-run compile, the mutation, the restore
         code, out = self.run_main("int value = 1;")
@@ -254,6 +337,12 @@ class BatchTests(BatchTestCase):
         self.assertEqual(code, 2, out)
         self.assertIn("baseline is already red", out)
         self.assertEqual(self.editor.suite_runs, [(SUITE, False)])
+
+    def test_a_baseline_with_only_a_red_summary_is_red(self):
+        self.editor.baseline_messages = VALIDATE_ALL_RED
+        code, out = self.run_batch([self.entry()])
+        self.assertEqual(code, 2, out)
+        self.assertIn("baseline is already red", out)
 
     def test_no_baseline_skips_the_unmutated_run(self):
         code, out = self.run_batch([self.entry()], "--no-baseline")

@@ -9,15 +9,18 @@ WHAT THIS DOES
       4. replaces EXACTLY ONE occurrence of --old with --new (line endings preserved; zero or several matches abort);
       5. recompiles — a mutation that does not compile proves nothing, so that aborts too;
       6. runs the suite's menu item as a detached job, waiting in bounded slices, and reads this run's console
-         entries: its [FAIL] lines and its summary line. No summary line, `NO SCENARIOS RAN` or a STALE-CODE WARNING
-         means the run proves nothing;
+         entries. The summary line is the verdict (red = `BASELINE TESTS FAILED` or `VALIDATE ALL: REGRESSION`);
+         the [FAIL] lines and the `Failed baselines` list are what --expect matches. No summary line,
+         `NO SCENARIOS RAN`, a suite that ran nothing or a STALE-CODE WARNING means the run proves nothing, and so
+         does a red run whose --expect evidence may have rolled out of the console's last 2000 entries;
       7. ALWAYS restores the backup (also on error or Ctrl+C), verifies the checksum, deletes the backup and
          recompiles the restored code.
     `git status --short` is compared before and after the whole run; a difference prints TREE CHANGED.
 
 TIME BUDGET
     --budget (default 540 s) caps the whole run below the agent tool's 10-minute limit. An entry whose expected
-    recompiles and suite runs no longer fit is not started, and the summary marks it NOT RUN. A suite still running
+    recompiles and suite runs no longer fit is not started, and the summary marks it NOT RUN. A suite run waits at most
+    the time left minus one recompile (the restore's), in slices cut to that limit. A suite still running
     at --max-wait keeps running inside the Editor (killing the CLI wait does not stop it), so it stops the batch and
     leaves the restored file uncompiled. A kill of THIS script runs no cleanup: the mutation stays in place, the
     backup it printed is the way back, and every later run refuses to start until that backup is gone.
@@ -48,7 +51,7 @@ RUN (from the repo root, with the Editor open on this project and not in Play mo
 
 EXIT CODES (a batch exits with its worst entry)
     0  RED: the mutation made a baseline fail, as it should
-    1  SURVIVED: every baseline stayed green, or no [FAIL] line matched --expect
+    1  SURVIVED: the summary stayed green, or no [FAIL] line matched --expect
     2  the cycle could not run: missing file, invalid --expect, baseline red, no unique match, a mutation that
        leaves the file unchanged or does not compile, no verdict in the console, a timeout, no time budget left,
        restore mismatch, a backup left by an earlier run, any unexpected error
@@ -58,6 +61,7 @@ import argparse
 import datetime
 import hashlib
 import json
+import math
 import re
 import shutil
 import subprocess
@@ -73,8 +77,12 @@ JOB_WAIT_SLICE_SECONDS = 90
 STILL_RUNNING_EXIT_CODE = 6
 CONSOLE_TAIL = 2000  # the Editor console keeps its last 2000 entries
 FAIL_PATTERN = re.compile(r"\[FAIL\]")
+FAILED_BASELINES_PATTERN = re.compile(r"Failed baselines \(")
+RED_SUMMARY_PATTERN = re.compile(r"BASELINE TESTS FAILED|VALIDATE ALL: REGRESSION")
 SUMMARY_PATTERN = re.compile(r"BASELINE TESTS (PASSED|FAILED)|VALIDATE ALL:")
-NO_VERDICT_PATTERN = re.compile(r"NO SCENARIOS RAN|STALE-CODE WARNING")
+NO_VERDICT_PATTERN = re.compile(r"NO SCENARIOS RAN|STALE-CODE WARNING|a suite ran nothing")
+# Put first in a run's messages when its console entries did not all survive the console tail.
+DROPPED_MARKER = "prove_red: some of this run's console entries were dropped before they could be read"
 NOT_RUN = 3  # the time budget ran out before the entry; exits as 2
 
 
@@ -135,29 +143,36 @@ def console_entries():
 
 
 def run_suite(menu_path, max_wait_seconds):
-    """Runs a suite's menu item as a detached job and returns the console messages it logged."""
+    """Runs a suite's menu item as a detached job and returns the console messages it logged.
+
+    The messages start with DROPPED_MARKER when the first new seq does not follow the last one seen before the run:
+    the run's earliest entries fell out of the console tail."""
     before = max((seq for seq, _ in console_entries()), default=0)
     submitted = unity("command", "menu", "--path", menu_path, "--detach", "--format", "json", timeout=60)
     job_id = re.search(r'"jobId":\s*"([0-9a-f]+)"', submitted.stdout)
     if job_id is None:
         raise RuntimeError(f"the menu item did not start a job:\n{submitted.stdout}{submitted.stderr}")
 
-    waited = 0
+    # Each slice is cut to the time left, so the wait never outlasts max_wait_seconds by more than a second.
+    deadline = time.monotonic() + max_wait_seconds
     while True:
-        result = unity("job", "wait", job_id.group(1), "--timeout", str(JOB_WAIT_SLICE_SECONDS),
-                       timeout=JOB_WAIT_SLICE_SECONDS + 30)
+        slice_seconds = max(1, min(JOB_WAIT_SLICE_SECONDS, math.ceil(deadline - time.monotonic())))
+        result = unity("job", "wait", job_id.group(1), "--timeout", str(slice_seconds), timeout=slice_seconds + 30)
         if result.returncode != STILL_RUNNING_EXIT_CODE:
             break
-        waited += JOB_WAIT_SLICE_SECONDS
-        if waited >= max_wait_seconds:
-            raise SuiteTimedOut(f"the suite was still running after {waited} s (job {job_id.group(1)}); it keeps "
-                                "running in the Editor — wait for it, then run `unity recompile`")
+        if time.monotonic() >= deadline:
+            raise SuiteTimedOut(f"the suite was still running after {max_wait_seconds:.0f} s (job {job_id.group(1)}); "
+                                "it keeps running in the Editor — wait for it, then run `unity recompile`")
 
-    return [message for seq, message in console_entries() if seq > before]
+    new = [(seq, message) for seq, message in console_entries() if seq > before]
+    lost = bool(new) and before > 0 and min(seq for seq, _ in new) > before + 1
+    return ([DROPPED_MARKER] if lost else []) + [message for _, message in new]
 
 
-def suite_failures(messages, label):
-    """Prints a run's verdict lines and returns its [FAIL] lines; raises when the run gave no verdict."""
+def suite_verdict(messages, label):
+    """Prints a run's verdict lines; returns (red, evidence, dropped). Raises when the run gave no verdict.
+
+    The summary line decides red; evidence is the [FAIL] lines plus the `Failed baselines` entries, for --expect."""
     for message in messages:
         if FAIL_PATTERN.search(message) or SUMMARY_PATTERN.search(message) or NO_VERDICT_PATTERN.search(message):
             print("  " + message.splitlines()[0])
@@ -166,7 +181,15 @@ def suite_failures(messages, label):
         raise RuntimeError(f"{label}: no verdict — {NO_VERDICT_PATTERN.search(blocker).group(0)}")
     if not any(SUMMARY_PATTERN.search(m) for m in messages):
         raise RuntimeError(f"{label}: no suite summary line in the console — no verdict")
-    return [m.splitlines()[0] for m in messages if FAIL_PATTERN.search(m)]
+
+    evidence = []
+    for message in messages:
+        if FAIL_PATTERN.search(message):
+            evidence.append(message.splitlines()[0])
+        elif FAILED_BASELINES_PATTERN.search(message):
+            evidence += [line.strip() for line in message.splitlines()[1:] if line.strip()]
+    red = any(RED_SUMMARY_PATTERN.search(m) for m in messages)
+    return red, evidence, DROPPED_MARKER in messages
 
 
 def mutate(path, old, new):
@@ -204,7 +227,8 @@ class Budget:
         return self.deadline - time.monotonic()
 
     def suite_wait(self):
-        return max(1.0, min(self.max_wait, self.left()))
+        """The longest a suite run may wait: what is left after the restore's recompile, capped at --max-wait."""
+        return max(1.0, min(self.max_wait, self.left() - self.longest_compile))
 
     def needed(self, baseline):
         """Seconds an entry is expected to take: two recompiles and its run, plus its baseline when not cached.
@@ -266,7 +290,7 @@ def check_baseline(suite, budget, cache):
         print(f"baseline: {suite}")
         started = time.monotonic()
         try:
-            if suite_failures(timed_suite(suite, budget), "baseline"):
+            if suite_verdict(timed_suite(suite, budget), "baseline")[0]:
                 raise RuntimeError("the baseline is already red — a red mutated run would prove nothing")
             cache[suite] = (None, time.monotonic() - started)
         except RuntimeError as error:
@@ -297,15 +321,21 @@ def cycle(entry, budget):
         if errors:
             raise RuntimeError(f"the mutation does not compile ({errors} errors) — it proves nothing")
 
-        fails = suite_failures(timed_suite(entry["suite"], budget), "mutated run")
-        red = [line for line in fails if expect is None or re.search(expect, line)]
-        verdict = 0 if red else 1
-        if red:
+        red, evidence, dropped = suite_verdict(timed_suite(entry["suite"], budget), "mutated run")
+        matched = [line for line in evidence if expect is not None and re.search(expect, line)]
+        if not red:
+            verdict = 1
+            stray = f" ({len(evidence)} [FAIL] line(s) from scenarios the summary does not count)" if evidence else ""
+            print(f"SURVIVED — the suite's summary stayed green under the mutation{stray}")
+        elif expect is None or matched:
+            verdict = 0
             print("RED — the suite caught the mutation")
-        elif fails:
-            print(f"SURVIVED — {len(fails)} [FAIL] line(s) but none matched --expect")
+        elif dropped:
+            raise RuntimeError("the summary is red, but this run's earliest console entries were dropped, so "
+                               "--expect cannot be checked — run the failing suite on its own")
         else:
-            print("SURVIVED — the suite stayed green under the mutation")
+            verdict = 1
+            print(f"SURVIVED — {len(evidence)} failure line(s) but none matched --expect")
     except SuiteTimedOut:
         suite_running = True
         raise
