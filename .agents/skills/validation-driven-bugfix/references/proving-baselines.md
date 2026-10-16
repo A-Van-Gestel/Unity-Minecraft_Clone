@@ -7,9 +7,17 @@ writing a baseline, running a prove-red, or writing "closed" into a doc.
 ## 1. Running a prove-red
 
 - **Use the tool:** `python -u Tools/Python/prove_red.py --file <path> --old <text> --new <text> --suite "<menu path>" [--expect <regex>]`.
-  It backs up with a checksum, replaces exactly one match, recompiles (a non-compiling mutation
-  aborts), runs the suite detached, reads this run's `[FAIL]` lines, and always restores + recompiles.
-  Exit 0 = red, 1 = survived, 2 = could not run.
+  It runs the suite once unmutated (a red baseline proves nothing), backs up with a checksum, replaces
+  exactly one match, recompiles (a non-compiling mutation aborts), runs the suite detached, reads this
+  run's `[FAIL]` and summary lines (none, `NO SCENARIOS RAN` or a STALE-CODE warning = no proof), and
+  always restores + recompiles. Exit 0 = red, 1 = survived, 2 = could not run.
+- **Several mutations go in one `--batch` file** (`[{file, old, new, suite, expect?, label?}]`): one
+  baseline per suite, a `=== prove-red summary ===` table, the worst entry's exit code, and a
+  `--budget` (default 540 s) that marks entries that no longer fit `NOT RUN`. The `prove-red-runner`
+  subagent runs a batch you wrote and quotes its verdicts; choosing the mutations stays with you.
+- **`STOPPED: PREVIOUS RUN WAS KILLED` means a backup outlived its run** and the mutation may still be
+  in the file. Diff each listed backup against its file, restore by copying the backup back if they
+  differ, then delete the backup — the script refuses to start until the folder is empty.
 - **By hand, never restore with `git checkout -- <file>`.** The mutated file is usually the one you are
   editing, and the checkout discards the uncommitted fix along with the mutation. Copy every file the
   sweep touches to the scratchpad first, restore from the copy, then confirm `grep -c MUTATION` and
