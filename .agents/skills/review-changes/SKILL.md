@@ -52,14 +52,14 @@ unit. Resolve scope in this order.
 verbatim; do not second-guess it against the size heuristic below. Translate the
 common phrasings:
 
-| User says | Range to review |
-|---|---|
-| "my working changes" / "before I commit" | `git diff` (+ `git diff --staged`) |
-| "the staged changes" | `git diff --staged` |
-| "all unpushed commits" / "everything I haven't pushed" | `git diff @{u}...HEAD` |
-| "starting from commit `<hash>`" | `git diff <hash>^...HEAD` (includes `<hash>` itself) |
-| "the last N commits" | `git diff HEAD~N...HEAD` |
-| "this branch" / "the whole PR" | `git diff <base>...HEAD` (see step 3 for `<base>`) |
+| User says | Range to review | `RANGE=` |
+|---|---|---|
+| "my working changes" / "before I commit" | `git diff` (+ `git diff --staged`) | `HEAD` (staged and unstaged in one diff) |
+| "the staged changes" | `git diff --staged` | `--staged` |
+| "all unpushed commits" / "everything I haven't pushed" | `git diff @{u}...HEAD` | `<hash of @{u}>...HEAD` |
+| "starting from commit `<hash>`" | `git diff <hash>^...HEAD` (includes `<hash>` itself) | `<hash>^...HEAD` |
+| "the last N commits" | `git diff HEAD~N...HEAD` | `HEAD~N...HEAD` |
+| "this branch" / "the whole PR" | `git diff <base>...HEAD` (see step 3 for `<base>`) | `<base>...HEAD` |
 
 **2. Always run `git status --short` first**, whatever the scope — it is the only
 thing that surfaces untracked files (see below), and those are invisible to every
@@ -120,6 +120,21 @@ in step 5.
 
 State which scope and mode you used — a review of the wrong scope is worse than
 none.
+
+**Then pin that scope as `RANGE`, once, before loading any shard.** Every gate
+writes its commands as `git diff --no-color $RANGE …`, using the last column of
+the scope table. Resolve `@{u}` to its hash (`git rev-parse @{u}`) so the value is
+literal and can be handed to a subagent as-is. A gate that runs a bare `git diff`
+during a `--staged` or pre-merge review sees only unstaged work — on a clean tree
+nothing at all — so it reports clean for the wrong reason, and the report still
+says it ran.
+
+**Keep `--no-color` on every diff you grep.** Under `color.ui` or `color.diff` =
+`always`, git emits ANSI escapes even when piped; an escape lands before the
+`+`/`-`, every `^\+` / `^-` anchor matches nothing, and the whole shard reports
+clean. `color.ui` is `auto` here today, but the setting is often global and
+invisible from the repo (`git config --get color.ui`), so the flag is
+unconditional.
 
 Get the file list first, then read the changed regions. Do not review from the
 diff hunks alone for anything behavioral: a hunk shows what changed, not what the
@@ -258,6 +273,27 @@ Everything else fires on every run. Three that look deferrable and are not:
 On an intermediate run the owed halves go under `Still owed before merge` in the
 report — a checklist, not findings. On a pre-merge run there is no owed half:
 everything is a finding.
+
+## Step 3a — who runs the shards
+
+Running the gates is the context-heavy part; refuting and ruling is the
+judgment. Hand each earned shard to its own runner and keep steps 4 and 5 here.
+The brief, the report shape and what to check in it are in
+[references/fanout.md](references/fanout.md) — read it before spawning.
+
+**Fan out when** the diff earns a shard besides `core`, or changes more than ~50
+lines (`git diff --no-color --numstat $RANGE`, plus every line of an untracked
+file). Below that, run inline: spawning costs more than it saves.
+
+Pick the runner in this order:
+
+1. **The `review-shard-runner` agent** — read-only, on a cheaper model.
+2. **A generic subagent** with the `fanout.md` brief, on a cheaper model
+   (in Claude Code, `general-purpose` with `model: sonnet`).
+3. **Inline**, when no subagent can be spawned — step 3 exactly as written.
+
+The fan-out changes who runs a gate, never what it checks. A runner's "clean"
+counts only when its ledger names every gate in its shard.
 
 ## Step 4 — refute each candidate before it becomes a finding
 
