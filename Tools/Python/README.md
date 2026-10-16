@@ -49,7 +49,7 @@ A known gap is recorded as an `expectedFailure` test that names it, so a fix sho
 | Script                          | Does                                                                                        |
 |---------------------------------|---------------------------------------------------------------------------------------------|
 | `prove_red.py`                  | Proves a validation suite goes red under a source mutation, restores byte for byte          |
-| `session_cost_report.py`        | Claude Code session cost: main context, turn mix by category, subagents                     |
+| `session_cost_report.py`        | Claude Code session cost: main context, turn mix by category, subagents; `--agents` rollup  |
 | `tabulate_tick_hitches.py`      | Tabulates Tick-led hitch records from player-run performance summaries                      |
 | `attribute_startup_tail.py`     | Which slot led each slow frame of a startup run's drained → stable tail (Capture sessions)  |
 | `summarize_perf_session.py`     | Per-phase slots, counters, jobs, I/O and hitches from a Capture session + report            |

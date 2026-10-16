@@ -25,6 +25,9 @@ RUN
     python Tools/Python/session_cost_report.py --last 5
     python Tools/Python/session_cost_report.py 56e21cf9 a1cb09e8 # by session id prefix
     python Tools/Python/session_cost_report.py --last 1 --categories
+    python Tools/Python/session_cost_report.py --last 20 --agents   # cost per agent type, rollup only
+
+    --agents reads only <session>/subagents/ one level deep: a subagent spawned by a subagent is missed.
 
 EXIT CODES
     0  report printed
@@ -148,6 +151,54 @@ def summarize(turns):
     }
 
 
+def agent_summaries(session_path):
+    """(meta, summary) per subagent transcript of one session; meta is {} when .meta.json is absent."""
+    result = []
+    for agent_path in sorted(glob.glob(os.path.join(session_path[:-len(".jsonl")], "subagents", "agent-*.jsonl"))):
+        meta_path = agent_path[:-len(".jsonl")] + ".meta.json"
+        meta = {}
+        if os.path.exists(meta_path):
+            with open(meta_path, encoding="utf-8") as handle:
+                meta = json.load(handle)
+        result.append((meta, summarize(read_turns(agent_path))))
+    return result
+
+
+def rollup(files):
+    """Cost per agent type across sessions, plus the main threads; returns {type: totals}."""
+    rows = collections.defaultdict(lambda: {"spawns": 0, "turns": 0, "ctx_sum": 0.0, "cost": 0.0,
+                                            "models": collections.Counter()})
+    main_turns, main_cost = 0, 0.0
+    for path in files:
+        main = summarize(read_turns(path))
+        main_turns += main["turns"]
+        main_cost += main["cost"]
+        for meta, agent in agent_summaries(path):
+            row = rows[meta.get("agentType", "?")]
+            row["spawns"] += 1
+            row["turns"] += agent["turns"]
+            row["ctx_sum"] += agent["avg_ctx"] * agent["turns"]
+            row["cost"] += agent["cost"]
+            row["models"][agent["models"]] += 1
+
+    agent_cost = sum(r["cost"] for r in rows.values())
+    grand = main_cost + agent_cost
+    print(f"\nSubagents by type across {len(files)} session(s)")
+    if not rows:
+        print("    no subagents")
+    for agent_type, r in sorted(rows.items(), key=lambda item: -item[1]["cost"]):
+        avg_ctx = r["ctx_sum"] / r["turns"] if r["turns"] else 0
+        share = 100 * r["cost"] / grand if grand else 0.0
+        print(f"    {agent_type:18s} {r['models'].most_common(1)[0][0]:18s} {r['spawns']:3d} spawns "
+              f"{r['turns']:5d} turns  ctx avg {avg_ctx / 1e3:4.0f}k  ~${r['cost']:7.3f} "
+              f"(~${r['cost'] / r['spawns']:.3f}/spawn)  {share:5.1f}%")
+    share = 100 * main_cost / grand if grand else 0.0
+    print(f"    {'main threads':18s} {'':18s} {len(files):3d} sess.  {main_turns:5d} turns"
+          f"{'':15s}~${main_cost:7.3f}{'':17s}{share:5.1f}%")
+    print(f"    total ~${grand:.2f} (API-price equivalent, estimate)")
+    return dict(rows)
+
+
 def report_session(path, show_categories):
     session_id = os.path.basename(path)[:-len(".jsonl")]
     turns = read_turns(path)
@@ -166,13 +217,7 @@ def report_session(path, show_categories):
             print(f"    {cat:14s} {counts[cat]:5d} turns  ~${cost:7.2f}  {share:5.1f}%")
 
     total = main["cost"]
-    for agent_path in sorted(glob.glob(os.path.join(path[:-len(".jsonl")], "subagents", "agent-*.jsonl"))):
-        meta_path = agent_path[:-len(".jsonl")] + ".meta.json"
-        meta = {}
-        if os.path.exists(meta_path):
-            with open(meta_path, encoding="utf-8") as handle:
-                meta = json.load(handle)
-        agent = summarize(read_turns(agent_path))
+    for meta, agent in agent_summaries(path):
         total += agent["cost"]
         print(f"    agent {meta.get('agentType', '?'):18s} {agent['models']:18s} {agent['turns']:4d} turns, "
               f"ctx avg {agent['avg_ctx'] / 1e3:4.0f}k, ~${agent['cost']:.2f}  {meta.get('description', '')[:40]}")
@@ -186,6 +231,8 @@ def main():
     parser.add_argument("sessions", nargs="*", help="session id prefixes")
     parser.add_argument("--last", type=int, default=1, help="the N most recent sessions (default 1)")
     parser.add_argument("--categories", action="store_true", help="break main turns down by category")
+    parser.add_argument("--agents", action="store_true",
+                        help="only a rollup of subagent cost per agent type across the selected sessions")
     args = parser.parse_args()
     if args.last < 1:
         parser.error("--last must be at least 1")
@@ -198,6 +245,9 @@ def main():
     if not files:
         print(f"no transcripts found under {projects_dir()}")
         return 2
+    if args.agents:
+        rollup(files)
+        return 0
     grand = sum(report_session(f, args.categories) for f in files)
     if len(files) > 1:
         print(f"\nAll {len(files)} session(s): ~${grand:.2f} (API-price equivalent, estimate)")

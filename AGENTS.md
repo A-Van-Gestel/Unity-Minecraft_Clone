@@ -133,6 +133,8 @@ Your context is the session's main cost: every turn re-reads all of it, and late
 - **Delegate only when it replaces three or more of your turns** and the answer is a short report. Never delegate reading code you are about to edit — you need that content in your own context.
 - **Shared state:** while `committer`, `validation-runner` or `player-runner` runs, do not edit files, compile, stage, or start another of them — they share the one Editor and the one git index.
 - **Subagents get no auto-memory.** A lesson an agent needs belongs in its definition file, not only in memory.
+- **Agent-file edits need `/reload-plugins`** (or a restart) before the next spawn runs them.
+- Measure what delegation saves with `python Tools/Python/session_cost_report.py --last 1 --categories` (one session) or `--last 20 --agents` (cost per agent type).
 
 <!-- CodeGraph MCP tools -->
 
