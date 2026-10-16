@@ -257,3 +257,8 @@ The `rider` MCP server exposes Rider's inspection, refactoring, and build engine
 ## System Environment & Capabilities
 
 - **Python Environment:** Python 3.14 is available on the host. Use it whenever Python is a better fit than C# (LUT generation, math prototyping, data transforms, save-file inspection, repo-wide automation, etc.). Place persistent scripts in `Tools/Python/` at the repo root — **never under `Assets/`**, which would drag them into Unity's asset pipeline. See the `python-scripting` skill for the full protocol (venv conventions, C# code-gen style, constraints).
+- **Bash tool on Windows (Git Bash):** each of these has cost a failed call.
+    - A single quote inside a heredoc body breaks the tool's own wrapping, even when the heredoc is quoted (`<<'EOF'`; error `unexpected EOF while looking for matching '`). Write such scripts or messages to a scratchpad file with the Write tool and run or pass the file.
+    - A bare `cat > file` blocks on empty stdin until the timeout. Edit files with the Edit/Write tools, not shell redirection. After any timeout, check `git status --short` / `git diff --stat` before assuming a step applied.
+    - `TMPDIR` is unset, so `"$TMPDIR/x"` becomes `/x`: name the session scratchpad explicitly.
+    - Python `subprocess.run(..., text=True)` writes CRLF on Windows, so a patch piped to `git apply` fails: pass and read bytes.
