@@ -30,9 +30,10 @@ SAFETY
       the commit count dropped by exactly the number of fixups, no `fixup!` subject remains, and
       `git status` (working tree + untracked) is unchanged. A failed gate resets the branch to the
       pre-rebase commit (mixed reset: working-tree files are not touched) and exits 1.
+    * An autostash git could not re-apply stays in the stash list: that is named loudly and exits 1.
 
 READS / WRITES   commits and refs of the current branch; the working tree only through
-                 --autostash, which puts it back.
+                 --autostash, which puts it back or leaves it as the newest stash entry.
 
 RUN
     python Tools/Python/fold_into_commit.py fixup <target-rev> [<path> ...] [--whole-file]
@@ -100,8 +101,9 @@ def unstaged_paths():
 def repo_relative(paths):
     """Command-line paths (relative to cwd, `./x`, absolute, or a directory) as repo-root-relative
     POSIX paths, the form `git diff --name-only` reports."""
-    top = git("rev-parse", "--show-toplevel")[1].strip()
-    return [os.path.relpath(os.path.abspath(p), top).replace("\\", "/") for p in paths]
+    # realpath on both sides: an 8.3 short cwd (`AXELVA~1`) never matches git's long toplevel.
+    top = os.path.realpath(git("rev-parse", "--show-toplevel")[1].strip())
+    return [os.path.relpath(os.path.realpath(p), top).replace("\\", "/") for p in paths]
 
 
 def is_covered(path, given):
@@ -152,6 +154,19 @@ def status_snapshot():
     return git("status", "--porcelain=v1", "-z", "--untracked-files=all")[1]
 
 
+def top_stash():
+    return git("rev-parse", "--quiet", "--verify", "refs/stash", check=False)[1].strip()
+
+
+def leaked_autostash(before):
+    """The warning for an autostash git left in the stash list instead of re-applying it, else None."""
+    if top_stash() == before:
+        return None
+    entry = git("stash", "list", "-1", "--format=%gd (%gs)")[1].strip()
+    return (f"AUTOSTASH NOT RE-APPLIED: your working-tree changes are in {entry}; "
+            "restore them with `git stash pop` once the branch is where you want it")
+
+
 def command_squash(keep_backup):
     upstream = upstream_ref()
     if staged_paths():
@@ -181,6 +196,7 @@ def command_squash(keep_backup):
     pre_tip = rev("HEAD")
     pre_count = len(commits)
     pre_status = status_snapshot()
+    pre_stash = top_stash()
     backup = f"fold-backup-{pre_tip[:10]}"
     git("branch", "-f", backup, pre_tip)
 
@@ -193,6 +209,9 @@ def command_squash(keep_backup):
         print(f"CONFLICT: the autosquash rebase failed and was aborted; HEAD "
               f"{'is back at' if restored else 'did NOT return to'} {pre_tip[:10]}. "
               f"The fixup commits are still in place. Backup branch: {backup}")
+        leaked = leaked_autostash(pre_stash)
+        if leaked:
+            print(leaked)
         return 1
 
     failures = []
@@ -205,12 +224,16 @@ def command_squash(keep_backup):
         failures.append("a fixup! commit survived the rebase")
     if status_snapshot() != pre_status:
         failures.append("git status (working tree / untracked) changed")
+    leaked = leaked_autostash(pre_stash)
+    if leaked:
+        failures.append("the autostash was not re-applied")
 
     if failures:
         git("reset", "--quiet", "--mixed", pre_tip, check=False)
         print("GATE FAILED: " + "; ".join(failures))
-        print(f"Branch reset to {pre_tip[:10]} (working-tree files untouched; staged/unstaged "
-              f"split may need redoing). Backup branch: {backup}")
+        print(f"Branch reset to {pre_tip[:10]} (mixed reset; staged/unstaged split may need redoing). "
+              f"Backup branch: {backup}")
+        print(leaked or "Working-tree files untouched by the reset.")
         return 1
 
     print(f"Folded {len(fixups)} fixup(s); {upstream}..HEAD is now:")

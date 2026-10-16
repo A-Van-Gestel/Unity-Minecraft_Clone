@@ -1,7 +1,12 @@
 """fold_into_commit.py: what `fixup` accepts and refuses, and the gated `squash`."""
+import contextlib
+import io
+import os
 import unittest
+from unittest import mock
 
 from helpers import TempRepo, numbered_lines
+import fold_into_commit
 
 SCRIPT = "fold_into_commit.py"
 BOTH_ENDS = {1: "ONE", 20: "TWENTY"}
@@ -116,6 +121,38 @@ class SquashTests(unittest.TestCase):
             subjects = repo.git("log", "--format=%s", "origin/main..HEAD").split("\n")
             self.assertEqual([s for s in subjects if s], ["Added: g", "Added: f"])
             self.assertIn("THREE", repo.git("show", "HEAD~1:f.txt"))
+
+    def test_autostash_left_in_the_stash_list_is_named_and_fails(self):
+        """An unstaged edit git could not re-apply after the rebase is reported, never called untouched."""
+        real_git = fold_into_commit.git
+
+        def leaking_git(*args, check=True):
+            # git leaves a conflicting autostash in the stash list; this reproduces that end state.
+            result = real_git(*args, check=check)
+            if "--autostash" in args:
+                real_git("stash", "push", "--quiet", "-m", "autostash")
+            return result
+
+        with TempRepo() as repo:
+            repo.write("root.txt", "a\n")
+            repo.write("unrelated.txt", "committed\n")
+            repo.commit("base")
+            repo.mark_pushed()
+            repo.write("f.txt", numbered_lines(5))
+            target = repo.commit("Added: f")
+            repo.write("f.txt", numbered_lines(5, {3: "THREE"}))
+            self.assertEqual(repo.run(SCRIPT, "fixup", target, "f.txt")[0], 0)
+            repo.write("unrelated.txt", "uncommitted edit\n")
+            out, cwd = io.StringIO(), os.getcwd()
+            try:
+                os.chdir(repo.root)
+                with mock.patch.object(fold_into_commit, "git", leaking_git), contextlib.redirect_stdout(out):
+                    code = fold_into_commit.command_squash(keep_backup=False)
+            finally:
+                os.chdir(cwd)
+            self.assertEqual(code, 1, out.getvalue())
+            self.assertIn("AUTOSTASH NOT RE-APPLIED: your working-tree changes are in stash@{0}", out.getvalue())
+            self.assertNotIn("untouched", out.getvalue())
 
 
 if __name__ == "__main__":
