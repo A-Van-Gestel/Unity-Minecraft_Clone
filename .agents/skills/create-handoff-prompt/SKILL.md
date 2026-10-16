@@ -1,6 +1,6 @@
 ---
 name: create-handoff-prompt
-description: Author a self-contained continuation prompt that a future, cold session can execute — anchored on durable @-referenced artifacts, never on conversation state. Use when the user asks to "write a prompt for the next/future session", "prepare a handoff", "hand this off", asks for a "continuation prompt", or when a multi-session work arc pauses with its next step already planned. The prompt is a pointer + contract, not a payload: bulky content is persisted to Documentation/ first (via docs-sync or create-design-doc).
+description: Author a self-contained continuation prompt that a future, cold session can execute — anchored on durable @-referenced artifacts, never on conversation state. Use when the user asks to "write a prompt for the next/future session", "prepare a handoff", "hand this off", asks for a "continuation prompt", or when a multi-session work arc pauses with its next step already planned. The prompt is a pointer + contract, not a payload — bulky content is persisted to Documentation/ first (via docs-sync or create-design-doc).
 ---
 
 # Create Handoff Prompt

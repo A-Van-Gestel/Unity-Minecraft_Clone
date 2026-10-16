@@ -163,6 +163,11 @@ Most changes to a skill are edits, not new skills. The discipline differs from a
 
 ## Gotchas (from real incidents)
 
+- **Claude Code's frontmatter parser is lenient; strict ones are not.** An unquoted `: ` inside a
+  `description` is invalid YAML, and a `<placeholder>` there breaks the spec's no-XML-tags rule —
+  both worked here while a strict parser would drop or garble the skill. Use `—` instead of a
+  colon and plain words instead of `<…>`; the spec reference's checklist covers both.
+
 - **IDE auto-reflow corrupts SKILL.md code blocks.** An editor reformat has mangled fenced code
   examples into one-token-per-line garbage. After any IDE-side save of a `SKILL.md`, re-check that
   its code blocks are still valid.

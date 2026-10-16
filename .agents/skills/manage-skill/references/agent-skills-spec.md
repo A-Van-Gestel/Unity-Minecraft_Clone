@@ -23,7 +23,7 @@ YAML frontmatter followed by Markdown body. Fields:
 | Field           | Required | Constraints                                                                                                                   |
 |-----------------|----------|-------------------------------------------------------------------------------------------------------------------------------|
 | `name`          | Yes      | ≤64 chars; lowercase `a-z`, `0-9`, hyphens; no leading/trailing/consecutive hyphens; **must match the parent directory name** |
-| `description`   | Yes      | 1–1024 chars; what the skill does **and** when to use it, with trigger keywords                                               |
+| `description`   | Yes      | 1–1024 chars; what the skill does **and** when to use it, with trigger keywords; no XML/angle-bracket tags                    |
 | `license`       | No       | License name or bundled license file reference                                                                                |
 | `compatibility` | No       | ≤500 chars; only for real environment requirements (products, packages, network)                                              |
 | `metadata`      | No       | Arbitrary string→string map; use unique-ish key names                                                                         |
@@ -58,6 +58,8 @@ relative paths from the skill root; keep references one level deep — no nested
 - [ ] `SKILL.md` exists, uppercase filename, UTF-8 **without BOM**, frontmatter `---` at byte 0.
 - [ ] `name`: 1–64 chars, `[a-z0-9-]`, no `-` at start/end, no `--`, equals directory name.
 - [ ] `description`: non-empty, ≤1024 chars, states what + when.
+- [ ] Frontmatter is strict YAML: an unquoted `description` has no `: ` (colon-space) and no
+      `<…>` tags. Claude Code tolerates both; a strict parser drops the skill or escapes the text.
 - [ ] `compatibility` (if present): ≤500 chars.
 - [ ] Relative file references resolve; no absolute paths.
 - [ ] `SKILL.md` body within budget (~500 lines); bulky content moved to `references/`.
@@ -65,3 +67,8 @@ relative paths from the skill root; keep references one level deep — no nested
 Upstream validator: `skills-ref validate ./my-skill`
 (github.com/agentskills/agentskills, `skills-ref` reference library — not installed in this
 repo; install only if skill authoring becomes frequent).
+
+Third-party linter: `npx agnix .` (github.com/agent-sh/agnix) catches the strict-YAML and
+description-tag errors above. Most of its other output is noise here: "Unclosed XML tag" on
+`<placeholder>` text in templates, "deeper than one level" on repo paths in code spans, "missing
+file" on code spans such as `.meta`. **Never run its `--fix`** — it "closes" template placeholders.
