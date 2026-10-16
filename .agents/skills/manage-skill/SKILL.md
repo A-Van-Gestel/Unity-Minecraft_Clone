@@ -103,6 +103,10 @@ No format restrictions, but the house style that has worked here:
 - Reference project ground truth by path (`Documentation/…`, `CLAUDE.md` rules) instead of
   restating it; restated facts go stale silently.
 
+For body-writing technique — scoping a coherent unit, defaults over menus, procedures over
+declarations, gotcha/checklist/validation-loop patterns — read
+[references/best-practices.md](references/best-practices.md) when drafting or auditing a body.
+
 **Budgets (progressive disclosure):** keep `SKILL.md` under ~500 lines / ~5k tokens. Anything
 bulky, stable, or only-sometimes-needed goes in `references/` as its own focused file, linked
 with a relative path from the skill root, one level deep. The agent loads reference files only
@@ -125,8 +129,9 @@ at the top; per the repo's Python protocol, substantial persistent tooling belon
    [references/agent-skills-spec.md](references/agent-skills-spec.md). The upstream
    `skills-ref validate` CLI exists but is not installed here — the manual checklist in the
    reference covers what it checks.
-2. **Read the file back once** and confirm: no BOM, frontmatter opens at byte 0, `name` matches
-   the directory, description under 1024 chars.
+2. **Read the file back once** and confirm: frontmatter opens at byte 0, `name` matches the
+   directory, description under 1024 chars. `python Tools/Python/check_twin_files.py` proves no
+   file under `.agents/` (or either twin) has a BOM or a non-UTF-8 encoding.
 3. **Cross-reference seams, both directions.** If the new skill borders an existing one (shared
    trigger surface), name the split in **both** bodies — add a routing line to the new skill, then
    edit the sibling's body to name the new one. A one-way seam is how two skills end up both
@@ -152,9 +157,9 @@ Most changes to a skill are edits, not new skills. The discipline differs from a
 - **Preserve the description's trigger phrases.** They are load-bearing for activation; never tidy
   them out to make the line read more cleanly. A tidier description that stops matching is a skill
   that never runs.
-- **Read the file back** after editing: no BOM, frontmatter still opens at byte 0, `name` still
-  equals the directory, description still under 1024 chars, and every fenced code block is still
-  valid (see Gotchas).
+- **Read the file back** after editing: no BOM (`python Tools/Python/check_twin_files.py`),
+  frontmatter still opens at byte 0, `name` still equals the directory, description still under
+  1024 chars, and every fenced code block is still valid (see Gotchas).
 
 ## Gotchas (from real incidents)
 

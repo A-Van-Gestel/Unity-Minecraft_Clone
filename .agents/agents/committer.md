@@ -49,8 +49,9 @@ uncommitted work never pull you outside the batch, and fix what they report:
   a content question: report it, do not fix it.
 - `python Tools/Python/tests/run_tests.py` when the batch changes a script under `Tools/Python/` — a
   failing test is a STOP: report it verbatim, never edit the test to pass.
-- `python Tools/Python/check_twin_files.py` when `CLAUDE.md` or `AGENTS.md` is in the batch; a
-  mismatch means one side missed an edit — report it rather than guessing which side wins.
+- `python Tools/Python/check_twin_files.py` when `CLAUDE.md`, `AGENTS.md` or a file under `.agents/`
+  is in the batch; a mismatch means one side missed an edit — report it rather than guessing which
+  side wins. An `ENCODING` line (a BOM or non-UTF-8 file) is a STOP: report it, do not re-save.
 
 Then read every changed and untracked file in the batch for what no script sees: why-not-what,
 inline comments ≤ 3 lines, no consumer rosters, no war stories, XML docstrings on new public API.

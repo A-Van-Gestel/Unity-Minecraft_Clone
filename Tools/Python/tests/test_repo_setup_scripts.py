@@ -59,18 +59,59 @@ class SetupAgentLinksTests(unittest.TestCase):
 
 
 class TwinFilesTests(unittest.TestCase):
+    def setUp(self):
+        self.repo = CopiedScriptRepo()
+        self.repo.install("check_twin_files.py")
+        self.repo.write("CLAUDE.md", "same\nrules\n")
+        self.repo.write("AGENTS.md", "same\nrules\n")
+        self.repo.write(".agents/skills/demo/SKILL.md", "---\nname: demo\n---\n")
+
+    def tearDown(self):
+        self.repo.close()
+
+    def write_bytes(self, relative, content):
+        with open(self.repo.path(relative), "wb") as handle:
+            handle.write(content)
+
     def test_identical_differing_and_missing(self):
-        with CopiedScriptRepo() as repo:
-            repo.install("check_twin_files.py")
-            repo.write("CLAUDE.md", "same\nrules\n")
-            repo.write("AGENTS.md", "same\nrules\n")
-            self.assertEqual(repo.run_copy("check_twin_files.py")[0], 0)
-            repo.write("AGENTS.md", "same\nstale\n")
-            code, out = repo.run_copy("check_twin_files.py")
-            self.assertEqual(code, 1, out)
-            self.assertIn("line 2", out)
-            os.remove(repo.path("AGENTS.md"))
-            self.assertEqual(repo.run_copy("check_twin_files.py")[0], 2)
+        code, out = self.repo.run_copy("check_twin_files.py")
+        self.assertEqual(code, 0, out)
+        self.assertIn("OK: 3 agent guidance files", out)
+        self.repo.write("AGENTS.md", "same\nstale\n")
+        code, out = self.repo.run_copy("check_twin_files.py")
+        self.assertEqual(code, 1, out)
+        self.assertIn("line 2", out)
+        os.remove(self.repo.path("AGENTS.md"))
+        self.assertEqual(self.repo.run_copy("check_twin_files.py")[0], 2)
+
+    def test_bom_in_a_skill_fails_and_names_the_file(self):
+        self.write_bytes(".agents/skills/demo/SKILL.md", b"\xef\xbb\xbf---\nname: demo\n---\n")
+        code, out = self.repo.run_copy("check_twin_files.py")
+        self.assertEqual(code, 1, out)
+        self.assertIn("SKILL.md has a UTF-8 BOM", out)
+        self.assertIn("OK: CLAUDE.md == AGENTS.md", out)
+
+    def test_bom_on_identical_twins_still_fails(self):
+        for name in ("CLAUDE.md", "AGENTS.md"):
+            self.write_bytes(name, b"\xef\xbb\xbfsame\n")
+        code, out = self.repo.run_copy("check_twin_files.py")
+        self.assertEqual(code, 1, out)
+        self.assertIn("CLAUDE.md has a UTF-8 BOM", out)
+
+    def test_utf16_and_invalid_utf8_fail(self):
+        self.write_bytes(".agents/skills/demo/SKILL.md", "---\n".encode("utf-16"))
+        self.repo.write(".agents/agents/bad.md", "ok\n")
+        self.write_bytes(".agents/agents/bad.md", b"caf\xe9\n")
+        code, out = self.repo.run_copy("check_twin_files.py")
+        self.assertEqual(code, 1, out)
+        self.assertIn("SKILL.md is UTF-16", out)
+        self.assertIn("bad.md is not valid UTF-8 (byte 3)", out)
+
+    def test_empty_agents_tree_is_not_clean(self):
+        os.remove(self.repo.path(".agents/skills/demo/SKILL.md"))
+        code, out = self.repo.run_copy("check_twin_files.py")
+        self.assertEqual(code, 2, out)
+        self.assertIn("MISSING: no files under .agents/", out)
 
 
 if __name__ == "__main__":

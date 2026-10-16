@@ -14,7 +14,7 @@ a Store stub on this machine). Everything is stdlib-only unless `requirements.tx
 | `check_doc_links.py`          | Every relative Markdown link between docs resolves                              |
 | `check_doc_status.py`         | `OPEN_WORK_INDEX.md` agrees with each listed doc's `**Status:**`                |
 | `align_md_tables.py`          | Tables under `Documentation/` are column-aligned — house style (`--fix` aligns) |
-| `check_twin_files.py`         | `CLAUDE.md` and `AGENTS.md` are byte-identical                                  |
+| `check_twin_files.py`         | `CLAUDE.md` == `AGENTS.md`; those + `.agents/` are UTF-8 without BOM            |
 | `check_american_english.py`   | No British spelling in added lines (`--all PATH` scans whole files)             |
 | `audit_reserialize_guids.py`  | No Unity YAML/`.meta` file lost a `guid:` reference (pre-commit step 0)         |
 | `check_perf_session_files.py` | Structure of Performance Monitor Capture-tier session and hitch files           |

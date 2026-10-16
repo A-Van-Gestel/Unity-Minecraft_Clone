@@ -219,7 +219,7 @@ python Tools/Python/check_doc_refs.py      # @-prefixed doc references
 python Tools/Python/check_doc_links.py     # relative markdown links between docs
 python Tools/Python/check_doc_status.py    # OPEN_WORK_INDEX vs each doc's own **Status:**
 python Tools/Python/align_md_tables.py     # Documentation/ tables column-aligned (--fix aligns)
-python Tools/Python/check_twin_files.py    # CLAUDE.md == AGENTS.md
+python Tools/Python/check_twin_files.py    # CLAUDE.md == AGENTS.md; agent files UTF-8 without BOM
 ```
 
 `check_doc_status.py` reads a `**Status:**` field only up to the next line that starts with `**` and a
