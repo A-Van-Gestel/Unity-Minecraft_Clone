@@ -29,7 +29,7 @@ namespace Editor.Validation.Lighting
     /// </para>
     /// <para>
     /// <b>Prove-red, measured.</b> Dropping the flag term from the harness's derivation (deriving from
-    /// <c>false</c> instead of <c>NeedsEdgeCheck</c>) reds <b>3 of 112</b>: B120, plus B32 and B64, which
+    /// <c>false</c> instead of <c>NeedsEdgeCheck</c>) reds <b>exactly three baselines</b>: B120, plus B32 and B64, which
     /// depend on the fallback for convergence without naming it. B120 is the one that says what broke.
     /// </para>
     /// Self-registered via the <see cref="AddEdgeCheckFallbackBaselineScenarios"/> hook.

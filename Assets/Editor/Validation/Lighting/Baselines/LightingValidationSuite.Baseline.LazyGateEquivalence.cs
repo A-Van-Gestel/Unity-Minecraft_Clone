@@ -32,9 +32,9 @@ namespace Editor.Validation.Lighting
     /// </para>
     /// <para>
     /// <b>Prove-red, measured 2026-08-24 — and it refuted the prediction made when these were written.</b>
-    /// Dropping the <c>DataReady</c> term from the regular arm reds <b>2 of 114</b>: B122 (naming the six
-    /// input combinations that stopped querying the gate) and B67, which depends on that gate to keep a
-    /// chunk parked. <b>B121 stayed green.</b> That is structural, not luck: both overloads reach one shared
+    /// Dropping the <c>DataReady</c> term from the regular arm reds <b>exactly two baselines</b>, every other
+    /// one stays green: B122 (naming the six input combinations that stopped querying the gate) and B67,
+    /// which depends on that gate to keep a chunk parked. <b>B121 stayed green.</b> That is structural, not luck: both overloads reach one shared
     /// core, so a mutation inside the core moves the lazy and pre-evaluated answers together and they still
     /// agree. B121 therefore witnesses that the two strategies have not been re-implemented apart — it is a
     /// guard against re-duplicating the arm rule, not a mutation detector. <b>B122 is the one with teeth
