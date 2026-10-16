@@ -43,7 +43,7 @@ the fixtures the lighting work is verified against.
 
 ## 05. Grass under a log never turns to dirt
 
-**Severity:** Implementation (behavior rule never applies in the live world)
+**Severity:** Implementation (behavior rule never applies in the live world)  
 **Files:** `BlockBehavior.cs` / `Jobs/GrassTickJob.cs` — the grass "solid on top → Dirt" rule;
 `World.ApplyModifications` — the Default-rule placement gate; `Data/PlacementRules.cs` —
 `BlockTagUtility.CanReplaceForPlacement`; the structure expansion in `WorldJobManager.ProcessGenerationJobs` (stage 2)
