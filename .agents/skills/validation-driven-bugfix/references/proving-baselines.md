@@ -36,14 +36,15 @@ writing a baseline, running a prove-red, or writing "closed" into a doc.
 
 ## 2. A mutation that stays green — rule these out before blaming the baseline
 
-| Cause                       | Check                                                                                                                                                                                     |
-|-----------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| The mutation is a no-op     | A literal nudged below float32 precision (relative ~1.2e-7) rounds to the same value: `struct.unpack('f', struct.pack('f', x))` both sides. Prefer mutating a scale, offset or threshold. |
-| A sibling guard swallows it | In `a && b && c`, the fixture must make every other conjunct true, so the mutated term alone decides. Ask which clause is actually rejecting the fixture.                                 |
-| No reachable input hits it  | Check what bounds the producer at plan time. A defensive floor no reachable input exercises can stay, but does not earn a baseline.                                                       |
-| The fixture samples a range | When the value comes from a hash, seed or range lerp, pin min = max = the boundary under test. Log the value the fixture produced.                                                        |
-| The gate cannot observe it  | A check that samples before the write it guards, or runs in a different cwd/env than the code, is blind. Reproduce the code's own cwd/env/argv; run a self-mutating operation twice.       |
-| The code is not loaded      | See §6 — a stale or un-reloaded domain reads as a false green.                                                                                                                            |
+| Cause                       | Check                                                                                                                                                                                                                                                    |
+|-----------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| The mutation is a no-op     | A literal nudged below float32 precision (relative ~1.2e-7) rounds to the same value: `struct.unpack('f', struct.pack('f', x))` both sides. Prefer mutating a scale, offset or threshold.                                                                |
+| A sibling guard swallows it | In `a && b && c`, the fixture must make every other conjunct true, so the mutated term alone decides. Ask which clause is actually rejecting the fixture.                                                                                                |
+| An early exit returns first | Code that stops at its first hit (an "any active?" pre-scan) never reaches a defect input placed after the fixture's first hit in scan order. Put the input first (flat index 0). BH-B13's out-of-palette id survived until it moved there (2026-10-16). |
+| No reachable input hits it  | Check what bounds the producer at plan time. A defensive floor no reachable input exercises can stay, but does not earn a baseline.                                                                                                                      |
+| The fixture samples a range | When the value comes from a hash, seed or range lerp, pin min = max = the boundary under test. Log the value the fixture produced.                                                                                                                       |
+| The gate cannot observe it  | A check that samples before the write it guards, or runs in a different cwd/env than the code, is blind. Reproduce the code's own cwd/env/argv; run a self-mutating operation twice.                                                                     |
+| The code is not loaded      | See §6 — a stale or un-reloaded domain reads as a false green.                                                                                                                                                                                           |
 
 ## 3. Choosing the mutation
 
