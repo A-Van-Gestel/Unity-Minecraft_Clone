@@ -62,7 +62,7 @@ light-only section (`safeSections[i] == null`, sky set), then the sky level flip
 
 **Why it doesn't currently fire:** `SaveChunkAsync` serializes an isolated snapshot created on the main thread (`CreateSerializationSnapshot`), and the synchronous `SaveChunk` path is only called from the main thread. The bug becomes live the moment anyone passes a **live** `ChunkData` to a background `Serialize` call.
 
-**Proposed fix:** Actually copy the array (`skyLevels = (byte[])data.SectionUniformSkyLevel.Clone()` or copy into a pooled buffer), and read `skyLevels[i]` (the local copy) in the write loop — or document loudly that `WriteChunkInternal` must only ever receive snapshots/main-thread data. Note the queue `lock`s in `WriteChunkInternal` have the same asymmetry: the main-thread enqueue sites (`AddToSkylightQueue` etc.) do not lock, so the reader-side locks only protect snapshot objects that nobody else touches anyway.
+**Proposed fix:** Actually copy the array (`skyLevels = (byte[])data.SectionUniformSkyLevel.Clone()` or copy into a pooled buffer), and read `skyLevels[i]` (the local copy) in the write loop — or document loudly that `WriteChunkInternal` must only ever receive snapshots/main-thread data.
 
 ---
 
