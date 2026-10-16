@@ -118,6 +118,10 @@ When a change touches the chunk generation → lighting → meshing pipeline spe
 - **Play mode holds compiles and reloads.** `Assets/Editor/ProjectUtilities/PlayModeReloadGuard.cs` locks assembly reloads while the Editor plays, because the engine's runtime state does not survive a Play-mode reload. A change made during Play compiles and loads only once Play stops: until then `unity recompile` blocks with no output and `editor_status` reports `compiling`. Leave Play mode (with the user's consent) before compiling.
 - **Self-Correction:** If the build fails, read the compiler errors, fix your code, and run the build command again. Do not ask the user to test broken code.
 - **Doc Sync:** When a change alters behavior described in a `Documentation/Architecture/`, `Design/`, or `Guides/` doc — or ships a feature drafted in a Design doc — use the `docs-sync` skill to update the matching doc in the same commit. Skip for refactors, bug fixes that preserve documented behavior, and test-only changes.
+- **Claims need evidence.**
+    - *Absence needs proof.* A null grep proves nothing about a layer you did not read. Before saying "X is missing", trace one hop past the file (base class, `partial` part, scene/prefab YAML, shader) and cite where you confirmed it. Before saying a symbol "doesn't exist", check the other refs too: `git grep -l '<symbol>' $(git rev-list --all --max-count=400) --`. `grep -c` counts comments and strings, so it is never a call-site count.
+    - *Numbers come from a tool.* Every count or total in a conclusion comes from its own command (`grep … | wc -l`, a Python one-liner), never hand-summed or subtracted. When two paths should agree (per-bucket sum vs. the total), run both and say whether they reconcile. Label estimates as estimates.
+    - *Propose out-of-scope skill edits.* A skill edit the task needs is part of its diff. A gotcha that belongs in a skill the task did not touch is proposed (which file, exact text), not made silently; the user curates.
 
 ## Delegation to Subagents
 
