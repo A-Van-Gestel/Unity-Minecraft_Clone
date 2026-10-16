@@ -1,4 +1,5 @@
-"""prove_red.py: argument handling, the single-match mutation, and the byte-for-byte restore on every path.
+"""prove_red.py: argument handling, the single-match mutation, the byte-for-byte restore on every path, and the
+batch's stops, verdicts and summary.
 
 The Editor half (recompile, the suite run) needs a live Unity Editor, so it is stubbed here; what is tested is
 everything that decides whether the user's file comes back intact and what the exit code says.
@@ -6,6 +7,7 @@ everything that decides whether the user's file comes back intact and what the e
 import contextlib
 import hashlib
 import io
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -15,6 +17,9 @@ import helpers  # noqa: F401 — puts Tools/Python on sys.path for the import be
 import prove_red
 
 ORIGINAL = b"line one\r\nint value = 1;\r\nline three\r\n"
+SUITE = "Minecraft Clone/Dev/Validate X"
+GREEN = ["[PASS] B7", "ALL 9 X BASELINE TESTS PASSED."]
+RED = ["[FAIL] B7 broke", "1 OF 9 X BASELINE TESTS FAILED — REGRESSION."]
 
 
 class MutateTests(unittest.TestCase):
@@ -48,66 +53,127 @@ class MutateTests(unittest.TestCase):
         self.assertEqual(prove_red.json_payload('warning: x\n{"errors": 0}'), {"errors": 0})
         self.assertEqual(prove_red.json_payload("no json here"), {})
 
+    def test_load_batch_rejects_malformed_entries(self):
+        batch = Path(self.directory.name) / "batch.json"
+        for content in ([], [{"file": "a", "old": "b", "new": "c"}],
+                        [{"file": "a", "old": "b", "new": "c", "suite": "s", "expect": 3}], {"file": "a"}):
+            batch.write_text(json.dumps(content), encoding="utf-8")
+            with self.assertRaises(RuntimeError, msg=content):
+                prove_red.load_batch(batch)
 
-class RestoreTests(unittest.TestCase):
-    """main() with the Editor stubbed: the target must come back byte for byte, whatever happens."""
+    def test_a_run_without_a_verdict_raises(self):
+        for messages in (["[PASS] B1"], ["X: NO SCENARIOS RAN — nothing was validated.", *GREEN],
+                         ["⚠️ STALE-CODE WARNING: validation may be running against out-of-date compiled code.",
+                          *GREEN]):
+            with contextlib.redirect_stdout(io.StringIO()), self.assertRaises(RuntimeError, msg=messages):
+                prove_red.suite_failures(messages, "run")
 
+
+class EditorStub:
+    """Stands in for the Editor: compiles and runs suites against the files on disk, per test."""
+
+    def __init__(self, root):
+        self.root = root
+        self.targets = {}  # path relative to the root -> original bytes
+        self.compile_errors = []  # popped per recompile; 0 once empty
+        self.mutated_messages = RED
+        self.baseline_messages = GREEN
+        self.suite_runs = []  # (suite, mutated?)
+        self.compiled = []  # the targets' bytes at each recompile
+        self.on_suite = None
+
+    def add(self, name, content=ORIGINAL):
+        path = self.root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(content)
+        self.targets[name] = content
+
+    def mutated(self):
+        return any((self.root / name).read_bytes() != content for name, content in self.targets.items())
+
+    def recompile(self):
+        self.compiled.append({name: (self.root / name).read_bytes() for name in self.targets})
+        return self.compile_errors.pop(0) if self.compile_errors else 0
+
+    def run_suite(self, suite, _max_wait):
+        mutated = self.mutated()
+        self.suite_runs.append((suite, mutated))
+        if self.on_suite is not None:
+            self.on_suite(mutated)
+        return list(self.mutated_messages if mutated else self.baseline_messages)
+
+
+class BatchTestCase(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
         self.root = Path(self.directory.name)
-        self.target = self.root / "Assets" / "Target.cs"
-        self.target.parent.mkdir(parents=True)
-        self.target.write_bytes(ORIGINAL)
-        self.recompiles = []
+        self.backups = self.root / "backup"
+        self.editor = EditorStub(self.root)
+        self.editor.add("Assets/Target.cs")
 
     def tearDown(self):
         self.directory.cleanup()
 
-    def run_main(self, old, suite_messages=(), compile_errors=(0, 0), expect=None):
-        errors = iter(compile_errors)
-
-        def recompile():
-            self.recompiles.append(self.target.read_bytes())
-            return next(errors)
-
-        argv = ["prove_red.py", "--file", "Assets/Target.cs", "--old", old, "--new", "int value = 2;",
-                "--suite", "Minecraft Clone/Dev/Validate X"]
-        if expect:
-            argv += ["--expect", expect]
+    def run_argv(self, *argv, statuses=("", "")):
+        statuses = iter(statuses)
         out = io.StringIO()
         with mock.patch.object(prove_red, "REPO_ROOT", self.root), \
-                mock.patch.object(prove_red, "BACKUP_DIR", self.root / "backup"), \
-                mock.patch.object(prove_red, "recompile", recompile), \
-                mock.patch.object(prove_red, "run_suite", lambda *_: list(suite_messages)), \
-                mock.patch("sys.argv", argv), contextlib.redirect_stdout(out):
+                mock.patch.object(prove_red, "BACKUP_DIR", self.backups), \
+                mock.patch.object(prove_red, "recompile", self.editor.recompile), \
+                mock.patch.object(prove_red, "run_suite", self.editor.run_suite), \
+                mock.patch.object(prove_red, "tree_status", lambda: next(statuses)), \
+                mock.patch("sys.argv", ["prove_red.py", *argv]), contextlib.redirect_stdout(out):
             code = prove_red.main()
         return code, out.getvalue()
 
+    def run_batch(self, entries, *extra, **kwargs):
+        batch = self.root / "batch.json"
+        batch.write_text(json.dumps(entries), encoding="utf-8")
+        return self.run_argv("--batch", str(batch), *extra, **kwargs)
+
     def assert_restored(self, out):
-        self.assertEqual(hashlib.sha256(self.target.read_bytes()).hexdigest(),
-                         hashlib.sha256(ORIGINAL).hexdigest(), out)
+        for name, content in self.editor.targets.items():
+            self.assertEqual(hashlib.sha256((self.root / name).read_bytes()).hexdigest(),
+                             hashlib.sha256(content).hexdigest(), out)
         self.assertIn("checksum IDENTICAL", out)
 
+    @staticmethod
+    def entry(old="int value = 1;", file="Assets/Target.cs", suite=SUITE, **extra):
+        return {"file": file, "old": old, "new": "int value = 2;", "suite": suite, **extra}
+
+
+class RestoreTests(BatchTestCase):
+    """main() with the Editor stubbed: the target must come back byte for byte, whatever happens."""
+
+    def run_main(self, old, expect=None):
+        argv = ["--file", "Assets/Target.cs", "--old", old, "--new", "int value = 2;", "--suite", SUITE]
+        return self.run_argv(*argv, *(["--expect", expect] if expect else []))
+
     def test_red_run_exits_0_and_restores(self):
-        code, out = self.run_main("int value = 1;", ["  [FAIL] B7 broke", "1 OF 9 BASELINE TESTS FAILED"])
+        code, out = self.run_main("int value = 1;")
         self.assertEqual(code, 0, out)
-        self.assertIn(b"value = 2", self.recompiles[0])  # the suite ran against the mutation
-        self.assertEqual(self.recompiles[-1], ORIGINAL)  # and the final compile against the restore
+        self.assertEqual(self.editor.suite_runs, [(SUITE, False), (SUITE, True)])  # baseline, then the mutation
+        self.assertIn(b"value = 2", self.editor.compiled[1]["Assets/Target.cs"])
+        self.assertEqual(self.editor.compiled[-1]["Assets/Target.cs"], ORIGINAL)  # final compile is the restore
         self.assert_restored(out)
 
     def test_survived_run_exits_1_and_restores(self):
-        code, out = self.run_main("int value = 1;", ["ALL 9 BASELINE TESTS PASSED"])
+        self.editor.mutated_messages = GREEN
+        code, out = self.run_main("int value = 1;")
         self.assertEqual(code, 1, out)
         self.assertIn("SURVIVED", out)
         self.assert_restored(out)
 
     def test_expect_narrows_what_counts_as_red(self):
-        code, out = self.run_main("int value = 1;", ["  [FAIL] B3 unrelated"], expect=r"\bB7\b")
+        self.editor.mutated_messages = ["[FAIL] B3 unrelated", "1 OF 9 X BASELINE TESTS FAILED"]
+        code, out = self.run_main("int value = 1;", expect=r"\bB7\b")
         self.assertEqual(code, 1, out)
+        self.assertIn("none matched --expect", out)
         self.assert_restored(out)
 
     def test_mutation_that_does_not_compile_exits_2_and_restores(self):
-        code, out = self.run_main("int value = 1;", compile_errors=(3, 0))
+        self.editor.compile_errors = [0, 3, 0]  # the start-of-run compile, the mutation, the restore
+        code, out = self.run_main("int value = 1;")
         self.assertEqual(code, 2, out)
         self.assertIn("does not compile", out)
         self.assert_restored(out)
@@ -118,9 +184,129 @@ class RestoreTests(unittest.TestCase):
         self.assert_restored(out)
 
     def test_restored_code_that_fails_to_compile_exits_2(self):
-        code, out = self.run_main("int value = 1;", ["  [FAIL] B7"], compile_errors=(0, 1))
+        self.editor.compile_errors = [0, 0, 1]
+        code, out = self.run_main("int value = 1;")
         self.assertEqual(code, 2, out)
-        self.assertIn("restored code does not compile", out)
+        self.assertIn("STOPPED: the restored code does not compile", out)
+
+    def test_a_mutated_run_without_a_verdict_exits_2(self):
+        self.editor.mutated_messages = ["[FAIL] B7 broke"]  # the summary line never arrived
+        code, out = self.run_main("int value = 1;")
+        self.assertEqual(code, 2, out)
+        self.assertIn("no suite summary line", out)
+        self.assert_restored(out)
+
+    def test_backup_is_deleted_after_a_good_restore(self):
+        code, out = self.run_main("int value = 1;")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(list(self.backups.glob("*.bak")), [], out)
+
+    def test_an_unexpected_error_exits_2_not_1(self):
+        def explode(*_):
+            if not self.editor.mutated():
+                return list(GREEN)
+            raise KeyError("boom")
+
+        with mock.patch.object(self.editor, "run_suite", explode):
+            code, out = self.run_main("int value = 1;")
+        self.assertEqual(code, 2, out)
+        self.assertIn("KeyError", out)
+        self.assert_restored(out)
+
+
+class BatchTests(BatchTestCase):
+    def test_a_leftover_backup_stops_before_touching_anything(self):
+        self.backups.mkdir()
+        (self.backups / "Assets__Target.cs.20261016T120000000000.bak").write_bytes(b"old")
+        code, out = self.run_batch([self.entry()])
+        self.assertEqual(code, 2, out)
+        self.assertIn("STOPPED: PREVIOUS RUN WAS KILLED", out)
+        self.assertEqual(self.editor.compiled, [])
+        self.assertEqual((self.root / "Assets/Target.cs").read_bytes(), ORIGINAL)
+
+    def test_same_named_files_get_separate_backups(self):
+        self.editor.add("Assets/Other/Target.cs", b"int value = 1;\n")
+        seen = []
+        self.editor.on_suite = lambda mutated: seen.extend(p.name for p in self.backups.glob("*.bak"))
+        code, out = self.run_batch([self.entry(), self.entry(file="Assets/Other/Target.cs")])
+        self.assertEqual(code, 0, out)
+        self.assertTrue(any(name.startswith("Assets__Target.cs.") for name in seen), seen)
+        self.assertTrue(any(name.startswith("Assets__Other__Target.cs.") for name in seen), seen)
+        self.assert_restored(out)
+
+    def test_summary_lists_every_entry_and_exits_with_the_worst(self):
+        self.editor.mutated_messages = GREEN
+        code, out = self.run_batch([self.entry(label="survivor"), self.entry(old="absent", label="no match")])
+        self.assertEqual(code, 2, out)
+        self.assertIn("=== prove-red summary ===", out)
+        self.assertRegex(out, r"SURVIVED\s+survivor")
+        self.assertRegex(out, r"NO PROOF\s+no match")
+
+    def test_one_baseline_per_distinct_suite(self):
+        code, out = self.run_batch([self.entry(), self.entry(), self.entry(suite="Minecraft Clone/Dev/Validate Y")])
+        self.assertEqual(code, 0, out)
+        baselines = [suite for suite, mutated in self.editor.suite_runs if not mutated]
+        self.assertEqual(baselines, [SUITE, "Minecraft Clone/Dev/Validate Y"])
+
+    def test_a_red_baseline_proves_nothing_and_is_not_rerun(self):
+        self.editor.baseline_messages = RED
+        code, out = self.run_batch([self.entry(), self.entry()])
+        self.assertEqual(code, 2, out)
+        self.assertIn("baseline is already red", out)
+        self.assertEqual(self.editor.suite_runs, [(SUITE, False)])
+
+    def test_no_baseline_skips_the_unmutated_run(self):
+        code, out = self.run_batch([self.entry()], "--no-baseline")
+        self.assertEqual(code, 0, out)
+        self.assertEqual(self.editor.suite_runs, [(SUITE, True)])
+
+    def test_a_restore_mismatch_stops_the_batch(self):
+        def corrupt_backup(mutated):
+            if mutated:
+                for backup in self.backups.glob("*.bak"):
+                    backup.write_bytes(b"not the original")
+
+        self.editor.on_suite = corrupt_backup
+        code, out = self.run_batch([self.entry(label="first"), self.entry(label="second")])
+        self.assertEqual(code, 2, out)
+        self.assertIn("checksum MISMATCH", out)
+        self.assertIn("STOPPED:", out)
+        self.assertNotIn("[2/2]", out)
+        self.assertIn("1 entries not run", out)
+        self.assertEqual(len(list(self.backups.glob("*.bak"))), 1, out)  # kept as the way back
+
+    def test_a_suite_that_outlives_its_wait_stops_without_recompiling(self):
+        def time_out(suite, _max_wait):
+            if self.editor.mutated():
+                raise prove_red.SuiteTimedOut("still running")
+            return list(GREEN)
+
+        with mock.patch.object(self.editor, "run_suite", time_out):
+            code, out = self.run_batch([self.entry(), self.entry()])
+        self.assertEqual(code, 2, out)
+        self.assertIn("STOPPED: still running", out)
+        self.assertEqual(len(self.editor.compiled), 2)  # start + mutation; the busy Editor gets no restore compile
+        self.assert_restored(out)
+
+    def test_entries_past_the_budget_are_not_run(self):
+        clock = iter(range(0, 10_000, 100))
+        with mock.patch.object(prove_red.time, "monotonic", lambda: next(clock)):
+            code, out = self.run_batch([self.entry(label="a"), self.entry(label="b"), self.entry(label="c")],
+                                       "--budget", "1000")
+        self.assertEqual(code, 2, out)
+        self.assertIn("STOPPED: time budget", out)
+        self.assertRegex(out, r"NOT RUN\s+c")
+
+    def test_a_changed_tree_is_reported(self):
+        code, out = self.run_batch([self.entry()], statuses=("", " M Assets/Elsewhere.cs\n"))
+        self.assertEqual(code, 0, out)
+        self.assertIn("TREE CHANGED", out)
+        self.assertIn("Assets/Elsewhere.cs", out)
+
+    def test_an_unchanged_tree_is_not_reported(self):
+        code, out = self.run_batch([self.entry()], statuses=(" M a.cs\n", " M a.cs\n"))
+        self.assertEqual(code, 0, out)
+        self.assertNotIn("TREE CHANGED", out)
 
 
 if __name__ == "__main__":
