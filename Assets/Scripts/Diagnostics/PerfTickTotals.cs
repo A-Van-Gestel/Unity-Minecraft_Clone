@@ -22,16 +22,16 @@ namespace Diagnostics
         /// <summary>Building the active-chunk list, in <see cref="Stopwatch"/> ticks.</summary>
         public long ListTicks;
 
-        /// <summary>Preparing fluid chunks — bucket partition and section copies, plus first-use allocation — in ticks.</summary>
+        /// <summary>Preparing fluid and grass chunks — bucket partition and section copies, plus first-use allocation — in ticks.</summary>
         public long PrepareTicks;
 
         /// <summary>Renting tickers and timing records, scheduling the jobs and flushing the batch, in ticks.</summary>
         public long ScheduleTicks;
 
-        /// <summary>Waiting for the fluid jobs to complete, in ticks.</summary>
+        /// <summary>Waiting for the fluid and grass jobs to complete (the grass rules run there), in ticks.</summary>
         public long WaitTicks;
 
-        /// <summary>The managed grass tick, in ticks.</summary>
+        /// <summary>Replaying the grass jobs' results (or the managed fallback tick), in ticks.</summary>
         public long GrassTicks;
 
         /// <summary>Replaying the fluid jobs' modifications and inactive voxels, in ticks.</summary>
@@ -43,7 +43,7 @@ namespace Diagnostics
         /// <summary>Active fluid voxels those prepares handed to the jobs.</summary>
         public long FluidVoxels;
 
-        /// <summary>Voxel sections copied by those prepares; <see cref="SnapshotSectionKb"/> each.</summary>
+        /// <summary>Voxel sections copied by the fluid and grass prepares; <see cref="SnapshotSectionKb"/> each.</summary>
         public long SnapshotSections;
 
         /// <summary>Active grass voxels ticked.</summary>

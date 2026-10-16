@@ -156,16 +156,16 @@ namespace Diagnostics
         /// <summary>Behavior-tick time spent building the active-chunk list, in microseconds.</summary>
         TickListUs,
 
-        /// <summary>Behavior-tick time spent preparing fluid chunks — partitions, section copies, first-use allocation — in microseconds.</summary>
+        /// <summary>Behavior-tick time spent preparing fluid and grass chunks — partitions, section copies, first-use allocation — in microseconds.</summary>
         TickPrepareUs,
 
-        /// <summary>Behavior-tick time spent renting tickers and scheduling the fluid jobs, in microseconds.</summary>
+        /// <summary>Behavior-tick time spent renting tickers and scheduling the fluid and grass jobs, in microseconds.</summary>
         TickScheduleUs,
 
-        /// <summary>Behavior-tick time spent waiting for the fluid jobs to complete, in microseconds.</summary>
+        /// <summary>Behavior-tick time spent waiting for the fluid and grass jobs to complete (the grass rules run there), in microseconds.</summary>
         TickWaitUs,
 
-        /// <summary>Behavior-tick time spent in the managed grass tick, in microseconds.</summary>
+        /// <summary>Behavior-tick time spent replaying the grass jobs' results (or the managed fallback tick), in microseconds.</summary>
         TickGrassUs,
 
         /// <summary>Behavior-tick time spent replaying the fluid jobs' results, in microseconds.</summary>
@@ -177,7 +177,7 @@ namespace Diagnostics
         /// <summary>Active fluid voxels those jobs ticked.</summary>
         TickFluidVoxels,
 
-        /// <summary>Kilobytes of voxel sections copied into the tick's snapshot arena for those jobs.</summary>
+        /// <summary>Kilobytes of voxel sections copied into the tick's snapshot arena, for the fluid and grass jobs together.</summary>
         TickSnapshotKb,
 
         /// <summary>Active grass voxels the behavior tick ticked.</summary>
