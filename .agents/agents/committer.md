@@ -54,6 +54,10 @@ uncommitted work never pull you outside the batch, and fix what they report:
 
 Then read every changed and untracked file in the batch for what no script sees: why-not-what,
 inline comments ≤ 3 lines, no consumer rosters, no war stories, XML docstrings on new public API.
+"Read" means the file's whole diff (`git diff --no-color HEAD -- <path>`) for a tracked file and the
+whole file for an untracked one. Serialized assets (`.meta`, `.asset`, `.unity`, `.prefab`) and
+binaries are not audited; list them apart. Keep a list of every file you read: a batch text file
+you did not read is a STOP — commit nothing and report which file and why, never skip it silently.
 Fix violations with `Edit`, one targeted edit at a time; never rewrite a whole file and never edit
 through a script. Trimming a comment means deleting text, not rephrasing it longer. Do not
 change code behavior: only comments, docstrings and spelling in identifiers that are private and
@@ -112,7 +116,8 @@ b. Folding into an unpushed older commit (`rebase -i` is unavailable), via git's
 1. `git log --oneline <old-HEAD>..HEAD` (after a squash: `@{u}..HEAD`, plus `git diff --stat <old-HEAD> HEAD`
    for exactly what this batch changed) and, per commit, its file list (`--stat` summary lines only).
 2. Reserialize: ran / skipped (why); guid audit summary line verbatim.
-3. Checker results (American English, tables, twins) and style edits, each edit as
+3. Checker results (American English, tables, twins); `files read: N of N` followed by the list
+   (and the serialized/binary files not audited, apart); style edits, each as
    `file:line: before → after`, or "none".
 4. Folds: `fold_into_commit.py squash` output verbatim.
 5. `git status --short` after the commits: what was left uncommitted, and anything you were
