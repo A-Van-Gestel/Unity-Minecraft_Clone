@@ -1,6 +1,6 @@
 ---
 name: review-changes
-description: Reviews a working diff against this voxel engine's project-specific invariants — architecture constraints, Burst, hot-path GC, serialization, chunk pipeline, coordinate spaces, URP Render Graph, docs — and ends with a single merge verdict. Safe to run repeatedly mid-work. Use when the user says "review my changes", "review the diff", "pre-merge check", "is this ready to merge", "review before commit", "check my work", or before offering a commit on a non-trivial change.
+description: Reviews a working diff against this voxel engine's project-specific invariants — architecture constraints, Burst, hot-path GC, serialization, chunk pipeline, coordinate spaces, URP Render Graph, docs, stale comments — and ends with a single merge verdict. Safe to run repeatedly mid-work. Use when the user says "review my changes", "review the diff", "pre-merge check", "is this ready to merge", "review before commit", "check my work", or before offering a commit on a non-trivial change.
 ---
 
 # Review changes
@@ -157,7 +157,7 @@ class of regression the `+` side cannot show you is a guard the `-` side removed
 
 ## Step 3 — load the shards the diff earns, then run the gates
 
-The twenty-three gates are split across seven reference files. **Read
+The twenty-four gates are split across seven reference files. **Read
 `references/gates-core.md` always**, plus each shard the changed-file list
 triggers. Loading a shard the diff cannot trip is wasted context; skipping one it
 does trip is a missed gate, so route from the actual file list, not from a guess
@@ -165,7 +165,7 @@ about what the change was "about".
 
 | Shard | Gates | Load when the diff touches |
 |---|---|---|
-| `references/gates-core.md` | 1, 2, 3, 4 | **always** |
+| `references/gates-core.md` | 1, 2, 3, 4, 24 | **always** |
 | `references/gates-jobs.md` | 5, 6, 7 | `Assets/Scripts/Jobs/`, an `Update`/`LateUpdate`/`FixedUpdate`, a meshing / chunk-loop body, or a job-dispatch wrapper |
 | `references/gates-serialization.md` | 8, 9 | `Assets/Scripts/Serialization/`, `ChunkData.cs`, `ChunkStorageManager.cs`, or a `[SerializeField]` / public field on a `MonoBehaviour` / `ScriptableObject` |
 | `references/gates-pipeline.md` | 10, 11, 12 | `World.cs`, `WorldJobManager.cs`, `ChunkPoolManager.cs`, a pooled type (`Chunk.cs`, `Data/ChunkData.cs`, `Data/ChunkSection.cs`, `VisualizerChunkData.cs`), lighting / fluid / meshing / chunk-management code, or a newly added mutable `static` |
@@ -225,6 +225,7 @@ are the part that matters, and the exceptions are where false positives come fro
 | 21 | Render function reads stale or shared state (non-`static`, `PassData` not reassigned, shared `Material` mutated inside the render function) | rendering |
 | 22 | Global state published around the graph (no `AllowGlobalStateModification`, global with no consumer) | rendering |
 | 23 | Renderer-feature lifecycle leak (`Create` not idempotent, material or `RTHandle` never released) | rendering |
+| 24 | A comment that no longer describes the code (narrates history, asserts a contract that does not exist, prose broken by a rename, inline comment past three lines) | core |
 
 ### On an intermediate run: what may wait, and what may not
 

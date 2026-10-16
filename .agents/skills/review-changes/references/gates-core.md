@@ -1,7 +1,7 @@
 # Core gates — always run
 
-These four apply to any diff, whatever it touches, and they are the only gates
-that do. The other six shards — `jobs`, `serialization`, `pipeline`,
+These five (1–4 and 24) apply to any diff, whatever it touches, and they are the
+only gates that do. The other six shards — `jobs`, `serialization`, `pipeline`,
 `coordinates`, `rendering`, `docs` — are loaded per the router in `SKILL.md`.
 
 Each gate carries **what fails**, **how to check**, **severity**, and whether it
@@ -85,6 +85,24 @@ Per `AGENTS.md`, refactors, behavior-preserving bug fixes, and test-only changes
 are exempt — a change that alters *documented behavior* or ships a feature
 drafted in a Design doc is not.
 
+**Open bug entries go stale the same way.** An entry in `Documentation/Bugs/`
+names the code it describes (`**Files:**` line, method names in its prose); a
+diff that changes that code can leave the entry describing a guard, a call site
+or a mechanism that is gone. These docs are outside the Doc Sync rule's three
+folders, so check them here. List the open entries naming a changed file, and
+re-read each:
+
+```bash
+git diff --no-color --name-only $RANGE -- '*.cs' '*.hlsl' '*.shader' '*.py' | xargs -n1 basename | \
+  sort -u | grep -lFf - Documentation/Bugs/*.md | grep -v '_FIXED_BUGS.md'
+```
+
+A sentence the diff made false is the finding: Low when it is a side remark,
+Medium when it is the entry's repro, "why it doesn't fire" or proposed fix. A
+diff that *fixes* the entry is not this gate — route to `archive-fixed-bug`
+after the user confirms. Gate 12 owns the opposite question, whether the diff
+revives or collides with the bug itself.
+
 **Absolute.**
 
 **Severity.** Medium normally. High when the false statement is in a Core
@@ -118,6 +136,8 @@ The recurring shapes in this engine:
   `AGENTS.md` forbids this
 - a test deleted or renamed rather than updated — the case it covered is now
   uncovered
+- a `lock` removed — say which thread now owns the state it guarded; a lock
+  that only ever guarded single-owner data is a plain removal, not a finding
 
 **How to check.** Read the `-` lines directly rather than inferring them from the
 new code. **Pass the range you resolved in `SKILL.md` step 1** — a bare `git diff`
@@ -125,10 +145,10 @@ sees only unstaged work, so on a pre-merge or staged review it silently reports
 nothing and the gate passes for the wrong reason:
 
 ```bash
-# $RANGE is whatever step 1 resolved: "" (unstaged), --staged, @{u}...HEAD, <base>...HEAD
+# $RANGE is whatever step 1 pinned: HEAD (working changes), --staged, <hash>...HEAD, <base>...HEAD
 # --no-color is REQUIRED, not cosmetic: under a color.ui / color.diff = always setting git emits ANSI
 # escapes even when piped — every ^+ / ^- anchor below then matches NOTHING and the gate passes silently.
-git diff --no-color -U5 $RANGE | grep -nE '^-.*(FormerlySerializedAs|RuntimeInitializeOnLoadMethod|BurstCompile|\.Release\(|\.Complete\(|await |IsCreated|return;|DomainReset)'
+git diff --no-color -U5 $RANGE | grep -nE '^-.*(FormerlySerializedAs|RuntimeInitializeOnLoadMethod|BurstCompile|\.Release\(|\.Complete\(|await |IsCreated|return;|DomainReset|\block ?\()'
 ```
 
 A new (untracked) file has no `-` side at all, so this gate is a no-op there —
@@ -151,3 +171,79 @@ findings — the invariant went with the thing it protected.
 reset is gate 11's High, a dropped serialized value is gate 9's Blocker.
 For a deletion matching no other gate, High when it can reach a user (lost save
 data, a stuck pipeline, a corrupted mesh), Medium otherwise.
+
+---
+
+## Gate 24 — A comment that no longer describes the code
+
+**What fails.** `CODING_STYLE_GUIDE.md` §3: comments describe the code as it
+stands now, explain *why*, and an inline comment runs three lines at most. No
+compiler, analyzer or checker script reads a comment's meaning, so this is the
+one part of a diff that reaches the next reader entirely unchecked. It applies
+to C#, HLSL and the Python under `Tools/Python/` alike.
+
+Three shapes, in descending cost:
+
+- **It describes the past.** "used to", "previously", "the old path", or the
+  story of a bug that is already fixed. One refactor later a reader cannot tell
+  which half still applies. History belongs in `Documentation/Bugs/_FIXED_BUGS.md`,
+  the owning design doc and `git log`.
+- **It describes something that does not exist yet.** The same failure pointed
+  forward: a comment asserting a guarantee, a caller, a save-format field or a
+  validation scenario that the diff does not contain and nothing else provides.
+  It reads as authoritative and cannot be checked against anything.
+- **A mechanical rename rewrote prose it did not understand.** A rename leaves
+  paragraphs describing a mechanism that is gone. A renamed symbol in the diff is
+  the signal to re-read every comment that mentioned it.
+
+**How to check.** Four mechanical signals, none of them a verdict:
+
+```bash
+SRC=(-- '*.cs' '*.hlsl' '*.shader' '*.py')
+# 1. comment lines the diff ADDS, filtered to history markers
+git diff --no-color $RANGE "${SRC[@]}" | grep -E '^\+' | grep -vE '^\+\+\+' | \
+  grep -iE '^\+[[:space:]]*(///|//|#).*(used to|previously|no longer|originally|any ?more|the old |before the fix|was a (bug|defect)|this fixes|the first implementation)'
+
+# 2. a diff that claims to be comments-only: prove it. Empty output = the claim
+#    holds; any line means it also changes code.
+git diff -U0 --no-color $RANGE "${SRC[@]}" | grep -E '^[+-]' | grep -vE '^(\+\+\+|---)' | \
+  grep -vE '^[+-][[:space:]]*(///|//|#|"""|$)'
+
+# 3. added inline comments longer than three lines (/// docstrings and # region
+#    directives excluded; one hit per over-long run)
+git diff --no-color $RANGE "${SRC[@]}" | awk '
+  /^\+[[:space:]]*\/\/[^\/]|^\+[[:space:]]*\/\/$|^\+[[:space:]]*# / { n++; if (n == 4) print FNR": "$0; next }
+  { n = 0 }'
+```
+
+The fourth signal has no one-liner and is worth the minute: **did a comment block
+get bigger?** A "trim" that relocates prose onto a member instead of deleting it
+grows the thing it claimed to shrink. Compare block lengths against `$RANGE`
+rather than trusting the diffstat, which nets growth against deletion elsewhere
+in the file.
+
+**Signal 1 is a prompt to read, not a finding.** Its false positives are
+ordinary English, and this repo has hundreds of them: "the buffer must no longer
+be referenced", "the columns originally queued". Open every hit. A finding
+reported from the grep alone is the kind that gets this gate switched off.
+
+**Not a finding:**
+
+- A measured number that justifies a live constant — "p99 queue depth", "−59 MB
+  managed heap", "25 % of a burst's fluid voxels". That is *current* information
+  however historical it sounds, and it is the reason the constant is not a guess.
+- A Unity, Burst, IL2CPP or platform constraint invisible from the call site. When
+  a comment reads like a war story, ask whether the constraint is still live
+  before calling it history; deleting a live one re-opens the defect it prevents.
+- Docstring bulk on an on-disk or wire-format struct, where the docstring *is*
+  the contract readers check the layout against.
+
+**Delta-based.** Only comments the diff adds or rewrites. Pre-existing prose is
+not a finding, and a whole-file comment audit is its own task, not a review.
+
+**Severity.** Medium for a comment that describes the past or a contract that
+does not exist — it sends the next reader re-deriving something the code already
+handles. High when it explains a guard, because a reader who believes a stale
+reason deletes the guard. Low for bulk alone — an inline comment past three lines
+with nothing false in it; say whether the code wants an extracted method instead,
+as the style guide asks.
