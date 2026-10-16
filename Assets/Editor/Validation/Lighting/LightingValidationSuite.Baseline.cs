@@ -89,6 +89,7 @@ namespace Editor.Validation.Lighting
             // --- C3 cross-chunk skylight darkening family (B54 in-flight race, B55 steady-state) lives in
             // Baselines/LightingValidationSuite.Baseline.C3Darkening.cs and self-registers here. ---
             AddCrossChunkDarkeningBaselineScenarios(scenarios);
+            AddInChunkReshadowBaselineScenarios(scenarios);
 
             // --- Bug 13 suspended-slab family (B56/B57 generation-wave, B58/B59 dynamic-stamp fix
             // tripwires; promoted from K13a-K13d) lives in
@@ -269,6 +270,10 @@ namespace Editor.Validation.Lighting
         /// <summary>Hook for the C3 cross-chunk skylight darkening baselines (implemented in Baselines/LightingValidationSuite.Baseline.C3Darkening.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
         static partial void AddCrossChunkDarkeningBaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the C7 in-chunk re-shadow baseline (implemented in Baselines/LightingValidationSuite.Baseline.C7Reshadow.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddInChunkReshadowBaselineScenarios(List<Scenario> scenarios);
 
         /// <summary>Hook for the completion-pass fault-isolation baseline (implemented in Baselines/LightingValidationSuite.Baseline.FaultIsolation.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>

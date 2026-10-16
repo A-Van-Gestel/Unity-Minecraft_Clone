@@ -355,10 +355,16 @@ conversion on the production mod path would not be caught in-harness (guarded in
   `Baselines/LightingValidationSuite.Baseline.Bug16Runaway.cs` (+ B88's registration site).
 - **Standing lesson (mirrors C9's):** this finding sat OPEN·LOW–MEDIUM for a month while both bugs were live. A "small-effort, no-new-capability" coverage gap on a *removal* path is cheap insurance — removal is the engine's documented problem area (`LIGHTING_SYSTEM_OVERVIEW.md` §3.7) and deserves priority inflation over placement-path gaps of equal apparent size.
 
-### C7 — Diagonal/corner delivery and dynamic in-chunk opaque-placement re-shadow lack deterministic baselines · **OPEN · LOW (corner half upgraded — Bug 16 evidence)**
+### C7 — Diagonal/corner delivery and dynamic in-chunk opaque-placement re-shadow lack deterministic baselines · **OPEN · LOW (corner half upgraded — Bug 16 evidence) · re-shadow half CLOSED (2026-10-16, B123)**
 
 - Corner (diagonal-neighbor) cross-chunk delivery exists only *inside* B40's fuzz (probabilistic per seed); there is no fixed, deterministic corner-spill baseline (source at a chunk corner → diagonal neighbor lit → oracle). **Priority evidence (2026-07-11):** Bug 16's infinite removal cycle armed at a **four-chunk corner** (the x15|16 / z31|32 junction) — multi-seam corners are where per-channel colored-light cycles live, not just a delivery edge case. The corner-spill baseline should use *colored* lamps, not white.
-- Dynamic in-chunk column re-shadow on opaque *placement* (place a block mid-air in a lit column → everything below darkens to side-bleed → break → re-light) is untested as a dedicated baseline; B3 only opens a shaft. Likely caught incidentally by other oracle compares — hence LOW.
+- **Closed (2026-10-16):** dynamic in-chunk column re-shadow on opaque *placement* is baseline **B123**
+  (`Baselines/LightingValidationSuite.Baseline.C7Reshadow.cs`): stone placed mid-air at chunk-local (8,8)
+  darkens the column below to side-bleed, then breaking it re-lights the column, each stage matched to the
+  oracle. Prove-red: limiting `RecalculateSkylightForColumn`'s pass-2 write to brightening
+  (`oldSkylight != lightFromSky` → `<`) reds B123 and 35 other baselines, confirming the "caught
+  incidentally" guess the LOW rating rested on. B123 guards the job-side recalc only: the harness
+  `PlaceBlock` mirrors `ModifyVoxel`'s enqueue (A3), so the production trigger stays unwitnessed.
 
 ### C10 — No RGB analog of the Bug 12 sourceless-loop initiator · **CLOSED (2026-07-12) — the predicted latent bug was real (Bug 18), fixed + guarded by baseline B90**
 
@@ -546,7 +552,7 @@ manual-flight path is not the only guard of that machinery.)
 | C8  | Single-wave-only initial lighting — staggered-frontier axis unfuzzed (→ roadmap AS-3; Bug 05 fixed via the post-edit axis, so now belt-and-braces)                                                                                                 | OPEN                      | Low              | medium         |
 | C9  | Flat scenario worlds never exercise border shadow-casters (B60; HF-3 fuzz shipped 2026-07-05 — found Bug 15 → B62/B63 + the first sync Bug-05 repro)                                                                                               | **CLOSED**                | —                | done           |
 | C6  | Per-channel removal independence (B86–B88 — authoring it found Bugs 16+17, `_FIXED_BUGS.md` #21/#22)                                                                                                                                               | **CLOSED**                | —                | done           |
-| C7  | Deterministic corner spill / in-chunk re-shadow (corner half upgraded by Bug-16 evidence — use colored lamps)                                                                                                                                      | OPEN                      | Low              | small          |
+| C7  | Deterministic corner spill (upgraded by Bug-16 evidence — use colored lamps) / in-chunk re-shadow (closed by **B123**)                                                                                                                             | OPEN (corner half)        | Low              | small          |
 | §5  | Bug-09 fleet (B15–B25) consolidation                                                                                                                                                                                                               | **CLOSED**                | —                | done           |
 | A3  | `ModifyVoxel` heightmap (shared) / enqueue path                                                                                                                                                                                                    | **PARTIAL**               | Low              | heightmap done |
 | A4  | Oracle shared-assumption probes                                                                                                                                                                                                                    | **MOSTLY CLOSED**         | Low (2nd oracle) | probes done    |
