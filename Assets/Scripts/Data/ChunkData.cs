@@ -742,6 +742,8 @@ namespace Data
         /// </summary>
         /// <param name="registerAll">When true, registers every active-type voxel unscreened — for harnesses whose
         /// workload is the seeded voxels themselves (the fluid-tick benchmark), never for gameplay.</param>
+        /// <param name="pool">Where the screened scan rents its flat copy of the chunk; null allocates a temporary one
+        /// (harnesses without a <see cref="WorldJobManager"/>). Main thread only, like the pool.</param>
         /// <remarks>
         /// The scan for data with no generation-job list (loaded from disk, or from a generator without the scan
         /// pass), since active voxels are not persisted; a job list registers through
@@ -753,11 +755,11 @@ namespace Data
         /// in <c>World</c> init, so drift-proof), the screen (both call <see cref="ActiveVoxelScreen.MustRegister{TSource}"/>)
         /// and the section/index convention. Change one path's criterion or convention and you must change the other.</para>
         /// </remarks>
-        public void RescanActiveVoxels(bool registerAll = false)
+        public void RescanActiveVoxels(bool registerAll = false, ChunkJobArrayPool pool = null)
         {
             if (!registerAll)
             {
-                RegisterScreenedActiveVoxels();
+                RegisterScreenedActiveVoxels(pool);
                 return;
             }
 
@@ -777,7 +779,7 @@ namespace Data
                     uint packedData = section.voxels[i];
                     ushort id = BurstVoxelDataBitMapping.GetId(packedData);
 
-                    if (isActiveById[id])
+                    if (id < isActiveById.Length && isActiveById[id])
                     {
                         // Convert section index back to 3D position
                         int x = i % ChunkMath.SECTION_SIZE;
@@ -794,7 +796,7 @@ namespace Data
 
         // Runs generation's own Burst scan synchronously over a flat copy of the chunk: the screen reads every active
         // voxel's neighbors, which managed code pays for per read, and one implementation keeps both paths' sets equal.
-        private void RegisterScreenedActiveVoxels()
+        private void RegisterScreenedActiveVoxels(ChunkJobArrayPool pool)
         {
             // Most land chunks hold no active voxel at all: skip the copy and the job for them.
             if (!HasAnyActiveVoxel(World.Instance.IsActiveById))
@@ -803,8 +805,10 @@ namespace Data
                 return;
             }
 
-            NativeArray<uint> map = new NativeArray<uint>(ChunkMath.CHUNK_VOLUME, Allocator.TempJob,
-                NativeArrayOptions.UninitializedMemory);
+            // FillJobVoxelMap writes every element, so a stale pooled buffer is safe.
+            NativeArray<uint> map = pool != null
+                ? pool.RentVoxelMap()
+                : new NativeArray<uint>(ChunkMath.CHUNK_VOLUME, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
             NativeList<int> activeVoxels = new NativeList<int>(Allocator.TempJob);
             try
             {
@@ -819,19 +823,26 @@ namespace Data
             }
             finally
             {
-                map.Dispose();
+                if (pool != null)
+                    pool.Return(map);
+                else
+                    map.Dispose();
                 activeVoxels.Dispose();
             }
         }
 
+        // An id outside the palette (a block removed since the save) is inert, as in ActiveVoxelScanJob.
         private bool HasAnyActiveVoxel(bool[] isActiveById)
         {
             foreach (ChunkSection section in sections)
             {
                 if (section == null || section.IsEmpty) continue;
                 foreach (uint packed in section.voxels)
-                    if (isActiveById[BurstVoxelDataBitMapping.GetId(packed)])
+                {
+                    ushort id = BurstVoxelDataBitMapping.GetId(packed);
+                    if (id < isActiveById.Length && isActiveById[id])
                         return true;
+                }
             }
 
             return false;

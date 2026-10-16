@@ -49,6 +49,11 @@ namespace Editor.Validation.Behavior
         private const int BH13_COLUMN_BOTTOM_Y = 36;
         private const int BH13_COLUMN_HEIGHT = 4;
 
+        // Leg 5's out-of-palette id: flat index 0, so the any-active pre-scan reaches it before the fixture's first
+        // active voxel returns, and clear of every fixture block's neighborhood.
+        private const int BH13_UNKNOWN_ID_XZ = 0;
+        private const int BH13_UNKNOWN_ID_Y = 0;
+
         private static readonly Vector3Int s_bh13GrassA = new Vector3Int(1, BH13_SURFACE_Y, 1);
         private static readonly Vector3Int s_bh13GrassB = new Vector3Int(2, BH13_SURFACE_Y, 1);
         private static readonly Vector3Int s_bh13Dirt = new Vector3Int(3, BH13_SURFACE_Y, 1);
@@ -216,12 +221,16 @@ namespace Editor.Validation.Behavior
         /// <item><c>ModifyVoxel</c> edits (add, remove, family change) keep the buckets exact without a rescan — each
         /// edit registers its own cell when active, screened or not, and unregisters it otherwise;</item>
         /// <item><c>Reset</c> empties the buckets and re-arms the rescan;</item>
-        /// <item>the rescan registers the screened replica set and clears it, and <c>registerAll</c> the full one;</item>
+        /// <item>the rescan registers the screened replica set and clears it, and <c>registerAll</c> the full one; both
+        /// treat a block id outside the palette as inert, and a pooled rescan reads only its own chunk from a reused
+        /// buffer;</item>
         /// <item>the step-4 wake reaches a data-only neighbor's quiesced seam voxel.</item>
         /// </list>
         /// <para><b>Prove-red</b>, one at a time: drop <c>ModifyVoxel</c>'s bucket add (leg 3); skip the flag write in
         /// <c>RegisterActiveVoxelsFromJob</c> (leg 2); restore the step-4 wake's visual-<c>Chunk</c> lookup (leg 6);
-        /// omit the flag clear in <c>ChunkData.Reset</c> (leg 4, and Lighting B34).</para>
+        /// omit the flag clear in <c>ChunkData.Reset</c> (leg 4, and Lighting B34); drop the palette-range check in
+        /// <c>HasAnyActiveVoxel</c> or in the <c>registerAll</c> loop, or skip <c>FillJobVoxelMap</c> for a pooled
+        /// buffer (leg 5).</para>
         /// </summary>
         /// <returns>True when every leg holds.</returns>
         private static bool Bh13_ActiveRegistrationFlag()
@@ -233,6 +242,7 @@ namespace Editor.Validation.Behavior
 
             ChunkData subject = null;
             ChunkData rescanned = null;
+            ChunkJobArrayPool pool = null;
             try
             {
                 using BehaviorTestWorld world = new BehaviorTestWorld(s_bh4CenterOrigin);
@@ -320,6 +330,46 @@ namespace Editor.Validation.Behavior
                 passed &= CheckBucketsMatch("BH-B13 the unscreened rescan registers exactly the full replica set", rescanned,
                     ReplicaActiveSet(rescanned));
 
+                // An id past the palette (a block removed since the save) sits away from every fixture block, so it
+                // changes no neighbor's screen: the expected sets are the fixture's, taken before the id is written.
+                rescanned.Reset(s_bh13SubjectOrigin);
+                FillRegistrationFixture(rescanned);
+                rescanned.IsPopulated = true;
+                HashSet<Vector3Int> screenedFixture = ScreenedReplicaSet(rescanned);
+                HashSet<Vector3Int> fullFixture = ReplicaActiveSet(rescanned);
+                ushort unknownId = (ushort)World.Instance.BlockTypes.Length;
+                rescanned.SetVoxel(BH13_UNKNOWN_ID_XZ, BH13_UNKNOWN_ID_Y, BH13_UNKNOWN_ID_XZ,
+                    BurstVoxelDataBitMapping.PackVoxelData(unknownId, 0));
+                rescanned.RescanActiveVoxels();
+                passed &= CheckBucketsMatch("BH-B13 the rescan treats an id past the palette as inert", rescanned,
+                    screenedFixture);
+                rescanned.Reset(s_bh13SubjectOrigin);
+                FillRegistrationFixture(rescanned);
+                rescanned.SetVoxel(BH13_UNKNOWN_ID_XZ, BH13_UNKNOWN_ID_Y, BH13_UNKNOWN_ID_XZ,
+                    BurstVoxelDataBitMapping.PackVoxelData(unknownId, 0));
+                rescanned.IsPopulated = true;
+                rescanned.RescanActiveVoxels(registerAll: true);
+                passed &= CheckBucketsMatch("BH-B13 the unscreened rescan treats an id past the palette as inert",
+                    rescanned, fullFixture);
+
+                // A pooled rescan reuses the previous chunk's buffer: the lone placed water must not inherit the
+                // fixture's voxels.
+                pool = new ChunkJobArrayPool();
+                rescanned.Reset(s_bh13SubjectOrigin);
+                FillRegistrationFixture(rescanned);
+                rescanned.IsPopulated = true;
+                rescanned.RescanActiveVoxels(pool: pool);
+                passed &= CheckBucketsMatch("BH-B13 a pooled rescan registers exactly the screened replica set",
+                    rescanned, ScreenedReplicaSet(rescanned));
+                rescanned.Reset(s_bh13SubjectOrigin);
+                SetFixtureBlock(rescanned, s_bh13PlacedWater, BlockIDs.Water);
+                rescanned.IsPopulated = true;
+                rescanned.RescanActiveVoxels(pool: pool);
+                passed &= Check("BH-B13 the pooled rescan reused the returned buffer", pool.TotalAllocated == 1,
+                    $"the pool allocated {pool.TotalAllocated.ToString()} buffers for two rescans");
+                passed &= CheckBucketsMatch("BH-B13 a rescan from a reused buffer reads only its own chunk", rescanned,
+                    ScreenedReplicaSet(rescanned));
+
                 // Leg 6 — the step-4 wake into a data-only neighbor. The seeded −X neighbor is populated but its
                 // voxels are never registered (BehaviorTestWorld's read-only context), i.e. a quiesced seam source.
                 world.SetNeighborBlock(-1, 0, VoxelData.ChunkWidth - 1, BH13_SEAM_WAKE_Y, BH13_SEAM_WAKE_Z, BlockIDs.Water);
@@ -342,6 +392,7 @@ namespace Editor.Validation.Behavior
             {
                 subject?.Dispose();
                 rescanned?.Dispose();
+                pool?.Dispose();
                 ChunkData.OnLightWorkFlagged = savedCallback;
             }
         }

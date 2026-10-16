@@ -219,7 +219,7 @@ public class Chunk
     /// <see cref="Data.ChunkData.RescanActiveVoxels"/>, which owns the scan and its parity invariant with
     /// <see cref="Jobs.ActiveVoxelScanJob"/>.
     /// </summary>
-    public void OnDataPopulated() => ChunkData.RescanActiveVoxels();
+    public void OnDataPopulated() => ChunkData.RescanActiveVoxels(pool: World.Instance.JobManager?.JobArrayPool);
 
     #region Block Behavior Methods
 

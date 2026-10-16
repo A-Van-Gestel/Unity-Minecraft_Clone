@@ -107,6 +107,9 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     /// <summary>Job buffers retained by the chunk job array pool, ready to rent.</summary>
     public int JobArraysPooled => _jobArrayPool.PooledCount;
 
+    /// <summary>The full-chunk job buffer pool, for main-thread work outside this manager that needs a voxel map.</summary>
+    public ChunkJobArrayPool JobArrayPool => _jobArrayPool;
+
     /// <summary>Mesh outputs the mesh output pool has allocated because none was retained (its misses).</summary>
     public long MeshOutputsAllocated => _meshOutputPool.TotalAllocated;
 
