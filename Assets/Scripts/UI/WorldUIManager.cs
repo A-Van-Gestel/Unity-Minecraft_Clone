@@ -192,10 +192,13 @@ namespace UI
             if (line != null) _console.Engine.PostLine(ConsoleLineSeverity.Info, line);
         }
 
-        /// <summary>Posts a finished pre-generation's outcome and resets the progress steps for the next run.</summary>
+        /// <summary>Posts a finished console run's outcome and resets the progress steps for the next run.</summary>
         /// <param name="outcome">The run's outcome.</param>
         private void OnPregenerationEnded(PregenerationOutcome outcome)
         {
+            // The benchmark reports its own runs; its "run the command again" advice would name no command.
+            if (!outcome.Interactive) return;
+
             _pregenerationProgressStep = 0;
             ConsoleLine line = ChunkCommand.EndedLine(outcome);
             _console.Engine.PostLine(line.Severity, line.Text);

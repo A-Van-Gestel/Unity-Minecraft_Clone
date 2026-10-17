@@ -1,6 +1,6 @@
 # Chunk Pre-Generation (CMD-6) Design
 
-**Version:** 1.3  
+**Version:** 1.4  
 **Date:** 2026-10-17  
 **Status:** In progress — v1's phases PG-0…PG-5 are complete and PG-5's IL2CPP A/B is GO; §8 Q4 (the vd-32 loading-pass tail PG-5 found) still open, then promotion to Architecture.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
@@ -315,8 +315,10 @@ that is not.
 resident, `IsPopulated`, generation job tracked, `HasAnyLightingWork`, lighting job tracked,
 lighting enabled. With lighting disabled every populated chunk is `Settled`. The driver gathers the
 facts on the main thread each frame and never mutates a flag. Its one write is to the save set: a target
-that settles while outside `ModifiedChunks` (reloaded from a save an earlier station's unload made before it
-lit) is added back, so its finished lighting reaches disk — 367 of 8 100 chunks on a fresh vd 10 run.
+the station saw `Populated` that then settles while outside `ModifiedChunks` (reloaded from a save an earlier
+station's unload made before it lit) is added back, so its finished lighting reaches disk. A target already
+`Settled` when first seen came from a settled save and is not rewritten. The 367 of 8 100 chunks a fresh vd 10
+run re-marked were counted before that distinction, so they are an upper bound.
 
 ### 4.4 Station geometry
 
@@ -377,9 +379,12 @@ center at the benchmark's flight height. The station change is a boundary crossi
 **Player handling.** The command run sets `IsTeleportHeld` for its duration, which gates the player
 rigidbody's whole `FixedUpdate`. At the end, if the walk moved the anchor at all, it returns the
 player to the start cell through `TeleportPlayer`, whose arrival hold releases the flag; a run that walked
-no station leaves the player where it stood and releases the hold itself. The benchmark's run
-(`PregenerateRegion`) neither returns nor saves: it leaves the player at the last station, and the
-controller places it for the loading pass.
+no station leaves the player where it stood and releases the hold itself. While a run is active, `/teleport`
+(`/tp`) and `/spawn` are refused with a pointer to `/chunk generate cancel` — the mirror of the start refusal
+during a teleport hold, so the two never share the hold flag. The benchmark's run (`PregenerateRegion`)
+neither returns nor saves: it leaves the player at the last station, and the controller places it for the
+loading pass. It runs as `World`'s own coroutine rather than nested in the controller's, so a controller
+destroyed mid-run cannot skip the walk's cleanup; its `OnDestroy` cancels the run instead.
 
 **Outcomes** — every cell has a disposition:
 
@@ -584,6 +589,13 @@ commit that compiles and keeps every suite green.
 
    Separately, the benchmark could pre-warm the `ChunkSection` pool so the loading pass no longer pays its
    growth. Both stay inside v1's no-pipeline-change rule only if the fix is in the benchmark or the walk.
+5. **Should a chunk loaded with pending lighting be re-marked for saving once it settles?** *Open, filed by
+   the 2026-10-17 code review of PG-0…PG-5.* Today nothing does in ordinary play: the unload path saves
+   chunks whose lighting has not settled, and a reload re-lights them (World.cs's unload comment calls this
+   by design). The walk re-marks only its own targets (§4.3). A pipeline-wide re-mark would make §4.3's
+   special case unnecessary and stop repeated re-lighting, at the cost of extra disk writes in normal play.
+   It conflicts with goal 3 and the "re-lighting chunks already on disk" non-goal, so it needs its own
+   design pass under `chunk-lifecycle`, with a benchmark, outside v1.
 
 ---
 
@@ -604,6 +616,10 @@ commit that compiles and keeps every suite green.
 
 ## Document History
 
+* **v1.4** - Code-review fixes (2026-10-17): `/teleport` and `/spawn` are refused during a run, and the
+  benchmark's walk runs as `World`'s coroutine (§4.5). The walk re-marks only targets it saw unsettled (§4.3),
+  `CollectSavedChunks` reuses its scratch buffers, and benchmark runs post nothing to the console. §8 Q5 is
+  filed.
 * **v1.3** - PG-5 complete: the IL2CPP Master A/B is GO (§7). The §2.2 projection was checked against the
   measurement, and §8 Q3 is answered: loading-pass averages are within the noise, vd 32's tail is not. §8 Q4
   is filed for that tail's lighting source.

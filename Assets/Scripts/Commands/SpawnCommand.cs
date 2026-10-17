@@ -31,6 +31,9 @@ namespace Commands
             if (ctx.World == null)
                 return CommandResult.Error("No world is loaded.");
 
+            if (ctx.World.IsPregenerating)
+                return CommandResult.Error(ChunkCommand.TeleportRefusedWhilePregenerating);
+
             var spawn = ctx.World.WorldSpawnPoint;
             int voxelX = spawn.Chunk.X * ChunkMath.CHUNK_WIDTH + (int)Math.Floor(spawn.localPosition.x);
             int voxelY = (int)Math.Floor(spawn.localPosition.y);

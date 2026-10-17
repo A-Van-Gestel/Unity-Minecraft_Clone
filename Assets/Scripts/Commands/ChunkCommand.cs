@@ -25,6 +25,13 @@ namespace Commands
     /// </summary>
     public sealed class ChunkCommand : IConsoleCommand
     {
+        /// <summary>
+        /// The refusal teleporting commands give while a run is active: the walk owns the player and the arrival hold
+        /// for its duration, the mirror of a run refusing to start during a teleport hold.
+        /// </summary>
+        public const string TeleportRefusedWhilePregenerating =
+            "A pre-generation run is moving the player — /chunk generate cancel stops it first.";
+
         private static readonly string[] s_noAliases = Array.Empty<string>();
 
         // "generate <radius>" and "generate <x1> <z1> <x2> <z2>", counting the subcommand word.
@@ -98,14 +105,14 @@ namespace Commands
         /// <summary>
         /// The console line for a progress report when it reaches a new 10 % step of the station grid, or null. The
         /// remaining-time estimate extrapolates the run's own pace, so it adapts to the machine and view distance.
-        /// 100 % is left to <see cref="EndedLine"/>.
+        /// 100 % is left to <see cref="EndedLine"/>. The benchmark's runs post nothing: no command started them.
         /// </summary>
         /// <param name="report">The progress report.</param>
         /// <param name="lastStep">The last step posted; 0 before the first. Advanced when a line is returned.</param>
-        /// <returns>The line text, or null when no new step was reached.</returns>
+        /// <returns>The line text, or null when no new step was reached or the run is not interactive.</returns>
         public static string ProgressLine(in PregenerationProgressReport report, ref int lastStep)
         {
-            if (report.StationCount <= 0 || report.StationsChecked <= 0) return null;
+            if (!report.Interactive || report.StationCount <= 0 || report.StationsChecked <= 0) return null;
 
             int step = (int)(report.StationsChecked * PROGRESS_STEPS / report.StationCount);
             if (step <= lastStep || step >= PROGRESS_STEPS) return null;

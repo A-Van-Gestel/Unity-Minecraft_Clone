@@ -67,6 +67,9 @@ namespace Commands
             if (ctx.World == null)
                 return CommandResult.Error("No world is loaded.");
 
+            if (ctx.World.IsPregenerating)
+                return CommandResult.Error(ChunkCommand.TeleportRefusedWhilePregenerating);
+
             // --- Warn tier: collect every applicable warning into ONE confirmation (§4.3) ---
             List<string> warnings = new List<string>();
 

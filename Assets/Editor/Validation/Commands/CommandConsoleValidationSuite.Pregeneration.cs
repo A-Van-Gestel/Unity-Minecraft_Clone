@@ -17,7 +17,8 @@ namespace Editor.Validation.Commands
     /// B59; dropping the addressable-world bound on the radius reds B60; forbidding relative corners reds B61;
     /// confirming at <c>&gt;=</c> instead of <c>&gt;</c> the confirmation count reds B62; giving the persistence
     /// refusal the no-world text reds B63; turning the no-active-run error into Info reds B64; turning the stalled
-    /// outcome line into Info reds B65.</para>
+    /// outcome line into Info or posting non-interactive progress reds B65; dropping the <c>IsPregenerating</c> check
+    /// from <c>TeleportCommand</c> or <c>SpawnCommand</c> reds B66.</para>
     /// </summary>
     public static partial class CommandConsoleValidationSuite
     {
@@ -44,6 +45,31 @@ namespace Editor.Validation.Commands
             scenarios.Add(new Scenario("B63: /chunk generate refusals — a huge area asks instead of refusing; border, no world, persistence off; disk estimate; every StartRefusal has distinct text (CMD-6 PG-3)", Pregen_Refusals));
             scenarios.Add(new Scenario("B64: /chunk generate cancel with no active run is an error (CMD-6 PG-3)", Pregen_CancelWithoutRun));
             scenarios.Add(new Scenario("B65: Pre-generation console lines — one line per new 10 % step; outcome severity and text per status (CMD-6 PG-3)", Pregen_ConsoleLines));
+            scenarios.Add(new Scenario("B66: /teleport and /spawn are refused while a pre-generation run is active; nothing executes (CMD-6)", Pregen_TeleportRefusedWhileRunning));
+        }
+
+        private static bool Pregen_TeleportRefusedWhileRunning()
+        {
+            using CommandTeleportTestWorld stub = new CommandTeleportTestWorld();
+            ChunkCoord originBefore = WorldOrigin.OriginChunk;
+
+            // Positive control: the same destination teleports, so the refusals below come from the run alone.
+            bool ok = Expect(stub.Engine.Execute("/teleport 100000 64 100000").Lines[0].Severity == ConsoleLineSeverity.Info,
+                "control: with no run active the teleport executes");
+            stub.Rigidbody.IsTeleportHeld = false;
+            WorldOrigin.SetOrigin(originBefore);
+
+            stub.MarkPregenerationRunning();
+            ok &= ExpectTeleportError(stub.Engine, "/teleport 100000 64 100000", ChunkCommand.TeleportRefusedWhilePregenerating,
+                "/teleport during a run");
+            ok &= ExpectTeleportError(stub.Engine, "/tp ~ ~ ~", ChunkCommand.TeleportRefusedWhilePregenerating,
+                "the /tp alias during a run");
+            ok &= ExpectTeleportError(stub.Engine, "/spawn", ChunkCommand.TeleportRefusedWhilePregenerating,
+                "/spawn during a run");
+
+            ok &= Expect(WorldOrigin.OriginChunk.Equals(originBefore), "a refused teleport leaves the origin alone");
+            ok &= Expect(!stub.Rigidbody.IsTeleportHeld, "a refused teleport begins no hold");
+            return ok;
         }
 
         private static bool Pregen_GrammarAndArity()
@@ -245,12 +271,17 @@ namespace Editor.Validation.Commands
         private static bool Pregen_ConsoleLines()
         {
             static string Progress(long checkedStations, long stations, long generated, double elapsed, ref int step) =>
-                ChunkCommand.ProgressLine(new PregenerationProgressReport(checkedStations, stations, generated, elapsed),
-                    ref step);
+                ChunkCommand.ProgressLine(new PregenerationProgressReport(checkedStations, stations, generated, elapsed,
+                    interactive: true), ref step);
 
             int lastStep = 0;
             bool ok = Expect(Progress(0, 100, 0, 0.0, ref lastStep) == null && lastStep == 0,
                 "nothing checked yet posts no progress");
+
+            int benchmarkStep = 0;
+            ok &= Expect(ChunkCommand.ProgressLine(new PregenerationProgressReport(50, 100, 10, 1.0, interactive: false),
+                             ref benchmarkStep) == null && benchmarkStep == 0,
+                "a benchmark run's progress posts nothing and leaves the step alone");
 
             ok &= Expect(Progress(5, 100, 10, 1.0, ref lastStep) == null && lastStep == 0,
                 "5 of 100 stations is still below the first 10 % step");

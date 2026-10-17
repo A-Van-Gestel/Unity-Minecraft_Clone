@@ -97,6 +97,7 @@ public sealed class ChunkPregenerator
         PregenerationOutcome outcome = new PregenerationOutcome
         {
             Rect = rect,
+            Interactive = interactive,
             StationGridCount = PregenerationPlan.StationGridCount(rect, coverRadius),
         };
         bool hasStart = _world.TryGetPlayerVoxelCell(out int startX, out int startY, out int startZ);
@@ -159,7 +160,7 @@ public sealed class ChunkPregenerator
                 // A station cut short by a cancel reports through the outcome alone, not as one more step of progress.
                 if (!_cancelRequested)
                     _world.RaisePregenerationProgress(new PregenerationProgressReport(outcome.StationsChecked,
-                        outcome.StationGridCount, outcome.Generated, elapsed.Elapsed.TotalSeconds));
+                        outcome.StationGridCount, outcome.Generated, elapsed.Elapsed.TotalSeconds, interactive));
             }
 
             // One retry pass over the stations still holding a stalled target, in walk order.
@@ -344,6 +345,7 @@ public sealed class ChunkPregenerator
         Stopwatch stationClock = Stopwatch.StartNew();
         double populatedAt = -1.0;
         WorldJobManager jobs = _world.JobManager;
+        HashSet<ChunkCoord> seenUnsettled = HashSetPool<ChunkCoord>.Get();
 
         try
         {
@@ -374,13 +376,15 @@ public sealed class ChunkPregenerator
 
                     if (readiness == Readiness.Settled)
                     {
-                        // A chunk saved unsettled by an earlier station's unload and reloaded here is not in the save
-                        // set (only Populate and ModifyVoxel add to it); re-marking it saves the lighting it now has.
-                        if (_world.worldData.ModifiedChunks.Add(data)) outcome.Remarked++;
+                        // A chunk reloaded from an unsettled save is not in the save set (only Populate and ModifyVoxel
+                        // add to it); re-marking it saves the lighting it now has. One first seen settled is left alone.
+                        if (seenUnsettled.Contains(chunkCoord) && _world.worldData.ModifiedChunks.Add(data))
+                            outcome.Remarked++;
                         FinishTarget(targets, t, stalled, outcome);
                     }
                     else if (readiness == Readiness.Populated)
                     {
+                        seenUnsettled.Add(chunkCoord);
                         populated++;
                     }
                     else
@@ -426,6 +430,8 @@ public sealed class ChunkPregenerator
         }
         finally
         {
+            HashSetPool<ChunkCoord>.Release(seenUnsettled);
+
             // Every exit is timed, the stall and cancel ones included: those are exactly the stations a report reads.
             double stationSeconds = stationClock.Elapsed.TotalSeconds;
             double populateSeconds = populatedAt < 0.0 ? stationSeconds : populatedAt;

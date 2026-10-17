@@ -92,6 +92,17 @@ namespace Editor.Validation.Commands
         /// <param name="radius">Border half-extent in voxels.</param>
         public void SetBorderRadius(int radius) => _world.SetBorderRadius(radius);
 
+        /// <summary>
+        /// Makes <see cref="World.IsPregenerating"/> report an active run without starting one — no run can step in edit
+        /// mode, so the pre-generator's running flag is set directly.
+        /// </summary>
+        public void MarkPregenerationRunning()
+        {
+            ChunkPregenerator pregenerator = new ChunkPregenerator(_world);
+            ValidationReflection.SetInstanceProperty(pregenerator, nameof(ChunkPregenerator.IsRunning), true);
+            ValidationReflection.SetInstanceField(_world, "_pregenerator", pregenerator);
+        }
+
         /// <summary>Restores the <see cref="WorldOrigin"/> snapshot and destroys every created object.</summary>
         public void Dispose()
         {

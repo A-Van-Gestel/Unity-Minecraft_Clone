@@ -1,8 +1,8 @@
 # Command Console System
 
-**Version:** 1.26  
+**Version:** 1.27  
 **Date:** 2026-10-17  
-**Status:** **Implemented (Stable)** — the v1 arc (CMD-0..3), **CMD-4 relative `~` coordinates** (§8.2), and **CMD-5 tab autocomplete + PowerShell-style inline ghost suggestion** (§8.3) are all shipped and in-game confirmed; **`/wind`** (§8.4) shipped + in-game confirmed 2026-08-10; **CMD-6 `/chunk generate`** (§8.7) shipped 2026-10-17. Guarded by the `Validate Command Console` suite (**65** baselines; see [`../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md`](../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md) for live aggregate counts). Promoted from `Design/` 2026-07-26. §7 and §8.1–§8.3 are retained as **as-built records**; §8's table is the live extension roadmap — the remaining v2/v3+ rows (selectable/copyable output, chat, entity selectors, permissions) are deferred wishes, each owed a design pass when it becomes concrete.  
+**Status:** **Implemented (Stable)** — the v1 arc (CMD-0..3), **CMD-4 relative `~` coordinates** (§8.2), and **CMD-5 tab autocomplete + PowerShell-style inline ghost suggestion** (§8.3) are all shipped and in-game confirmed; **`/wind`** (§8.4) shipped + in-game confirmed 2026-08-10; **CMD-6 `/chunk generate`** (§8.7) shipped 2026-10-17. Guarded by the `Validate Command Console` suite (its current baseline count is in the `Validate All` combined summary). Promoted from `Design/` 2026-07-26. §7 and §8.1–§8.3 are retained as **as-built records**; §8's table is the live extension roadmap — the remaining v2/v3+ rows (selectable/copyable output, chat, entity selectors, permissions) are deferred wishes, each owed a design pass when it becomes concrete.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > An in-game command console (Minecraft-chat-style: `T` opens a left-anchored panel with
@@ -637,16 +637,19 @@ run already active, a teleport still arriving) each have their own line.
 
 **Output arrives late.** The run is a coroutine, so `WorldUIManager` posts its lines through `CommandEngine.PostLine`:
 a progress line at each 10 % of the station grid (stations checked, chunks generated, a pace-based time left), and
-one closing line — complete, complete with stalls (an error line), or canceled (a warning with the resume note). The
-player is held for the run and returned to the start only when the walk actually moved it.
+one closing line — complete, complete with stalls (an error line), or canceled (a warning with the resume note).
+The benchmark's own runs post nothing. The player is held for the run and returned to the start only when the walk
+actually moved it; `/teleport` and `/spawn` are refused while it runs.
 
-**Validation.** Command Console B59–B65 (grammar, radius and corner forms, the confirmation tier, the disk estimate,
-the refusal texts, the progress and closing lines) — suite 58 → **65**.
+**Validation.** Command Console B59–B66 (grammar, radius and corner forms, the confirmation tier, the disk estimate,
+the refusal texts, the progress and closing lines, teleports refused during a run) — suite 58 → **66**.
 
 ---
 
 ## Document History
 
+* **v1.27** - §8.7: `/teleport` and `/spawn` are refused during a pre-generation run, and benchmark runs post no
+  console lines. Suite 65 → 66 (B66). The status line no longer quotes a baseline count (2026-10-17).
 * **v1.26** - CMD-6 shipped as `/chunk generate` (new §8.7; §8's CMD-6 row; the `/chunk info` row notes the
   `ChunkInfoCommand` → `ChunkCommand` rename). Status count 58 → 65 (B59–B65). PG-5's IL2CPP A/B is still pending
   (2026-10-17).

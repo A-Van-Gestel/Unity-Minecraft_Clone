@@ -33,17 +33,23 @@ namespace Data
         /// <summary>Wall-clock seconds since the run started.</summary>
         public readonly double ElapsedSeconds;
 
+        /// <summary>Whether the run is a console command's rather than the benchmark's.</summary>
+        public readonly bool Interactive;
+
         /// <summary>Creates a progress report.</summary>
         /// <param name="stationsChecked">Stations checked so far.</param>
         /// <param name="stationCount">Stations in the grid.</param>
         /// <param name="generated">Chunks generated so far.</param>
         /// <param name="elapsedSeconds">Seconds since the run started.</param>
-        public PregenerationProgressReport(long stationsChecked, long stationCount, long generated, double elapsedSeconds)
+        /// <param name="interactive">Whether the run is a console command's.</param>
+        public PregenerationProgressReport(long stationsChecked, long stationCount, long generated, double elapsedSeconds,
+            bool interactive)
         {
             StationsChecked = stationsChecked;
             StationCount = stationCount;
             Generated = generated;
             ElapsedSeconds = elapsedSeconds;
+            Interactive = interactive;
         }
     }
 
@@ -55,6 +61,9 @@ namespace Data
 
         /// <summary>The rectangle the run covered.</summary>
         public ChunkRect Rect;
+
+        /// <summary>Whether the run was a console command's rather than the benchmark's.</summary>
+        public bool Interactive;
 
         /// <summary>Chunks the walk found neither on disk nor resident, over the stations it checked.</summary>
         public long MissingFound;
