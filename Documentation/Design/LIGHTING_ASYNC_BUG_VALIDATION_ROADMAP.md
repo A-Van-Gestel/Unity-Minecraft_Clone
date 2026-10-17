@@ -1,7 +1,7 @@
 # Lighting Async-Bug Validation Roadmap (AS-1 … AS-5)
 
-**Version:** 1.0  
-**Date:** 2026-07-03  
+**Version:** 1.1  
+**Date:** 2026-10-17  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > **Status:** In progress — **AS-1 CLOSED 2026-07-04** (Bugs 13 + 14 both reproduced, fixed, confirmed
@@ -206,7 +206,7 @@ The Bug-09 fleet stays legacy/byte-identical. 62 baselines green, editor assembl
 - **Migration:** a shared helper `RunScenarioBothModes(body)` runs a scenario in legacy + scheduler mode. Keep the existing Bug-09 fleet (B15/B16/B22/B26–B29/B40/B41) in legacy mode (byte-identical)
   and add the scheduler-mode second pass as **new baselines B65+** (suite tip is B64) — preferred over a mode toggle inside each existing baseline, so the two passes are distinct regression guards.
 - **Prove-red:** temporarily disable one promotion hook (e.g. comment the completion-`PromoteNeighborhood`) → a border-lamp scenario must stall (converge only via fail-safe) → red under the fail-safe-off assertion. Restore → green.
-- **Definition of done:** scheduler mode + fleet second pass green with fail-safe off, prove-red documented, fidelity finding **B6** flipped to CLOSED, and the "existing coverage" suite-count line in `VALIDATION_SUITE_COVERAGE_ROADMAP.md` updated.
+- **Definition of done:** scheduler mode + fleet second pass green with fail-safe off, prove-red documented, and fidelity finding **B6** flipped to CLOSED.
 
 > **Plan detail (2026-07-06, Phase 3 — done after HF-4 #2).** Phases 1–2 are committed (`39ea1d5`,
 > `18c97b6`); HF-4 #1 (`3199436`) shares the scan arm. Phase 3 is harness-only (no production edit),
@@ -338,7 +338,7 @@ Accept these; route them to AS-5 instead of burning effort on a synchronous laye
 - Scenario turns **red** → it is a faithful repro: move the bug's entry forward per
   `validation-driven-bugfix`; after the fix + in-game confirmation, promote to a baseline and archive the bug via `archive-fixed-bug`.
 - Scenario stays **green** → record the negative result in the bug entry *and* the fidelity doc (the C1/C2 precedent: a green fuzz still closes a search axis and becomes regression coverage).
-- AS-2 / AS-3 / AS-4 completions flip their fidelity findings (B6 / C8 / B3-amendment) and should update the suite counts in `VALIDATION_SUITE_COVERAGE_ROADMAP.md`'s "existing coverage" line.
+- AS-2 / AS-3 / AS-4 completions flip their fidelity findings (B6 / C8 / B3-amendment).
 
 ---
 
@@ -512,6 +512,8 @@ Both extractions are chunk-pipeline edits → `CHUNK_LIFECYCLE_PIPELINE.md` doc-
 project's Document History convention, so they record what the commits changed rather than
 contemporaneous notes.*
 
+* **v1.1** - Dropped the duty to update `VALIDATION_SUITE_COVERAGE_ROADMAP.md`'s suite counts from AS-3's
+  definition of done and the completion notes: that doc no longer records counts (2026-10-17).
 * **v1.0** - Mandatory header completed (2026-07-26): `Version`/`Date`/`Target`, an `Audited` line and a
   relationship list. The detailed status roll-up already at the top of the summary blockquote is
   unchanged — it is more specific than a one-line `Status:` field could be. First versioned edition.

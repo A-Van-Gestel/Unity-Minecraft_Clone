@@ -1,7 +1,7 @@
 # Validation Suite Coverage Roadmap — Uncovered Systems, Ranked
 
-**Version:** 1.6  
-**Date:** 2026-09-05  
+**Version:** 1.7  
+**Date:** 2026-10-17  
 **Status:** **Living backlog.** `NS-4`, `NS-5`, `NS-7` and `NS-7b` are ✅ complete (NS-4 2026-08-03; NS-5 at the CP-2
 close-out; NS-7 and NS-7b both 2026-08-20 — the migration chain is now covered end to end, and NS-7b's first
 run found `SERIALIZATION_BUGS` §10, fixed 2026-08-21 and archived as `_FIXED_BUGS.md` Serialization 07, its `K10`
@@ -10,7 +10,7 @@ repro promoted to baseline `B25`). `NS-1` is **✅ COMPLETE (2026-08-21, parts 1
 roadmap is closed, and the two open serialization bugs it found (`§04`, `§08`) are guarded by repros.
 `NS-3` is 🟡 **slice 1 shipped (2026-08-22)** — 6 baselines, grown scenario-wise from here.
 `NS-2`, `NS-6` and `NS-8`…`NS-11` remain proposals.
-Existing-coverage counts are re-verified against a real `Validate All` run each time they are touched.  
+Live suite and baseline counts are deliberately not recorded here; see *Existing coverage* below.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > Which systems currently have **no validation suite** and deserve one, ranked most → least
@@ -23,13 +23,16 @@ Existing-coverage counts are re-verified against a real `Validate All` run each 
 > Status: **Living backlog.** NS-1 is partially seeded (CP-3's robustness slice, 2026-07-22); NS-5 ✅
 > (CP-2 close-out, 2026-07-22), NS-4 ✅ (2026-08-03) and NS-7 + NS-7b ✅ (both 2026-08-20) are complete — see the per-item status lines; the rest are proposals.
 
-> **These counts are a dated snapshot and drift every time a phase adds a baseline — verify before citing them.**
-> Regenerate from the `=== Validate All — combined summary ===` block that `Minecraft Clone/Dev/Validate All`
-> logs: it prints the per-suite tally and the total. Treat any figure below that disagrees with a fresh run as
-> stale, not as the run being wrong.
+> **This document holds no live suite or baseline counts, by design.** Every per-suite tally it used to
+> carry drifted with the next baseline a phase added, and correcting them became a recurring Document History
+> entry. Counts now live only where they are computed.
 
-**Existing coverage (for contrast, counts re-verified 2026-08-24 against a full `Validate All` run — 574 baselines / 25 suites, 0 failures, 0 isolation violations, 2 known-bug repros outstanding (`K04`/`K08`, `SERIALIZATION_BUGS` §04 and §08); 3 min 19 s wall clock, of which Lighting is the dominant share):** Lighting (112 — B108–B114 are the fidelity **C14** mixed-channel mirrors, B115–B119 the LP-4 `LightingWork` transition census and cascade-effects guard, and B120 the LP-5 weak-gate edge-check fallback), Meshing (57 — including the **MP-\* orchestration** baselines B24–B27 and B31–B33, the meshing-side groundwork this roadmap's NS-3 convergence family names, B34–B36 guarding the chunk load-animation toggle, MP-7's neighbor-map permutation guards B37–B39 — one of which guards a direction→offset table feeding the **lighting** schedule too — and MH-13's B40, the same permutation guard for the eight neighbor
-**light** maps), Behavior/fluid tick (17, incl. determinism gates), Placement (29 — VQ-2's six ray-march guards and VQ-3's five sub-voxel guards landed here), **Physics Solver (26 — NS-4, incl. the retired `PLAYER_BUGS` §04's tripwires B18/B19, its promoted repro B20–B23, `PH-1`'s step-0 horizontal-aggregation guard B24 and its gather-envelope guard B25, and `PH-2`'s B26 pinning that `CalculateVelocity` never writes the transform)**, MeshBuildQueue (9), LightWorkScheduler (9), Chunk Math (72 — the NS-5 G1–G4 coverage extension added 16: 6 padded-volume, 4 flattened-index, 4 region-filename, 2 legacy-V1-encoder), Chunk Unload Decision (9), Pool Prune Decision (5), Pipeline Backpressure (22), **Chunk Pipeline (7 — NS-3 slice 1, the pipeline state machine: `B1` is the harness's own deadlock prove-red; `B7` is LP-2's `NeighborReadinessDecision` gate-term census)**, Save Durability (13), Deserialization Robustness (9), **Serialization Round-Trip (16 — NS-1 parts 1–5, plus the `K04`/`K08` repros of `SERIALIZATION_BUGS` §04 and §08)**, **Migration Chain (25 — NS-7 + NS-7b, incl. `B25`, the promoted `K10` repro of the bug archived as `_FIXED_BUGS.md` Serialization 07)**, Spawn (10), Command Console (56), Voxel Occlusion (6), Sky & Celestial (15), Sky Render (11), World Clock (10), UI Blur Render (5), Worm Carver (6), Validation Framework (18), plus the standalone `VoxelMetadataUtility` / `FastNoiseLite` tests (the `ChunkRelativePosition` tests are no longer standalone — they are the Chunk Math suite's `.ChunkRelativePosition.cs` partial).
+**Existing coverage (for contrast):** the suites `Minecraft Clone/Dev/Validate All` runs are the ones registered
+in `Assets/Editor/Validation/Framework/ValidationSuiteRegistry.cs`. That list is authoritative, not this
+document, and `ExpectedSuiteCount` pins its length. Per-suite and total baseline counts, failures, isolation
+violations and outstanding known-bug repros come from the `=== Validate All — combined summary ===` block the
+run logs. Figures in the audit notes and the Document History below are dated records of a past run, never
+current state. A doc that needs a count cites that summary block rather than copying a number into this one.
 
 **Build protocol for every suite below:** the `validation-driven-bugfix` skill (deterministic repro first, prove-red before trusting green, promote repros to baselines). New suites should land on the shared `ValidationSuiteRunner` (`VS-1`, ✅ shipped 2026-07-08): register `Scenario`s and return its `ValidationRunResult` from a headless `Execute()`, with a thin `[MenuItem]` wrapper. All suites stay on the custom validation framework: migrating to the Unity Test Framework was evaluated 2026-07-02 and rejected (see the status header in
 [`../Archived/UNITY_TEST_FRAMEWORK_MIGRATION.md`](../Archived/UNITY_TEST_FRAMEWORK_MIGRATION.md)); the CI/coverage/XML gaps close via the VS-2 extensions instead.
@@ -462,9 +465,9 @@ what this document ranks.
 
 ## Deliberate: not every menu-item suite belongs in `Validate All`
 
-`ValidationSuiteRegistry` carries **30** registered suites, pinned by `ExpectedSuiteCount` and guarded
-by `ValidationFrameworkSelfTest.RegistryMeetsExpectedCount` (which reds if a suite is *dropped*) and by
-the aggregate runner's and `ValidationSuiteCI`'s count check. Some validation entry points intentionally
+The suites in `ValidationSuiteRegistry` are pinned by `ExpectedSuiteCount` and guarded by
+`ValidationFrameworkSelfTest.RegistryMeetsExpectedCount` (which reds if a suite is *dropped*) and by the
+aggregate runner's and `ValidationSuiteCI`'s count check. Some validation entry points intentionally
 sit **outside** that registry and therefore outside `Validate All` and CI:
 
 - **`Minecraft Clone/Dev/Validate Fluid Parallel Determinism (Cross-Chunk Halo, Y-band)`**
@@ -512,6 +515,12 @@ infrastructure hygiene: do (1) and (2) with the next framework change, and treat
 ---
 
 ## Document History
+
+* **v1.7** *(2026-10-17)* - **Live counts removed.** The *Existing coverage* census listed a baseline count
+  per suite, and the "Deliberate" section a registered-suite count. Both had drifted (Command Console read 56
+  against 66; the registry read 30 against `ExpectedSuiteCount` 32). The census is now a pointer to
+  `ValidationSuiteRegistry` for the suite list and to the `Validate All` combined summary for every count, so
+  there is nothing left here to go stale. Dated figures in earlier entries and the audit notes are unchanged.
 
 *Entries below the newest are reconstructed from git history — this document predates the
 project's Document History convention, so they record what the commits changed rather than
