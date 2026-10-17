@@ -32,6 +32,10 @@ also matches `batch`). Pick the entry by its `name`.
   raise: `eval`'s own `timeout` parameter is shadowed by the CLI's `--timeout <seconds>`. The work still runs to
   completion behind the error. Put anything longer behind a menu item and run it with `menu … --detach`.
 - **Every `run_script` argument must be passed**; C# default parameter values are not applied.
+- **Each `run_script` call compiles a fresh assembly**, so a script's statics never survive into the next call — a
+  second `run_script` of the same file sees empty state. To read a long-running script's state (one that hooked
+  `EditorApplication.update`), `eval` with reflection into the `assemblyName` the first call returned;
+  `Tools/UnityCli/PlayMode/PregenProbe.cs`'s header has the one-liner.
 - **`run_script` compiles against `Assembly-CSharp-Editor` too**: a `Tools/UnityCli/` script may use editor-only
   types (the validation framework, test worlds) with their `using`.
 
