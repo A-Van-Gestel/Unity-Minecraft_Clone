@@ -1015,7 +1015,7 @@ enabled *and* disabled after each phase.
    to the default) plus the correctness items. Whoever answers this should also state where the
    supported ceiling is, since `viewDistance` is `[Range]`-editable up to a value no capture defends.
 
-   > **✅ ANSWERED by the product owner, 2026-08-02: large view distances ARE supported, vd 32 included,
+   > **✅ ANSWERED 2026-08-02: large view distances ARE supported, vd 32 included,
    > and 32+ is a stated future goal.** The `viewDistance = 5` default is **legacy** — it dates from a
    > period when the engine could not hold larger distances and it persists as an editor-build testing
    > convenience, not as a statement about the supported range. The intended default is **12–15** once it
@@ -1169,7 +1169,7 @@ enabled *and* disabled after each phase.
   discharges its standing contingency. **Q1/Q2/Q3a remain unmeasured** — the flag cannot flip on without a
   same-build IL2CPP A/B (§7).
 
-* **v1.9** - **§10 q5 ANSWERED by the product owner: large view distances are supported, vd 32 included,
+* **v1.9** - **§10 q5 ANSWERED: large view distances are supported, vd 32 included,
   and 32+ is a future goal** — the `viewDistance = 5` default is legacy (an editor-build testing
   convenience from a period when the engine could not hold more), and the intended default is **12–15**.
   So **P-9 does not park after P9-2**: the vd ≥ 20 failures are product defects in a supported
