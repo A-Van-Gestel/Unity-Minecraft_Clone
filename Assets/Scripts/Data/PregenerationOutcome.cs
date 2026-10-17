@@ -15,6 +15,38 @@ namespace Data
         Canceled,
     }
 
+    /// <summary>
+    /// A running pre-generation's position, raised after each station is checked. The walk finds missing chunks one
+    /// station at a time, so progress is measured in stations, not chunks.
+    /// </summary>
+    public readonly struct PregenerationProgressReport
+    {
+        /// <summary>Stations checked so far, walked or skipped.</summary>
+        public readonly long StationsChecked;
+
+        /// <summary>Stations in the rectangle's grid.</summary>
+        public readonly long StationCount;
+
+        /// <summary>Chunks generated so far.</summary>
+        public readonly long Generated;
+
+        /// <summary>Wall-clock seconds since the run started.</summary>
+        public readonly double ElapsedSeconds;
+
+        /// <summary>Creates a progress report.</summary>
+        /// <param name="stationsChecked">Stations checked so far.</param>
+        /// <param name="stationCount">Stations in the grid.</param>
+        /// <param name="generated">Chunks generated so far.</param>
+        /// <param name="elapsedSeconds">Seconds since the run started.</param>
+        public PregenerationProgressReport(long stationsChecked, long stationCount, long generated, double elapsedSeconds)
+        {
+            StationsChecked = stationsChecked;
+            StationCount = stationCount;
+            Generated = generated;
+            ElapsedSeconds = elapsedSeconds;
+        }
+    }
+
     /// <summary>The result of one pre-generation run: what was asked, what was done, and what was not.</summary>
     public sealed class PregenerationOutcome
     {
@@ -24,14 +56,20 @@ namespace Data
         /// <summary>The rectangle the run covered.</summary>
         public ChunkRect Rect;
 
-        /// <summary>Chunks neither on disk nor resident when the run started.</summary>
-        public int MissingAtStart;
+        /// <summary>Chunks the walk found neither on disk nor resident, over the stations it checked.</summary>
+        public long MissingFound;
 
-        /// <summary>Stations planned for the first pass.</summary>
+        /// <summary>Stations in the rectangle's grid.</summary>
+        public long StationGridCount;
+
+        /// <summary>Stations checked, walked or skipped; below <see cref="StationGridCount"/> only when canceled.</summary>
+        public long StationsChecked;
+
+        /// <summary>Stations the first pass moved the anchor to — the ones that held a missing chunk.</summary>
         public int Stations;
 
         /// <summary>Missing chunks the run generated.</summary>
-        public int Generated;
+        public long Generated;
 
         /// <summary>Chunks still missing after the retry pass (0 unless <see cref="PregenerationStatus.CompletedWithStalls"/>).</summary>
         public int Stalled;

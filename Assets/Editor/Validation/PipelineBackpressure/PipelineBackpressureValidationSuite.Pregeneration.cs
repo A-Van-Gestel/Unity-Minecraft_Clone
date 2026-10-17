@@ -9,14 +9,15 @@ namespace Editor.Validation.PipelineBackpressure
 {
     /// <summary>
     /// CMD-6 pre-generation planning (<see cref="PregenerationPlan"/>, design CHUNK_PREGENERATION.md §3.2/§4.4/§4.5):
-    /// the station grid's exact tiling, the station filter, the serpentine walk order, the two-tier readiness
-    /// decision and the start validation. All pure — no world is involved.
+    /// the station grid's exact tiling, the indexed walk the streaming driver uses (cover clipping and the
+    /// station-index inverse), the serpentine walk order, the two-tier readiness decision and the start validation.
+    /// All pure — no world is involved.
     /// <para><b>Prove-red (by temporary mutation):</b> a stride of <c>2r</c> or <c>2r + 2</c> in
-    /// <see cref="PregenerationPlan.BuildStationGrid"/> reds B26 (overlap / gap); keeping every grid station in
-    /// <see cref="PregenerationPlan.FilterStations"/> reds B27; dropping the row reversal reds B28; dropping the
-    /// generation-job clause or the lighting-job clause in <see cref="PregenerationPlan.Classify"/> reds B29;
-    /// moving the world-state checks above the argument checks in <see cref="PregenerationPlan.ValidateStart"/>
-    /// reds B30.</para>
+    /// <see cref="PregenerationPlan.StationAt"/> reds B26 (overlap / gap); dropping the row reversal in
+    /// <see cref="PregenerationPlan.StationIndexOf"/> reds B27, and in <see cref="PregenerationPlan.StationAt"/>
+    /// reds B28; dropping the generation-job clause or the lighting-job clause in
+    /// <see cref="PregenerationPlan.Classify"/> reds B29; moving the world-state checks above the border check in
+    /// <see cref="PregenerationPlan.ValidateStart"/> reds B30.</para>
     /// </summary>
     public static partial class PipelineBackpressureValidationSuite
     {
@@ -100,57 +101,110 @@ namespace Editor.Validation.PipelineBackpressure
         }
 
         /// <summary>
-        /// B27. A fully generated rectangle plans zero stations; a single missing chunk plans exactly the one
-        /// station whose cover holds it; a fully missing rectangle keeps the whole grid, in its order.
+        /// B27. The indexed walk the streaming driver relies on: for every cell of every tested shape and radius,
+        /// <see cref="PregenerationPlan.StationIndexOf"/> names a valid index whose station's clipped cover square
+        /// holds the cell; the clipped squares never leave the rectangle and their sizes sum to its chunk count; and
+        /// <see cref="PregenerationPlan.TryGetNeighborStation"/> (the driver's capture-before-walk step) finds a
+        /// neighbor exactly when the stepped center is on the grid, and lands on it. Then
+        /// the doc's two vd 10 scenarios as the driver walks them: a fresh 90 x 90 checks 16 stations, and the +3/+3
+        /// shift's 531-chunk L leaves exactly 7 stations holding a missing chunk.
         /// </summary>
-        private static bool RunB27PregenStationFilter()
+        private static bool RunB27PregenIndexedWalk()
         {
-            const int radius = 11;
-            ChunkRect rect = new ChunkRect(new ChunkCoord(0, 0), new ChunkCoord(89, 89));
-            List<ChunkCoord> grid = new List<ChunkCoord>();
-            List<ChunkCoord> kept = new List<ChunkCoord>();
-            List<ChunkCoord> scratch = new List<ChunkCoord>();
-            HashSet<ChunkCoord> missing = new HashSet<ChunkCoord>();
-            PregenerationPlan.BuildStationGrid(rect, radius, grid);
-
-            PregenerationPlan.FilterStations(grid, radius, missing, kept, scratch);
-            bool ok = Check($"empty missing set -> zero stations (got {kept.Count})", kept.Count == 0);
-
-            ChunkCoord lone = new ChunkCoord(50, 70);
-            missing.Add(lone);
-            PregenerationPlan.FilterStations(grid, radius, missing, kept, scratch);
-            ok &= Check($"one missing chunk -> one station (got {kept.Count})", kept.Count == 1);
-            if (kept.Count == 1)
+            bool ok = true;
+            foreach ((string label, ChunkRect rect) in s_pregenShapes)
             {
-                PregenerationPlan.CollectTargets(kept[0], radius, missing, scratch);
-                ok &= Check("...whose cover holds exactly that chunk", scratch.Count == 1 && scratch[0].Equals(lone));
+                string failure = null;
+                for (int radius = MIN_TESTED_COVER_RADIUS; radius <= MAX_TESTED_COVER_RADIUS && failure == null; radius++)
+                {
+                    long count = PregenerationPlan.StationGridCount(rect, radius);
+                    long clippedTotal = 0;
+                    for (long i = 0; i < count && failure == null; i++)
+                    {
+                        ChunkRect cover = PregenerationPlan.ClipCover(PregenerationPlan.StationAt(rect, radius, i), radius, rect);
+                        clippedTotal += cover.Count;
+                        if (!rect.Contains(new ChunkCoord(cover.MinX, cover.MinZ)) ||
+                            !rect.Contains(new ChunkCoord(cover.MaxX, cover.MaxZ)))
+                            failure = $"radius {radius}: station #{i}'s clipped cover {cover} leaves the rectangle";
+                    }
+
+                    if (failure == null && clippedTotal != rect.Count)
+                        failure = $"radius {radius}: clipped covers sum to {clippedTotal}, the rectangle holds {rect.Count}";
+
+                    // Neighbor capture: a step exists exactly when the stepped center stays on the grid, and lands there.
+                    long stride = 2L * radius + 1;
+                    long maxCenterX = rect.MinX + radius + ((rect.Width + stride - 1) / stride - 1) * stride;
+                    long maxCenterZ = rect.MinZ + radius + ((rect.Depth + stride - 1) / stride - 1) * stride;
+                    for (long i = 0; i < count && failure == null; i++)
+                    {
+                        ChunkCoord center = PregenerationPlan.StationAt(rect, radius, i);
+                        for (int dz = -1; dz <= 1 && failure == null; dz++)
+                        for (int dx = -1; dx <= 1 && failure == null; dx++)
+                        {
+                            long cx = center.X + dx * stride, cz = center.Z + dz * stride;
+                            bool onGrid = cx >= rect.MinX + radius && cx <= maxCenterX && cz >= rect.MinZ + radius && cz <= maxCenterZ;
+                            bool found = PregenerationPlan.TryGetNeighborStation(rect, radius, i, dx, dz, out long n);
+                            if (found != onGrid)
+                                failure = $"radius {radius}: station #{i} step ({dx}, {dz}) found={found}, on grid={onGrid}";
+                            else if (found && !PregenerationPlan.StationAt(rect, radius, n).Equals(new ChunkCoord((int)cx, (int)cz)))
+                                failure = $"radius {radius}: station #{i} step ({dx}, {dz}) lands on {PregenerationPlan.StationAt(rect, radius, n)}";
+                        }
+                    }
+
+                    for (int z = rect.MinZ; z <= rect.MaxZ && failure == null; z++)
+                    for (int x = rect.MinX; x <= rect.MaxX && failure == null; x++)
+                    {
+                        ChunkCoord cell = new ChunkCoord(x, z);
+                        long index = PregenerationPlan.StationIndexOf(rect, radius, cell);
+                        if (index < 0 || index >= count)
+                            failure = $"radius {radius}: cell {cell} maps to index {index} of {count}";
+                        else if (!PregenerationPlan.ClipCover(PregenerationPlan.StationAt(rect, radius, index), radius, rect)
+                                     .Contains(cell))
+                            failure = $"radius {radius}: cell {cell} is not in the cover of station #{index}";
+                    }
+                }
+
+                ok &= Check($"[{label}] station index round-trips and clipped covers tile the rectangle, radii " +
+                            $"{MIN_TESTED_COVER_RADIUS}..{MAX_TESTED_COVER_RADIUS}" + (failure == null ? "" : $" — {failure}"),
+                    failure == null);
             }
 
-            for (int z = rect.MinZ; z <= rect.MaxZ; z++)
-            for (int x = rect.MinX; x <= rect.MaxX; x++)
-                missing.Add(new ChunkCoord(x, z));
+            // The doc's two prototype scenarios at vd 10 (cover radius 11), as the driver walks them: every grid
+            // station is checked, and only those whose cover holds a missing chunk are walked.
+            const int vd10Radius = 11;
+            ChunkRect fresh = new ChunkRect(new ChunkCoord(0, 0), new ChunkCoord(89, 89));
+            ok &= Check("fresh 90 x 90 at vd 10 checks 16 stations",
+                PregenerationPlan.StationGridCount(fresh, vd10Radius) == 16);
 
-            PregenerationPlan.FilterStations(grid, radius, missing, kept, scratch);
-            bool sameOrder = kept.Count == grid.Count;
-            for (int i = 0; sameOrder && i < kept.Count; i++) sameOrder = kept[i].Equals(grid[i]);
-            ok &= Check($"fully missing rectangle keeps all {grid.Count} grid stations in walk order", sameOrder);
-
-            // The doc's two prototype scenarios at vd 10: a fresh 90 x 90 plans 16 stations; the same rectangle
-            // shifted +3/+3 over generated terrain leaves a 531-chunk L and plans 7.
-            ok &= Check("fresh 90 x 90 at vd 10 plans 16 stations", kept.Count == 16);
             ChunkRect shifted = new ChunkRect(new ChunkCoord(3, 3), new ChunkCoord(92, 92));
             HashSet<ChunkCoord> strip = new HashSet<ChunkCoord>();
             for (int z = shifted.MinZ; z <= shifted.MaxZ; z++)
             for (int x = shifted.MinX; x <= shifted.MaxX; x++)
             {
                 ChunkCoord chunkCoord = new ChunkCoord(x, z);
-                if (!rect.Contains(chunkCoord)) strip.Add(chunkCoord);
+                if (!fresh.Contains(chunkCoord)) strip.Add(chunkCoord);
             }
 
-            PregenerationPlan.BuildStationGrid(shifted, radius, grid);
-            PregenerationPlan.FilterStations(grid, radius, strip, kept, scratch);
-            ok &= Check($"shifted rectangle: 531 missing plan 7 stations (got {strip.Count} / {kept.Count})",
-                strip.Count == 531 && kept.Count == 7);
+            List<ChunkCoord> targets = new List<ChunkCoord>();
+            int walked = 0;
+            long shiftedCount = PregenerationPlan.StationGridCount(shifted, vd10Radius);
+            for (long i = 0; i < shiftedCount; i++)
+            {
+                PregenerationPlan.CollectTargets(PregenerationPlan.StationAt(shifted, vd10Radius, i), vd10Radius, strip, targets);
+                if (targets.Count > 0) walked++;
+            }
+
+            ok &= Check($"shifted rectangle: 531 missing walk 7 stations (got {strip.Count} / {walked})",
+                strip.Count == 531 && walked == 7);
+
+            // The retry pass regroups a stalled chunk onto its station: CollectTargets there yields exactly that chunk.
+            ChunkCoord lone = new ChunkCoord(50, 70);
+            HashSet<ChunkCoord> stalled = new HashSet<ChunkCoord> { lone };
+            ChunkCoord loneStation = PregenerationPlan.StationAt(fresh, vd10Radius,
+                PregenerationPlan.StationIndexOf(fresh, vd10Radius, lone));
+            PregenerationPlan.CollectTargets(loneStation, vd10Radius, stalled, targets);
+            ok &= Check("a stalled chunk regroups onto the one station whose cover holds it",
+                targets.Count == 1 && targets[0].Equals(lone));
             return ok;
         }
 
@@ -232,37 +286,31 @@ namespace Editor.Validation.PipelineBackpressure
         }
 
         /// <summary>
-        /// B30. Start validation and its precedence: argument problems (size, border) before world state (no
-        /// world, persistence, active run, teleport hold), each refusal reachable alone, and a clean start.
+        /// B30. Start validation and its precedence: the argument problem (border) before world state (no world,
+        /// persistence, active run, teleport hold), each refusal reachable alone, and a clean start. A rectangle's
+        /// size is not a fact here at all — the streaming walk never refuses one.
         /// </summary>
         private static bool RunB30PregenValidateStart()
         {
-            static StartRefusal RefusalOf(long count, bool inside, bool loaded, bool persistence, bool running, bool hold) =>
-                PregenerationPlan.ValidateStart(new PregenerationPlan.StartFacts(count, inside, loaded, persistence,
-                    running, hold));
+            static StartRefusal RefusalOf(bool inside, bool loaded, bool persistence, bool running, bool hold) =>
+                PregenerationPlan.ValidateStart(new PregenerationPlan.StartFacts(inside, loaded, persistence, running,
+                    hold));
 
-            const long allowedCount = 100;
-            const long tooMany = PregenerationPlan.MaxChunkCount + 1;
-
-            bool ok = Check("clean facts -> None", RefusalOf(allowedCount, true, true, true, false, false) == StartRefusal.None);
-            ok &= Check("exactly MaxChunkCount is allowed",
-                RefusalOf(PregenerationPlan.MaxChunkCount, true, true, true, false, false) == StartRefusal.None);
-            ok &= Check("too many chunks -> TooManyChunks", RefusalOf(tooMany, true, true, true, false, false) == StartRefusal.TooManyChunks);
-            ok &= Check("corner outside border -> OutsideBorder", RefusalOf(allowedCount, false, true, true, false, false) == StartRefusal.OutsideBorder);
-            ok &= Check("no world -> NoWorld", RefusalOf(allowedCount, true, false, true, false, false) == StartRefusal.NoWorld);
+            bool ok = Check("clean facts -> None", RefusalOf(true, true, true, false, false) == StartRefusal.None);
+            ok &= Check("corner outside border -> OutsideBorder", RefusalOf(false, true, true, false, false) == StartRefusal.OutsideBorder);
+            ok &= Check("no world -> NoWorld", RefusalOf(true, false, true, false, false) == StartRefusal.NoWorld);
             ok &= Check("persistence off -> PersistenceDisabled",
-                RefusalOf(allowedCount, true, true, false, false, false) == StartRefusal.PersistenceDisabled);
-            ok &= Check("run active -> AlreadyRunning", RefusalOf(allowedCount, true, true, true, true, false) == StartRefusal.AlreadyRunning);
+                RefusalOf(true, true, false, false, false) == StartRefusal.PersistenceDisabled);
+            ok &= Check("run active -> AlreadyRunning", RefusalOf(true, true, true, true, false) == StartRefusal.AlreadyRunning);
             ok &= Check("teleport hold -> TeleportHoldActive",
-                RefusalOf(allowedCount, true, true, true, false, true) == StartRefusal.TeleportHoldActive);
+                RefusalOf(true, true, true, false, true) == StartRefusal.TeleportHoldActive);
 
-            ok &= Check("precedence: size before border before world state",
-                RefusalOf(tooMany, false, false, false, true, true) == StartRefusal.TooManyChunks
-                && RefusalOf(allowedCount, false, false, false, true, true) == StartRefusal.OutsideBorder);
+            ok &= Check("precedence: border before world state",
+                RefusalOf(false, false, false, true, true) == StartRefusal.OutsideBorder);
             ok &= Check("precedence: no world before persistence before run before hold",
-                RefusalOf(allowedCount, true, false, false, true, true) == StartRefusal.NoWorld
-                && RefusalOf(allowedCount, true, true, false, true, true) == StartRefusal.PersistenceDisabled
-                && RefusalOf(allowedCount, true, true, true, true, true) == StartRefusal.AlreadyRunning);
+                RefusalOf(true, false, false, true, true) == StartRefusal.NoWorld
+                && RefusalOf(true, true, false, true, true) == StartRefusal.PersistenceDisabled
+                && RefusalOf(true, true, true, true, true) == StartRefusal.AlreadyRunning);
             return ok;
         }
     }

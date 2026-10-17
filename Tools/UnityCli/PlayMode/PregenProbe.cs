@@ -63,10 +63,10 @@ namespace UnityCli
             return s_log + "assemblyName=" + typeof(PregenProbe).Assembly.GetName().Name;
         }
 
-        private static void OnProgress(int generated, int missingAtStart, int station, int stationCount)
+        private static void OnProgress(PregenerationProgressReport report)
         {
             s_progressLines++;
-            s_log.AppendLine($"station {station}/{stationCount}: {generated}/{missingAtStart} generated " +
+            s_log.AppendLine($"station {report.StationsChecked}/{report.StationCount}: {report.Generated} generated " +
                              $"t={Time.realtimeSinceStartup:F1}s resident={World.Instance.worldData.ChunkCount}");
         }
 
@@ -75,7 +75,7 @@ namespace UnityCli
             s_outcome = outcome;
             World.Instance.PregenerationProgress -= OnProgress;
             World.Instance.PregenerationEnded -= OnEnded;
-            s_log.AppendLine($"ENDED {outcome.Status} missingAtStart={outcome.MissingAtStart} stations={outcome.Stations} " +
+            s_log.AppendLine($"ENDED {outcome.Status} missingFound={outcome.MissingFound} stations={outcome.Stations} " +
                              $"generated={outcome.Generated} elapsed={outcome.ElapsedSeconds:F1}s " +
                              $"populate={outcome.PopulateSeconds:F1}s settle={outcome.SettleSeconds:F1}s " +
                              $"slowest={outcome.SlowestStationSeconds:F1}s@{outcome.SlowestStation} stalled={outcome.Stalled} " +

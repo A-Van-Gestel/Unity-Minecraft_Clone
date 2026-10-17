@@ -2257,11 +2257,8 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// <summary>The station walk, created on first use.</summary>
     private ChunkPregenerator Pregenerator => _pregenerator ??= new ChunkPregenerator(this);
 
-    /// <summary>
-    /// Raised after each pre-generation station with (chunks generated so far, chunks missing at start, station
-    /// number, stations in the pass).
-    /// </summary>
-    public event Action<int, int, int, int> PregenerationProgress;
+    /// <summary>Raised after each pre-generation station is checked, walked or skipped.</summary>
+    public event Action<PregenerationProgressReport> PregenerationProgress;
 
     /// <summary>Raised when a pre-generation run finishes, with its outcome.</summary>
     public event Action<PregenerationOutcome> PregenerationEnded;
@@ -2278,7 +2275,6 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     public PregenerationPlan.StartRefusal CheckPregenerationStart(ChunkRect rect)
     {
         return PregenerationPlan.ValidateStart(new PregenerationPlan.StartFacts(
-            rect.Count,
             AreRectCornersInsideBorder(rect),
             _isWorldLoaded,
             settings.EnablePersistence && StorageManager != null,
@@ -2352,8 +2348,16 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     }
 
     /// <summary>Raises <see cref="PregenerationProgress"/>.</summary>
-    internal void RaisePregenerationProgress(int generated, int missingAtStart, int station, int stationCount) =>
-        PregenerationProgress?.Invoke(generated, missingAtStart, station, stationCount);
+    internal void RaisePregenerationProgress(in PregenerationProgressReport report) => PregenerationProgress?.Invoke(report);
+
+    /// <summary>
+    /// Free space on the drive that holds this world's saves, for the pre-generation disk warning. Keeps the
+    /// <c>Commands</c> namespace free of file-system types.
+    /// </summary>
+    /// <param name="freeBytes">The bytes available to this process on success.</param>
+    /// <returns>False when the drive cannot be determined or queried.</returns>
+    public bool TryGetSaveDriveFreeBytes(out long freeBytes) =>
+        DiskSpace.TryGetFreeBytes(SaveSystem.GetSavePath(worldData.worldName, IsVolatileMode), out freeBytes);
 
     /// <summary>Raises <see cref="PregenerationEnded"/>.</summary>
     internal void RaisePregenerationEnded(PregenerationOutcome outcome) => PregenerationEnded?.Invoke(outcome);

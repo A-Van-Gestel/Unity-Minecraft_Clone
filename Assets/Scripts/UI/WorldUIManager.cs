@@ -1,4 +1,5 @@
 using Commands;
+using Data;
 using Diagnostics;
 using UI.Toast;
 using Unity.Scripting.LifecycleManagement;
@@ -78,6 +79,9 @@ namespace UI
 
         /// <summary>The runtime-spawned console view (CMD-1). Built in <see cref="Awake"/> — no scene object involved.</summary>
         private ConsoleUI _console;
+
+        /// <summary>The last 10 % step posted for the running pre-generation; 0 before the first.</summary>
+        private int _pregenerationProgressStep;
 
         /// <summary>
         /// Gets or sets whether the command console is open. Opening disables the Gameplay action
@@ -159,6 +163,8 @@ namespace UI
             {
                 _console.Engine.Context.AttachWorld(World.Instance, World.Instance.player);
                 World.Instance.TeleportHoldEnded += OnTeleportHoldEnded;
+                World.Instance.PregenerationProgress += OnPregenerationProgress;
+                World.Instance.PregenerationEnded += OnPregenerationEnded;
             }
 
             // Registered even without a world: /help stays consistent, and world-touching commands
@@ -171,7 +177,28 @@ namespace UI
         {
             if (Instance == this) Instance = null;
             if (World.Instance != null)
+            {
                 World.Instance.TeleportHoldEnded -= OnTeleportHoldEnded;
+                World.Instance.PregenerationProgress -= OnPregenerationProgress;
+                World.Instance.PregenerationEnded -= OnPregenerationEnded;
+            }
+        }
+
+        /// <summary>Posts a console line at each 10 % step of a running pre-generation (CMD-6 §4.6).</summary>
+        /// <param name="report">The run's position.</param>
+        private void OnPregenerationProgress(PregenerationProgressReport report)
+        {
+            string line = ChunkCommand.ProgressLine(report, ref _pregenerationProgressStep);
+            if (line != null) _console.Engine.PostLine(ConsoleLineSeverity.Info, line);
+        }
+
+        /// <summary>Posts a finished pre-generation's outcome and resets the progress steps for the next run.</summary>
+        /// <param name="outcome">The run's outcome.</param>
+        private void OnPregenerationEnded(PregenerationOutcome outcome)
+        {
+            _pregenerationProgressStep = 0;
+            ConsoleLine line = ChunkCommand.EndedLine(outcome);
+            _console.Engine.PostLine(line.Severity, line.Text);
         }
 
         /// <summary>Surfaces the teleport arrival-hold outcome (§3.3 CMD-2) in the console.</summary>

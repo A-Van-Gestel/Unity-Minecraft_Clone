@@ -33,7 +33,7 @@ namespace Commands
             registry.Register(new SpeedCommand());
             registry.Register(new GiveCommand());
             registry.Register(new SetBlockCommand());
-            registry.Register(new ChunkInfoCommand());
+            registry.Register(new ChunkCommand());
             registry.Register(new SoundCommand());
             registry.Register(new MusicCommand());
             registry.Register(new ToastCommand());

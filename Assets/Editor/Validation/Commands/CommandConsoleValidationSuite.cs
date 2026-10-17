@@ -40,6 +40,7 @@ namespace Editor.Validation.Commands
             AddBaselineScenarios(scenarios);
             AddTeleportScenarios(scenarios);
             AddCommandPackScenarios(scenarios);
+            AddPregenerationScenarios(scenarios);
             AddCompletionScenarios(scenarios);
             AddKnownBugScenarios(scenarios);
             return ValidationSuiteRunner.Execute("Command Console", scenarios, KnownBugChannel.Bug, logToConsole, showProgress);
@@ -67,6 +68,9 @@ namespace Editor.Validation.Commands
 
         /// <summary>Registers the CMD-3 command-pack baselines (implemented in CommandConsoleValidationSuite.Pack.cs).</summary>
         static partial void AddCommandPackScenarios(List<Scenario> scenarios);
+
+        /// <summary>Registers the CMD-6 /chunk generate baselines (implemented in CommandConsoleValidationSuite.Pregeneration.cs).</summary>
+        static partial void AddPregenerationScenarios(List<Scenario> scenarios);
 
         /// <summary>Registers the CMD-5 Tab-completion baselines (implemented in CommandConsoleValidationSuite.Completion.cs).</summary>
         static partial void AddCompletionScenarios(List<Scenario> scenarios);

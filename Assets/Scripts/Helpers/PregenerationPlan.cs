@@ -6,18 +6,15 @@ namespace Helpers
 {
     /// <summary>
     /// Pure planning arithmetic for the CMD-6 pre-generator's station walk: the rectangle, the cover radius, the
-    /// serpentine station grid and its filter, the per-target readiness decision and the start validation. The
-    /// driver gathers the world facts and performs every side effect; this class only maps facts to decisions, so
-    /// each rule is truth-table-testable in edit mode.
+    /// serpentine station grid (addressed by index, so a rectangle of any size is walked without materializing it),
+    /// the per-target readiness decision and the start validation. The driver gathers the world facts and performs
+    /// every side effect; this class only maps facts to decisions, so each rule is truth-table-testable in edit mode.
     /// See Documentation/Design/CHUNK_PREGENERATION.md §3.2 (readiness tiers), §4.4 (station geometry) and §4.5.
     /// </summary>
     public static class PregenerationPlan
     {
         /// <summary>A run over more chunks than this asks for confirmation first.</summary>
         public const long ConfirmChunkCount = 10_000;
-
-        /// <summary>A run over more chunks than this is refused.</summary>
-        public const long MaxChunkCount = 250_000;
 
         // A target at Chebyshev distance LoadDistance − 2 has neighbors at LoadDistance − 1, whose own neighbors
         // are all resident — the outermost ring that can still light fully and pass AreNeighborsReadyAndLit.
@@ -41,9 +38,6 @@ namespace Helpers
         {
             /// <summary>The run may start.</summary>
             None,
-
-            /// <summary>The rectangle holds more than <see cref="MaxChunkCount"/> chunks.</summary>
-            TooManyChunks,
 
             /// <summary>The world border is set and a rectangle corner lies outside it.</summary>
             OutsideBorder,
@@ -104,9 +98,6 @@ namespace Helpers
         /// <summary>World state gathered when a run is asked to start.</summary>
         public readonly struct StartFacts
         {
-            /// <summary>Chunks in the requested rectangle.</summary>
-            public readonly long ChunkCount;
-
             /// <summary>Every rectangle corner lies inside the world border (true when no border is set).</summary>
             public readonly bool CornersInsideBorder;
 
@@ -123,16 +114,14 @@ namespace Helpers
             public readonly bool TeleportHoldActive;
 
             /// <summary>Creates the start facts.</summary>
-            /// <param name="chunkCount">Chunks in the requested rectangle.</param>
             /// <param name="cornersInsideBorder">Every corner lies inside the world border.</param>
             /// <param name="worldLoaded">A world is loaded.</param>
             /// <param name="persistenceEnabled">Persistence is enabled with a storage manager.</param>
             /// <param name="runActive">A run is already active.</param>
             /// <param name="teleportHoldActive">A teleport arrival hold is active.</param>
-            public StartFacts(long chunkCount, bool cornersInsideBorder, bool worldLoaded, bool persistenceEnabled,
-                bool runActive, bool teleportHoldActive)
+            public StartFacts(bool cornersInsideBorder, bool worldLoaded, bool persistenceEnabled, bool runActive,
+                bool teleportHoldActive)
             {
-                ChunkCount = chunkCount;
                 CornersInsideBorder = cornersInsideBorder;
                 WorldLoaded = worldLoaded;
                 PersistenceEnabled = persistenceEnabled;
@@ -174,7 +163,7 @@ namespace Helpers
             return (span + stride - 1) / stride;
         }
 
-        /// <summary>Stations in the unfiltered grid — an upper bound on the planned walk (sizing hints).</summary>
+        /// <summary>Stations in the grid — every station the walk checks; it moves only to those holding a missing chunk.</summary>
         /// <param name="rect">The rectangle.</param>
         /// <param name="coverRadius">The cover radius.</param>
         /// <returns>The grid's station count.</returns>
@@ -182,9 +171,92 @@ namespace Helpers
             StationsAlong(rect.Width, coverRadius) * StationsAlong(rect.Depth, coverRadius);
 
         /// <summary>
-        /// Fills <paramref name="into"/> with the unfiltered serpentine station grid: cover squares of side
-        /// <c>2r + 1</c> tile the rectangle from its minimum corner, and rows alternate direction so consecutive
-        /// stations are neighbors and each arrival finds the previous station's terrain resident.
+        /// The station at a walk index: cover squares of side <c>2r + 1</c> tile the rectangle from its minimum corner,
+        /// and rows alternate direction (serpentine) so consecutive stations are neighbors and each arrival finds the
+        /// previous station's terrain resident.
+        /// </summary>
+        /// <param name="rect">The rectangle.</param>
+        /// <param name="coverRadius">The cover radius.</param>
+        /// <param name="index">The walk index, in <c>[0, StationGridCount)</c>.</param>
+        /// <returns>The station chunk.</returns>
+        public static ChunkCoord StationAt(ChunkRect rect, int coverRadius, long index)
+        {
+            long stride = 2L * coverRadius + 1;
+            (long row, long column) = GridCellOf(rect, coverRadius, index);
+            return new ChunkCoord((int)(rect.MinX + coverRadius + column * stride),
+                (int)(rect.MinZ + coverRadius + row * stride));
+        }
+
+        /// <summary>The walk index of the station whose cover square holds a chunk of the rectangle (inverse of <see cref="StationAt"/>).</summary>
+        /// <param name="rect">The rectangle.</param>
+        /// <param name="coverRadius">The cover radius.</param>
+        /// <param name="chunkCoord">A chunk inside <paramref name="rect"/>.</param>
+        /// <returns>The walk index.</returns>
+        public static long StationIndexOf(ChunkRect rect, int coverRadius, ChunkCoord chunkCoord)
+        {
+            long stride = 2L * coverRadius + 1;
+            return IndexOfGridCell(rect, coverRadius, ((long)chunkCoord.Z - rect.MinZ) / stride,
+                ((long)chunkCoord.X - rect.MinX) / stride);
+        }
+
+        /// <summary>
+        /// The walk index of the grid station <paramref name="columnOffset"/> columns and <paramref name="rowOffset"/>
+        /// rows from a station, when the grid has one. A walked station streams chunks into its eight neighbors'
+        /// covers and no further: a station two steps away is <c>3r + 2</c> chunks out, past <c>LoadDistance = r + 2</c>.
+        /// </summary>
+        /// <param name="rect">The rectangle.</param>
+        /// <param name="coverRadius">The cover radius.</param>
+        /// <param name="index">The station's walk index.</param>
+        /// <param name="columnOffset">Columns to step (+X).</param>
+        /// <param name="rowOffset">Rows to step (+Z).</param>
+        /// <param name="neighbor">The neighbor's walk index on success.</param>
+        /// <returns>False when the step leaves the grid.</returns>
+        public static bool TryGetNeighborStation(ChunkRect rect, int coverRadius, long index, int columnOffset,
+            int rowOffset, out long neighbor)
+        {
+            (long row, long column) = GridCellOf(rect, coverRadius, index);
+            long neighborRow = row + rowOffset;
+            long neighborColumn = column + columnOffset;
+            if (neighborRow < 0 || neighborRow >= StationsAlong(rect.Depth, coverRadius) ||
+                neighborColumn < 0 || neighborColumn >= StationsAlong(rect.Width, coverRadius))
+            {
+                neighbor = -1;
+                return false;
+            }
+
+            neighbor = IndexOfGridCell(rect, coverRadius, neighborRow, neighborColumn);
+            return true;
+        }
+
+        /// <summary>The (row, column) grid cell of a walk index — the serpentine mapping's one definition.</summary>
+        private static (long Row, long Column) GridCellOf(ChunkRect rect, int coverRadius, long index)
+        {
+            long columns = StationsAlong(rect.Width, coverRadius);
+            long row = index / columns;
+            long walked = index % columns;
+            return (row, (row & 1) == 0 ? walked : columns - 1 - walked);
+        }
+
+        /// <summary>The walk index of a (row, column) grid cell — the inverse of <see cref="GridCellOf"/>.</summary>
+        private static long IndexOfGridCell(ChunkRect rect, int coverRadius, long row, long column)
+        {
+            long columns = StationsAlong(rect.Width, coverRadius);
+            return row * columns + ((row & 1) == 0 ? column : columns - 1 - column);
+        }
+
+        /// <summary>A station's cover square clipped to the rectangle — the chunks that station is responsible for.</summary>
+        /// <param name="station">The station chunk.</param>
+        /// <param name="coverRadius">The cover radius.</param>
+        /// <param name="rect">The rectangle.</param>
+        /// <returns>The clipped square; never empty for a grid station.</returns>
+        public static ChunkRect ClipCover(ChunkCoord station, int coverRadius, ChunkRect rect) =>
+            new ChunkRect(
+                new ChunkCoord(Math.Max(rect.MinX, station.X - coverRadius), Math.Max(rect.MinZ, station.Z - coverRadius)),
+                new ChunkCoord(Math.Min(rect.MaxX, station.X + coverRadius), Math.Min(rect.MaxZ, station.Z + coverRadius)));
+
+        /// <summary>
+        /// Fills <paramref name="into"/> with the whole station grid in walk order (<see cref="StationAt"/> for every
+        /// index). For tests and small rectangles; the driver walks by index instead of materializing the grid.
         /// </summary>
         /// <param name="rect">The rectangle to cover.</param>
         /// <param name="coverRadius">The cover radius.</param>
@@ -192,29 +264,18 @@ namespace Helpers
         public static void BuildStationGrid(ChunkRect rect, int coverRadius, List<ChunkCoord> into)
         {
             into.Clear();
-            int stride = 2 * coverRadius + 1;
-            int columns = (int)StationsAlong(rect.Width, coverRadius);
-            int rows = (int)StationsAlong(rect.Depth, coverRadius);
-
-            for (int row = 0; row < rows; row++)
-            {
-                int stationZ = rect.MinZ + coverRadius + row * stride;
-                bool forward = (row & 1) == 0;
-                for (int i = 0; i < columns; i++)
-                {
-                    int column = forward ? i : columns - 1 - i;
-                    into.Add(new ChunkCoord(rect.MinX + coverRadius + column * stride, stationZ));
-                }
-            }
+            long count = StationGridCount(rect, coverRadius);
+            for (long i = 0; i < count; i++) into.Add(StationAt(rect, coverRadius, i));
         }
 
         /// <summary>
-        /// Fills <paramref name="into"/> with the missing chunks inside one station's cover square, in row order.
-        /// Walks the square rather than the set, so the cost is bounded by the square whatever the set's size.
+        /// Fills <paramref name="into"/> with the chunks of a set inside one station's cover square, in row order —
+        /// the retry pass's targets, gathered from the stalled set. Walks the square rather than the set, so the cost
+        /// is bounded by the square whatever the set's size.
         /// </summary>
         /// <param name="station">The station chunk.</param>
         /// <param name="coverRadius">The cover radius.</param>
-        /// <param name="missing">The chunks still to generate.</param>
+        /// <param name="missing">The chunks to collect from.</param>
         /// <param name="into">Destination; cleared first.</param>
         public static void CollectTargets(ChunkCoord station, int coverRadius, HashSet<ChunkCoord> missing,
             List<ChunkCoord> into)
@@ -229,26 +290,6 @@ namespace Helpers
                     ChunkCoord chunkCoord = station.Neighbor(dx, dz);
                     if (missing.Contains(chunkCoord)) into.Add(chunkCoord);
                 }
-            }
-        }
-
-        /// <summary>
-        /// Keeps only the stations whose cover square holds at least one missing chunk, preserving the walk order.
-        /// A fully generated rectangle plans zero stations.
-        /// </summary>
-        /// <param name="grid">The unfiltered grid (<see cref="BuildStationGrid"/>).</param>
-        /// <param name="coverRadius">The cover radius.</param>
-        /// <param name="missing">The chunks still to generate.</param>
-        /// <param name="into">Destination; cleared first.</param>
-        /// <param name="scratch">Reusable target list.</param>
-        public static void FilterStations(List<ChunkCoord> grid, int coverRadius, HashSet<ChunkCoord> missing,
-            List<ChunkCoord> into, List<ChunkCoord> scratch)
-        {
-            into.Clear();
-            foreach (ChunkCoord station in grid)
-            {
-                CollectTargets(station, coverRadius, missing, scratch);
-                if (scratch.Count > 0) into.Add(station);
             }
         }
 
@@ -268,14 +309,14 @@ namespace Helpers
         }
 
         /// <summary>
-        /// Decides whether a run may start. Argument problems are reported before world state, so a refusal names
-        /// what the caller can fix first.
+        /// Decides whether a run may start. The argument problem (the border) is reported before world state, so a
+        /// refusal names what the caller can fix first. A rectangle's size is never a refusal: the walk's memory is
+        /// bounded by one station, and the command warns about disk and time instead.
         /// </summary>
         /// <param name="facts">The start facts.</param>
         /// <returns>The first refusal that applies, or <see cref="StartRefusal.None"/>.</returns>
         public static StartRefusal ValidateStart(in StartFacts facts)
         {
-            if (facts.ChunkCount > MaxChunkCount) return StartRefusal.TooManyChunks;
             if (!facts.CornersInsideBorder) return StartRefusal.OutsideBorder;
             if (!facts.WorldLoaded) return StartRefusal.NoWorld;
             if (!facts.PersistenceEnabled) return StartRefusal.PersistenceDisabled;
