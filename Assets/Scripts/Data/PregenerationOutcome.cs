@@ -92,7 +92,7 @@ namespace Data
         /// <summary>The longest single station, in seconds (§8 Q1's measure).</summary>
         public double SlowestStationSeconds;
 
-        /// <summary>The station <see cref="SlowestStationSeconds"/> was measured at.</summary>
+        /// <summary>Where the anchor stood for the station <see cref="SlowestStationSeconds"/> was measured at.</summary>
         public ChunkCoord SlowestStation;
 
         /// <summary>Why the run was canceled, or null.</summary>

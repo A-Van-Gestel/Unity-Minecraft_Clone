@@ -1,6 +1,6 @@
 # Design Document: Infinite World Storage & Serialization Architecture
 
-**Version:** 1.7 **Date:** 2026-06-13  
+**Version:** 1.14 **Date:** 2026-10-17  
 **Status:** Implemented (Stable)  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)
 
@@ -1057,6 +1057,16 @@ Load a world, fly to edge (0,0) or (99,99), verify no permanent dark strips.
     * Add periodic retry system in `World.Update()`
     * Ensures edge chunks eventually light
 
+3. **Region-file handle eviction** (filed 2026-10-17, CMD-6)
+    * **Current:** `ChunkStorageManager._regions` keeps every `RegionFile` it has opened — and its `FileStream` and
+      header — until `Dispose`; only a faulted open is evicted (CP-3). Nothing closes an idle region.
+    * Pre-existing for long play sessions too: every region the player ever streamed through stays open. The CMD-6
+      pre-generator (`/chunk generate`) reaches it faster, since a large rectangle touches many regions in one run
+      (one region is 32 × 32 chunks, so a 2 000 × 2 000-chunk run opens about 4 000).
+    * Fix shape: close regions untouched for a while, under the region lock, never one with a save in flight
+      ([`../Design/REGION_FILE_CONCURRENCY.md`](../Design/REGION_FILE_CONCURRENCY.md)).
+    * Not urgent: the pre-generator's main consumer is the benchmark, whose rectangles span a few regions.
+
 ### 11.2. Long-Term
 
 1. **Incremental Saves**
@@ -1230,8 +1240,10 @@ Pre-migration backups are created as sibling world folders named `{WorldName}_Ba
 * **v1.12** - CP-3 load-boundary failure contract: corrupt payload → null + pooled-shell return (no leak) → regenerate; transient I/O fault → throw (+ faulted-`Lazy` region eviction) → load-arm retry; `SaveChunkData` write faults rethrow instead of reporting a false `Written`; latent `Serialize`-with-`None` dispose bug fixed. New `Validate Deserialization Robustness` suite (NS-1 seed, B1–B7). No format change — read-path behavior on invalid data only
 * **v1.13** - CP-3 review hardening: too-large chunk writes are the typed `ChunkTooLargeException` → `FailedPermanent` on every save path (closes the last false-`Written` hole; `InjectTooLargeSaves` seam + Save Durability B13); `RegionFile` disposes its `FileStream` on partial-init throw (no leaked handle poisoning retries); `ChunkData.LifecycleEpoch` closes the load-arm fault path's pool-ABA window (round 2: the mid-await unload guard too); migration reads gain a bounded transient retry and the v1→v2 repack per-chunk fault isolation (skip-one-chunk, not
   abort); shared `StorageValidationFixture` + one `TryConsumeInjection` core for all four seams
+* **v1.14** - §11.1 item 3: region-file handle eviction filed as a backlog item (regions stay open until `Dispose`),
+  found while removing CMD-6's pre-generation size cap. No code change
 
 ---
 
-**Last Updated:** 2026-07-22  
+**Last Updated:** 2026-10-17  
 **Next Review:** Chunk prioritization or Defragmentation

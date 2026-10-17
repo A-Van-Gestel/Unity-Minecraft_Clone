@@ -9,6 +9,7 @@ using Helpers;
 using Launch;
 using Unity.Profiling;
 using UnityEngine;
+using UnityEngine.Pool;
 using UnityEngine.SceneManagement;
 using Debug = UnityEngine.Debug;
 
@@ -23,8 +24,8 @@ namespace Benchmarks
     /// <see cref="Settings.benchmarkPhaseSeconds"/> — rows sit <c>2 × LoadDistance</c> apart so each sweeps
     /// virgin terrain. Every speed phase runs exactly one phase duration, at every view distance, which is
     /// what makes two captures comparable (FP-9b).</para>
-    /// <para><b>Ensure Generated:</b> the loading tour is flown once slowly so its terrain is on disk before
-    /// the transition saves it. Not a measurement — it carries no regime verdict.</para>
+    /// <para><b>Ensure Generated:</b> the loading tour's rectangle is pre-generated (CMD-6) so its terrain is on
+    /// disk before the transition saves it. Not a measurement — it carries no regime verdict.</para>
     /// <para><b>Transition:</b> All active jobs are drained, world data is saved to disk,
     /// and chunks are force-unloaded from memory via <see cref="World.ForceUnloadAllChunks"/>.
     /// This ensures the loading pass exercises the deserialization pipeline.</para>
@@ -106,6 +107,12 @@ namespace Benchmarks
 
         /// <summary>The <see cref="SettingsDifferenceReport"/> block, captured beside the pipeline snapshot for the same reason.</summary>
         private string _settingsDifferenceForCapture;
+
+        /// <summary>How the ensure pass's pre-generation ended; null when it did not run, which the report says.</summary>
+        private PregenerationOutcome _pregenerationOutcome;
+
+        /// <summary>The world whose progress event this controller is subscribed to, if any.</summary>
+        private World _progressWorld;
 
         // ── Frame Rate Overrides ─────────────────────────────────────────
 
@@ -249,8 +256,9 @@ namespace Benchmarks
 
             // FP-11a: start crediting tour coverage HERE rather than at the ensure pass, so terrain the
             // generation phases already produced counts — it is on disk by the time the loading pass asks
-            // for it, which is the only property the ensure sweep exists to guarantee.
+            // for it, which is the only property pre-generation exists to guarantee.
             BenchmarkTourCoverage.Arm(_routeGeometry, settings.LoadDistance);
+            CreditExistingTourTerrain(settings.LoadDistance);
 
             _totalStopwatch = Stopwatch.StartNew();
             IsRunning = true;
@@ -304,7 +312,8 @@ namespace Benchmarks
                 _savedVSyncCount,
                 _savedTargetFrameRate,
                 _pipelineSettingsForCapture,
-                _settingsDifferenceForCapture);
+                _settingsDifferenceForCapture,
+                _pregenerationOutcome);
 
             ShowResults(reportResult);
         }
@@ -312,6 +321,9 @@ namespace Benchmarks
         private void OnDestroy()
         {
             _metricsCollector?.StopRecording();
+
+            // A coroutine killed mid-yield skips its finally block, so the ensure pass's subscription is dropped here.
+            UnsubscribePregenerationProgress();
 
             // Close any phase still open (an aborted run) and switch the layer off. The domain reset covers
             // a play-mode restart, but not returning to the main menu within one session.
@@ -353,14 +365,26 @@ namespace Benchmarks
         /// pipeline state (FP-9a). Defaults true so the generation and loading phases are unaffected.
         /// </param>
         private void BeginPhaseBoth(string phaseName, string groupName, float speedMetersPerSecond,
-            bool regimeBearing = true, float phaseSecondsOverride = 0f)
+            bool regimeBearing = true)
         {
-            float seconds = phaseSecondsOverride > 0f ? phaseSecondsOverride : _phaseSeconds;
-            _metricsCollector.BeginPhase(phaseName, groupName);
-            PipelineTelemetry.BeginPhase(phaseName, groupName,
+            BeginPhaseBothSized(phaseName, groupName,
                 PipelineTelemetry.EstimateTraceCapacity(_pipelineSettingsForCapture.LoadDistance,
-                    speedMetersPerSecond, seconds),
+                    speedMetersPerSecond, _phaseSeconds),
                 regimeBearing);
+        }
+
+        /// <summary>
+        /// <see cref="BeginPhaseBoth"/> with an explicit trace capacity, for a phase not sized by flight speed and
+        /// duration (the pre-generation walk).
+        /// </summary>
+        /// <param name="phaseName">Display name.</param>
+        /// <param name="groupName">Logical group.</param>
+        /// <param name="traceCapacity">The trace table's capacity hint.</param>
+        /// <param name="regimeBearing">Whether the phase may carry a regime verdict.</param>
+        private void BeginPhaseBothSized(string phaseName, string groupName, int traceCapacity, bool regimeBearing)
+        {
+            _metricsCollector.BeginPhase(phaseName, groupName);
+            PipelineTelemetry.BeginPhase(phaseName, groupName, traceCapacity, regimeBearing);
         }
 
         /// <summary>Closes the current phase on both recorders (both are no-ops when none is open).</summary>
@@ -440,20 +464,19 @@ namespace Benchmarks
         }
 
         /// <summary>
-        /// Flies the loading tour once at <see cref="BenchmarkRouteGeometry.EnsureGeneratedSpeed"/> so every
-        /// chunk the loading pass will visit exists on disk before the transition saves and unloads.
+        /// Pre-generates <see cref="BenchmarkRouteGeometry.TourChunkBounds"/> (CMD-6) so every chunk the loading
+        /// pass will visit exists on disk before the transition saves and unloads.
         /// </summary>
         /// <returns>The coroutine enumerator.</returns>
         /// <remarks>
-        /// <b>Not a measurement</b> — begun with <c>regimeBearing: false</c> (FP-9a) so a deliberately slow
-        /// sweep cannot contribute a regime verdict. Its purpose is correctness, not data: without it any
-        /// chunk the fast generation phases failed to populate would be <i>generated</i> by the loading pass,
-        /// which would then be measuring generation while labeled loading.
+        /// <b>Not a measurement</b> — begun with <c>regimeBearing: false</c> (FP-9a), so the station walk cannot
+        /// contribute a regime verdict. Its purpose is correctness, not data: without it any chunk the fast
+        /// generation phases failed to populate would be <i>generated</i> by the loading pass, which would then be
+        /// measuring generation while labeled loading.
         /// <para>
-        /// It flies the tour <b>legs</b> rather than the whole swept region deliberately: the loading pass
-        /// only ever visits those legs, so this is the smallest sufficient sweep — and its cost stays
-        /// constant (~211 s) no matter how many speed phases are configured, whereas a full-region sweep
-        /// would grow with them (~2 684 s once 300/500 m/s are added).
+        /// Its cost follows the chunks still missing, not the route: chunks the generation phases already produced
+        /// are read from disk or residency and never waited on. The walk leaves the player at its last station;
+        /// the loading pass places it itself.
         /// </para>
         /// </remarks>
         private IEnumerator RunEnsureGeneratedPass()
@@ -462,51 +485,40 @@ namespace Benchmarks
 
             CurrentGroupName = GROUP_ENSURE;
             CurrentPhaseName = "Ensure Generated";
-            TotalWaypointsInActivePass = _loadingWaypoints.Count;
-            Progress = -1f;
+            TotalWaypointsInActivePass = 0;
+            Progress = 0f;
 
-            transform.position = WorldOrigin.VoxelToUnity(_loadingWaypoints[0]);
-            _activeWaypointIndex = 1;
-            FaceWaypoint(WorldOrigin.VoxelToUnity(_loadingWaypoints[1]));
+            // The same LoadDistance the coverage footprint was armed with, so the rectangle contains it exactly.
+            World world = World.Instance;
+            int loadDistance = _pipelineSettingsForCapture.LoadDistance;
+            ChunkRect rect = _routeGeometry.TourChunkBounds(loadDistance);
+            long stations = PregenerationPlan.StationGridCount(rect, PregenerationPlan.CoverRadius(loadDistance));
 
-            yield return WaitForChunkPipelineToSettle();
+            BeginPhaseBothSized(CurrentPhaseName, GROUP_ENSURE,
+                PipelineTelemetry.EstimateStationWalkCapacity(loadDistance, stations), regimeBearing: false);
+            Debug.Log($"[Benchmark] === Ensure Generated: pre-generating {rect} ({stations} stations) ===");
 
-            // Sized from THIS pass's duration, not _phaseSeconds: the sweep runs ~7x a speed phase, and a
-            // capacity hint short by that factor makes the trace table rehash mid-run — the incremental
-            // growth design §6 pre-sizes to avoid, landing inside the benchmark process.
-            BeginPhaseBoth(CurrentPhaseName, GROUP_ENSURE, BenchmarkRouteGeometry.EnsureGeneratedSpeed,
-                regimeBearing: false, phaseSecondsOverride: _routeGeometry.EnsureGeneratedSeconds);
-            Debug.Log("[Benchmark] === Ensure Generated: covering the loading tour at " +
-                      $"{BenchmarkRouteGeometry.EnsureGeneratedSpeed} m/s ===");
-
-            // Leg-bounded, unlike the timed passes: this one exists to COVER the tour, so it walks the whole
-            // circuit exactly once. Looping beyond that would repeat work; stopping early would defeat the
-            // purpose — and stopping at the LAST WAYPOINT is stopping early, because the loading pass loops
-            // its waypoints and therefore also flies the return leg back to the first. That leg went
-            // ungenerated until FP-11a, and at low view distance the load radius does not reach across it.
-            int legsToFly = _loadingWaypoints.Count;
-            int legsFlown = 0;
-            int previousWaypointIndex = _activeWaypointIndex;
-
-            while (legsFlown < legsToFly)
+            // A refused start yields nothing and leaves the previous outcome in place, so only a new object counts.
+            PregenerationOutcome previous = world.LastPregenerationOutcome;
+            _progressWorld = world;
+            world.PregenerationProgress += OnPregenerationProgress;
+            try
             {
-                Progress = (float)legsFlown / legsToFly;
-                OverallProgress = Mathf.Clamp01((_currentOverallPhaseIndex + Progress) / _totalPhaseCount);
-                StepTowardWaypoint(_loadingWaypoints, BenchmarkRouteGeometry.EnsureGeneratedSpeed, loop: true);
-
-                // An arrival ALWAYS increments the index by exactly one; the wrap back to 0 happens on a
-                // later call and completes no leg, so testing for the increment cannot double-count it.
-                if (_activeWaypointIndex == previousWaypointIndex + 1) legsFlown++;
-                previousWaypointIndex = _activeWaypointIndex;
-
-                yield return null;
+                yield return world.PregenerateRegion(rect);
+            }
+            finally
+            {
+                UnsubscribePregenerationProgress();
             }
 
-            EndPhaseBoth();
+            PregenerationOutcome outcome = world.LastPregenerationOutcome;
+            _pregenerationOutcome = ReferenceEquals(outcome, previous) ? null : outcome;
 
-            // Snapshot only — accrual continues through the transition, which drains and saves the backlog
-            // the gate deferred out of this sweep. Freezing here would count that terrain as missing even
-            // though the loading pass genuinely loads it.
+            EndPhaseBoth();
+            LogPregenerationOutcome(_pregenerationOutcome);
+
+            // Snapshot only — accrual continues through the transition, which drains and saves what is still in
+            // flight. Freezing here would count that terrain as missing even though the loading pass loads it.
             BenchmarkTourCoverage.SnapshotEnsurePass();
 
             _currentOverallPhaseIndex++;
@@ -515,16 +527,96 @@ namespace Benchmarks
         }
 
         /// <summary>
+        /// Credits the tour terrain that exists before the run — resident and populated, or saved on disk — to the
+        /// coverage tracker, which otherwise counts only what is populated after it arms.
+        /// </summary>
+        /// <param name="loadDistance">The <c>LoadDistance</c> the tracker was armed with.</param>
+        private void CreditExistingTourTerrain(int loadDistance)
+        {
+            World world = World.Instance;
+            HashSet<ChunkCoord> existing = HashSetPool<ChunkCoord>.Get();
+            try
+            {
+                if (world.StorageManager != null)
+                    world.StorageManager.CollectSavedChunks(_routeGeometry.TourChunkBounds(loadDistance), existing);
+
+                foreach (ChunkData data in world.worldData.ChunkValues)
+                {
+                    if (data.IsPopulated) existing.Add(ChunkCoord.FromVoxelOrigin(data.Position));
+                }
+
+                BenchmarkTourCoverage.CreditExisting(existing);
+            }
+            catch (System.Exception e)
+            {
+                // Coverage then undercounts, which the report prints loudly; the run itself is unaffected.
+                Debug.LogError($"[Benchmark] Could not read the existing tour terrain for coverage: {e.Message}");
+            }
+            finally
+            {
+                HashSetPool<ChunkCoord>.Release(existing);
+            }
+        }
+
+        /// <summary>Maps the walk's station progress onto the HUD.</summary>
+        /// <param name="report">The walk's position.</param>
+        private void OnPregenerationProgress(PregenerationProgressReport report)
+        {
+            Progress = report.StationCount > 0 ? (float)report.StationsChecked / report.StationCount : 1f;
+            OverallProgress = Mathf.Clamp01((_currentOverallPhaseIndex + Progress) / _totalPhaseCount);
+        }
+
+        /// <summary>Drops the progress subscription, if any.</summary>
+        private void UnsubscribePregenerationProgress()
+        {
+            // A reference check, not Unity's null: a destroyed world still holds the delegate.
+            if (ReferenceEquals(_progressWorld, null)) return;
+
+            _progressWorld.PregenerationProgress -= OnPregenerationProgress;
+            _progressWorld = null;
+        }
+
+        /// <summary>
+        /// Logs how pre-generation ended. Anything short of <see cref="PregenerationStatus.Completed"/> is an error
+        /// but not fatal: the coverage instrument decides whether the loading pass is admissible.
+        /// </summary>
+        /// <param name="outcome">The run's outcome, or null when the start was refused.</param>
+        private static void LogPregenerationOutcome(PregenerationOutcome outcome)
+        {
+            if (outcome == null)
+            {
+                Debug.LogError("[Benchmark] Pre-generation NOT RUN — its start was refused (see the [Pregen] error), " +
+                               "so the loading tour's terrain is not guaranteed to exist.");
+                return;
+            }
+
+            switch (outcome.Status)
+            {
+                case PregenerationStatus.Canceled:
+                    Debug.LogError($"[Benchmark] Pre-generation CANCELED ({outcome.CancelReason}) after " +
+                                   $"{outcome.StationsChecked} of {outcome.StationGridCount} stations.");
+                    break;
+                case PregenerationStatus.CompletedWithStalls:
+                    Debug.LogError($"[Benchmark] Pre-generation left {outcome.Stalled} chunks STALLED after its " +
+                                   "retry pass.");
+                    break;
+                default:
+                    Debug.Log($"[Benchmark] Pre-generation generated {outcome.Generated} chunks over " +
+                              $"{outcome.Stations} stations in {outcome.ElapsedSeconds:F1} s.");
+                    break;
+            }
+        }
+
+        /// <summary>
         /// Logs how much of the loading tour exists on disk as the loading pass begins (FP-11a), alongside
-        /// what the ensure sweep alone achieved.
+        /// what pre-generation alone achieved.
         /// </summary>
         /// <remarks>
         /// Only the final figure gates admissibility, and it is loud below
-        /// <see cref="BenchmarkTourCoverage.MinimumCoverage"/> on the same grounds as the shrunken-tour
-        /// banner: the loading pass is then partly generating terrain while labeled loading, and its numbers
-        /// look entirely plausible anyway. The ensure figure is informational — a sweep the gate throttled is
-        /// not a problem if the transition drain finished the job. An unmeasurable result is reported as such
-        /// and never as 100 %.
+        /// <see cref="BenchmarkTourCoverage.MinimumCoverage"/>: the loading pass is then partly generating terrain
+        /// while labeled loading, and its numbers look entirely plausible anyway. The pre-generation figure is
+        /// informational — chunks still in flight when it ends are finished and saved by the transition drain. An
+        /// unmeasurable result is reported as such and never as 100 %.
         /// </remarks>
         private static void ReportTourCoverage()
         {
@@ -539,7 +631,7 @@ namespace Benchmarks
 
             string message = $"[Benchmark] Loading-tour coverage: {BenchmarkTourCoverage.CoveredChunks.ToString()} / " +
                              $"{required.ToString()} chunks on disk when the loading pass starts " +
-                             $"({BenchmarkTourCoverage.CoverageFraction * 100f:F1} %); the ensure sweep alone " +
+                             $"({BenchmarkTourCoverage.CoverageFraction * 100f:F1} %); pre-generation alone " +
                              $"reached {BenchmarkTourCoverage.EnsurePassCoveredChunks.ToString()} " +
                              $"({BenchmarkTourCoverage.EnsurePassCoverageFraction * 100f:F1} %).";
 
@@ -547,9 +639,9 @@ namespace Benchmarks
             else
                 Debug.LogError(message + " Below " +
                                (BenchmarkTourCoverage.MinimumCoverage * 100f).ToString("F0") +
-                               " % — the panic gate throttled the sweep and the transition did not finish the " +
-                               "job, so the loading pass will GENERATE part of its terrain rather than load " +
-                               "it. Treat its numbers as inadmissible at this view distance.");
+                               " % — pre-generation did not complete and the transition did not finish the job, " +
+                               "so the loading pass will GENERATE part of its terrain rather than load it. Treat " +
+                               "its numbers as inadmissible.");
         }
 
         /// <summary>
@@ -595,7 +687,7 @@ namespace Benchmarks
 
             yield return WaitForChunkPipelineToSettle();
 
-            // +2, not +1: the ensure-generated sweep and the transition both precede the loading phases.
+            // +2, not +1: the ensure-generated pass and the transition both precede the loading phases.
             int loadingPhaseBase = _generationSpeeds.Length + 2;
             for (int i = 0; i < _loadingSpeeds.Length; i++)
             {
@@ -768,16 +860,17 @@ namespace Benchmarks
 
             BenchmarkRouteGeometry geometry = _routeGeometry;
 
-            // A shrunken tour means the timed phases cannot cover the loading route, so the loading pass
-            // would generate terrain instead of loading it — the confound FP-9b removes. Loud, because the
-            // capture is not comparable to any other and the numbers would look plausible anyway.
+            // A shrunken tour is sized to the little the timed phases cover, so the loading pass flies a smaller
+            // route than a full-tour capture does. Pre-generation still makes its terrain exist; the loudness is
+            // because the capture is not comparable to a full-tour one and its numbers would look plausible anyway.
             if (geometry.TourWasShrunk)
             {
                 Debug.LogError("[Benchmark] Loading tour shrunk to " +
                                $"{geometry.TourChunks} chunks (wanted {BenchmarkRouteGeometry.LoadingTourChunks}) — " +
                                "the configured speeds travel too little distance for the generation phases to " +
-                               "cover it. The loading pass will GENERATE terrain, not load it. Raise the " +
-                               "generation speeds or the phase duration before trusting this capture.");
+                               "cover it. The loading pass flies a smaller route, so this capture is not " +
+                               "comparable to a full-tour one. Raise the generation speeds or the phase duration " +
+                               "for a comparable capture.");
             }
 
             BuildGenerationWaypoints(geometry);

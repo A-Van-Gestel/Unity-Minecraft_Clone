@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Benchmarks;
 using Data;
 using Helpers;
 using Readiness = Helpers.PregenerationPlan.Readiness;
@@ -10,14 +11,17 @@ namespace Editor.Validation.PipelineBackpressure
     /// <summary>
     /// CMD-6 pre-generation planning (<see cref="PregenerationPlan"/>, design CHUNK_PREGENERATION.md §3.2/§4.4/§4.5):
     /// the station grid's exact tiling, the indexed walk the streaming driver uses (cover clipping and the
-    /// station-index inverse), the serpentine walk order, the two-tier readiness decision and the start validation.
+    /// station-index inverse), the serpentine walk order, the two-tier readiness decision and the start validation,
+    /// plus the benchmark's use of it: the tour rectangle it pre-generates and the trace capacity sized from its grid.
     /// All pure — no world is involved.
     /// <para><b>Prove-red (by temporary mutation):</b> a stride of <c>2r</c> or <c>2r + 2</c> in
     /// <see cref="PregenerationPlan.StationAt"/> reds B26 (overlap / gap); dropping the row reversal in
     /// <see cref="PregenerationPlan.StationIndexOf"/> reds B27, and in <see cref="PregenerationPlan.StationAt"/>
-    /// reds B28; dropping the generation-job clause or the lighting-job clause in
+    /// reds B28; anchoring on the station itself in <see cref="PregenerationPlan.AnchorOf"/> reds B27; dropping the generation-job clause or the lighting-job clause in
     /// <see cref="PregenerationPlan.Classify"/> reds B29; moving the world-state checks above the border check in
-    /// <see cref="PregenerationPlan.ValidateStart"/> reds B30.</para>
+    /// <see cref="PregenerationPlan.ValidateStart"/> reds B30; widening
+    /// <see cref="BenchmarkRouteGeometry.TourChunkBounds"/> by one chunk reds B31 and leaves B18 green; dropping the
+    /// stations factor in <see cref="PipelineTelemetry.EstimateStationWalkCapacity"/> reds B32.</para>
     /// </summary>
     public static partial class PipelineBackpressureValidationSuite
     {
@@ -107,7 +111,8 @@ namespace Editor.Validation.PipelineBackpressure
         /// <see cref="PregenerationPlan.TryGetNeighborStation"/> (the driver's capture-before-walk step) finds a
         /// neighbor exactly when the stepped center is on the grid, and lands on it. Then
         /// the doc's two vd 10 scenarios as the driver walks them: a fresh 90 x 90 checks 16 stations, and the +3/+3
-        /// shift's 531-chunk L leaves exactly 7 stations holding a missing chunk.
+        /// shift's 531-chunk L leaves exactly 7 stations holding a missing chunk. Also where the anchor stands
+        /// (<see cref="PregenerationPlan.AnchorOf"/>): inside the rectangle, within the cover radius of every target.
         /// </summary>
         private static bool RunB27PregenIndexedWalk()
         {
@@ -118,21 +123,31 @@ namespace Editor.Validation.PipelineBackpressure
                 for (int radius = MIN_TESTED_COVER_RADIUS; radius <= MAX_TESTED_COVER_RADIUS && failure == null; radius++)
                 {
                     long count = PregenerationPlan.StationGridCount(rect, radius);
+                    long stride = 2L * radius + 1;
                     long clippedTotal = 0;
                     for (long i = 0; i < count && failure == null; i++)
                     {
-                        ChunkRect cover = PregenerationPlan.ClipCover(PregenerationPlan.StationAt(rect, radius, i), radius, rect);
+                        ChunkCoord station = PregenerationPlan.StationAt(rect, radius, i);
+                        ChunkRect cover = PregenerationPlan.ClipCover(station, radius, rect);
                         clippedTotal += cover.Count;
                         if (!rect.Contains(new ChunkCoord(cover.MinX, cover.MinZ)) ||
                             !rect.Contains(new ChunkCoord(cover.MaxX, cover.MaxZ)))
                             failure = $"radius {radius}: station #{i}'s clipped cover {cover} leaves the rectangle";
+
+                        // The anchor stands inside the rectangle with every target within the cover radius (so each can
+                        // settle), and is the station itself wherever the cover was not clipped.
+                        ChunkCoord anchor = PregenerationPlan.AnchorOf(station, radius, rect);
+                        bool reachesAll = Math.Max(anchor.X - cover.MinX, cover.MaxX - anchor.X) <= radius
+                                          && Math.Max(anchor.Z - cover.MinZ, cover.MaxZ - anchor.Z) <= radius;
+                        bool unclipped = cover.Width == stride && cover.Depth == stride;
+                        if (failure == null && (!rect.Contains(anchor) || !reachesAll || (unclipped && !anchor.Equals(station))))
+                            failure = $"radius {radius}: station #{i} at {station} anchors at {anchor} for cover {cover}";
                     }
 
                     if (failure == null && clippedTotal != rect.Count)
                         failure = $"radius {radius}: clipped covers sum to {clippedTotal}, the rectangle holds {rect.Count}";
 
                     // Neighbor capture: a step exists exactly when the stepped center stays on the grid, and lands there.
-                    long stride = 2L * radius + 1;
                     long maxCenterX = rect.MinX + radius + ((rect.Width + stride - 1) / stride - 1) * stride;
                     long maxCenterZ = rect.MinZ + radius + ((rect.Depth + stride - 1) / stride - 1) * stride;
                     for (long i = 0; i < count && failure == null; i++)
@@ -205,6 +220,15 @@ namespace Editor.Validation.PipelineBackpressure
             PregenerationPlan.CollectTargets(loneStation, vd10Radius, stalled, targets);
             ok &= Check("a stalled chunk regroups onto the one station whose cover holds it",
                 targets.Count == 1 && targets[0].Equals(lone));
+
+            // The vd 32 benchmark rectangle (135 wide, stride 67): the last column's station sits at x 150, past the
+            // edge, covering only column 117 — 33 chunks out, reached last. The anchor stands on that column instead.
+            const int vd32Radius = 33;
+            ChunkRect vd32Tour = new ChunkRect(new ChunkCoord(-17, -49), new ChunkCoord(117, 85));
+            ChunkCoord edgeStation = PregenerationPlan.StationAt(vd32Tour, vd32Radius, 2);
+            ChunkCoord edgeAnchor = PregenerationPlan.AnchorOf(edgeStation, vd32Radius, vd32Tour);
+            ok &= Check($"vd 32 tour: edge station {edgeStation} anchors on the rectangle's last column ({edgeAnchor})",
+                edgeStation.X == 150 && edgeAnchor.X == 117 && edgeAnchor.Z == edgeStation.Z);
             return ok;
         }
 
@@ -311,6 +335,102 @@ namespace Editor.Validation.PipelineBackpressure
                 RefusalOf(true, false, false, true, true) == StartRefusal.NoWorld
                 && RefusalOf(true, true, false, true, true) == StartRefusal.PersistenceDisabled
                 && RefusalOf(true, true, true, true, true) == StartRefusal.AlreadyRunning);
+            return ok;
+        }
+
+        /// <summary>
+        /// B31. The benchmark pre-generates <see cref="BenchmarkRouteGeometry.TourChunkBounds"/>, and the coverage
+        /// instrument counts the tour footprint, so the footprint must lie inside the rectangle and reach all four of
+        /// its edges: a rectangle too small leaves tour chunks to the loading pass, one too large walks stations for
+        /// nothing. Asserted at the default speeds and at the single-speed benchmark config, whose vd 10 tour shrinks.
+        /// B18 pins the footprint against the tour itself; this pins it against the rectangle, which B18 cannot see.
+        /// </summary>
+        private static bool RunB31TourChunkBounds()
+        {
+            float[] defaultSpeeds = { 10f, 20f, 50f, 100f, 200f };
+            float[] singleSpeed = { 200f };
+            const int dataLoadBuffer = 3;
+            const float phaseSeconds = 30f;
+            const int requestedWaypoints = 12;
+
+            bool ok = Check("the single-speed config shrinks the vd 10 tour, so a shrunk tour is covered below",
+                new BenchmarkRouteGeometry(10 + dataLoadBuffer, singleSpeed, phaseSeconds, requestedWaypoints)
+                    .TourWasShrunk);
+
+            HashSet<ChunkCoord> footprint = new HashSet<ChunkCoord>();
+            foreach ((string label, float[] speeds) in new[] { ("default", defaultSpeeds), ("200 m/s only", singleSpeed) })
+            {
+                foreach (int viewDistance in new[] { 5, 10, 20, 32 })
+                {
+                    int loadDistance = viewDistance + dataLoadBuffer;
+                    BenchmarkRouteGeometry g = new BenchmarkRouteGeometry(loadDistance, speeds, phaseSeconds,
+                        requestedWaypoints);
+                    ChunkRect bounds = g.TourChunkBounds(loadDistance);
+                    g.BuildTourChunkSet(loadDistance, footprint);
+
+                    bool allInside = true;
+                    int minX = int.MaxValue, maxX = int.MinValue, minZ = int.MaxValue, maxZ = int.MinValue;
+                    foreach (ChunkCoord c in footprint)
+                    {
+                        allInside &= bounds.Contains(c);
+                        minX = Math.Min(minX, c.X);
+                        maxX = Math.Max(maxX, c.X);
+                        minZ = Math.Min(minZ, c.Z);
+                        maxZ = Math.Max(maxZ, c.Z);
+                    }
+
+                    ok &= Check($"[{label}] vd {viewDistance}: all {footprint.Count:N0} footprint chunks lie in {bounds} " +
+                                $"({bounds.Count:N0} chunks)",
+                        footprint.Count > 0 && allInside);
+                    ok &= Check($"[{label}] vd {viewDistance}: the footprint reaches every edge of the rectangle " +
+                                $"(x {minX}..{maxX}, z {minZ}..{maxZ})",
+                        minX == bounds.MinX && maxX == bounds.MaxX && minZ == bounds.MinZ && maxZ == bounds.MaxZ);
+                }
+            }
+
+            return ok;
+        }
+
+        /// <summary>
+        /// B32. The ensure pass's trace-capacity hint: every station of the walk's grid streams one full resident
+        /// square, times the revisit headroom, clamped to the supported range. Pins the formula below the clamp, its
+        /// growth with stations and with <c>LoadDistance</c>, both clamps, and the grid sizes of the PG-4 benchmark
+        /// configs (vd 10 and vd 32 at a single 200 m/s phase).
+        /// </summary>
+        private static bool RunB32StationWalkCapacity()
+        {
+            const int vd10Load = 13;
+            const int vd20Load = 23;
+            const int vd32Load = 35;
+            const float revisitHeadroom = 1.5f;
+
+            static int Capacity(int loadDistance, long stations) =>
+                PipelineTelemetry.EstimateStationWalkCapacity(loadDistance, stations);
+
+            int vd10Square = (2 * vd10Load + 1) * (2 * vd10Load + 1);
+            bool ok = Check($"16 stations at vd 10: 16 x {vd10Square} x the revisit headroom = {Capacity(vd10Load, 16)}",
+                Capacity(vd10Load, 16) == (int)(16 * vd10Square * revisitHeadroom));
+            ok &= Check("capacity doubles with the station count below the clamp (8 -> 16 stations)",
+                Capacity(vd10Load, 16) == 2 * Capacity(vd10Load, 8));
+            ok &= Check("a wider resident square needs more traces at the same station count",
+                Capacity(vd20Load, 4) > Capacity(vd10Load, 4));
+            ok &= Check("no stations and one small station both sit on the floor, which is not zero",
+                Capacity(vd10Load, 0) == Capacity(vd10Load, 1) && Capacity(vd10Load, 0) > 0);
+            ok &= Check("vd 32's 9 stations clamp to the maximum, as does an absurd count (no overflow)",
+                Capacity(vd32Load, 9) < (long)9 * (2 * vd32Load + 1) * (2 * vd32Load + 1) * revisitHeadroom
+                && Capacity(vd32Load, 9) == Capacity(vd32Load, long.MaxValue));
+
+            float[] singleSpeed = { 200f };
+            foreach ((int loadDistance, long expectedStations) in new[] { (vd10Load, 16L), (vd32Load, 9L) })
+            {
+                BenchmarkRouteGeometry g = new BenchmarkRouteGeometry(loadDistance, singleSpeed, 30f, 12);
+                long stations = PregenerationPlan.StationGridCount(g.TourChunkBounds(loadDistance),
+                    PregenerationPlan.CoverRadius(loadDistance));
+                ok &= Check($"LoadDistance {loadDistance} at 200 m/s: the tour rectangle's grid has {stations} stations " +
+                            $"(expected {expectedStations})",
+                    stations == expectedStations);
+            }
+
             return ok;
         }
     }

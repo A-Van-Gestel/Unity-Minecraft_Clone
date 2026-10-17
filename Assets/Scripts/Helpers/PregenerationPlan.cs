@@ -255,6 +255,22 @@ namespace Helpers
                 new ChunkCoord(Math.Min(rect.MaxX, station.X + coverRadius), Math.Min(rect.MaxZ, station.Z + coverRadius)));
 
         /// <summary>
+        /// Where the anchor stands for a station: the center of its cover clipped to the rectangle. That is the station
+        /// itself for an interior one. An edge station's center can lie past the rectangle, leaving its targets at the
+        /// far edge of the streamed square, which the pipeline (nearest first) reaches last; centered, they are reached
+        /// early, and every target stays within the cover radius, so it can still settle.
+        /// </summary>
+        /// <param name="station">The station chunk.</param>
+        /// <param name="coverRadius">The cover radius.</param>
+        /// <param name="rect">The rectangle.</param>
+        /// <returns>The anchor chunk, inside the rectangle.</returns>
+        public static ChunkCoord AnchorOf(ChunkCoord station, int coverRadius, ChunkRect rect)
+        {
+            ChunkRect cover = ClipCover(station, coverRadius, rect);
+            return new ChunkCoord((int)(cover.MinX + (cover.Width - 1) / 2), (int)(cover.MinZ + (cover.Depth - 1) / 2));
+        }
+
+        /// <summary>
         /// Fills <paramref name="into"/> with the whole station grid in walk order (<see cref="StationAt"/> for every
         /// index). For tests and small rectangles; the driver walks by index instead of materializing the grid.
         /// </summary>

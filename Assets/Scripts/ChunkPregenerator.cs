@@ -15,7 +15,8 @@ using Readiness = Helpers.PregenerationPlan.Readiness;
 /// coroutine serves both the console command and the benchmark.
 /// <para>
 /// The walk streams: it checks one station's cover square at a time (residency plus the region headers) and moves
-/// the anchor only to stations holding a missing chunk. A station's missing set is captured before the first of its
+/// the anchor only to stations holding a missing chunk, onto the middle of the station's cover inside the rectangle
+/// (<see cref="PregenerationPlan.AnchorOf"/>). A station's missing set is captured before the first of its
 /// grid neighbors is walked, because that walk streams chunks into its cover that must still be waited on there.
 /// Memory is therefore the next row's captured sets plus the stalled set — it grows with the rectangle's width, not
 /// its area. A canceled or interrupted run resumes for free: re-running it reads what is already on disk.
@@ -150,7 +151,8 @@ public sealed class ChunkPregenerator
 
                     outcome.MissingFound += targets.Count;
                     outcome.Stations++;
-                    yield return WalkStation(station, loadDistance, targets, stalled, outcome);
+                    yield return WalkStation(PregenerationPlan.AnchorOf(station, coverRadius, rect), loadDistance, targets,
+                        stalled, outcome);
                     frame.Restart();
                 }
 
@@ -176,7 +178,9 @@ public sealed class ChunkPregenerator
 
                     ChunkCoord station = PregenerationPlan.StationAt(rect, coverRadius, index);
                     PregenerationPlan.CollectTargets(station, coverRadius, stalled, targets);
-                    if (targets.Count > 0) yield return WalkStation(station, loadDistance, targets, stalled, outcome);
+                    if (targets.Count > 0)
+                        yield return WalkStation(PregenerationPlan.AnchorOf(station, coverRadius, rect), loadDistance,
+                            targets, stalled, outcome);
                 }
             }
 
@@ -319,18 +323,18 @@ public sealed class ChunkPregenerator
     /// Finished targets leave <paramref name="stalled"/>; targets a stall leaves pending join it for the retry pass.
     /// Returns with <paramref name="targets"/> empty.
     /// </summary>
-    /// <param name="station">The station chunk.</param>
+    /// <param name="anchor">Where the anchor stands for the station (<see cref="PregenerationPlan.AnchorOf"/>).</param>
     /// <param name="loadDistance">The <c>LoadDistance</c> the run started with.</param>
     /// <param name="targets">The station's missing chunks.</param>
     /// <param name="stalled">Chunks that never populated at their station so far.</param>
     /// <param name="outcome">Counters to update.</param>
     /// <returns>The coroutine enumerator.</returns>
-    private IEnumerator WalkStation(ChunkCoord station, int loadDistance, List<ChunkCoord> targets,
+    private IEnumerator WalkStation(ChunkCoord anchor, int loadDistance, List<ChunkCoord> targets,
         HashSet<ChunkCoord> stalled, PregenerationOutcome outcome)
     {
         _anchorMoved = true;
-        _anchorChunk = station;
-        _world.MovePregenerationAnchor(station);
+        _anchorChunk = anchor;
+        _world.MovePregenerationAnchor(anchor);
 
         int targetCount = targets.Count;
         int lastReached = -1;
@@ -430,7 +434,7 @@ public sealed class ChunkPregenerator
             if (stationSeconds > outcome.SlowestStationSeconds)
             {
                 outcome.SlowestStationSeconds = stationSeconds;
-                outcome.SlowestStation = station;
+                outcome.SlowestStation = anchor;
             }
         }
     }

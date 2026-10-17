@@ -45,9 +45,6 @@ namespace Benchmarks
         /// </summary>
         public const int LoadingTourChunks = 64;
 
-        /// <summary>Speed (m/s) of the ensure-generated sweep — slow enough to reliably populate.</summary>
-        public const float EnsureGeneratedSpeed = 50f;
-
         /// <summary>
         /// Smallest loading tour worth flying. Reached only by a degenerate speed configuration — a list of
         /// slow speeds travels too little distance for the timed phases to cover any tour at all (10/20 m/s
@@ -252,9 +249,7 @@ namespace Benchmarks
         /// <param name="maxZ">Tour upper Z.</param>
         /// <returns>Total leg length in metres, including the return leg.</returns>
         /// <remarks>
-        /// The return leg counts because the loading pass loops its waypoints and therefore flies it. Leaving
-        /// it out understated the ensure sweep's duration and — worse — let the sweep stop one leg short of
-        /// the circuit it exists to cover (FP-11a).
+        /// The return leg counts because the loading pass loops its waypoints and therefore flies it (FP-11a).
         /// </remarks>
         private static float MeasureTour(float minX, float maxX, float minZ, float maxZ)
         {
@@ -292,14 +287,11 @@ namespace Benchmarks
             FillTourPoints(TourMinX, TourMaxX, TourMinZ, TourMaxZ, 0f, points);
             if (points.Count < 2) return;
 
-            int minChunkX = ChunkMath.VoxelToChunk(Mathf.FloorToInt(TourMinX)) - loadDistance;
-            int maxChunkX = ChunkMath.VoxelToChunk(Mathf.FloorToInt(TourMaxX)) + loadDistance;
-            int minChunkZ = ChunkMath.VoxelToChunk(Mathf.FloorToInt(TourMinZ)) - loadDistance;
-            int maxChunkZ = ChunkMath.VoxelToChunk(Mathf.FloorToInt(TourMaxZ)) + loadDistance;
-
-            int gridWidth = maxChunkX - minChunkX + 1;
-            int gridDepth = maxChunkZ - minChunkZ + 1;
-            if (gridWidth <= 0 || gridDepth <= 0) return;
+            ChunkRect bounds = TourChunkBounds(loadDistance);
+            int minChunkX = bounds.MinX;
+            int minChunkZ = bounds.MinZ;
+            int gridWidth = (int)bounds.Width;
+            int gridDepth = (int)bounds.Depth;
 
             bool[] visited = new bool[gridWidth * gridDepth];
 
@@ -341,6 +333,23 @@ namespace Benchmarks
             }
         }
 
+        /// <summary>
+        /// The chunk rectangle the loading pass can make resident: the tour's chunk extent widened by
+        /// <paramref name="loadDistance"/> on every side. The grid <see cref="BuildTourChunkSet"/> rasterizes into, and
+        /// the rectangle the pre-generation pass makes exist, so the two cannot disagree.
+        /// </summary>
+        /// <param name="loadDistance">Active <c>Settings.LoadDistance</c>, in chunks.</param>
+        /// <returns>The rectangle; the footprint is a subset of it that reaches all four edges.</returns>
+        public ChunkRect TourChunkBounds(int loadDistance)
+        {
+            loadDistance = Mathf.Max(0, loadDistance);
+            return new ChunkRect(
+                new ChunkCoord(ChunkMath.VoxelToChunk(Mathf.FloorToInt(TourMinX)) - loadDistance,
+                    ChunkMath.VoxelToChunk(Mathf.FloorToInt(TourMinZ)) - loadDistance),
+                new ChunkCoord(ChunkMath.VoxelToChunk(Mathf.FloorToInt(TourMaxX)) + loadDistance,
+                    ChunkMath.VoxelToChunk(Mathf.FloorToInt(TourMaxZ)) + loadDistance));
+        }
+
         /// <summary>Marks one resident load square into the rasterization grid, clipped to its bounds.</summary>
         /// <param name="visited">The grid, row-major over Z.</param>
         /// <param name="centerX">Chunk X the player occupies.</param>
@@ -367,9 +376,6 @@ namespace Benchmarks
 
         /// <summary>Generation waypoints this route emits — two per sweep row.</summary>
         public int GenerationWaypoints => Rows * 2;
-
-        /// <summary>Seconds the ensure-generated sweep takes, at <see cref="EnsureGeneratedSpeed"/>.</summary>
-        public float EnsureGeneratedSeconds => TourLengthMeters / EnsureGeneratedSpeed;
 
         /// <summary>Row width (chunks) needed for a given row count to cover the required distance.</summary>
         /// <param name="rows">Sweep rows.</param>

@@ -589,6 +589,25 @@ namespace Benchmarks
         }
 
         /// <summary>
+        /// Estimates how many chunk traces a pre-generation phase will start (CMD-6): every station the walk may
+        /// visit streams one full resident square, times the same revisit headroom as
+        /// <see cref="EstimateTraceCapacity"/>. Sized from the station grid, so a walk that skips stations already on
+        /// disk only over-sizes the table.
+        /// </summary>
+        /// <param name="loadDistance">The active <c>Settings.LoadDistance</c>, in chunks.</param>
+        /// <param name="stations">Stations in the walk's grid (<c>PregenerationPlan.StationGridCount</c>).</param>
+        /// <returns>A trace capacity, clamped to the supported range.</returns>
+        public static int EstimateStationWalkCapacity(int loadDistance, long stations)
+        {
+            int squareWidth = Mathf.Max(1, loadDistance * 2 + 1);
+            long resident = (long)squareWidth * squareWidth;
+
+            // Saturates rather than overflowing: anything this large clamps to the maximum anyway.
+            double estimate = Math.Max(0L, stations) * (double)resident * REVISIT_HEADROOM;
+            return ClampCapacity(estimate >= long.MaxValue ? long.MaxValue : (long)estimate);
+        }
+
+        /// <summary>
         /// Clamps a capacity to the supported range. Hand-rolled rather than <c>Math.Clamp</c>, which is not
         /// available under this project's .NET Framework API compatibility level, and <c>Mathf.Clamp</c>
         /// has no <see cref="long"/> overload.

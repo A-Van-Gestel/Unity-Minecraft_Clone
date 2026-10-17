@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
+using Data;
 using Diagnostics;
 using UnityEngine;
 
@@ -45,6 +46,7 @@ namespace Benchmarks
         /// <param name="pipelineSettings">Pipeline tuning captured at run start (FP-6) — the values the
         /// FP stop-reason tallies must be read against.</param>
         /// <param name="settingsDifference">The <see cref="SettingsDifferenceReport"/> block captured at run start.</param>
+        /// <param name="pregeneration">How the ensure pass's pre-generation ended, or null when it did not run.</param>
         /// <returns>A <see cref="BenchmarkReportResult"/> containing the report text and file path.</returns>
         public static BenchmarkReportResult GenerateAndWriteReport(
             BenchmarkMetricsCollector collector,
@@ -58,7 +60,8 @@ namespace Benchmarks
             int savedVSyncCount,
             int savedTargetFrameRate,
             PipelineSettingsSnapshot pipelineSettings,
-            string settingsDifference)
+            string settingsDifference,
+            PregenerationOutcome pregeneration)
         {
             StringBuilder sb = new StringBuilder(4096);
 
@@ -66,7 +69,7 @@ namespace Benchmarks
             sb.Append(BenchmarkEnvironment.DescribeSystem());
             sb.Append(settingsDifference);
             AppendConfiguration(sb, generationSpeeds, loadingSpeeds, timePerPhase, routeGeometry,
-                generationWaypointCount, loadingWaypointCount, savedVSyncCount, savedTargetFrameRate);
+                generationWaypointCount, loadingWaypointCount, savedVSyncCount, savedTargetFrameRate, pregeneration);
             pipelineSettings.AppendTo(sb);
             AppendMonitorConfiguration(sb);
             AppendOverallSummary(sb, collector.CompletedPhases, totalDuration);
@@ -106,7 +109,8 @@ namespace Benchmarks
             int generationWaypointCount,
             int loadingWaypointCount,
             int savedVSyncCount,
-            int savedTargetFrameRate)
+            int savedTargetFrameRate,
+            PregenerationOutcome pregeneration)
         {
             sb.AppendLine("<b>=== Configuration ===</b>");
 
@@ -126,22 +130,63 @@ namespace Benchmarks
             sb.AppendLine($"    Sweep rows:        {routeGeometry.Rows}  (row stride {routeGeometry.RowStrideChunks} chunks = 2 x LoadDistance)");
             sb.AppendLine($"    Route length:      {routeGeometry.RouteLengthMeters:N0} m");
             sb.AppendLine($"    Timed travel:      {routeGeometry.TimedTravelMeters:N0} m  (what the speed phases consume)");
-            sb.AppendLine($"    Loading tour:      {routeGeometry.TourChunks} chunks square" +
+            sb.AppendLine($"    Loading tour:      {routeGeometry.TourChunks} chunks square, " +
+                          $"{routeGeometry.TourLengthMeters:N0} m closed circuit" +
                           (routeGeometry.TourWasShrunk
-                              ? $"  ** SHRUNK from {BenchmarkRouteGeometry.LoadingTourChunks} — the timed phases do not cover it, so the loading pass GENERATED terrain. Capture not comparable. **"
+                              ? $"  ** SHRUNK from {BenchmarkRouteGeometry.LoadingTourChunks} — the timed phases do not cover it, so the loading pass flies a smaller route. Not comparable to a full-tour capture. **"
                               : "  (fixed — independent of view distance)"));
 
-            // FP-11c: both derived, and both needed to read the coverage line below — a sweep that is slower
-            // or shorter than the reader assumes explains a coverage shortfall that would otherwise look like
-            // a pipeline result.
-            sb.AppendLine($"    Ensure sweep:      {BenchmarkRouteGeometry.EnsureGeneratedSpeed:F0} m/s over " +
-                          $"{routeGeometry.TourLengthMeters:N0} m = {routeGeometry.EnsureGeneratedSeconds:F1} s " +
-                          "(closed circuit, incl. the return leg the loading pass flies)");
+            // FP-6 rule: the capture states which ensure method produced it, and the line is needed to read the
+            // coverage below — a pre-generation that stopped short explains a shortfall that would otherwise look
+            // like a pipeline result.
+            AppendPregeneration(sb, pregeneration);
             AppendTourCoverage(sb);
 
             sb.AppendLine($"VSync override:      Forced Off (was: {(savedVSyncCount > 0 ? "On" : "Off")})");
             sb.AppendLine($"FPS cap override:    Uncapped (was: {(savedTargetFrameRate > 0 ? savedTargetFrameRate.ToString() : "Uncapped")})");
             sb.AppendLine();
+        }
+
+        /// <summary>
+        /// Renders how the ensure pass's pre-generation went (CMD-6): what it found missing, what it walked, where the
+        /// time went, and what it did not finish.
+        /// </summary>
+        /// <param name="sb">The report builder.</param>
+        /// <param name="outcome">The run's outcome, or null when its start was refused.</param>
+        /// <remarks>
+        /// A refused start prints NOT RUN rather than a row of zeros: "0 stalled" from a run that never happened would
+        /// read as a clean result.
+        /// </remarks>
+        private static void AppendPregeneration(StringBuilder sb, PregenerationOutcome outcome)
+        {
+            if (outcome == null)
+            {
+                sb.AppendLine("    Pre-generation:    ** NOT RUN — its start was refused, so the tour's terrain was " +
+                              "not guaranteed to exist. **");
+                return;
+            }
+
+            ChunkRect rect = outcome.Rect;
+            sb.AppendLine($"    Pre-generation:    chunks ({rect.MinX}, {rect.MinZ}) to ({rect.MaxX}, {rect.MaxZ}), " +
+                          $"{rect.Count:N0} chunks; {outcome.MissingFound:N0} missing found");
+            if (outcome.Status == PregenerationStatus.Canceled)
+            {
+                sb.AppendLine($"                       ** CANCELED ({outcome.CancelReason}) after " +
+                              $"{outcome.StationsChecked:N0} of {outcome.StationGridCount:N0} stations — the loading " +
+                              "pass may GENERATE terrain. **");
+            }
+
+            sb.AppendLine($"                       {outcome.Stations:N0} stations walked of {outcome.StationsChecked:N0} " +
+                          $"checked ({outcome.StationGridCount:N0} in the grid); {outcome.Generated:N0} generated in " +
+                          $"{outcome.ElapsedSeconds:F1} s");
+            sb.AppendLine($"                       station time: populate {outcome.PopulateSeconds:F1} s + settle " +
+                          $"{outcome.SettleSeconds:F1} s; slowest {outcome.SlowestStationSeconds:F1} s at " +
+                          $"({outcome.SlowestStation.X}, {outcome.SlowestStation.Z})");
+            sb.AppendLine($"                       {outcome.Stalled:N0} stalled | {outcome.SettleTimeouts:N0} settle " +
+                          $"timeouts | {outcome.Remarked:N0} re-marked for saving" +
+                          (outcome.Stalled > 0
+                              ? "  ** the stalled chunks may be GENERATED by the loading pass. **"
+                              : ""));
         }
 
         /// <summary>
@@ -153,9 +198,8 @@ namespace Benchmarks
         /// Read from the static rather than passed in, exactly as the FP pipeline section reads
         /// <see cref="PipelineTelemetry.CompletedPhases"/>. An unmeasurable result prints as NOT MEASURED: a
         /// missing footprint must never render as a clean 100 %.
-        /// <para>Both instants are printed. The gap between them is how much of the tour the panic gate
-        /// deferred out of the ensure sweep and the transition drain then finished — a P-8 signal in its own
-        /// right, and invisible from either figure alone.</para>
+        /// <para>Both instants are printed. The gap between them is how much of the tour was still in flight when
+        /// pre-generation ended and the transition drain then finished — invisible from either figure alone.</para>
         /// </remarks>
         private static void AppendTourCoverage(StringBuilder sb)
         {
@@ -167,7 +211,7 @@ namespace Benchmarks
             }
 
             sb.AppendLine($"    Tour coverage:     {BenchmarkTourCoverage.EnsurePassCoveredChunks:N0} / " +
-                          $"{BenchmarkTourCoverage.RequiredChunks:N0} chunks after the ensure sweep " +
+                          $"{BenchmarkTourCoverage.RequiredChunks:N0} chunks after pre-generation " +
                           $"({BenchmarkTourCoverage.EnsurePassCoverageFraction * 100f:F1} %)");
             sb.AppendLine($"                       {BenchmarkTourCoverage.CoveredChunks:N0} / " +
                           $"{BenchmarkTourCoverage.RequiredChunks:N0} on disk when the loading pass starts " +

@@ -1,8 +1,8 @@
 # Chunk Pre-Generation (CMD-6) Design
 
-**Version:** 1.1  
+**Version:** 1.2  
 **Date:** 2026-10-17  
-**Status:** In implementation — PG-0…PG-2 landed; PG-3/PG-4 next; PG-5 on the build owner's go-ahead.  
+**Status:** In progress — PG-0…PG-4 landed; PG-5 (the IL2CPP A/B) pending the build owner's go-ahead.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > A deterministic "make every chunk in this rectangle exist on disk" operation, shared by a new
@@ -12,8 +12,9 @@
 > each, waits until every still-missing chunk in reach is populated and its lighting has settled.**
 > The pipeline itself is untouched. In the benchmark this turns a fixed ~198 s flight that is still
 > short of 100 % coverage at view distance 32 into a step whose cost scales with the chunks actually
-> missing: an Editor prototype finished a realistic 531-chunk gap in 8.1 s, and a fully fresh
-> 8 100-chunk tour area in 87.9 s.
+> missing. Through the real API (Editor, vd 10) a genuine 531-chunk gap costs 16.8–22.6 s and a fully
+> fresh 8 100-chunk rectangle 70–90 s; an earlier prototype figure of 8.1 s for the gap measured disk
+> reloads, not generation (§2.2).
 
 **Audited:** 2026-10-17, at commit `a01e953e` (branch `main`).
 Findings are from reading `BenchmarkController`, `BenchmarkRouteGeometry`, `BenchmarkTourCoverage`,
@@ -61,7 +62,9 @@ mode on a fresh seed-4242 world through the Unity CLI.
 4. **One implementation, two callers** — the benchmark (`yield return`) and the console command
    (fire-and-forget with progress and cancel) share the same coroutine.
 5. **Benchmark comparability** — chunks it generates reach disk with settled lighting, as the
-   flight's mostly did, so the loading pass keeps measuring loading.
+   flight's mostly did, so the loading pass keeps measuring loading. That includes the spill a walked
+   station streams into its neighbors' covers (captured, §4.2) and chunks reloaded from an unsettled
+   save (re-marked, §4.3).
 
 ### Non-goals (v1)
 
@@ -77,18 +80,20 @@ mode on a fresh seed-4242 world through the Unity CLI.
 
 ## 2. Current state (what exists today)
 
-| Area                   | State                                                                                                                                                                                                                                                                                                                                                                      |
-|------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Ensure Generated pass  | `BenchmarkController.RunEnsureGeneratedPass` flies the closed 12-point loading tour once at `BenchmarkRouteGeometry.EnsureGeneratedSpeed` (50 m/s). Its duration is `TourLengthMeters / 50` — fixed by geometry, independent of how much terrain is actually missing.                                                                                                      |
-| Residency              | Player-centric only. `CheckViewDistance` (World.cs:4418) queues the `(2·LoadDistance+1)²` square around the player nearest-first, and only on a chunk-boundary crossing. `UnloadChunks` and the §3.2 out-of-range discard in `ProcessGenerationJobs` both reclaim anything beyond `IsBeyondUnloadDistance` (`LoadDistance + 2`, World.cs:4040).                            |
-| "Populated" vs "done"  | `ChunkData.Populate` sets `IsPopulated` **before** the job's structure mods are expanded; the per-frame mods quota can defer the rest of the job to a later frame (WorldJobManager.cs:1336) with the job still tracked. A completion check must also require "no generation job tracked".                                                                                  |
-| Structure spill        | `ApplyModifications` (World.cs:3698) routes mods for an absent or unpopulated chunk to `ModManager.AddPendingMod`; they replay on that chunk's load or generation. Order-independent.                                                                                                                                                                                      |
-| Save marking           | Only `Populate` and `ModifyVoxel` add to `ModifiedChunks` (ChunkData.cs:456/708). Lighting never does, so a reloaded, re-lit chunk is not re-saved — its disk copy keeps whatever lighting state it was unloaded with.                                                                                                                                                     |
-| Lighting state on disk | `NeedsInitialLighting` is serialized (ChunkSerializer.cs:175/262). A modified chunk — freshly generated ones included, since `Populate` marks them — unloaded with pending light changes is flagged for a full re-light first (World.cs:4187), so leaving a station before lighting settles would hand the loading pass extra re-light work.                               |
-| Saved-chunk existence  | No query exists. `RegionFile`'s header (`_offsets`) answers it, but `ChunkStorageManager.GetRegion` opens with `FileMode.OpenOrCreate` — a naive probe would create empty region files.                                                                                                                                                                                    |
-| Anchor movement        | `World.TeleportPlayer` shifts the floating origin, parks the player and arms the arrival hold; `UpdateTeleportHold` releases on destination populated + mesh applied. `VoxelRigidbody.IsTeleportHeld` gates its whole `FixedUpdate` (VoxelRigidbody.cs:327). The benchmark moves its own transform (it lives on the player, `Player.cs:94`); `Update` re-anchors on drift. |
-| Command layer          | `Commands` stays UnityEngine-free and reaches the world through `CommandContext.World`. `/chunk` exists with one subcommand (`ChunkInfoCommand`, `/chunk info`). Output that arrives after `Execute` returns goes through `CommandEngine.PostLine` (the `TeleportHoldEnded` → `WorldUIManager` precedent).                                                                 |
-| Coverage instrument    | `BenchmarkTourCoverage` arms at the generation pass, counts footprint chunks on `StampPopulated`, snapshots after the ensure pass and freezes after the transition; ≥ 99 % is the admissibility bar.                                                                                                                                                                       |
+> As audited before PG-0 (commit `a01e953e`); §4 describes what shipped.
+
+| Area                   | State                                                                                                                                                                                                                                                                                                                                                                                      |
+|------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Ensure Generated pass  | `BenchmarkController.RunEnsureGeneratedPass` flies the closed 12-point loading tour once at `BenchmarkRouteGeometry.EnsureGeneratedSpeed` (50 m/s). Its duration is `TourLengthMeters / 50` — fixed by geometry, independent of how much terrain is actually missing.                                                                                                                      |
+| Residency              | Player-centric only. `CheckViewDistance` (World.cs:4418) queues the `(2·LoadDistance+1)²` square around the player nearest-first, and only on a chunk-boundary crossing. `UnloadChunks` and the §3.2 out-of-range discard in `ProcessGenerationJobs` both reclaim anything beyond `IsBeyondUnloadDistance` (`LoadDistance + 2`, World.cs:4040).                                            |
+| "Populated" vs "done"  | `ChunkData.Populate` sets `IsPopulated` **before** the job's structure mods are expanded; the per-frame mods quota can defer the rest of the job to a later frame (WorldJobManager.cs:1336) with the job still tracked. A completion check must also require "no generation job tracked".                                                                                                  |
+| Structure spill        | `ApplyModifications` (World.cs:3698) routes mods for an absent or unpopulated chunk to `ModManager.AddPendingMod`; they replay on that chunk's load or generation. Order-independent.                                                                                                                                                                                                      |
+| Save marking           | Only `Populate` and `ModifyVoxel` add to `ModifiedChunks` (ChunkData.cs:456/708). Lighting never does, so a reloaded, re-lit chunk is not re-saved — its disk copy keeps whatever lighting state it was unloaded with.                                                                                                                                                                     |
+| Lighting state on disk | `NeedsInitialLighting` is serialized (ChunkSerializer.cs:175/262). A modified chunk — freshly generated ones included, since `Populate` marks them — unloaded with pending light changes is flagged for a full re-light first (World.cs:4187), so leaving a station before lighting settles would hand the loading pass extra re-light work.                                               |
+| Saved-chunk existence  | No query exists. `RegionFile`'s header (`_offsets`) answers it, but `ChunkStorageManager.GetRegion` opens with `FileMode.OpenOrCreate` — a naive probe would create empty region files. The streaming loader already does: `LoadChunkAsync` → `GetRegion` creates an empty region file for any region it is asked to load from, so the no-create guarantee belongs to the new query alone. |
+| Anchor movement        | `World.TeleportPlayer` shifts the floating origin, parks the player and arms the arrival hold; `UpdateTeleportHold` releases on destination populated + mesh applied. `VoxelRigidbody.IsTeleportHeld` gates its whole `FixedUpdate` (VoxelRigidbody.cs:327). The benchmark moves its own transform (it lives on the player, `Player.cs:94`); `Update` re-anchors on drift.                 |
+| Command layer          | `Commands` stays UnityEngine-free and reaches the world through `CommandContext.World`. `/chunk` exists with one subcommand (`ChunkInfoCommand`, `/chunk info`). Output that arrives after `Execute` returns goes through `CommandEngine.PostLine` (the `TeleportHoldEnded` → `WorldUIManager` precedent).                                                                                 |
+| Coverage instrument    | `BenchmarkTourCoverage` arms at the generation pass, counts footprint chunks on `StampPopulated`, snapshots after the ensure pass and freezes after the transition; ≥ 99 % is the admissibility bar.                                                                                                                                                                                       |
 
 ### 2.1 What the ensure pass actually costs
 
@@ -112,10 +117,10 @@ Editor running at ≈ 28 fps) moved the player through the §4.4 station grid an
 waited until every missing chunk within Chebyshev distance 12 was populated with initial lighting
 scheduled and no generation or lighting job in flight:
 
-| Scenario                                                  | Missing chunks | Stations | Time   | Stalls | Console errors |
-|-----------------------------------------------------------|---------------:|---------:|--------|-------:|---------------:|
-| Worst case: a fresh 90×90 rectangle (the vd 10 tour bbox) | 8 100          | 16       | 87.9 s | 0      | 0              |
-| Realistic: the same rectangle shifted 3 chunks            | 531            | 7        | 8.1 s  | 0      | 0              |
+| Scenario                                       | Missing chunks | Stations | Time                           | Stalls | Console errors |
+|------------------------------------------------|---------------:|---------:|--------------------------------|-------:|---------------:|
+| Worst case: a fresh 90×90 rectangle, (40..129) | 8 100          | 16       | 87.9 s                         | 0      | 0              |
+| Realistic: the same rectangle shifted 3 chunks | 531            | 7        | ~~8.1 s~~ ❌ reloads, see note | 0      | 0              |
 
 Per station: 4.2–6.9 s for 625 fresh chunks, 0.9–1.8 s for 75 fresh chunks amid terrain reloaded
 from disk. The Editor figures are frame-bound (≈ 28 fps against ≈ 440 fps in the vd 10 IL2CPP ensure
@@ -132,6 +137,11 @@ phase), so the player numbers should be lower. The vd 32 cost is **not yet measu
 > met within 0.4 s of full settle. Each move streams ≈ 620 new chunks (only 108 overlap at stride 23), whose
 > lighting backlog (320–420 ready vs the vd 10 close threshold of 256) keeps the panic gate closed on 25–55 %
 > of frames. The cost is the pipeline streaming a full square — inherent to §3.1 Option A.
+
+> **Re-measured after PG-3's streaming rework (v1.2):** the fresh (40..129) rectangle 76.8 s over 16 stations,
+> 0 stalled, 2 settle timeouts, 367 re-marked; the genuine 531-chunk gap 18.9 s over 7 stations. (40..129) was a
+> hand-picked rectangle, not the vd 10 tour's: `TourChunkBounds` is 91 × 91 at the default speeds and 79 × 79 at a
+> single 200 m/s phase, where the tour shrinks to 52 chunks.
 
 **Projected effect** (estimate): vd 10 total ≈ 440 s → ≈ 260 s (−40 %); vd 32 ≈ 480 s → ≈ 300–340 s
 (−30 … −37 %), coverage 100 % at both by construction.
@@ -159,7 +169,8 @@ targets in reach, move on.
 - ✅ Measured feasible (§2.2).
 - ❌ The anchor moves, so the console command teleports the player through the region and back.
 - ❌ Wasted work: the square around each station is streamed and meshed in full even where only a
-  few chunks were missing. Bounded by the station count; §2.2 shows it is cheap.
+  few chunks were missing. Bounded by the station count; §2.2 prices it — 40–60 % of a station is
+  populating, the rest the lighting tail of a freshly streamed square.
 
 #### Option B — A second residency anchor ("chunk tickets") (deferred to v2)
 
@@ -213,8 +224,14 @@ registry dispatches on the name. `ChunkInfoCommand` becomes `ChunkCommand` (GUID
 ```
 
 Voxel coordinates for corners, as `/teleport` and `/setblock` take; chunks for the radius, the unit
-view distance is set in. A run over more than `PREGEN_CONFIRM_CHUNKS` (10 000) asks for confirmation
-with the chunk count; above `PREGEN_MAX_CHUNKS` (250 000) it is refused.
+view distance is set in.
+
+**No size cap** (revised in PG-3). A run over `PregenerationPlan.ConfirmChunkCount` (10 000 chunks) asks
+for confirmation, stating the chunk count, the corner chunks, the station count, a disk estimate
+(4.6–6.4 KB per chunk) with a warning when it exceeds the save drive's free space, that it can take
+hours, and that a cancel or a re-run resumes. The only size refusal is a systems bound: a radius square
+reaching past the addressable world (±2^31 voxels). The prompt prints no time estimate: it is
+machine-dependent, so it is a v2 item (§7.2).
 
 ### 3.4 No fallback to the flight
 
@@ -234,7 +251,7 @@ exact base commit (PG-5) — and no new rollback flag is created that would late
  BenchmarkController ── yield return World.PregenerateRegion ──► ChunkPregenerator.Run (IEnumerator)
                                                                    │
             PregenerationPlan (Helpers, pure) ◄── station grid, cover radius, readiness decision
-            ChunkStorageManager.CollectSavedChunks ◄── missing-set scan (read-only)
+            ChunkStorageManager.CollectSavedChunks ◄── per-station scan (read-only)
             World.MovePregenerationAnchor ◄── origin shift + transform (internal hook)
                                                                    │
                        World.PregenerationProgress / PregenerationEnded events
@@ -242,32 +259,43 @@ exact base commit (PG-5) — and no new rollback flag is created that would late
                        WorldUIManager ──► CommandEngine.PostLine   (console output)
 ```
 
-| Component                                | Location                                     | Role                                                                                                                                                                                                           |
-|------------------------------------------|----------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `PregenerationPlan`                      | `Assets/Scripts/Helpers/`                    | Pure, stateless: rectangle normalization, cover radius from `LoadDistance`, serpentine station grid, station filter against the missing set, the readiness decision (§4.3).                                    |
-| `ChunkStorageManager.CollectSavedChunks` | `Assets/Scripts/Serialization/`              | Read-only: adds every coordinate in a chunk rectangle that has a header entry on disk. No region file is created (§4.2).                                                                                       |
-| `ChunkPregenerator`                      | `Assets/Scripts/` (beside `WorldJobManager`) | Owned by `World`. The station-walk coroutine, its watchdogs, the outcome, the progress counters.                                                                                                               |
-| `World` facade                           | `World.cs`                                   | `PregenerateRegion(request)` (the benchmark yields it), `TryStartPregeneration(request, out error)` / `CancelPregeneration()` / `IsPregenerating`, the two events, and the internal `MovePregenerationAnchor`. |
-| `ChunkCommand`                           | `Assets/Scripts/Commands/`                   | Parses, validates, confirms, starts or cancels. UnityEngine-free.                                                                                                                                              |
-| `WorldUIManager`                         | `Assets/Scripts/UI/`                         | Subscribes to the events and posts progress lines.                                                                                                                                                             |
+| Component                                | Location                                     | Role                                                                                                                                                                                                                                                                                                                  |
+|------------------------------------------|----------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `PregenerationPlan`                      | `Assets/Scripts/Helpers/`                    | Pure, stateless: rectangle normalization, cover radius from `LoadDistance`, the serpentine station grid walked by index (`StationAt`, `StationIndexOf`, `TryGetNeighborStation`, `ClipCover`, `AnchorOf`), the readiness decision (§4.3), start validation.                                                           |
+| `ChunkStorageManager.CollectSavedChunks` | `Assets/Scripts/Serialization/`              | Read-only: adds every coordinate in a chunk rectangle that has a header entry on disk. No region file is created (§4.2).                                                                                                                                                                                              |
+| `ChunkPregenerator`                      | `Assets/Scripts/` (beside `WorldJobManager`) | Owned by `World`. The streaming station walk (§4.2), its watchdogs, the outcome, the progress counters.                                                                                                                                                                                                               |
+| `World` facade                           | `World.cs`                                   | `PregenerateRegion(ChunkRect)` (the benchmark yields it), `TryStartPregeneration(ChunkRect, out StartRefusal)` / `CancelPregeneration(reason)` / `IsPregenerating` / `LastPregenerationOutcome` / `CheckPregenerationStart` / `TryGetSaveDriveFreeBytes`, the two events, and the internal `MovePregenerationAnchor`. |
+| `ChunkCommand`                           | `Assets/Scripts/Commands/`                   | Parses, validates, confirms (with a disk estimate), starts or cancels. UnityEngine-free.                                                                                                                                                                                                                              |
+| `WorldUIManager`                         | `Assets/Scripts/UI/`                         | Subscribes to the events and posts progress lines.                                                                                                                                                                                                                                                                    |
+| `DiskSpace`                              | `Assets/Scripts/Helpers/`                    | Free space on the save drive for the confirmation's disk warning, through kernel32 `GetDiskFreeSpaceEx` (Mono's `DriveInfo` costs ≈ 2.3 s on its first call).                                                                                                                                                         |
 
 State lives on the `ChunkPregenerator` instance, not in statics, so no domain-reload reset is needed.
 
 ### 4.2 The missing set
 
-At start, for the normalized rectangle:
+Read per station, never for the whole rectangle (revised in PG-3: v1.1 scanned the rectangle once at the
+start and held its whole missing set, which does not scale). When the walk reaches a station it reads that
+station's cover, clipped to the rectangle:
 
 ```
-missing = rectangle
-        − { c : resident(c) ∧ IsPopulated(c) ∧ ¬GenerationJobs.Contains(c) }
-        − CollectSavedChunks(rectangle)
+missing(station) = cover
+                 − { c : resident(c) ∧ IsPopulated(c) ∧ ¬GenerationJobs.Contains(c) }
+                 − CollectSavedChunks(cover)
 ```
 
-`CollectSavedChunks` groups the rectangle by region through the version's `IRegionAddressCodec`. For
+**Neighbor capture.** A walked station streams to `LoadDistance` = r + 2, two rings into each of its 8 grid
+neighbors' covers. Before the walk, the missing sets of the neighbors not yet visited are captured, so the
+chunks this walk generates in their covers stay targets there and are waited on until they settle. Read
+later, they would count as present and could reach disk unsettled: on a fresh 90×90, 7 056 found and 0
+re-marked without the capture, 8 100 and 367 with it. Memory is the next row's captured sets plus the
+stalled set — it grows with the rectangle's width, not its area. Stations with nothing missing are skimmed
+under a 4 ms per-frame scan budget.
+
+`CollectSavedChunks` groups the cover by region through the version's `IRegionAddressCodec`. For
 each region it uses the already-open `RegionFile` if there is one, opens it if the file exists, and
 **skips it when no file exists** — the `OpenOrCreate` path is never taken for a region that was never
 written. Each region's header is read once under its lock (`GetAllChunkMetadata`-style), not once per
-chunk, so the scan costs a handful of lock acquisitions however large the rectangle.
+chunk, so a station's scan costs a handful of lock acquisitions.
 
 A chunk whose asynchronous unload save has not landed yet reads as missing. That costs a redundant
 visit, and the reload goes through the ordinary `LoadOrGenerateChunk` path — the same window a
@@ -290,44 +318,61 @@ lit) is added back, so its finished lighting reaches disk — 367 of 8 100 chunk
 - Station centers `minX + r + i·s` and `minZ + r + j·s` while the cover square still reaches the
   rectangle; rows alternate direction (serpentine), so consecutive stations are neighbors and each
   arrival finds the previous station's terrain resident.
-- Stations whose cover square holds no missing chunk are dropped. A fully generated rectangle plans
-  zero stations.
+- The grid is walked by index (`StationAt` / `StationIndexOf`), never materialized, so its size costs
+  nothing. Every station is *checked*; only one whose cover holds a missing chunk is *walked*. A fully
+  generated rectangle walks zero stations.
 - Invariant (baselined in PG-1): every cell of the rectangle lies in exactly one cover square.
+- **The anchor stands at the middle of the station's cover clipped to the rectangle**
+  (`PregenerationPlan.AnchorOf`; added in PG-4) — the station itself for an interior one. When the
+  rectangle is not a multiple of the stride, the last column's or row's center lies past its edge: at vd 32
+  the 135-wide tour rectangle puts it at x 150 for a cover that is only column 117, 33 chunks out. The
+  pipeline streams nearest-first, so those targets come after ≈ 5 000 nearer non-targets, which is where
+  the 30 s no-progress watchdog can expire. PG-4's first vd 32 run stalled 41 of them (the transition drain
+  then generated them), but it shared the machine with a heavy external load (image transcoding), so how
+  much of that was the geometry and how much the load is not separated — no idle run without the fix was
+  taken. Centered on the clipped cover, every target stays within `r` (it can still settle) and is reached
+  early. The cover tiling and the neighbor capture are unchanged: the anchor stays inside its own
+  cover square, so its stream still reaches only the 8 grid neighbors (B27).
 
 ### 4.5 Run lifecycle
 
 ```
-Validate ─► Scan (missing set) ─► Plan stations ─► Hold player ─┐
-                                                                ▼
-         ┌──────────────── for each station ──────────────────────┐
-         │ MovePregenerationAnchor(station)                         │
-         │ every frame: classify targets in the cover square        │
-         │   populated tier: no progress for 30 s  → stall (error)  │
-         │   settled tier:   no progress for 3 s   → settle-timeout │
-         │ remove finished targets from the missing set; next       │
-         └────────────────────────────────────────────────────────────┘
-                                                                ▼
-   One retry pass over stalled targets (re-planned) ─► Finish ─► Outcome + PregenerationEnded
+Validate ─► Hold player ─┐
+                         ▼
+   ┌──────────── for each station, in serpentine grid order ──────────────┐
+   │ targets = its captured set, or scan the cover now (§4.2)            │
+   │ none missing → next station (scan budget 4 ms per frame)            │
+   │ capture the unvisited grid neighbors' missing sets                  │
+   │ MovePregenerationAnchor(AnchorOf(station))                          │
+   │ every frame: classify targets                                       │
+   │   populated tier: no progress for 30 s  → stall (error)             │
+   │   settled tier:   no progress for 3 s   → settle-timeout            │
+   └──────────────────────────────────────────────────────────────────────┘
+                         ▼
+   One retry pass over stalled targets (grouped by station) ─► Finish ─► Outcome + PregenerationEnded
 ```
 
 **Validation refuses to start** when: no world or persistence is disabled (nothing would be stored,
 and with unloading off the walk would accumulate every chunk in memory); a run is already active; a
-teleport hold is active; the rectangle is empty or above `PREGEN_MAX_CHUNKS`; the world border is set
-and any corner lies outside it (the fence would fight the anchor).
+teleport hold is active; the world border is set and any corner lies outside it (the fence would fight
+the anchor) — checked first, an argument problem before world state (B30). A rectangle's size never
+refuses a start.
 
-**Every frame** the driver also checks that `LoadDistance` still equals its snapshot; a mid-run view
-distance change cancels the run (outcome `Canceled`, with a message) rather than waiting on targets
-the new square no longer reaches.
+**Every frame** the driver also checks that `LoadDistance` still equals its snapshot and that the
+player's chunk is still the anchor's; a mid-run view distance change or a moved player cancels the run
+(outcome `Canceled`, with a message) rather than waiting on targets the square no longer reaches.
 
-**Anchor movement.** `MovePregenerationAnchor(station)` shifts the floating origin onto the station
-chunk (the private `ShiftOrigin`, as `TeleportPlayer` does) and places the player at the station
+**Anchor movement.** `MovePregenerationAnchor(anchor)` shifts the floating origin onto the anchor
+chunk (§4.4; the private `ShiftOrigin`, as `TeleportPlayer` does) and places the player at its
 center at the benchmark's flight height. The station change is a boundary crossing, so the next
 `Update` runs `CheckViewDistance`, re-queues the square nearest-first and unloads the old one.
 
 **Player handling.** The command run sets `IsTeleportHeld` for its duration, which gates the player
-rigidbody's whole `FixedUpdate`. At the end it returns the player to the start cell through
-`TeleportPlayer`, whose arrival hold releases the flag. The benchmark run sets
-`ReturnToStart = false`: the controller teleports to the loading tour itself.
+rigidbody's whole `FixedUpdate`. At the end, if the walk moved the anchor at all, it returns the
+player to the start cell through `TeleportPlayer`, whose arrival hold releases the flag; a run that walked
+no station leaves the player where it stood and releases the hold itself. The benchmark's run
+(`PregenerateRegion`) neither returns nor saves: it leaves the player at the last station, and the
+controller places it for the loading pass.
 
 **Outcomes** — every cell has a disposition:
 
@@ -343,25 +388,42 @@ next.
 
 ### 4.6 Progress and output
 
-`PregenerationProgress(done, total, station, stationCount)` fires once per station;
-`WorldUIManager` posts a console line at each 10 % step and one on `PregenerationEnded`. The
-benchmark maps `done / total` onto its HUD `Progress`.
+`PregenerationProgress(PregenerationProgressReport)` fires once per *checked* station — stations
+checked, grid size, chunks generated, elapsed — and not after a cancel. The walk finds missing chunks one
+station at a time, so progress is counted in stations, not chunks. `WorldUIManager` posts a console line
+at each 10 % step (`ChunkCommand.ProgressLine`, with a time left from the pace so far) and one on
+`PregenerationEnded`. The benchmark maps stations checked / grid size onto its HUD `Progress`.
 
 ### 4.7 Benchmark integration
 
+As built in PG-4:
+
 - `RunEnsureGeneratedPass` keeps its name, group, phase and `regimeBearing: false`, and yields
-  `World.Instance.PregenerateRegion` over `BenchmarkRouteGeometry.TourChunkBounds(loadDistance)` —
-  a new method that `BuildTourChunkSet` also uses for its grid bounds, so the scanned rectangle and the
-  coverage footprint cannot disagree. The footprint is a subset of that rectangle.
-- The pre-phase pipeline settle goes: the pass is not a measurement.
-- Trace capacity comes from the plan: `stations × (2·LoadDistance+1)² × headroom`, through a new
-  `PipelineTelemetry.EstimateStationWalkCapacity`, in place of the flight-time estimate.
-- `EnsureGeneratedSpeed` and `EnsureGeneratedSeconds` are deleted; `TourLengthMeters` stays — it
-  describes the circuit the loading pass loops.
-- The report's `Ensure sweep:` line becomes `Pre-generation:` — rectangle, missing at start, stations,
-  generated, elapsed, stalls, settle timeouts — so a capture states which ensure method produced it
-  (the FP-6 rule). The coverage line's "after the ensure sweep" becomes "after pre-generation";
-  `BenchmarkTourCoverage` itself is unchanged.
+  `World.Instance.PregenerateRegion(BenchmarkRouteGeometry.TourChunkBounds(loadDistance))`.
+  `BuildTourChunkSet` takes its grid from the same method, so the rectangle and the coverage footprint
+  cannot disagree: the footprint lies inside it and reaches all four edges (Backpressure B31).
+- The pre-phase pipeline settle and the waypoint placement are gone: the pass is not a measurement, and
+  the walk moves the anchor itself.
+- Trace capacity comes from the grid: `PipelineTelemetry.EstimateStationWalkCapacity(LoadDistance,
+  StationGridCount)` = stations × (2·LoadDistance+1)² × 1.5, clamped (B32) — 16 stations → 17 496 at
+  vd 10, 9 → the 65 536 maximum at vd 32.
+- `EnsureGeneratedSpeed` and `EnsureGeneratedSeconds` are deleted; `TourLengthMeters` stays and is
+  printed on the report's `Loading tour:` line.
+- The outcome counts only if `LastPregenerationOutcome` is a new object after the yield: a refused start
+  renders **NOT RUN**, never "0 stalled". A canceled or stalled run logs an error and the benchmark
+  continues — the coverage instrument judges admissibility.
+- The report's `Ensure sweep:` line is now `Pre-generation:` — rectangle, chunks, missing found, stations
+  walked / checked / in the grid, generated, elapsed, the populate + settle split, the slowest station,
+  stalled, settle timeouts, re-marked — with NOT RUN and CANCELED as `** … **` banners, so a capture
+  states which ensure method produced it (the FP-6 rule). The coverage line reads "after pre-generation".
+- **Coverage credits terrain that exists before arming.** `BenchmarkTourCoverage` counted only chunks
+  populated after `Arm`, so the world load's spawn area — on disk, inside a station the walk skips because
+  nothing there is missing — read as missing (PG-4's first vd 10 run: 84 chunks, 98.7 %, while the loading
+  pass generated 0). The flight had hidden this by reloading those chunks as it passed.
+  `BenchmarkTourCoverage.CreditExisting` now credits the footprint chunks saved or resident at arming (B18).
+- The shrunk-tour banner no longer claims the loading pass generates terrain — pre-generation covers any
+  tour — but says the capture is not comparable to a full-tour one. Dropping the shrink is
+  [`FLIGHT_PROFILE_CAPTURE.md`](FLIGHT_PROFILE_CAPTURE.md) §7.3 #14.
 
 ### 4.8 CMD-6's open design questions, answered
 
@@ -377,9 +439,11 @@ benchmark maps `done / total` onto its HUD `Progress`.
 ## 5. Prerequisites & integration points
 
 - **No blocking prerequisite.** Everything the design reads exists today.
-- **Doc sync on landing:** `COMMAND_CONSOLE_SYSTEM.md` §8 (CMD-6 row → shipped, plus a §8.x command
-  section), `CHUNK_PIPELINE_SCHEDULE_QUOTA_THROUGHPUT.md` §7.0 item 3 (the deferred gap closes),
-  `FLIGHT_PROFILE_CAPTURE.md` (the ensure pass is no longer a flight).
+- **Doc sync (done with PG-4):** `COMMAND_CONSOLE_SYSTEM.md` §8 (CMD-6 row → shipped, new §8.7, the
+  `/chunk info` row), `CHUNK_PIPELINE_SCHEDULE_QUOTA_THROUGHPUT.md` §7.0 item 3 (the deferred gap closes),
+  `FLIGHT_PROFILE_CAPTURE.md` v1.17 (the ensure pass is no longer a flight; §7.3 #14),
+  `INFINITE_WORLD_STORAGE_AND_SERIALIZATION_ARCHITECTURE.md` §11.1 item 3 (region-file handle eviction, a
+  pre-existing backlog item the uncapped command reaches faster).
 - **Reserved seat for v2:** the `ChunkPregenerator` contract (rectangle in, outcome out, progress
   events) is anchor-agnostic. A future second residency anchor (§7.2) replaces
   `MovePregenerationAnchor` and the player hold without touching either caller.
@@ -388,17 +452,17 @@ benchmark maps `done / total` onto its HUD `Progress`.
 
 ## 6. Constraint compliance checklist
 
-| Project constraint                              | How this design complies                                                                                                                                        |
-|-------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Voxels are packed `uint`s, no per-voxel objects | Untouched; the design works at chunk granularity.                                                                                                               |
-| Burst jobs 100 % Burst-compatible               | No job changes — generation, lighting and meshing jobs run unmodified.                                                                                          |
-| No GC / LINQ in hot paths                       | The per-frame classify loop walks a pooled list of the station's targets; sets and lists come from `HashSetPool`/`ListPool`. The one-time scan may allocate.    |
-| Pooling conventions                             | `ListPool<ChunkCoord>` / `HashSetPool<ChunkCoord>` for the missing set and station targets, released on every outcome.                                          |
-| No BinaryFormatter/JSON for terrain             | No format change; the saved-chunk query reads the existing region header.                                                                                       |
-| BlockIDs constants, no raw IDs                  | No block references.                                                                                                                                            |
-| Chunk-lifecycle invariants                      | No flag set or cleared, no gate added or bypassed; state is read on the main thread only.                                                                       |
-| Coordinate spaces (WS-4)                        | Command corners arrive in voxel space and convert once via `ChunkMath.VoxelToChunk`; the plan works in `ChunkCoord`; the anchor converts through `WorldOrigin`. |
-| `Commands` namespace is UnityEngine-free        | `ChunkCommand` talks only to the `World` facade.                                                                                                                |
+| Project constraint                              | How this design complies                                                                                                                                                             |
+|-------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Voxels are packed `uint`s, no per-voxel objects | Untouched; the design works at chunk granularity.                                                                                                                                    |
+| Burst jobs 100 % Burst-compatible               | No job changes — generation, lighting and meshing jobs run unmodified.                                                                                                               |
+| No GC / LINQ in hot paths                       | The per-frame classify loop walks a pooled list of the station's targets; sets and lists come from `HashSetPool`/`ListPool`. The per-station header read allocates once per station. |
+| Pooling conventions                             | `ListPool` / `HashSetPool` / `DictionaryPool` for the station targets, the stalled set, the header scratch and the captured neighbor sets, released on every outcome.                |
+| No BinaryFormatter/JSON for terrain             | No format change; the saved-chunk query reads the existing region header.                                                                                                            |
+| BlockIDs constants, no raw IDs                  | No block references.                                                                                                                                                                 |
+| Chunk-lifecycle invariants                      | No flag set or cleared, no gate added or bypassed; state is read on the main thread only.                                                                                            |
+| Coordinate spaces (WS-4)                        | Command corners arrive in voxel space and convert once via `ChunkMath.VoxelToChunk`; the plan works in `ChunkCoord`; the anchor converts through `WorldOrigin`.                      |
+| `Commands` namespace is UnityEngine-free        | `ChunkCommand` talks only to the `World` facade.                                                                                                                                     |
 
 ---
 
@@ -408,9 +472,9 @@ benchmark maps `done / total` onto its HUD `Progress`.
 |------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:------:|------------|---------------|
 | **PG-0 — Saved-chunk query** | `ChunkStorageManager.CollectSavedChunks(rect, set)` + the per-region header read; no region file created for an absent region. Format unchanged.                                                        |   🟢   | —          | ✅ `238176c2` |
 | **PG-1 — Plan**              | `Helpers/PregenerationPlan.cs`: normalization, cover radius, serpentine grid, station filter, `Classify`.                                                                                               |   🟢   | —          | ✅ `503189e8` |
-| **PG-2 — Driver**            | `ChunkPregenerator` + the `World` facade, events, `MovePregenerationAnchor`, watchdogs, retry pass, outcomes. `Tools/UnityCli/PlayMode/PregenProbe.cs` kept as the Play-mode harness over the real API. |   🟡   | PG-0, PG-1 | ✅            |
-| **PG-3 — `/chunk generate`** | `ChunkInfoCommand` → `ChunkCommand` (GUID kept, `unity-file-ops`), the generate/cancel grammar, confirmation and refusal tiers, `WorldUIManager` progress lines.                                        |   🟡   | PG-2       | —             |
-| **PG-4 — Benchmark**         | `RunEnsureGeneratedPass` on the driver, `TourChunkBounds`, `EstimateStationWalkCapacity`, the report lines; delete `EnsureGeneratedSpeed`/`Seconds`; the §5 doc sync.                                   |   🟡   | PG-2       | —             |
+| **PG-2 — Driver**            | `ChunkPregenerator` + the `World` facade, events, `MovePregenerationAnchor`, watchdogs, retry pass, outcomes. `Tools/UnityCli/PlayMode/PregenProbe.cs` kept as the Play-mode harness over the real API. |   🟡   | PG-0, PG-1 | ✅ `a3752105` |
+| **PG-3 — `/chunk generate`** | `ChunkInfoCommand` → `ChunkCommand` (GUID kept, `unity-file-ops`), the generate/cancel grammar, the confirmation tier (no size cap), `WorldUIManager` progress lines.                                   |   🟡   | PG-2       | ✅ `80009706` |
+| **PG-4 — Benchmark**         | `RunEnsureGeneratedPass` on the driver, `TourChunkBounds`, `EstimateStationWalkCapacity`, the report lines; delete `EnsureGeneratedSpeed`/`Seconds`; the §5 doc sync.                                   |   🟡   | PG-2       | ✅            |
 | **PG-5 — IL2CPP A/B**        | Master captures of the base commit vs the change at vd 10 and vd 32 (`perf-benchmark`); requires a player build, so it runs only on the build owner's go-ahead.                                         |   🟡   | PG-4       | —             |
 
 PG-0…PG-2 plus PG-4 deliver the benchmark win; PG-3 is independent of PG-4. Each phase is one
@@ -426,60 +490,96 @@ commit that compiles and keeps every suite green.
   `Classify` truth table including lighting-disabled. One mutation proven red per new baseline group
   (`prove_red.py`).
 - **PG-2 → Play mode:** `PregenProbe` re-runs both §2.2 scenarios through the real API; expected
-  close to 87.9 s / 8.1 s, zero stalls, zero console errors, and a missing set that is empty on
-  `Completed`. Then `Validate All`.
+  close to the prototype; measured 70.1–90.1 s for the fresh rectangle and 16.8–22.6 s for a genuine
+  531-chunk gap — not the prototype's 8.1 s, which measured reloads (§2.2) — zero stalls, zero console
+  errors, and a missing set that is empty on `Completed`. Then `Validate All`.
 - **PG-3 → `Validate Command Console`:** the argument matrix against the existing stub world —
-  no world, arity, radius bounds, corner normalization, `~`, confirmation above the threshold,
-  refusal above the cap, persistence off, border, `cancel` when idle. `InstalledCommandCount` stays
-  19 (a subcommand adds no registration). In game: `/chunk generate 8` and a cancel.
+  no world, arity, radius bounds, corner normalization, `~`, confirmation above the threshold, the
+  addressable-world bound (no size cap), persistence off, border, `cancel` when idle. `InstalledCommandCount`
+  stays 19 (a subcommand adds no registration). In game: `/chunk generate 8` and a cancel — done
+  2026-10-17, with a 361-chunk run, its re-run, a 4-million-chunk prompt and a canceled run.
 - **PG-4 → Editor benchmark**, generation speeds `200`, loading speeds `50`, at vd 10 and vd 32: the
   report must show coverage **100.0 %** when the loading pass starts, `Pre-generation: … 0 stalled`,
-  and `0 generated` in the loading pass's `Chunks populated` line. The last two come from code paths
-  the pre-generator does not own, so it cannot pass them by reporting its own success. Plus
-  `Validate Pipeline Backpressure`.
+  and `0 generated` with a non-zero loaded-from-disk count in the loading pass's `Chunks populated` line
+  (an empty phase must not pass). The coverage and the loading line come from code paths the
+  pre-generator does not own, so it cannot pass them by reporting its own success. Plus
+  `Validate Pipeline Backpressure` (B31 tour bounds, B32 trace capacity). **Met 2026-10-17** — one Editor
+  (Mono) run per view distance, ±15 %, fresh seed-0 benchmark worlds:
+
+  | vd | Rectangle            | Missing found | Stations walked / grid | Time    | Populate + settle | Slowest station | Stalled | Settle timeouts | Re-marked | Coverage | Loading pass        |
+  |----|----------------------|--------------:|-----------------------:|---------|-------------------|-----------------|--------:|----------------:|----------:|----------|---------------------|
+  | 10 | (11, −8)..(89, 70)   | 1 886         | 15 / 16                | 50.5 s  | 17.5 s + 32.9 s   | 4.5 s           | 0       | 0               | 47        | 100.0 %  | 0 gen / 3 252 loaded |
+  | 32 | (−17, −49)..(117, 85) | 12 299       | 9 / 9                  | 237.8 s | 205.9 s + 31.7 s  | 54.0 s          | 0       | 8               | 166       | 100.0 %  | 0 gen / 7 392 loaded |
+
+  Total runtime 1m 55s (vd 10, tour shrunk to 52 chunks at a single 200 m/s phase) and 6m 13s (vd 32).
+  Both rows ran on an otherwise idle machine. Earlier runs found the two fixes in §4.7 and §4.4: coverage
+  98.7 % at vd 10 from the spawn area arming missed (deterministic — those chunks are never loaded again
+  while the tracker is armed), and 41 stalls at vd 32 at the edge stations anchored past the rectangle. The
+  vd 32 run (389.2 s, 68 settle timeouts) and the vd 10 run between the two fixes (66.3 s) shared the
+  machine with a heavy external load, so they are **not** a before/after measure of the anchor fix.
 - **PG-5 →** total-runtime reduction, and loading-pass rows within the noise rules `perf-benchmark`
   sets for a same-session base-commit A/B.
 
 ### 7.2 Extension roadmap
 
-| Version | Extension                                                                                                                                                                                                                                                    |
-|---------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **v2**  | **Second residency anchor** (§3.1 Option B): pre-generate without moving the player, with no meshing cost and a free ticket radius. Needs its own `chunk-lifecycle` design pass over `IsBeyondUnloadDistance`, the request queue and the panic-gate scaling. |
-| **v2**  | Background / idle pre-generation (a "prepare world" spinner, WORLDGEN report's pre-generation note) — rides on the v2 anchor.                                                                                                                                |
-| **v3+** | Persisted resumable runs for very large regions — gets its own design when it becomes concrete.                                                                                                                                                              |
+| Version | Extension                                                                                                                                                                                                                                                                            |
+|---------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **v2**  | **Second residency anchor** (§3.1 Option B): pre-generate without moving the player, with no meshing cost and a free ticket radius. Needs its own `chunk-lifecycle` design pass over `IsBeyondUnloadDistance`, the request queue and the panic-gate scaling.                         |
+| **v2**  | Background / idle pre-generation (a "prepare world" spinner, WORLDGEN report's pre-generation note) — rides on the v2 anchor.                                                                                                                                                        |
+| **v2**  | **A time estimate in the confirmation prompt.** It needs a per-machine rate (a measured stations-per-minute, or the last run's pace); a static figure would be wrong on most machines, even between IL2CPP Master builds. The running progress lines already estimate from the pace. |
+| **v3+** | Persisted resumable runs for very large regions — gets its own design when it becomes concrete.                                                                                                                                                                                      |
 
 ---
 
 ## 8. Open questions
 
-1. **vd 32 cost and convergence.** Only vd 10 was prototyped. At vd 32 a station square is 5 041
-   chunks (`LoadDistance` 35) and the panic gate closes often; PG-4's vd 32 run measures the station time and stall
-   count. If stations converge slowly, the saving shrinks but completion still holds.
+1. **vd 32 cost and convergence.** *Answered by PG-4 (one Editor run, ±15 %):* 9 stations of 5 041-chunk
+   squares converge with **0 stalls** once edge stations anchor inside the rectangle (§4.4), in 237.8 s for
+   12 299 missing chunks. Unlike vd 10 the station time is mostly **populate** — 205.9 s against 31.7 s of
+   settling (87 %; vd 10: 35 %) — most likely the panic gate throttling admissions across the wide square
+   (not instrumented). The slowest station took **54.0 s**, at (83, −16), an interior one. The run before the
+   anchor fix stalled 41 edge chunks, but under a heavy external load; no clean figure without the fix
+   exists.
 2. **Settled-tier timeout rate at `LoadDistance − 2`.** *Answered for vd 10 by PG-2:* 0, 0 and 4 settle
    timeouts over three fresh 8 100-chunk runs. An initial-lit tier would not help — it is met within 0.4 s of
-   full settle (§2.2 note). Still open at vd 32 (PG-4).
+   full settle (§2.2 note). *vd 32, PG-4:* **8** settle timeouts over 12 299 generated chunks; vd 10 in the
+   same benchmark: 0. (The loaded pre-fix vd 32 run read 68, which says nothing about the fix.)
 3. **Does fully settled pre-generated terrain move the loading-pass numbers?** The flight saved its
-   few generated chunks mostly settled; the walk saves them settled. PG-5's A/B answers whether the
-   difference is inside the noise.
+   few generated chunks mostly settled; the walk saves them settled, including the spill a walked station
+   streams into its neighbors' covers (the §4.2 capture) and chunks reloaded from an unsettled save (the
+   §4.3 re-mark: 367 of 8 100 on a fresh vd 10 run). PG-5's A/B answers whether the difference is inside
+   the noise.
 
 ---
 
 ## 9. Rejected alternatives
 
-| Alternative                                                | Why rejected                                                                                                                                                            | Date       |
-|------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------|
-| Headless off-pipeline generator (§3.1 Option C)            | Duplicates `ProcessGenerationJobs` outside `worldData`, saves unlit terrain, races the live writer.                                                                     | 2026-10-17 |
-| Keeping the 50 m/s flight behind a setting                 | A second ensure path and a rollback flag to retire later; a base-commit A/B answers comparability without either.                                                       | 2026-10-17 |
-| A separate `/chunks` command                               | Two commands for one noun beside the existing `/chunk`.                                                                                                                 | 2026-10-17 |
-| "Populated" as the only completion tier                    | Leaving a station before lighting settles saves freshly generated chunks flagged for a full re-light (World.cs:4187), handing the loading pass work the flight did not. | 2026-10-17 |
-| Waiting for global quiescence (`JobManager.HasActiveJobs`) | Also waits for meshing the whole view square at every station, which pre-generation does not need.                                                                      | 2026-10-17 |
-| A fixed per-station timeout                                | The legitimate station time scales with view distance and panic-gate closures; a no-progress watchdog does not.                                                         | 2026-10-17 |
-| Flying the ensure sweep twice (the interim workaround)     | Doubles a ~198 s pass and is still probabilistic — the 99.7 % vd 32 capture fell 58 chunks short after one sweep.                                                       | 2026-10-17 |
+| Alternative                                                | Why rejected                                                                                                                                                                                  | Date       |
+|------------------------------------------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------|
+| Headless off-pipeline generator (§3.1 Option C)            | Duplicates `ProcessGenerationJobs` outside `worldData`, saves unlit terrain, races the live writer.                                                                                           | 2026-10-17 |
+| Keeping the 50 m/s flight behind a setting                 | A second ensure path and a rollback flag to retire later; a base-commit A/B answers comparability without either.                                                                             | 2026-10-17 |
+| A separate `/chunks` command                               | Two commands for one noun beside the existing `/chunk`.                                                                                                                                       | 2026-10-17 |
+| "Populated" as the only completion tier                    | Leaving a station before lighting settles saves freshly generated chunks flagged for a full re-light (World.cs:4187), handing the loading pass work the flight did not.                       | 2026-10-17 |
+| Waiting for global quiescence (`JobManager.HasActiveJobs`) | Also waits for meshing the whole view square at every station, which pre-generation does not need.                                                                                            | 2026-10-17 |
+| A fixed per-station timeout                                | The legitimate station time scales with view distance and panic-gate closures; a no-progress watchdog does not.                                                                               | 2026-10-17 |
+| Flying the ensure sweep twice (the interim workaround)     | Doubles a ~198 s pass and is still probabilistic — the 99.7 % vd 32 capture fell 58 chunks short after one sweep.                                                                             | 2026-10-17 |
+| A 250 000-chunk size cap (v1.1 §3.3)                       | No systems reason: it existed because the up-front missing-set scan did not scale. The streaming walk does, so size gets a confirmation with a cost estimate instead (the input-bounds rule). | 2026-10-17 |
 
 ---
 
 ## Document History
 
+* **v1.2** - PG-3 and PG-4 landed. **PG-3's revision:** no size cap (§3.3 — a confirmation with a disk estimate
+  instead; §9), the missing set read per station with the neighbor capture (§4.2), the grid walked by index
+  (§4.4), no size refusal and a return only when moved (§4.5), per-station progress with a pace-based time left
+  (§4.6). **PG-4 as built** (§4.7): the ensure pass pre-generates `TourChunkBounds`, B31/B32, NOT RUN for a
+  refused start, the `Pre-generation:` report line; coverage now credits terrain that exists at arming, and
+  edge stations anchor at the middle of their clipped cover (§4.4) — both found by the PG-4 benchmark, whose
+  idle-machine results answer §8 Q1 and Q2 at vd 32 (§7); the pre-fix runs ran under a heavy external load
+  and are not used as a before figure. Corrections: the 8.1 s prototype figure (reloads, not generation)
+  is retracted everywhere it stood; (40..129) was a hand-picked rectangle, not the vd 10 tour's; the streaming
+  loader already creates empty region files (§2). Region-file eviction filed in the storage doc; a prompt time
+  estimate is a v2 item (§7.2).
 * **v1.1** - PG-0…PG-2 landed: §2.2 corrected with the real-API measurements (the realistic prototype row
   measured reloads), §8 Q1's station-square size fixed (5 041 at vd 32), Q2 answered for vd 10; the driver's
   one write (re-marking reloaded settled chunks for saving, option A) is documented in §4.3.
@@ -490,4 +590,4 @@ commit that compiles and keeps every suite green.
 ---
 
 **Last Updated:** 2026-10-17  
-**Next Review:** when PG-0 starts
+**Next Review:** when PG-5's IL2CPP A/B runs

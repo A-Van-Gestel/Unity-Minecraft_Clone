@@ -2324,11 +2324,11 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     public bool CancelPregeneration(string reason) => _pregenerator != null && _pregenerator.RequestCancel(reason);
 
     /// <summary>
-    /// Moves the residency anchor onto a station: re-anchors the floating origin on the station chunk (as
+    /// Moves the residency anchor onto a station's anchor chunk: re-anchors the floating origin on it (as
     /// <see cref="TeleportPlayer"/> does) and places the player at its center at flight height. The next
     /// <see cref="Update"/> sees the chunk crossing and streams the square around it.
     /// </summary>
-    /// <param name="station">The station chunk.</param>
+    /// <param name="station">The anchor chunk (<see cref="PregenerationPlan.AnchorOf"/>).</param>
     internal void MovePregenerationAnchor(ChunkCoord station)
     {
         ShiftOrigin(station);
