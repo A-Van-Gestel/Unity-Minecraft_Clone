@@ -2244,6 +2244,141 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
 
     #endregion
 
+    #region CMD-6 pre-generation
+
+    /// <summary>The pre-generation anchor's height, as a fraction of the chunk height — the benchmark's flight height.</summary>
+    private const float PREGEN_ANCHOR_HEIGHT_RATIO = 0.8f;
+
+    /// <summary>Offset from a chunk's corner to its center, in voxels.</summary>
+    private const float PREGEN_STATION_CENTER = ChunkMath.CHUNK_WIDTH * 0.5f;
+
+    private ChunkPregenerator _pregenerator;
+
+    /// <summary>The station walk, created on first use.</summary>
+    private ChunkPregenerator Pregenerator => _pregenerator ??= new ChunkPregenerator(this);
+
+    /// <summary>
+    /// Raised after each pre-generation station with (chunks generated so far, chunks missing at start, station
+    /// number, stations in the pass).
+    /// </summary>
+    public event Action<int, int, int, int> PregenerationProgress;
+
+    /// <summary>Raised when a pre-generation run finishes, with its outcome.</summary>
+    public event Action<PregenerationOutcome> PregenerationEnded;
+
+    /// <summary>Whether a pre-generation run is active.</summary>
+    public bool IsPregenerating => _pregenerator != null && _pregenerator.IsRunning;
+
+    /// <summary>The most recent finished pre-generation outcome, or null.</summary>
+    public PregenerationOutcome LastPregenerationOutcome => _pregenerator?.LastOutcome;
+
+    /// <summary>Decides whether a pre-generation run over <paramref name="rect"/> may start now.</summary>
+    /// <param name="rect">The requested rectangle.</param>
+    /// <returns>The first refusal that applies, or <see cref="PregenerationPlan.StartRefusal.None"/>.</returns>
+    public PregenerationPlan.StartRefusal CheckPregenerationStart(ChunkRect rect)
+    {
+        return PregenerationPlan.ValidateStart(new PregenerationPlan.StartFacts(
+            rect.Count,
+            AreRectCornersInsideBorder(rect),
+            _isWorldLoaded,
+            settings.EnablePersistence && StorageManager != null,
+            IsPregenerating,
+            _teleportHoldActive));
+    }
+
+    /// <summary>
+    /// Starts a background pre-generation run (the <c>/chunk generate</c> path): the player is held, walked
+    /// through the rectangle, returned to the start, and the result is saved. Progress and the outcome arrive
+    /// through <see cref="PregenerationProgress"/> and <see cref="PregenerationEnded"/>.
+    /// </summary>
+    /// <param name="rect">The chunks to make exist.</param>
+    /// <param name="refusal">Why the run did not start, or <see cref="PregenerationPlan.StartRefusal.None"/>.</param>
+    /// <returns>True when the run started.</returns>
+    public bool TryStartPregeneration(ChunkRect rect, out PregenerationPlan.StartRefusal refusal)
+    {
+        refusal = CheckPregenerationStart(rect);
+        if (refusal != PregenerationPlan.StartRefusal.None) return false;
+
+        StartCoroutine(Pregenerator.Run(rect, interactive: true));
+        return true;
+    }
+
+    /// <summary>
+    /// A pre-generation run for a caller that yields it (the benchmark): no return to the start and no closing
+    /// save. A refused start is logged as an error and yields nothing; read <see cref="LastPregenerationOutcome"/>
+    /// after it for the result.
+    /// </summary>
+    /// <param name="rect">The chunks to make exist.</param>
+    /// <returns>The coroutine enumerator.</returns>
+    public IEnumerator PregenerateRegion(ChunkRect rect)
+    {
+        PregenerationPlan.StartRefusal refusal = CheckPregenerationStart(rect);
+        if (refusal != PregenerationPlan.StartRefusal.None)
+        {
+            Debug.LogError($"[Pregen] Refused to start over {rect}: {refusal}.");
+            yield break;
+        }
+
+        yield return Pregenerator.Run(rect, interactive: false);
+    }
+
+    /// <summary>Asks the active pre-generation run to stop.</summary>
+    /// <param name="reason">Why, for the outcome.</param>
+    /// <returns>False when no run is active.</returns>
+    public bool CancelPregeneration(string reason) => _pregenerator != null && _pregenerator.RequestCancel(reason);
+
+    /// <summary>
+    /// Moves the residency anchor onto a station: re-anchors the floating origin on the station chunk (as
+    /// <see cref="TeleportPlayer"/> does) and places the player at its center at flight height. The next
+    /// <see cref="Update"/> sees the chunk crossing and streams the square around it.
+    /// </summary>
+    /// <param name="station">The station chunk.</param>
+    internal void MovePregenerationAnchor(ChunkCoord station)
+    {
+        ShiftOrigin(station);
+        Vector2Int stationVoxelOrigin = station.ToVoxelOrigin();
+        _playerTransform.position = WorldOrigin.VoxelToUnity(new Vector3(
+            stationVoxelOrigin.x + PREGEN_STATION_CENTER,
+            VoxelData.ChunkHeight * PREGEN_ANCHOR_HEIGHT_RATIO,
+            stationVoxelOrigin.y + PREGEN_STATION_CENTER));
+    }
+
+    /// <summary>Holds or releases the player's simulation for a pre-generation run (the arrival-hold flag).</summary>
+    /// <param name="held">True to hold.</param>
+    internal void SetPregenerationHold(bool held)
+    {
+        if (player != null && player.VoxelRigidbody != null)
+            player.VoxelRigidbody.IsTeleportHeld = held;
+    }
+
+    /// <summary>Raises <see cref="PregenerationProgress"/>.</summary>
+    internal void RaisePregenerationProgress(int generated, int missingAtStart, int station, int stationCount) =>
+        PregenerationProgress?.Invoke(generated, missingAtStart, station, stationCount);
+
+    /// <summary>Raises <see cref="PregenerationEnded"/>.</summary>
+    internal void RaisePregenerationEnded(PregenerationOutcome outcome) => PregenerationEnded?.Invoke(outcome);
+
+    /// <summary>Whether all four voxel corners of a chunk rectangle lie inside the world border.</summary>
+    /// <param name="rect">The rectangle.</param>
+    /// <returns>True when inside, or when no border is set.</returns>
+    private bool AreRectCornersInsideBorder(ChunkRect rect)
+    {
+        if (BorderRadius <= 0) return true;
+
+        const int lastVoxelInChunk = ChunkMath.CHUNK_WIDTH - 1;
+        long minX = (long)rect.MinX * ChunkMath.CHUNK_WIDTH;
+        long minZ = (long)rect.MinZ * ChunkMath.CHUNK_WIDTH;
+        long maxX = (long)rect.MaxX * ChunkMath.CHUNK_WIDTH + lastVoxelInChunk;
+        long maxZ = (long)rect.MaxZ * ChunkMath.CHUNK_WIDTH + lastVoxelInChunk;
+        if (minX < int.MinValue || minZ < int.MinValue || maxX > int.MaxValue || maxZ > int.MaxValue) return false;
+
+        return IsVoxelInsideBorder((int)minX, (int)minZ) && IsVoxelInsideBorder((int)maxX, (int)minZ)
+                                                         && IsVoxelInsideBorder((int)minX, (int)maxZ)
+                                                         && IsVoxelInsideBorder((int)maxX, (int)maxZ);
+    }
+
+    #endregion
+
     /// <summary>
     /// Fails loudly if the player has drifted further from the Unity origin than a working floating origin ever
     /// allows (§4.3 step 4). This is WS-4's false-green guard: the failures it catches — a re-anchor that silently
