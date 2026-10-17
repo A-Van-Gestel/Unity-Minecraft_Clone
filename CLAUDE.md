@@ -89,6 +89,7 @@ When a change touches the chunk generation → lighting → meshing pipeline spe
 - **Styling:** Adhere strictly to the rules in `@Documentation/Guides/CODING_STYLE_GUIDE.md`.
 - **Shaders:** Hand-written HLSL under `Assets/Shaders/` follows `@Documentation/Guides/SHADER_CONVENTIONS.md` (the C# style guide does not apply). Notably: declare `#pragma target 4.5` — the project floor — and count interpolators when adding a varying.
 - **Coordinate spaces (WS-4):** The engine has five distinct spaces (Unity/render, voxel world, chunk index, chunk-local, chunk-relative persisted). Never mix them in one value; name variables/parameters for their space (`unityPos` vs `voxelPos`/`voxelCell` vs `chunkCoord` vs `localPos`); convert only at boundaries via `WorldOrigin`/`ChunkMath`/`ChunkCoord`. Rules + conversion table: `@Documentation/Guides/COORDINATE_SPACES_GUIDE.md`.
+- **Input bounds:** a command or tool input is only refused for a systems reason (memory, overflow, addressable range, format limit), named in the error; size alone gets a confirmation with a cost estimate, not a refusal.
 - **No Magic Numbers:** Extract inline magic numbers into named constants.
     - `public const` fields must use `PascalCase` (e.g., `public const int ChunkWidth = 16;`).
     - `private const` fields must use `SCREAMING_CASE` (e.g., `private const uint SUNLIGHT_MASK = 0x00000F00;`).
