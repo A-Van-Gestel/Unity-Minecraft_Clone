@@ -122,9 +122,11 @@ namespace UnityCli
         }
 
         /// <summary>Returns the run log so far, prefixed with RUNNING until the post-check has run.</summary>
+        /// <returns>The log, prefixed while the run is active.</returns>
         public static string Report() => (s_running ? "RUNNING " : "") + s_log;
 
         /// <summary>Cancels the walk; the post-check still runs on whatever finished.</summary>
+        /// <returns>Whether a cancel was requested, followed by the log so far.</returns>
         public static string Stop()
         {
             bool canceled = World.Instance != null && World.Instance.CancelPregeneration("probe stop");
