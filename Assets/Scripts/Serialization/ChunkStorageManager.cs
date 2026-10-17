@@ -159,6 +159,10 @@ namespace Serialization
         // Concurrent Dictionary with Lazy to ensure thread-safe, single initialization of RegionFiles
         private readonly ConcurrentDictionary<Vector2Int, Lazy<RegionFile>> _regions = new ConcurrentDictionary<Vector2Int, Lazy<RegionFile>>();
 
+        // Main-thread scratch for CollectSavedChunks, kept across calls: the pre-generator queries once per station.
+        private readonly Dictionary<Vector2Int, bool[]> _occupancyByRegion = new Dictionary<Vector2Int, bool[]>();
+        private readonly List<bool[]> _occupancyBuffers = new List<bool[]>();
+
         /// <summary>
         /// Initializes a new instance of the ChunkStorageManager, setting up region file I/O for the specified world.
         /// </summary>
@@ -259,7 +263,8 @@ namespace Serialization
         /// </remarks>
         public void CollectSavedChunks(ChunkRect rect, HashSet<ChunkCoord> into)
         {
-            Dictionary<Vector2Int, bool[]> occupancyByRegion = new Dictionary<Vector2Int, bool[]>();
+            _occupancyByRegion.Clear();
+            int buffersUsed = 0;
 
             for (int chunkZ = rect.MinZ; chunkZ <= rect.MaxZ; chunkZ++)
             {
@@ -268,10 +273,10 @@ namespace Serialization
                     ChunkCoord chunkCoord = new ChunkCoord(chunkX, chunkZ);
                     (Vector2Int regionCoord, int lx, int lz) = _codec.ChunkVoxelPosToRegionAddress(chunkCoord.ToVoxelOrigin());
 
-                    if (!occupancyByRegion.TryGetValue(regionCoord, out bool[] occupied))
+                    if (!_occupancyByRegion.TryGetValue(regionCoord, out bool[] occupied))
                     {
-                        occupied = ReadRegionOccupancy(regionCoord);
-                        occupancyByRegion.Add(regionCoord, occupied);
+                        occupied = ReadRegionOccupancy(regionCoord, ref buffersUsed);
+                        _occupancyByRegion.Add(regionCoord, occupied);
                     }
 
                     if (occupied != null && occupied[lx + lz * RegionFile.SlotsPerSide]) into.Add(chunkCoord);
@@ -281,8 +286,9 @@ namespace Serialization
 
         /// <summary>Reads a region's slot occupancy without creating its file.</summary>
         /// <param name="regionCoord">The region to read.</param>
+        /// <param name="buffersUsed">Scratch buffers this query has taken so far; advanced when one is taken.</param>
         /// <returns>The occupancy table, or null when the region has never been written.</returns>
-        private bool[] ReadRegionOccupancy(Vector2Int regionCoord)
+        private bool[] ReadRegionOccupancy(Vector2Int regionCoord, ref int buffersUsed)
         {
             RegionFile region;
             if (_regions.TryGetValue(regionCoord, out Lazy<RegionFile> lazy) && lazy.IsValueCreated)
@@ -292,7 +298,8 @@ namespace Serialization
             else
                 return null; // GetRegion would create it (OpenOrCreate) — the query must leave no file behind.
 
-            bool[] occupied = new bool[RegionFile.SlotCount];
+            if (buffersUsed == _occupancyBuffers.Count) _occupancyBuffers.Add(new bool[RegionFile.SlotCount]);
+            bool[] occupied = _occupancyBuffers[buffersUsed++];
             region.CopyOccupancy(occupied);
             return occupied;
         }
