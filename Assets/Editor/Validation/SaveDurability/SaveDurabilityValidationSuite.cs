@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Data;
@@ -28,6 +29,9 @@ namespace Editor.Validation.SaveDurability
     /// <c>StageFailedSave</c> in <see cref="ChunkStorageManager.SaveChunkAsync"/> reds B2–B8 (the edit
     /// no longer survives); routing FailedPermanent into the registry reds B9 (retry loop); B1 stays
     /// green (happy path untouched).</para>
+    /// <para>B14–B16 guard CMD-6's read-only saved-chunk query. Prove-red: opening absent regions through
+    /// <c>GetRegion</c> reds B14; reporting every slot as occupied reds B15; skipping existing but unopened region
+    /// files reds B16.</para>
     /// </summary>
     public static class SaveDurabilityValidationSuite
     {
@@ -60,6 +64,9 @@ namespace Editor.Validation.SaveDurability
                 new Scenario("B11: Dispose makes a final attempt on pending saves — edits survive a manager swap", DisposeFlushesPendingSaves),
                 new Scenario("B12: sync SaveChunk failure stages a snapshot — edits recoverable, not just logged", SyncSaveFailureStagesSnapshot),
                 new Scenario("B13: too-large chunk write — FailedPermanent, never staged, no retry loop", TooLargeWriteIsPermanent),
+                new Scenario("B14: saved-chunk query — an absent region yields nothing and leaves no region file (CMD-6)", SavedQueryLeavesNoFileForAbsentRegion),
+                new Scenario("B15: saved-chunk query — a saved chunk is found, its unsaved neighbors are not (CMD-6)", SavedQueryFindsOnlySavedChunks),
+                new Scenario("B16: saved-chunk query — spans regions and both signs; open and freshly opened regions agree (CMD-6)", SavedQuerySpansRegionsBothSigns),
             };
             return ValidationSuiteRunner.Execute("Save Durability", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }
@@ -418,6 +425,102 @@ namespace Editor.Validation.SaveDurability
             ok &= Check("too-large retry recovers nothing", fx.Storage.DrainFailedSaveRetries(ignoreBackoff: true) == 0);
             ok &= Check("entry dropped (no infinite retry loop)", fx.Storage.PendingFailedSaves == 0);
             ok &= Check("still nothing written to disk", RunLoad(fx, pos) == null);
+            return ok;
+        }
+
+        // --- CMD-6 saved-chunk query (CollectSavedChunks) ------------------------------------------
+
+        /// <summary>Region files currently in the fixture world's save folder.</summary>
+        private static int RegionFileCount(Fixture fx)
+        {
+            string regionFolder = Path.Combine(SaveSystem.GetSavePath(fx.WorldName, useVolatilePath: true), "Region");
+            return Directory.Exists(regionFolder) ? Directory.GetFiles(regionFolder).Length : 0;
+        }
+
+        /// <summary>Runs the saved-chunk query over a rectangle into a fresh set.</summary>
+        private static HashSet<ChunkCoord> CollectSaved(ChunkStorageManager storage, ChunkRect rect)
+        {
+            HashSet<ChunkCoord> saved = new HashSet<ChunkCoord>();
+            storage.CollectSavedChunks(rect, saved);
+            return saved;
+        }
+
+        /// <summary>B14. Red when: the saved-chunk query opens an unwritten region through
+        /// <c>GetRegion</c>'s OpenOrCreate path, leaving an empty region file behind.</summary>
+        private static bool SavedQueryLeavesNoFileForAbsentRegion()
+        {
+            using Fixture fx = new Fixture();
+            ChunkRect rect = new ChunkRect(new ChunkCoord(100, 100), new ChunkCoord(105, 105));
+
+            bool ok = Check("no region file before the query", RegionFileCount(fx) == 0);
+            ok &= Check("an absent region yields no saved chunks", CollectSaved(fx.Storage, rect).Count == 0);
+            ok &= Check("...and leaves no region file behind", RegionFileCount(fx) == 0);
+
+            // Positive control: the folder listing does see a region file once one is genuinely written.
+            ChunkData data = MakeEditedChunk(new ChunkCoord(0, 0).ToVoxelOrigin(), BlockIDs.Stone);
+            ok &= Check("control save reports Written", RunSave(fx, data) == ChunkSaveResult.Written);
+            World.Instance.ChunkPool.ReturnChunkData(data);
+            ok &= Check("control: the written region is visible to the listing", RegionFileCount(fx) == 1);
+            return ok;
+        }
+
+        /// <summary>B15. Red when: the query reports slots that hold no record, or ignores the rectangle bounds.</summary>
+        private static bool SavedQueryFindsOnlySavedChunks()
+        {
+            using Fixture fx = new Fixture();
+            ChunkCoord savedCoord = new ChunkCoord(2, 3);
+            ChunkData data = MakeEditedChunk(savedCoord.ToVoxelOrigin(), BlockIDs.Stone);
+            bool ok = Check("save reports Written", RunSave(fx, data) == ChunkSaveResult.Written);
+            World.Instance.ChunkPool.ReturnChunkData(data);
+
+            HashSet<ChunkCoord> saved = CollectSaved(fx.Storage, new ChunkRect(new ChunkCoord(0, 0), new ChunkCoord(5, 5)));
+            ok &= Check($"exactly the saved chunk is found (got {saved.Count.ToString()})",
+                saved.Count == 1 && saved.Contains(savedCoord));
+
+            ok &= Check("a rectangle that excludes the saved chunk finds nothing",
+                CollectSaved(fx.Storage, new ChunkRect(new ChunkCoord(3, 0), new ChunkCoord(5, 5))).Count == 0);
+            return ok;
+        }
+
+        /// <summary>B16. Red when: the query mis-addresses chunks across region boundaries or negative
+        /// coordinates, or reads differently through a freshly opened region than through an open one.</summary>
+        private static bool SavedQuerySpansRegionsBothSigns()
+        {
+            using Fixture fx = new Fixture();
+            ChunkCoord[] savedCoords = { new ChunkCoord(-1, -1), new ChunkCoord(31, 0), new ChunkCoord(32, 0) };
+
+            bool ok = true;
+            foreach (ChunkCoord chunkCoord in savedCoords)
+            {
+                ChunkData data = MakeEditedChunk(chunkCoord.ToVoxelOrigin(), BlockIDs.Stone);
+                ok &= Check($"save of {chunkCoord} reports Written", RunSave(fx, data) == ChunkSaveResult.Written);
+                World.Instance.ChunkPool.ReturnChunkData(data);
+            }
+
+            int filesAfterSaves = RegionFileCount(fx);
+            ok &= Check($"three regions written (got {filesAfterSaves.ToString()})", filesAfterSaves == 3);
+
+            // Spans regions (-1,-1), (-1,0), (0,-1), (0,0), (1,-1) and (1,0); three of them were never written.
+            ChunkRect rect = new ChunkRect(new ChunkCoord(-2, -2), new ChunkCoord(33, 1));
+            HashSet<ChunkCoord> saved = CollectSaved(fx.Storage, rect);
+            ok &= Check($"open regions: exactly the three saved chunks (got {saved.Count.ToString()})",
+                saved.Count == 3 && saved.SetEquals(savedCoords));
+
+            // A second manager has no open regions: every existing file is reached through the File.Exists path.
+            fx.Storage.Dispose();
+            ChunkStorageManager second = new ChunkStorageManager(fx.WorldName, useVolatilePath: true, SaveSystem.CURRENT_VERSION);
+            try
+            {
+                saved = CollectSaved(second, rect);
+                ok &= Check($"freshly opened regions: the same three chunks (got {saved.Count.ToString()})",
+                    saved.Count == 3 && saved.SetEquals(savedCoords));
+            }
+            finally
+            {
+                second.Dispose();
+            }
+
+            ok &= Check("the unwritten regions in the rectangle were not created", RegionFileCount(fx) == filesAfterSaves);
             return ok;
         }
     }

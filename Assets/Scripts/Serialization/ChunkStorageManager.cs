@@ -247,6 +247,57 @@ namespace Serialization
         }
 
         /// <summary>
+        /// Adds every chunk of <paramref name="rect"/> that has a record on disk to <paramref name="into"/> — the
+        /// pre-generator's missing-set scan (CMD-6). Read-only: a region with no file is skipped, never created, and
+        /// each region's header is read once, so the cost is per region rather than per chunk.
+        /// </summary>
+        /// <param name="rect">The chunks to look up.</param>
+        /// <param name="into">Receives the saved chunks; existing entries are kept.</param>
+        /// <remarks>
+        /// Main thread. A save still in flight reads as absent, so a chunk is never reported saved when it is not.
+        /// An I/O fault opening an existing region throws rather than reading as absent (the CP-3 load contract).
+        /// </remarks>
+        public void CollectSavedChunks(ChunkRect rect, HashSet<ChunkCoord> into)
+        {
+            Dictionary<Vector2Int, bool[]> occupancyByRegion = new Dictionary<Vector2Int, bool[]>();
+
+            for (int chunkZ = rect.MinZ; chunkZ <= rect.MaxZ; chunkZ++)
+            {
+                for (int chunkX = rect.MinX; chunkX <= rect.MaxX; chunkX++)
+                {
+                    ChunkCoord chunkCoord = new ChunkCoord(chunkX, chunkZ);
+                    (Vector2Int regionCoord, int lx, int lz) = _codec.ChunkVoxelPosToRegionAddress(chunkCoord.ToVoxelOrigin());
+
+                    if (!occupancyByRegion.TryGetValue(regionCoord, out bool[] occupied))
+                    {
+                        occupied = ReadRegionOccupancy(regionCoord);
+                        occupancyByRegion.Add(regionCoord, occupied);
+                    }
+
+                    if (occupied != null && occupied[lx + lz * RegionFile.SlotsPerSide]) into.Add(chunkCoord);
+                }
+            }
+        }
+
+        /// <summary>Reads a region's slot occupancy without creating its file.</summary>
+        /// <param name="regionCoord">The region to read.</param>
+        /// <returns>The occupancy table, or null when the region has never been written.</returns>
+        private bool[] ReadRegionOccupancy(Vector2Int regionCoord)
+        {
+            RegionFile region;
+            if (_regions.TryGetValue(regionCoord, out Lazy<RegionFile> lazy) && lazy.IsValueCreated)
+                region = lazy.Value;
+            else if (File.Exists(RegionPath(regionCoord)))
+                region = GetRegion(regionCoord);
+            else
+                return null; // GetRegion would create it (OpenOrCreate) — the query must leave no file behind.
+
+            bool[] occupied = new bool[RegionFile.SlotCount];
+            region.CopyOccupancy(occupied);
+            return occupied;
+        }
+
+        /// <summary>
         /// Synchronously serializes, compresses, and saves a chunk to its region file.
         /// This directly blocks the calling thread, rendering it suitable primarily for application shutdown logic.
         /// </summary>
@@ -821,13 +872,13 @@ namespace Serialization
         // Private helpers
         // -------------------------------------------------------------------------
 
+        private string RegionPath(Vector2Int regionCoord) =>
+            Path.Combine(_saveFolderPath, $"r.{regionCoord.x}.{regionCoord.y}.bin");
+
         private RegionFile GetRegion(Vector2Int regionCoord)
         {
-            Lazy<RegionFile> lazy = _regions.GetOrAdd(regionCoord, coord => new Lazy<RegionFile>(() =>
-            {
-                string path = Path.Combine(_saveFolderPath, $"r.{coord.x}.{coord.y}.bin");
-                return new RegionFile(path);
-            }));
+            Lazy<RegionFile> lazy = _regions.GetOrAdd(regionCoord,
+                coord => new Lazy<RegionFile>(() => new RegionFile(RegionPath(coord))));
 
             try
             {

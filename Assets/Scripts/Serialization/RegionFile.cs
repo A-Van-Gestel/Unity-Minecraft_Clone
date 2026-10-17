@@ -13,6 +13,12 @@ namespace Serialization
         private const int CHUNKS_PER_SIDE = 32;
         private const int TOTAL_CHUNKS = CHUNKS_PER_SIDE * CHUNKS_PER_SIDE; // 1024
 
+        /// <summary>Chunk slots along one side of a region; a slot's index is <c>localX + localZ * SlotsPerSide</c>.</summary>
+        public const int SlotsPerSide = CHUNKS_PER_SIDE;
+
+        /// <summary>Chunk slots in one region — the length <see cref="CopyOccupancy"/> fills.</summary>
+        public const int SlotCount = TOTAL_CHUNKS;
+
         private readonly string _filePath;
         private FileStream _fileStream;
 
@@ -298,6 +304,19 @@ namespace Serialization
                     int localZ = i / CHUNKS_PER_SIDE;
                     yield return new Vector2Int(localX, localZ);
                 }
+            }
+        }
+
+        /// <summary>
+        /// Copies which local slots hold a chunk record into <paramref name="occupied"/>, indexed
+        /// <c>localX + localZ * 32</c>. One header read under the file lock, so a concurrent save is never half-seen.
+        /// </summary>
+        /// <param name="occupied">Destination of at least 1024 entries; every entry is overwritten.</param>
+        public void CopyOccupancy(bool[] occupied)
+        {
+            lock (_fileLock)
+            {
+                for (int i = 0; i < TOTAL_CHUNKS; i++) occupied[i] = _offsets[i] != 0;
             }
         }
 
