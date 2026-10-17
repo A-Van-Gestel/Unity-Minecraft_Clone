@@ -1,8 +1,8 @@
 # Chunk Pre-Generation (CMD-6) Design
 
-**Version:** 1.2  
+**Version:** 1.3  
 **Date:** 2026-10-17  
-**Status:** In progress — PG-0…PG-4 landed; PG-5 (the IL2CPP A/B) pending the build owner's go-ahead.  
+**Status:** In progress — v1's phases PG-0…PG-5 are complete and PG-5's IL2CPP A/B is GO; §8 Q4 (the vd-32 loading-pass tail PG-5 found) still open, then promotion to Architecture.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > A deterministic "make every chunk in this rectangle exist on disk" operation, shared by a new
@@ -145,6 +145,13 @@ phase), so the player numbers should be lower. The vd 32 cost is **not yet measu
 
 **Projected effect** (estimate): vd 10 total ≈ 440 s → ≈ 260 s (−40 %); vd 32 ≈ 480 s → ≈ 300–340 s
 (−30 … −37 %), coverage 100 % at both by construction.
+
+> **Measured by PG-5** (IL2CPP Master, default speeds, legs alternated):
+> - **vd 10:** 441 → 245 s (−44.4 %, 3 runs per leg), beating the estimate.
+> - **vd 32:** 479 → 312 s (−34.9 %, 2 runs per leg at matched calibrated budgets), inside its range.
+> - **Coverage:** 100.0 % on every run.
+>
+> Full capture: [`CHUNK_PREGENERATION_PG5_ENSURE_AB_IL2CPP_2026-10-17`](../Performance/CHUNK_PREGENERATION_PG5_ENSURE_AB_IL2CPP_2026-10-17_BENCHMARK.md).
 
 ---
 
@@ -474,8 +481,8 @@ As built in PG-4:
 | **PG-1 — Plan**              | `Helpers/PregenerationPlan.cs`: normalization, cover radius, serpentine grid, station filter, `Classify`.                                                                                               |   🟢   | —          | ✅ `503189e8` |
 | **PG-2 — Driver**            | `ChunkPregenerator` + the `World` facade, events, `MovePregenerationAnchor`, watchdogs, retry pass, outcomes. `Tools/UnityCli/PlayMode/PregenProbe.cs` kept as the Play-mode harness over the real API. |   🟡   | PG-0, PG-1 | ✅ `a3752105` |
 | **PG-3 — `/chunk generate`** | `ChunkInfoCommand` → `ChunkCommand` (GUID kept, `unity-file-ops`), the generate/cancel grammar, the confirmation tier (no size cap), `WorldUIManager` progress lines.                                   |   🟡   | PG-2       | ✅ `80009706` |
-| **PG-4 — Benchmark**         | `RunEnsureGeneratedPass` on the driver, `TourChunkBounds`, `EstimateStationWalkCapacity`, the report lines; delete `EnsureGeneratedSpeed`/`Seconds`; the §5 doc sync.                                   |   🟡   | PG-2       | ✅            |
-| **PG-5 — IL2CPP A/B**        | Master captures of the base commit vs the change at vd 10 and vd 32 (`perf-benchmark`); requires a player build, so it runs only on the build owner's go-ahead.                                         |   🟡   | PG-4       | —             |
+| **PG-4 — Benchmark**         | `RunEnsureGeneratedPass` on the driver, `TourChunkBounds`, `EstimateStationWalkCapacity`, the report lines; delete `EnsureGeneratedSpeed`/`Seconds`; the §5 doc sync.                                   |   🟡   | PG-2       | ✅ `f0564f1c` |
+| **PG-5 — IL2CPP A/B**        | Master captures of the base commit vs the change at vd 10 and vd 32 (`perf-benchmark`); requires a player build, so it runs only when a build is authorized.                                            |   🟡   | PG-4       | ✅ 2026-10-17 |
 
 PG-0…PG-2 plus PG-4 deliver the benchmark win; PG-3 is independent of PG-4. Each phase is one
 commit that compiles and keeps every suite green.
@@ -518,7 +525,16 @@ commit that compiles and keeps every suite green.
   vd 32 run (389.2 s, 68 settle timeouts) and the vd 10 run between the two fixes (66.3 s) shared the
   machine with a heavy external load, so they are **not** a before/after measure of the anchor fix.
 - **PG-5 →** total-runtime reduction, and loading-pass rows within the noise rules `perf-benchmark`
-  sets for a same-session base-commit A/B.
+  sets for a same-session base-commit A/B. **GO 2026-10-17**
+  ([`CHUNK_PREGENERATION_PG5_ENSURE_AB_IL2CPP_2026-10-17`](../Performance/CHUNK_PREGENERATION_PG5_ENSURE_AB_IL2CPP_2026-10-17_BENCHMARK.md)).
+  A = a fresh Master build of `cd367094`; B = `f0564f1c`.
+  - **Runs:** vd 10 × 3 and vd 32 × 2 per leg, then vd 32 × 2 per leg again with the calibrated per-frame budgets
+    pinned. The two fresh builds had calibrated different values: A's `maxMeshRebuildsPerFrame` was 9, B's
+    `maxLightJobsPerFrame` 30.
+  - **Runtime:** 441 → 245 s (vd 10) and 479 → 312 s (vd 32).
+  - **B gates:** every B run reads `0 stalled`, coverage 100.0 % and a loading pass with `0 generated` and loads > 0.
+    The A leg also reached 100.0 % at vd 32 in all four runs.
+  - **Loading pass:** averages within the noise at both view distances; vd 32's tail is not (§8 Q3).
 
 ### 7.2 Extension roadmap
 
@@ -548,7 +564,26 @@ commit that compiles and keeps every suite green.
    few generated chunks mostly settled; the walk saves them settled, including the spill a walked station
    streams into its neighbors' covers (the §4.2 capture) and chunks reloaded from an unsettled save (the
    §4.3 re-mark: 367 of 8 100 on a fresh vd 10 run). PG-5's A/B answers whether the difference is inside
-   the noise.
+   the noise. *Answered by PG-5 (IL2CPP Master):*
+   - **vd 10:** inside the noise at 50 and 100 m/s. 200 m/s leans higher on B (2.8–2.9 → 3.0–3.4 ms average
+     CPU), but those runs had unmatched budgets and a light background load.
+   - **vd 32, averages:** equal or better with matched budgets (50 m/s Avg Wall FPS 92.8–93.0 → 96.7–98.8;
+     group average CPU 17.7 → 17.5 ms).
+   - **vd 32, tail: worse.** 50 m/s wall p99 36.1–36.3 → 38.9–40.0 ms; hitches 34–40 → 64–76 at 50 m/s,
+     5–9 → 18–19 at 100 m/s, 8–26 → 50–54 at 200 m/s.
+   - **The work behind it:** at 50 m/s B serves ≈ 17 % more lighting and mesh schedules for the same chunks
+     loaded, mostly post-delivery corrections (lighting ≈ 850 → ≈ 2 700). B's loading pass also allocates
+     ≈ 2 000 `ChunkSection` buffers the pool cannot supply; A's allocates none, because the flight's ≈ 52 000
+     streamed chunks had grown the pool beforehand.
+   - **Consequence:** vd-32 hitch counts and p99 do not compare across `f0564f1c`; averages and FPS do.
+4. **Where does vd 32's extra post-delivery lighting come from?** *Open, filed by PG-5.* Lighting never
+   re-marks a chunk for saving, so the flight's reloads did not rewrite the A leg's disk state. Two candidates
+   remain, neither instrumented:
+   - the 1 298–1 493 chunks the edge stations generate past the rectangle without waiting on their lighting;
+   - the walk ending at its last station, so the transition re-streams for 6.2–7.3 s from a different place.
+
+   Separately, the benchmark could pre-warm the `ChunkSection` pool so the loading pass no longer pays its
+   growth. Both stay inside v1's no-pipeline-change rule only if the fix is in the benchmark or the walk.
 
 ---
 
@@ -569,6 +604,9 @@ commit that compiles and keeps every suite green.
 
 ## Document History
 
+* **v1.3** - PG-5 complete: the IL2CPP Master A/B is GO (§7). The §2.2 projection was checked against the
+  measurement, and §8 Q3 is answered: loading-pass averages are within the noise, vd 32's tail is not. §8 Q4
+  is filed for that tail's lighting source.
 * **v1.2** - PG-3 and PG-4 landed. **PG-3's revision:** no size cap (§3.3 — a confirmation with a disk estimate
   instead; §9), the missing set read per station with the neighbor capture (§4.2), the grid walked by index
   (§4.4), no size refusal and a return only when moved (§4.5), per-station progress with a pace-based time left
@@ -590,4 +628,4 @@ commit that compiles and keeps every suite green.
 ---
 
 **Last Updated:** 2026-10-17  
-**Next Review:** when PG-5's IL2CPP A/B runs
+**Next Review:** when §8 Q4 is attributed, or at the promotion to Architecture
