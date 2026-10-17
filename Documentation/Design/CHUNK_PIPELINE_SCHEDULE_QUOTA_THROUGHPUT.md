@@ -762,7 +762,8 @@ validity gates before spending the rest of the matrix.**
    coordinates, and programmatically drive every chunk in that region to fully generated; the benchmark
    harness then calls it instead of flying a sweep and hoping. Filed as its own item needing a
    `create-implementation-plan` pass (2026-08-02); until it exists, treat vd 26/32 coverage as a known
-   validity gap rather than something a capture can clear.
+   validity gap rather than something a capture can clear. Designed 2026-10-17 as `PG-0`…`PG-5` in
+   [`CHUNK_PREGENERATION.md`](CHUNK_PREGENERATION.md); the gap stays open until its PG-4 lands.
 
 ### 7.1 How a capture actually gets its settings (verified, and it corrects a standing belief)
 
