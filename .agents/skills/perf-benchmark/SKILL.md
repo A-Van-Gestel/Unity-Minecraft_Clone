@@ -115,6 +115,12 @@ first as its own commit.
   MSAA, fog, fps cap). Every report's "Settings (differing from defaults)" block lists each value off its default,
   tagged `[session override]` when it came from `-mc-set` or the harness: diff that block across legs before
   comparing numbers.
+  - **Two fresh builds calibrate separately.** Each runs OM-1's first-launch device calibration and can settle on
+    different `maxMeshRebuildsPerFrame` / `maxLightJobsPerFrame` (PG-5: A 9 / 32, B 10 / 30, about half of a vd-32
+    loading-pass delta). Pin both legs with `-mc-set` at the defaults (10 / 32). A pinned value equal to its default
+    drops out of the Settings block, so confirm it from `Player.log`'s `Session settings overrides` line.
+  - **Restore `ProjectSettings.asset` between the two builds.** A build can stamp `bundleVersion` there, and the
+    next build's stamp then reads `-dirty`.
 - **Fixed scenario set, fixed seed** — reuse the established scenarios for the system so numbers
   stay comparable across reports. Include warm-up iterations before timing.
 - **Report the full distribution**: `mean`, `min` (clean floor — best CPU-cost proxy), `median`,
