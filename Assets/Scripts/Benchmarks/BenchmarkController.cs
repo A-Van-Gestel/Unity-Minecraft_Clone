@@ -323,7 +323,9 @@ namespace Benchmarks
             _metricsCollector?.StopRecording();
 
             // A coroutine killed mid-yield skips its finally block, so the ensure pass's subscription is dropped here.
+            // The walk itself runs on World and outlives this coroutine; canceling lets it release its hold.
             UnsubscribePregenerationProgress();
+            if (World.Instance != null) World.Instance.CancelPregeneration("the benchmark was stopped");
 
             // Close any phase still open (an aborted run) and switch the layer off. The domain reset covers
             // a play-mode restart, but not returning to the main menu within one session.

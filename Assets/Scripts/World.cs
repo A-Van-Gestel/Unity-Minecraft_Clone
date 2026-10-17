@@ -2306,6 +2306,10 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// </summary>
     /// <param name="rect">The chunks to make exist.</param>
     /// <returns>The coroutine enumerator.</returns>
+    /// <remarks>
+    /// The walk runs as this world's own coroutine, not nested in the caller's: a caller destroyed mid-run would
+    /// otherwise skip the walk's cleanup and leave the run active and the player held. Such a caller cancels it.
+    /// </remarks>
     public IEnumerator PregenerateRegion(ChunkRect rect)
     {
         PregenerationPlan.StartRefusal refusal = CheckPregenerationStart(rect);
@@ -2315,7 +2319,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
             yield break;
         }
 
-        yield return Pregenerator.Run(rect, interactive: false);
+        yield return StartCoroutine(Pregenerator.Run(rect, interactive: false));
     }
 
     /// <summary>Asks the active pre-generation run to stop.</summary>
