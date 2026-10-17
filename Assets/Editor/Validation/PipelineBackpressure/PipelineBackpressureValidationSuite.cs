@@ -87,6 +87,11 @@ namespace Editor.Validation.PipelineBackpressure
                 new Scenario("B23 OM-1 probe anchor: min of batch medians, reference identity (ES-2)", RunB23CalibrationAnchor),
                 new Scenario("B24 OM-1 budget map clamps + keep-higher calibration upgrade (ES-2)", RunB24CalibrationMapAndUpgrade),
                 new Scenario("B25 Pool-miss inputs: generated/loaded tally ignores tracing, no world renders unread (H-1)", RunB25PoolMissInputs),
+                new Scenario("B26 Pre-generation station grid: exact tiling of every rectangle shape, radii 2..40 (CMD-6)", RunB26PregenStationTiling),
+                new Scenario("B27 Pre-generation station filter: empty missing set plans zero stations (CMD-6)", RunB27PregenStationFilter),
+                new Scenario("B28 Pre-generation serpentine walk: consecutive stations are neighbors (CMD-6)", RunB28PregenSerpentine),
+                new Scenario("B29 Pre-generation readiness tiers: populated needs no tracked generation job (CMD-6)", RunB29PregenClassify),
+                new Scenario("B30 Pre-generation start validation: refusals and their precedence (CMD-6)", RunB30PregenValidateStart),
             };
             return ValidationSuiteRunner.Execute("Pipeline Backpressure", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }
