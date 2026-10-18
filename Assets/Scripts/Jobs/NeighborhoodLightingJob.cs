@@ -992,8 +992,8 @@ namespace Jobs
                 // horizontal slab's solid underside still stops it. Water (opacity 2) keeps dimming the
                 // column because IsTransparentThroughFace tests entry COST, not merely "does not block".
                 bool isVerticalSkylight = sourceLight == 15 && VoxelData.FaceChecks[i].y == -1
-                                                            && LightAttenuation.IsTransparentThroughFace(in sourceProps, sourceMeta, i)
-                                                            && LightAttenuation.IsTransparentThroughFace(in neighborProps, neighborMeta, entryFace);
+                                                            && LightAttenuation.CarriesVerticalSky(in sourceProps, sourceMeta,
+                                                                in neighborProps, neighborMeta);
 
                 byte lightToPropagate;
 
@@ -1549,45 +1549,33 @@ namespace Jobs
         }
 
         /// <summary>
-        /// Returns true when the voxel at <paramref name="pos"/> receives full vertical skylight — it is
-        /// fully transparent and the voxel directly above it is fully transparent and holds full sky (15).
-        /// Encodes the same vertical-skylight rule that <see cref="PropagateLight"/>'s
-        /// <c>isVerticalSkylight</c> relies on (a fully-transparent voxel directly below a fully-transparent
-        /// sky-15 voxel is lit to 15 with no attenuation), but evaluated standalone for a single voxel
-        /// rather than across a source→neighbor downward step — the two are independent code paths, so a
-        /// change to the vertical-skylight rule must be mirrored in both. Used by
-        /// <see cref="PropagateDarkness"/> to recognize a genuinely sky-exposed cross-seam neighbor (which
-        /// is independently lit and must NOT be sent a Bug-12 cross-seam removal mod) versus a roofed seam
-        /// voxel (which can only be the stale mutual-support side of a 2-cycle).
+        /// Returns true when the voxel at <paramref name="pos"/> receives full vertical skylight: the voxel
+        /// directly above holds full sky (15) and <see cref="LightAttenuation.CarriesVerticalSky"/> carries it
+        /// down undimmed, or the voxel sits on the top row where the column pass holds it at 15
+        /// (<see cref="LightAttenuation.IsSkyExposedTopRow"/>). Used by <see cref="PropagateDarkness"/> to
+        /// recognize a genuinely sky-exposed cross-seam neighbor (which is independently lit and must NOT be
+        /// sent a Bug-12 cross-seam removal mod) versus a roofed seam voxel (which can only be the stale
+        /// mutual-support side of a 2-cycle).
         /// </summary>
         /// <param name="pos">The voxel position in the 3x3 grid's local space.</param>
         /// <param name="packed">The voxel's already-fetched packed data (avoids a redundant lookup).</param>
         /// <returns>True if the voxel is directly lit by vertical skylight.</returns>
         private bool IsVerticallySkyLit(Vector3Int pos, uint packed)
         {
-            // VO-4: this must test the same faces PropagateLight's isVerticalSkylight rule does, or the
-            // Bug 12 initiator fires on voxels the BFS is holding at an undimmed 15 through a partial
-            // block's open half. The veto's in-chunk support mirrors the same rule (InChunkSkylightSupport).
+            // The shared helpers keep this in step with PropagateLight's isVerticalSkylight and the cross-chunk
+            // veto (InChunkSkylightSupport): a voxel the BFS holds at 15 that this calls unlit draws a Bug 12 removal.
             BlockTypeJobData props = BlockTypes[BurstVoxelDataBitMapping.GetId(packed)];
-            if (!LightAttenuation.IsTransparentThroughFace(in props, BurstVoxelDataBitMapping.GetMeta(packed), TOP_FACE))
-                return false;
+            byte meta = BurstVoxelDataBitMapping.GetMeta(packed);
+            if (LightAttenuation.IsSkyExposedTopRow(pos.y, in props, meta)) return true;
 
             Vector3Int above = new Vector3Int(pos.x, pos.y + 1, pos.z);
             uint abovePacked = GetPackedData(above);
             if (abovePacked == uint.MaxValue) return false;
 
             BlockTypeJobData aboveProps = BlockTypes[BurstVoxelDataBitMapping.GetId(abovePacked)];
-            if (!LightAttenuation.IsTransparentThroughFace(in aboveProps, BurstVoxelDataBitMapping.GetMeta(abovePacked), BOTTOM_FACE))
-                return false;
-
-            return LightBitMapping.GetSkylight(GetLightData(above)) == 15;
+            return LightAttenuation.CarriesVerticalSky(in aboveProps, BurstVoxelDataBitMapping.GetMeta(abovePacked), in props, meta)
+                   && LightBitMapping.GetSkylight(GetLightData(above)) == 15;
         }
-
-        /// <summary>The +Y face index in <c>VoxelData.FaceChecks</c> order.</summary>
-        private const int TOP_FACE = 2;
-
-        /// <summary>The -Y face index in <c>VoxelData.FaceChecks</c> order.</summary>
-        private const int BOTTOM_FACE = 3;
 
         /// <summary>
         /// The <c>VoxelData.FaceChecks</c> index of a unit step between face-adjacent voxels. Callers that
@@ -1603,8 +1591,8 @@ namespace Jobs
 
             if (direction.z == -1) return 0;
             if (direction.z == 1) return 1;
-            if (direction.y == 1) return TOP_FACE;
-            if (direction.y == -1) return BOTTOM_FACE;
+            if (direction.y == 1) return LightAttenuation.TopFace;
+            if (direction.y == -1) return LightAttenuation.BottomFace;
             if (direction.x == -1) return 4;
             if (direction.x == 1) return 5;
 

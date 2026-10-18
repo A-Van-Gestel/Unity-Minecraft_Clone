@@ -2,7 +2,7 @@
 
 This document outlines **open** bugs related to the current lighting implementation. Resolved bugs are archived in [`_FIXED_BUGS.md`](./_FIXED_BUGS.md).
 
-> **Last reviewed:** August 2026
+> **Last reviewed:** October 2026
 >
 > **Validation suite:** the editor menu item `Minecraft Clone/Dev/Validate Lighting Engine`
 > (`Assets/Editor/Validation/Lighting/`) runs baseline regression scenarios plus deterministic
@@ -12,6 +12,67 @@ This document outlines **open** bugs related to the current lighting implementat
 ---
 
 > All previously listed lighting bugs (01–08, 10–21, 23) have been fixed. See [`_FIXED_BUGS.md`](./_FIXED_BUGS.md) for details.
+
+## Bug 24: A Top-Row Voxel Never Regains Full Sky Once Its Light Is Cleared
+
+**Severity:** Low (no in-game sighting; the one known trigger is closed)  
+**Status:** Open — found 2026-10-18 while fixing the top-row case of Bug 23 (`_FIXED_BUGS.md` Lighting #27); not fixed
+
+**Description:**
+A voxel on the chunk's top row (`y = VoxelData.ChunkHeight - 1`, 127) that does not obstruct the sky column belongs at
+sky 15. Only the column pass sets that value: `NeighborhoodLightingJob.RecalculateSkylightForColumn` PASS 1 lights every
+cell above the heightmap to 15. The BFS has no other way to give a top-row voxel 15:
+
+- `PropagateLight`'s vertical rule (`isVerticalSkylight`, through `LightAttenuation.CarriesVerticalSky`) carries 15
+  *down* from the voxel above, and the top row has nothing above it.
+- Its horizontal neighbors give at most `15 − 1 = 14`.
+
+The column pass runs only when a column recalculation is queued, which happens when the heightmap changes. So once
+anything clears or lowers a top-row voxel's sky light without moving the heightmap, its darkness wave's re-seed
+lights it back to 14 from the sides and it stays there. That is a stable but wrong field: over-dim by one, and so is
+everything that voxel feeds. Off the top row the same situation heals, because the voxel above re-lights it to 15.
+
+**Reachability.** The one known trigger was a cross-chunk skylight removal applied to an open top-row seam voxel: the
+Bug 23 veto credited it only 14, and the Bug 12 initiator called a top-row voxel "not vertically sky-lit". Both now ask
+`LightAttenuation.IsSkyExposedTopRow` (Lighting #27's top-row follow-up), so that removal is vetoed. Nothing else is
+known to clear a top-row 15 without moving the heightmap:
+- A darkness wave clears only neighbors below the removed level, and 15 is never below it.
+- Placing or breaking a block on the top row changes the heightmap and queues the column recalculation.
+
+Unconfirmed paths worth checking: a loaded-lighting removal seed (`lighting_pending`) on a top-row voxel, the Bug 14
+pull-back verifier clearing a top-row claim, and a mid-flight edit racing a job whose band reaches the top row.
+
+**Deterministic repro (expected red today).** Write it as `K24a` in
+`Assets/Editor/Validation/Lighting/Baselines/LightingValidationSuite.Baseline.Bug23VerticalVeto.cs`, next to B128–B130.
+The scenario was written and run once during the Bug 23 follow-up, then removed because it is not a Bug 23 guard:
+
+1. `new LightingTestWorld(3)`, `FillSuperflatFloor(10, TestBlockPalette.Stone)`, `RecalculateHeightmaps()`,
+   `RunInitialLighting()`.
+2. On the top row at the x15|16 seam, `(15, 127, 8)` and `(16, 127, 8)`: `SetSkylightAt(pos, 14)` and
+   `SeedLoadedSkylightRemoval(pos, 15)` for both.
+3. `RunWaveToConvergence()` converges in 2 rounds, but `MatchesOracle` fails with
+   `(15, 127, 8): sky 15/14` and `(16, 127, 8): sky 15/14` (expected/actual).
+
+The same recipe at `y = 11` is B129, which passes: the voxel above restores 15. Following the
+`validation-driven-bugfix` skill, a red K-scenario cannot be proven red by `prove_red.py`, so promote it to a baseline
+as soon as it turns green.
+
+**Fix directions (unevaluated):**
+- In the darkness wave's re-seed, treat a top-row voxel that passes `IsSkyExposedTopRow` as a 15 source, the same way
+  the column pass does. This keeps the rule in `LightAttenuation`, but it is a BFS change in the hot Burst path and needs the
+  full Lighting suite plus the band differentials (B75–B85).
+- Or queue a column recalculation for any column whose top-row voxel loses sky light while above the heightmap. This
+  is narrower, but it adds a scheduling trigger to the pipeline (`chunk-lifecycle` skill).
+- `LightingOracle` agrees with the column pass (top row 15), so the repro's oracle check is sound. It shares
+  `CarriesVerticalSky` with the engine, though (`LIGHTING_VALIDATION_HARNESS_FIDELITY.md` A4).
+
+**Related gap:** the job-side `IsVerticallySkyLit` top-row arm has no red-proven guard: no end-to-end scenario was found
+that fails without it (Lighting #27). A fix here may provide one.
+
+**Files:** `Assets/Scripts/Jobs/NeighborhoodLightingJob.cs` (`RecalculateSkylightForColumn`, `PropagateDarkness`,
+`IsVerticallySkyLit`), `Assets/Scripts/Jobs/BurstData/LightAttenuation.cs` (`IsSkyExposedTopRow`).
+
+---
 
 ## Bug 22: Light-Work Fail-Safe Keeps Promoting Parked Chunks in a Fully Quiesced World
 

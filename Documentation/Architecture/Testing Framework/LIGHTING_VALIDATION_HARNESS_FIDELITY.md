@@ -97,7 +97,7 @@ These pass green in the suite but the corresponding production code is **not** e
 
 - `LightingOracle` is a hand-written spec. Where it encodes the **same** rule as the engine — notably the vertical-skylight rule (`isVerticalSkylight` requires `IsFullyTransparentToLight` on both source and target), the opaque-source rule, and `Attenuate = max(0, src − max(1, opacity))` — a shared-wrong assumption passes `MatchesOracle`.
 - **Confirmed shared (2026-06-14 audit):** the suspicion was correct — these are not just *similar* rules, they are the **same mechanism** on both sides. `LightingOracle.SolveSky`'s column pass (15 above the heightmap, attenuate downward) mirrors production `NeighborhoodLightingJob.RecalculateSkylightForColumn`
-  (PASS 1 / PASS 2) line-for-line; the `isVerticalSkylight` condition is byte-identical (`LightingOracle.cs` vs `NeighborhoodLightingJob.cs:477`); and both call the identical
+  (PASS 1 / PASS 2) line-for-line; the `isVerticalSkylight` condition is the same function on both sides (`LightAttenuation.CarriesVerticalSky`, since 2026-10-18); and both call the identical
   `max(0, src − max(1, opacity))` attenuation. So a defect in any of these, replicated on both sides, is invisible to `MatchesOracle`. (Block-obstruction is keyed on opacity — `IsLightObstructing = opacity > 0`,
   `IsFullyTransparentToLight = opacity == 0`, `IsOpaque = opacity ≥ 15` — never on solidity.)
 - **Now:** every shared oracle rule has ≥1 **independent hand-derived probe** that asserts a constant the oracle never produced (no `MatchesOracle` call), so a formula broken in *both* engine and oracle still flips a probe red. Implemented as baselines **B35–B39** in `LightingValidationSuite.OracleProbes.cs`:

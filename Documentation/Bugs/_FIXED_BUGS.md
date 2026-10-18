@@ -712,9 +712,10 @@ B105 — also fixed and archived, as Lighting #25 above.
 **Severity:** Medium (a permanent ~0.8 ms/frame main-thread cost, and it stops any harness that waits for idle jobs)  
 **Fixed:** October 2026 — root cause confirmed 2026-10-18 from a watchdog capture; fix confirmed by a 28-run Master
 no-recurrence batch and the user's review of the benchmark runs  
-**Status:** Resolved — repro `K23a` promoted to baseline `B129`; `B128` guards the veto  
+**Status:** Resolved — repro `K23a` promoted to baseline `B129`; `B128` guards the veto; `B130` the top row  
 **Files:** `Assets/Scripts/Helpers/CrossChunkLightModApplier.cs` (`InChunkSkylightSupport`),
-`Assets/Scripts/Jobs/NeighborhoodLightingJob.cs` (`PropagateDarkness`)
+`Assets/Scripts/Jobs/NeighborhoodLightingJob.cs` (`PropagateDarkness`, `IsVerticallySkyLit`),
+`Assets/Scripts/Jobs/BurstData/LightAttenuation.cs` (`CarriesVerticalSky`, `IsSkyExposedTopRow`)
 
 **Description:**
 At view distance 32 (first sighting; vd 10 below) the lighting pipeline never goes idle. From about four minutes into the run until the player was
@@ -837,9 +838,21 @@ with removal seeds pending, the loop sustained itself on plain open ground (`B12
 
 **Fix (2026-10-18).** `InChunkSkylightSupport` credits the in-chunk neighbor directly above with a full 15 under the
 BFS's own vertical rule: it holds 15, and both faces the column crosses (its bottom, the target's top) cost nothing
-(`LightAttenuation.IsTransparentThroughFace`). The removal is vetoed, the sideways 13/14 placements no-op, the
+(`LightAttenuation.CarriesVerticalSky` since the top-row follow-up below). The removal is vetoed, the sideways 13/14 placements no-op, the
 receiver is not woken, and the emitter's next pass has no seeds and ends stable. Stability and cascade rules are
 unchanged.
+
+**Top row (2026-10-18, code review).** The fix credited the neighbor above, so a target on the chunk's top row
+(`y = 127`), which has none, still got only 14, and the job's `IsVerticallySkyLit` called a top-row voxel not
+sky-exposed for the same reason. The column pass holds every top-row voxel that does not obstruct the column at 15, so
+the veto would let a cross-seam removal clear a top-row voxel the BFS holds at 15, and in the BFS only a column
+recalculation sets a top-row 15 again. Both now ask `LightAttenuation.IsSkyExposedTopRow`, and the vertical rule itself
+lives in `LightAttenuation.CarriesVerticalSky`, which `PropagateLight`, `IsVerticallySkyLit`, the veto and the oracle
+share instead of four hand-kept copies. `B130` asserts the top-row veto (15 for open air, below 15 for a floor slab,
+which the heightmap counts) and was red before the change. No end-to-end top-row repro was found: a block placed on
+the top row beside a seam settles on the oracle with or without the change, so the job-side `IsVerticallySkyLit` arm has
+no red-proven guard. A top-row voxel whose 15 is cleared some other way still stays at 14, because only a column
+recalculation restores it: open as `LIGHTING_BUGS.md` Bug 24.
 
 **Validation.** `K23a` (known-bug scenario, promoted to baseline `B129` on archival): from the captured state — both seam voxels at 14 with old-15 wake nodes —
 the two chunks lit as concurrent flights never settled before the fix (both 14, unstable every round) and settle in 2

@@ -16,9 +16,7 @@ namespace Helpers
     /// </summary>
     public static class CrossChunkLightModApplier
     {
-        // VoxelData.FaceChecks indices of the +Y and -Y faces, and full sky — the vertical-column rule's terms.
-        private const int TOP_FACE = 2;
-        private const int BOTTOM_FACE = 3;
+        // Full sky — what the vertical-column rule credits.
         private const byte FULL_SKY = 15;
 
         /// <summary>
@@ -190,8 +188,9 @@ namespace Helpers
         /// </para>
         /// <para>
         /// The neighbor directly above supports a full 15 when the BFS's vertical-skylight rule would carry it
-        /// down undimmed: it holds full sky and both faces the column crosses (its bottom, the target's top) cost
-        /// nothing to cross (<see cref="LightAttenuation.IsTransparentThroughFace"/>).
+        /// down undimmed: it holds full sky and <see cref="LightAttenuation.CarriesVerticalSky"/> holds for it and the
+        /// target. A target on the top row has no neighbor above; it gets a full 15 when the column pass holds it there
+        /// (<see cref="LightAttenuation.IsSkyExposedTopRow"/>).
         /// </para>
         /// </summary>
         /// <param name="chunk">The chunk receiving the cross-chunk modification.</param>
@@ -204,6 +203,12 @@ namespace Helpers
         public static byte InChunkSkylightSupport(ChunkData chunk, Vector3Int localPos, TargetEntryCost entryCost,
             Func<ushort, BlockTypeJobData> getBlockData)
         {
+            uint target = chunk.GetVoxel(localPos.x, localPos.y, localPos.z);
+            BlockTypeJobData targetProps = getBlockData(BurstVoxelDataBitMapping.GetId(target));
+            byte targetMeta = BurstVoxelDataBitMapping.GetMeta(target);
+            if (LightAttenuation.IsSkyExposedTopRow(localPos.y, in targetProps, targetMeta))
+                return FULL_SKY;
+
             byte best = 0;
             for (int i = 0; i < 6; i++)
             {
@@ -221,11 +226,11 @@ namespace Helpers
                 // The BFS's vertical sky column (PropagateLight's isVerticalSkylight): full sky falls through
                 // cost-free faces undimmed, so the voxel above supports 15, not 15 − 1. Without it a removal
                 // sent across the seam clears a voxel its own column keeps at 15 (_FIXED_BUGS.md Lighting #27).
-                if (i == TOP_FACE && s == FULL_SKY && entryOpacity == 0)
+                if (i == LightAttenuation.TopFace && s == FULL_SKY && entryOpacity == 0)
                 {
                     uint above = chunk.GetVoxel(n.x, n.y, n.z);
-                    if (LightAttenuation.IsTransparentThroughFace(getBlockData(BurstVoxelDataBitMapping.GetId(above)),
-                            BurstVoxelDataBitMapping.GetMeta(above), BOTTOM_FACE))
+                    if (LightAttenuation.CarriesVerticalSky(getBlockData(BurstVoxelDataBitMapping.GetId(above)),
+                            BurstVoxelDataBitMapping.GetMeta(above), in targetProps, targetMeta))
                         return FULL_SKY;
                 }
 

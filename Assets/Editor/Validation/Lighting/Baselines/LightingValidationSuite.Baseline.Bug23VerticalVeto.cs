@@ -10,7 +10,8 @@ namespace Editor.Validation.Lighting
     /// (<c>CrossChunkLightModApplier.InChunkSkylightSupport</c>): the voxel above a target supports a full 15 exactly
     /// when the BFS's vertical-skylight rule would carry it down undimmed, and no more often (B128, the real function
     /// with controlled inputs); and two sky-exposed seam voxels knocked to 14 settle back to 15 instead of re-lighting
-    /// each other forever (B129, end to end). Self-registered via the <see cref="AddBug23VetoBaselineScenarios"/> hook.
+    /// each other forever (B129, end to end). B130 repeats B128 on the chunk's top row, where no voxel lies above and the
+    /// column pass alone holds a voxel at 15. Self-registered via the <see cref="AddBug23VetoBaselineScenarios"/> hook.
     /// </summary>
     public static partial class LightingValidationSuite
     {
@@ -34,6 +35,10 @@ namespace Editor.Validation.Lighting
         private const int B128_DIM_TARGET_X = 10;
         private const byte B128_FULL_SKY = 15;
 
+        // B130: the chunk's top row, open sky with nothing above it.
+        private const int TOP_ROW_Y = VoxelData.ChunkHeight - 1;
+        private const int B130_SLAB_X = 9;
+
         /// <summary>Registers the Bug 23 veto baseline (called from <c>AddBaselineScenarios</c>).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
         static partial void AddBug23VetoBaselineScenarios(List<Scenario> scenarios)
@@ -44,6 +49,42 @@ namespace Editor.Validation.Lighting
             scenarios.Add(new Scenario(
                 "B129: two sky-exposed seam voxels left at a stale 14 with pending wake nodes settle back to 15 under concurrent flights — no cross-seam re-light livelock (Bug 23; promoted from K23a)",
                 Baseline_SkyExposedSeamPairSettles));
+            scenarios.Add(new Scenario(
+                "B130: on the chunk's top row the veto credits a full 15 to an open voxel the column pass holds at 15 — but not to a floor slab, which the heightmap counts (Bug 23, top row)",
+                Baseline_VetoCreditsTopRowSky));
+        }
+
+        /// <summary>
+        /// B130: on a lit superflat, an open air voxel on the chunk's top row gets in-chunk support 15 and a cross-chunk
+        /// removal of it is vetoed. A floor half slab there enters for free through its top face but stops the column
+        /// below it, so the heightmap counts it and the column pass does not hold it at 15: its support stays below 15.
+        /// </summary>
+        /// <returns>True when both supports match the column pass.</returns>
+        private static bool Baseline_VetoCreditsTopRowSky()
+        {
+            using LightingTestWorld world = new LightingTestWorld(3);
+            world.FillSuperflatFloor(B128_FLOOR_Y, TestBlockPalette.Stone);
+            world.RecalculateHeightmaps();
+
+            bool passed = LightingAssert.Converged(world.RunInitialLighting(), "B130: initial lighting converges");
+
+            Vector3Int open = new Vector3Int(B128_OPEN_X, TOP_ROW_Y, B128_PROBE_Z);
+            byte openSupport = world.DirectionalInChunkSkylightSupportAt(open);
+            passed &= LightingAssert.IsTrue(openSupport == B128_FULL_SKY,
+                "B130: an open top-row voxel has in-chunk support 15",
+                $"Expected 15, got {openSupport.ToString()}");
+            passed &= LightingAssert.IsTrue(
+                LightingTestWorld.CrossChunkSkylightRemovalVetoed(world.GetSkylight(open), openSupport),
+                "B130: a cross-chunk removal of that voxel is vetoed");
+
+            Vector3Int slab = new Vector3Int(B130_SLAB_X, TOP_ROW_Y, B128_PROBE_Z);
+            world.SetBlock(slab, TestBlockPalette.HalfSlab);
+            byte slabSupport = world.DirectionalInChunkSkylightSupportAt(slab);
+            passed &= LightingAssert.IsTrue(slabSupport < B128_FULL_SKY,
+                "B130: a top-row floor slab does not get a full 15",
+                $"Expected < 15, got {slabSupport.ToString()}");
+
+            return passed;
         }
 
         /// <summary>

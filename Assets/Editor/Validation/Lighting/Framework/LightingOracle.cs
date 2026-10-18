@@ -153,8 +153,8 @@ namespace Editor.Validation.Lighting.Framework
                         // VO-3: per-face, so a vertical slab's open half carries the undimmed column
                         // while a horizontal slab's solid underside still stops it (mirror of the engine).
                         bool isVerticalSkylight = sourceLight == 15 && VoxelData.FaceChecks[i].y == -1 &&
-                                                  LightAttenuation.IsTransparentThroughFace(sourceProps, metas[srcIndex], i) &&
-                                                  LightAttenuation.IsTransparentThroughFace(neighborProps, metas[nIndex], entryFace);
+                                                  LightAttenuation.CarriesVerticalSky(sourceProps, metas[srcIndex],
+                                                      neighborProps, metas[nIndex]);
                         if (isVerticalSkylight)
                             propagated = 15;
 

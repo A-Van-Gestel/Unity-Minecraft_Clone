@@ -159,7 +159,7 @@ namespace Jobs.BurstData
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
         public static bool ObstructsSkyColumn(in BlockTypeJobData block, byte meta)
         {
-            return EntryOpacity(in block, meta, TOP_FACE) > 0 || ExitBlocked(in block, meta, BOTTOM_FACE);
+            return EntryOpacity(in block, meta, TopFace) > 0 || ExitBlocked(in block, meta, BottomFace);
         }
 
 
@@ -319,9 +319,42 @@ namespace Jobs.BurstData
         public const float FullCoverageThreshold = FULL_COVERAGE_THRESHOLD;
 
         /// <summary>The +Y face index in <c>VoxelData.FaceChecks</c> order — where a downward sky column enters.</summary>
-        private const int TOP_FACE = 2;
+        public const int TopFace = 2;
 
         /// <summary>The -Y face index in <c>VoxelData.FaceChecks</c> order — where a downward sky column leaves.</summary>
-        private const int BOTTOM_FACE = 3;
+        public const int BottomFace = 3;
+
+        /// <summary>
+        /// The BFS's vertical sky column: whether full sky in a cell carries into the cell directly below it undimmed
+        /// (15, not 15 − 1). Both faces the column crosses — the upper cell's bottom, the lower cell's top — must cost
+        /// nothing to cross. The BFS, its cross-seam removal initiator and the cross-chunk removal veto all ask this, and
+        /// must agree: a veto crediting less than the BFS holds clears a voxel the BFS relights (Bug 23).
+        /// </summary>
+        /// <param name="above">The upper block.</param>
+        /// <param name="aboveMeta">The upper voxel's raw metadata byte.</param>
+        /// <param name="below">The lower block.</param>
+        /// <param name="belowMeta">The lower voxel's raw metadata byte.</param>
+        /// <returns><see langword="true"/> when full sky falls from the upper cell into the lower one undimmed.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool CarriesVerticalSky(in BlockTypeJobData above, byte aboveMeta, in BlockTypeJobData below, byte belowMeta)
+        {
+            return IsTransparentThroughFace(in above, aboveMeta, BottomFace)
+                   && IsTransparentThroughFace(in below, belowMeta, TopFace);
+        }
+
+        /// <summary>
+        /// Whether a voxel on the chunk's top row holds full sky from the column pass. Nothing lies above the top row,
+        /// so <see cref="CarriesVerticalSky"/> has no upper cell to ask; the column pass lights every cell above the
+        /// heightmap to 15, which on the top row is every cell that does not obstruct the column itself.
+        /// </summary>
+        /// <param name="y">The voxel's chunk-local Y.</param>
+        /// <param name="block">The voxel's block.</param>
+        /// <param name="meta">The voxel's raw metadata byte.</param>
+        /// <returns><see langword="true"/> when <paramref name="y"/> is the top row and the column pass holds it at 15.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool IsSkyExposedTopRow(int y, in BlockTypeJobData block, byte meta)
+        {
+            return y == VoxelData.ChunkHeight - 1 && !ObstructsSkyColumn(in block, meta);
+        }
     }
 }
