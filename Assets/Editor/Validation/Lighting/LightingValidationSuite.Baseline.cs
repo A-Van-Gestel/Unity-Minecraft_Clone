@@ -139,7 +139,7 @@ namespace Editor.Validation.Lighting
             // fill and the merge. Lives in Baselines/LightingValidationSuite.Baseline.ES7MergeCuts.cs. ---
             AddEs7MergeCutsBaselineScenarios(scenarios);
 
-            // --- Bug 23 (B128): the cross-chunk removal veto credits the vertical sky column. Lives in
+            // --- Bug 23 (B128-B129): the cross-chunk removal veto credits the vertical sky column. Lives in
             // Baselines/LightingValidationSuite.Baseline.Bug23VerticalVeto.cs. ---
             AddBug23VetoBaselineScenarios(scenarios);
 

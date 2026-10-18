@@ -6,14 +6,26 @@ using Scenario = Editor.Validation.Framework.Scenario;
 namespace Editor.Validation.Lighting
 {
     /// <summary>
-    /// Bug 23 guard on the production cross-chunk removal veto (<c>CrossChunkLightModApplier.InChunkSkylightSupport</c>):
-    /// the voxel above a target supports a full 15 exactly when the BFS's vertical-skylight rule would carry it down
-    /// undimmed, and no more often. Asserted on the real function with controlled inputs, because the end-to-end repro
-    /// (K23a) logs quietly while it is a known-bug scenario. Self-registered via the
-    /// <see cref="AddBug23VetoBaselineScenarios"/> hook.
+    /// Bug 23 guards (archived <c>_FIXED_BUGS.md</c> Lighting #27) on the production cross-chunk removal veto
+    /// (<c>CrossChunkLightModApplier.InChunkSkylightSupport</c>): the voxel above a target supports a full 15 exactly
+    /// when the BFS's vertical-skylight rule would carry it down undimmed, and no more often (B128, the real function
+    /// with controlled inputs); and two sky-exposed seam voxels knocked to 14 settle back to 15 instead of re-lighting
+    /// each other forever (B129, end to end). Self-registered via the <see cref="AddBug23VetoBaselineScenarios"/> hook.
     /// </summary>
     public static partial class LightingValidationSuite
     {
+        // B129: a flat stone floor under open sky; the seam pair sits one voxel above it across the x15|16 seam.
+        private const int B129_FLOOR_Y = 10;
+        private const int B129_SEAM_Y = B129_FLOOR_Y + 1;
+        private const int B129_SEAM_Z = 8;
+        private const int B129_WEST_SEAM_X = 15;
+        private const int B129_EAST_SEAM_X = 16;
+
+        // The livelock state the Master-player watchdog captured: each seam voxel at 14 with the wake node a
+        // drained removal leaves behind (old level 15).
+        private const byte B129_STALE_SKY = 14;
+        private const byte B129_WAKE_OLD_SKY = 15;
+
         private const int B128_FLOOR_Y = 10;
         private const int B128_PROBE_Y = B128_FLOOR_Y + 1;
         private const int B128_PROBE_Z = 8;
@@ -29,6 +41,43 @@ namespace Editor.Validation.Lighting
             scenarios.Add(new Scenario(
                 "B128: the cross-chunk removal veto credits a full 15 from the sky column above an open voxel — and only through cost-free faces (water above or a dim-glass target still dims it) (Bug 23)",
                 Baseline_VetoCreditsVerticalSkyColumn));
+            scenarios.Add(new Scenario(
+                "B129: two sky-exposed seam voxels left at a stale 14 with pending wake nodes settle back to 15 under concurrent flights — no cross-seam re-light livelock (Bug 23; promoted from K23a)",
+                Baseline_SkyExposedSeamPairSettles));
+        }
+
+        /// <summary>
+        /// B129 (promoted from repro K23a, October 2026): from the livelock state a Master-player watchdog captured —
+        /// both sky-exposed seam voxels held at a stale 14 with a pending old-15 wake node each — the two seam chunks,
+        /// lit as concurrent flights (production's defer and drain routing), settle within the round budget on the
+        /// borderless oracle's 15.
+        /// </summary>
+        /// <returns>True when the pair converges to the oracle.</returns>
+        private static bool Baseline_SkyExposedSeamPairSettles()
+        {
+            using LightingTestWorld world = new LightingTestWorld(3);
+            world.FillSuperflatFloor(B129_FLOOR_Y, TestBlockPalette.Stone);
+            world.RecalculateHeightmaps();
+
+            bool passed = LightingAssert.Converged(world.RunInitialLighting(), "B129: initial lighting converges");
+
+            Vector3Int west = new Vector3Int(B129_WEST_SEAM_X, B129_SEAM_Y, B129_SEAM_Z);
+            Vector3Int east = new Vector3Int(B129_EAST_SEAM_X, B129_SEAM_Y, B129_SEAM_Z);
+            passed &= LightingAssert.IsTrue(world.GetSkylight(west) == B128_FULL_SKY && world.GetSkylight(east) == B128_FULL_SKY,
+                "B129: both seam voxels start at full sky",
+                $"Expected 15/15, got {world.GetSkylight(west).ToString()}/{world.GetSkylight(east).ToString()}");
+
+            world.SetSkylightAt(west, B129_STALE_SKY);
+            world.SetSkylightAt(east, B129_STALE_SKY);
+            world.SeedLoadedSkylightRemoval(west, B129_WAKE_OLD_SKY);
+            world.SeedLoadedSkylightRemoval(east, B129_WAKE_OLD_SKY);
+
+            passed &= LightingAssert.Converged(world.RunWaveToConvergence(),
+                "B129: the seam pair settles under concurrent flights");
+            passed &= LightingAssert.MatchesOracle(world, LightingOracle.Solve(world),
+                "B129: the settled seam matches the borderless oracle");
+
+            return passed;
         }
 
         /// <summary>

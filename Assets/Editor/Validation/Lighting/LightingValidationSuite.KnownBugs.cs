@@ -68,10 +68,11 @@ namespace Editor.Validation.Lighting
         {
             // Bug 09 still needs a faithful repro (see note above).
 
-            scenarios.Add(new Scenario(
-                "K23a: Two sky-exposed seam voxels left at a stale 14 with pending wake nodes settle back to 15 under concurrent flights — no cross-seam re-light livelock (Bug 23)",
-                KnownBug_Bug23SkyExposedSeamPairSettles,
-                knownBugId: "Bug 23"));
+            // NOTE on Bug 23 (found + FIXED 2026-10-18, archived _FIXED_BUGS.md Lighting #27): two chunks re-lit each
+            // other's sky-exposed seam voxel every frame because the cross-chunk removal veto credited the sky column
+            // above with only 14. Fixed by mirroring the BFS's vertical-skylight rule in InChunkSkylightSupport. Repro
+            // K23a promoted to baseline B129, with B128 guarding the veto directly
+            // (Baselines/LightingValidationSuite.Baseline.Bug23VerticalVeto.cs).
 
             // NOTE on Bug 18 (fidelity finding C10; found + FIXED 2026-07-12): the RGB twin of the Bug 12
             // sourceless cross-seam loop. Two equal-color lamps mutually lighting a seam, both broken in the

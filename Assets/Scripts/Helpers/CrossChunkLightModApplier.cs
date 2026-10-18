@@ -220,7 +220,7 @@ namespace Helpers
 
                 // The BFS's vertical sky column (PropagateLight's isVerticalSkylight): full sky falls through
                 // cost-free faces undimmed, so the voxel above supports 15, not 15 − 1. Without it a removal
-                // sent across the seam clears a voxel its own column keeps at 15 — the Bug 23 livelock.
+                // sent across the seam clears a voxel its own column keeps at 15 (_FIXED_BUGS.md Lighting #27).
                 if (i == TOP_FACE && s == FULL_SKY && entryOpacity == 0)
                 {
                     uint above = chunk.GetVoxel(n.x, n.y, n.z);

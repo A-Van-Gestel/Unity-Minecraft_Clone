@@ -293,8 +293,9 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     public ushort LastEffSampleNewLight { get; private set; }
 
     /// <summary>
-    /// The Lighting Bug 23 tripwire: reports a pass streak of only-unstable merges while generation and meshing are
-    /// idle, ungated so Master players carry it. The lighting scan feeds it the schedules it makes while capturing.
+    /// The lighting livelock tripwire (<c>_FIXED_BUGS.md</c> Lighting #27): reports a pass streak of only-unstable merges
+    /// while generation and meshing are idle, ungated so Master players carry it. The lighting scan feeds it the
+    /// schedules it makes while capturing.
     /// </summary>
     public LightingLivelockWatchdog LivelockWatchdog { get; } = new LightingLivelockWatchdog();
 

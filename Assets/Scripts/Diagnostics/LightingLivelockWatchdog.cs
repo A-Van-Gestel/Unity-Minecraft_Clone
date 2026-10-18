@@ -8,10 +8,14 @@ using UnityEngine;
 namespace Diagnostics
 {
     /// <summary>
-    /// Tripwire for a lighting livelock (Lighting Bug 23): the same few chunks re-lit every frame, every merge unstable,
-    /// while generation and meshing sit idle. Once tripped it records the next <see cref="CaptureMerges"/> merges —
-    /// stability inputs, outbound mods and their routes, and the chunk's and its neighbors' lighting state — and writes
-    /// them as one warning, once per world session.
+    /// Tripwire for a lighting livelock: the same few chunks re-lit every frame, every merge unstable, while generation
+    /// and meshing sit idle (the shape of <c>_FIXED_BUGS.md</c> Lighting #27, which it caught). Once tripped it records
+    /// the next <see cref="CaptureMerges"/> merges — stability inputs, outbound mods and their routes, and the chunk's
+    /// and its neighbors' lighting state — and writes them as one warning, once per world session.
+    /// <para>
+    /// Kept after that fix as a standing tripwire, but provisional: the performance monitor design's extension roadmap
+    /// lists folding it in as an opt-in check, or deleting it if no livelock recurs.
+    /// </para>
     /// <para>
     /// Deliberately <b>not</b> gated on <c>UNITY_INCLUDE_INSTRUMENTATION</c>: the bug has only been seen in Master
     /// players, whose Release managed code variant compiles that symbol out. While silent it costs a few compares per
