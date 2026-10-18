@@ -36,21 +36,6 @@ namespace Helpers
         }
 
         /// <summary>
-        /// Bulk-fills a slice of a NativeArray with a uniform sky light level (blocklight R/G/B = 0).
-        /// Used by <c>GetChunkLightMapForJob</c> to populate job input from compact sections.
-        /// </summary>
-        /// <param name="lightMap">The NativeArray to fill into.</param>
-        /// <param name="offset">Start index in the array.</param>
-        /// <param name="count">Number of elements to fill.</param>
-        /// <param name="skyLevel">The uniform sky light level (0-15).</param>
-        public static void FillUniformSkylight(NativeArray<ushort> lightMap, int offset, int count, byte skyLevel)
-        {
-            ushort packed = LightBitMapping.PackLightData(skyLevel, 0, 0, 0);
-            for (int i = 0; i < count; i++)
-                lightMap[offset + i] = packed;
-        }
-
-        /// <summary>
         /// Single-pass scan of <paramref name="lightData"/> to classify content: blocklight presence,
         /// any non-zero light, sky uniformity, and the uniform sky level (if all sky values are equal).
         /// </summary>

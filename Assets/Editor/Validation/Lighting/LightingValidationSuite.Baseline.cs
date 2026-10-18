@@ -135,6 +135,10 @@ namespace Editor.Validation.Lighting
             // Lives in Baselines/LightingValidationSuite.Baseline.P92Cascade.cs. ---
             AddP92CascadeBaselineScenarios(scenarios);
 
+            // --- ES-7 lighting cuts (B124+): bit-identity guards for the main-thread cuts to the job light-map
+            // fill and the merge. Lives in Baselines/LightingValidationSuite.Baseline.ES7MergeCuts.cs. ---
+            AddEs7MergeCutsBaselineScenarios(scenarios);
+
             // --- LI-2 band differential gate (B75-B78): identical world scripts run banded vs full
             // height must produce bit-identical fields with equal round counts; B78 is the gate's
             // prove-red (a headroom-stripped band must be caught). Lives in
@@ -290,6 +294,10 @@ namespace Editor.Validation.Lighting
         /// <summary>Hook for the P9-2 edge-check-cascade baselines (Baselines/…Baseline.P92Cascade.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
         static partial void AddP92CascadeBaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the ES-7 lighting-cut baselines (Baselines/…Baseline.ES7MergeCuts.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddEs7MergeCutsBaselineScenarios(List<Scenario> scenarios);
 
         /// <summary>Hook for the LI-2 band differential gate baselines (implemented in Baselines/LightingValidationSuite.Baseline.BandDifferential.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>

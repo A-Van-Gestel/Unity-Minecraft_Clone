@@ -1262,6 +1262,18 @@ namespace Data
         private static readonly uint[] s_emptySectionVoxels = new uint[ChunkMath.SECTION_VOLUME];
         private static readonly ushort[] s_emptySectionLight = new ushort[ChunkMath.SECTION_VOLUME];
 
+        // The 4-bit sky channel LightBitMapping packs: a compact section's level indexes the slab table masked the
+        // same way PackLightData masks it.
+        private const int SKY_LEVEL_COUNT = 16;
+        private const int SKY_LEVEL_MASK = SKY_LEVEL_COUNT - 1;
+
+        /// <summary>
+        /// One full section of packed uniform skylight per sky level (no blocklight), so a compact section reaches a
+        /// job buffer as one memcpy. Level 0 is <see cref="s_emptySectionLight"/>.
+        /// </summary>
+        [NoAutoStaticsCleanup] // immutable table
+        private static readonly ushort[][] s_uniformSkySectionLight = CreateUniformSkySectionLight();
+
         /// <summary>
         /// Fills a caller-provided full-chunk buffer with this chunk's raw voxel map, in the
         /// section-contiguous layout the Burst jobs expect (null sections zero-filled). Writes EVERY
@@ -1313,12 +1325,25 @@ namespace Data
             {
                 byte uniformSky = SectionUniformSkyLevel[i];
                 if (uniformSky != UNIFORM_SKY_NONE)
-                    LightingHelper.FillUniformSkylight(jobArray, i * sectionSize, sectionSize, uniformSky);
+                    NativeArray<ushort>.Copy(s_uniformSkySectionLight[uniformSky & SKY_LEVEL_MASK], 0, jobArray, i * sectionSize, sectionSize);
                 else if (sections[i] != null)
                     NativeArray<ushort>.Copy(sections[i].LightData, 0, jobArray, i * sectionSize, sectionSize);
                 else
                     NativeArray<ushort>.Copy(s_emptySectionLight, 0, jobArray, i * sectionSize, sectionSize);
             }
+        }
+
+        private static ushort[][] CreateUniformSkySectionLight()
+        {
+            ushort[][] slabs = new ushort[SKY_LEVEL_COUNT][];
+            slabs[0] = s_emptySectionLight;
+            for (int level = 1; level < SKY_LEVEL_COUNT; level++)
+            {
+                slabs[level] = new ushort[ChunkMath.SECTION_VOLUME];
+                Array.Fill(slabs[level], LightBitMapping.PackLightData((byte)level, 0, 0, 0));
+            }
+
+            return slabs;
         }
 
         /// <summary>
