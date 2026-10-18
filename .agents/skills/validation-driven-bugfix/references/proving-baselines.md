@@ -30,6 +30,9 @@ writing a baseline, running a prove-red, or writing "closed" into a doc.
   clean script rebuild and an emptied `Library/BurstCache/JIT` did not clear it; only a further real IL change to
   that helper did. The managed `Execute()` stayed correct, so only `.Run()`/`Schedule` paths lied. After restoring,
   compare a job's `.Run()` against its managed `Execute()` on one input before trusting any later result.
+- **prove_red cannot see a K-scenario.** It counts `[FAIL]` lines, and a known-bug scenario logs its
+  expected-red assertions with `Debug.Log` on purpose. To prove a fix red, add a loud baseline that asserts
+  the fixed decision directly (Bug 23's B128 beside its repro K23a, now B129) and mutate the fix against that.
 - **Write the `Prove-red:` docstring after the run**, transcribing the mutation that actually went red.
   One written while authoring is a prediction; when the evidence also lives in a fidelity-doc table,
   reconcile both in one step.
