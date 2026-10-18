@@ -318,10 +318,9 @@ namespace Editor.Validation.Lighting.Framework
             internal NativeList<LightModification> Mods;
             internal NativeList<PullBackClaim> PullBackClaims;
 
-            // LI-1: the center voxel snapshot + center light buffer (the ApplyJobLightMap merge reference
-            // and readback target) and the padded light volume the job wrote. Held on the flight so
-            // CompleteLightingJob can extract the center region of PaddedLight into CenterLight, then merge.
-            internal NativeArray<uint> CenterVoxels;
+            // LI-1: the center light buffer (the ApplyJobLightMap readback target) and the padded light
+            // volume the job wrote. Held on the flight so CompleteLightingJob can extract the center region
+            // of PaddedLight into CenterLight, then merge.
             internal NativeArray<ushort> CenterLight;
             internal NativeArray<ushort> PaddedLight;
 
@@ -636,8 +635,7 @@ namespace Editor.Validation.Lighting.Framework
             chunk.Data.FillJobLightMap(lightMap);
             NativeArray<ushort> heightmap = NewOwned(flight, new NativeArray<ushort>(chunk.Data.heightMap, Allocator.Persistent));
 
-            // Center snapshot + readback target are retained on the flight; the job no longer takes them.
-            flight.CenterVoxels = map;
+            // The readback target is retained on the flight; the job no longer takes it.
             flight.CenterLight = lightMap;
 
             // LI-1 / P-2 Layer 1: snapshot the 8 neighbors as section-contiguous full-chunk maps (the
@@ -862,7 +860,7 @@ namespace Editor.Validation.Lighting.Framework
                 // LI-2: band rows only — outside them CenterLight keeps its schedule-time snapshot.
                 ChunkMath.ExtractCenterLight(flight.PaddedLight, flight.CenterLight, flight.BandMinY, flight.BandHeight);
                 PerfMergeTotals unusedTotals = default;
-                chunk.Data.ApplyJobLightMap(flight.CenterVoxels, flight.CenterLight, null, flight.BandMinY, flight.BandHeight,
+                chunk.Data.ApplyJobLightMap(flight.CenterLight, null, flight.BandMinY, flight.BandHeight,
                     ref unusedTotals);
 
                 // Drain mods deferred for this chunk while its job was in flight

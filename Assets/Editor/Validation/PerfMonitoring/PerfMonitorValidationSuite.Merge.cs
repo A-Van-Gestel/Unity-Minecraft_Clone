@@ -12,7 +12,7 @@ namespace Editor.Validation.PerfMonitoring
     /// <summary>
     /// The lighting-merge half of the suite: <see cref="PerfMergeTotals"/> sampled into the <c>Merge*</c> and
     /// <c>Unload*</c> counters, the band predicate behind the out-of-band count, and the production
-    /// <see cref="ChunkData.ApplyJobLightMap(NativeArray{uint}, NativeArray{ushort}, BlockType[], int, int, ref PerfMergeTotals)"/>
+    /// <see cref="ChunkData.ApplyJobLightMap(NativeArray{ushort}, BlockType[], int, int, ref PerfMergeTotals)"/>
     /// compacting a uniform-lit absent section without churn, and its instrumented-build block-count verifier (the
     /// Editor compiles with <c>UNITY_INCLUDE_INSTRUMENTATION</c>). World-free: no suite stands up the production lighting merge, so the probes
     /// in <c>WorldJobManager.MergeCompletedLightingJob</c> are not reached here.
@@ -63,6 +63,9 @@ namespace Editor.Validation.PerfMonitoring
         /// <summary>The wrong non-air count the drift check plants in the kept section.</summary>
         private const int PLANTED_NON_AIR = 7;
 
+        /// <summary>Metadata on an air voxel: still air, so it must not raise the non-air count.</summary>
+        private const byte AIR_META = 0x5;
+
         #region Scenarios
 
         private static bool RunB40MergeBreakdown() => WithFreshStore(() =>
@@ -98,6 +101,11 @@ namespace Editor.Validation.PerfMonitoring
             ok &= Check("The apply charges only its own fields",
                 totals.ApplyTicks == 0 && totals.Merges == 0 && totals.OutOfBandSections == 0);
 
+            PerfMergeTotals banded = default;
+            ApplyChurnFixture(ref banded, palette, plantDrift: false, out ChunkData _, bandMinY: BAND_MIN_Y, bandHeight: BAND_END_Y);
+            ok &= Check($"A banded merge counts the {SECTIONS_OUTSIDE_BAND} sections it skips (got {banded.OutOfBandSections})",
+                banded.OutOfBandSections == SECTIONS_OUTSIDE_BAND);
+
             PerfMergeTotals drift = default;
             ApplyChurnFixture(ref drift, palette, plantDrift: true, out ChunkData drifted);
             ok &= Check($"A planted non-air count is caught as one drift and repaired to {KEPT_SECTION_BLOCKS} (got {drifted.sections[0].nonAirCount})",
@@ -106,6 +114,11 @@ namespace Editor.Validation.PerfMonitoring
             PerfMergeTotals noPalette = default;
             ApplyChurnFixture(ref noPalette, null, plantDrift: false, out ChunkData _);
             ok &= Check("Without a palette (the lighting harness) the verifier does not run", noPalette.CountChecks == 0);
+
+            PerfMergeTotals airMeta = default;
+            ApplyChurnFixture(ref airMeta, palette, plantDrift: false, out ChunkData withAirMeta, airWithMeta: true);
+            ok &= Check($"An air voxel written with metadata leaves the non-air count at {KEPT_SECTION_BLOCKS} and the verifier finds no drift (got {withAirMeta.sections[0].nonAirCount}, drifts {airMeta.CountDrifts})",
+                airMeta.CountChecks == 1 && airMeta.CountDrifts == 0);
 
             PerfStore.SetTier(PerfTier.Basic);
             PerfMergeTotals below = default;
@@ -165,15 +178,19 @@ namespace Editor.Validation.PerfMonitoring
         /// <param name="palette">The block palette handed to the merge, or null as the lighting harness passes.</param>
         /// <param name="plantDrift">Whether to overwrite the kept section's non-air count with a wrong value first.</param>
         /// <param name="chunk">The merged chunk.</param>
+        /// <param name="airWithMeta">Whether to also write an air voxel carrying metadata next to the block.</param>
+        /// <param name="bandMinY">The merge band's first row.</param>
+        /// <param name="bandHeight">The row above the merge band's last row.</param>
         /// <returns>The merge's change report.</returns>
-        private static bool ApplyChurnFixture(ref PerfMergeTotals totals, BlockType[] palette, bool plantDrift, out ChunkData chunk)
+        private static bool ApplyChurnFixture(ref PerfMergeTotals totals, BlockType[] palette, bool plantDrift, out ChunkData chunk,
+            bool airWithMeta = false, int bandMinY = 0, int bandHeight = ChunkMath.CHUNK_HEIGHT)
         {
             chunk = new ChunkData(Vector2Int.zero);
             chunk.SetVoxel(0, 0, 0, BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Stone, 0),
                 palette?[BlockIDs.Stone], palette?[BlockIDs.Air]);
+            if (airWithMeta) chunk.SetVoxel(1, 0, 0, BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Air, AIR_META));
             if (plantDrift) chunk.sections[0].nonAirCount = PLANTED_NON_AIR;
 
-            NativeArray<uint> voxels = new NativeArray<uint>(ChunkMath.CHUNK_VOLUME, Allocator.Temp);
             NativeArray<ushort> light = new NativeArray<ushort>(ChunkMath.CHUNK_VOLUME, Allocator.Temp);
             try
             {
@@ -184,11 +201,10 @@ namespace Editor.Validation.PerfMonitoring
                 for (int i = 0; i < ChunkMath.SECTION_VOLUME; i++)
                     light[churnOffset + i] = LightBitMapping.PackLightData(FULL_SKY, 0, 0, 0);
 
-                return chunk.ApplyJobLightMap(voxels, light, palette, 0, ChunkMath.CHUNK_HEIGHT, ref totals);
+                return chunk.ApplyJobLightMap(light, palette, bandMinY, bandHeight, ref totals);
             }
             finally
             {
-                voxels.Dispose();
                 light.Dispose();
             }
         }

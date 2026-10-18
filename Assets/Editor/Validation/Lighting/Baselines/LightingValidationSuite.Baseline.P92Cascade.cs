@@ -107,7 +107,6 @@ namespace Editor.Validation.Lighting
             const int length = VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth;
             ChunkData chunk = new ChunkData(Vector2Int.zero);
 
-            NativeArray<uint> voxels = new NativeArray<uint>(length, Allocator.Temp);
             NativeArray<ushort> light = new NativeArray<ushort>(length, Allocator.Temp);
             try
             {
@@ -115,34 +114,33 @@ namespace Editor.Validation.Lighting
                 for (int i = 0; i < length; i++) light[i] = sky8;
 
                 // First merge onto an empty chunk: every voxel goes 0 → 8, so this must report a change.
-                passed &= LightingAssert.IsTrue(chunk.ApplyJobLightMap(voxels, light, null),
+                passed &= LightingAssert.IsTrue(chunk.ApplyJobLightMap(light, null),
                     "B99: the first merge of a lit map onto an unlit chunk reports a change");
 
                 // Identical re-merge. Every section is now compacted to uniform sky 8 (no blocks, so the
                 // section objects were returned to the pool) — the compaction case.
-                passed &= LightingAssert.IsTrue(!chunk.ApplyJobLightMap(voxels, light, null),
+                passed &= LightingAssert.IsTrue(!chunk.ApplyJobLightMap(light, null),
                     "B99: re-merging the identical map reports NO change (the redundant pass P9-2 detects)");
 
                 // One voxel differs, in a compacted section: must be seen despite there being no
                 // ChunkSection.LightData to compare against.
                 light[0] = LightBitMapping.PackLightData(7, 0, 0, 0);
-                passed &= LightingAssert.IsTrue(chunk.ApplyJobLightMap(voxels, light, null),
+                passed &= LightingAssert.IsTrue(chunk.ApplyJobLightMap(light, null),
                     "B99: a single differing voxel in a COMPACTED section reports a change");
 
                 // And settling again reports no change.
-                passed &= LightingAssert.IsTrue(!chunk.ApplyJobLightMap(voxels, light, null),
+                passed &= LightingAssert.IsTrue(!chunk.ApplyJobLightMap(light, null),
                     "B99: the merge after that change settles back to NO change");
 
                 // Light vanishing entirely (sections drop out) is a change, and its repeat is not.
                 for (int i = 0; i < length; i++) light[i] = 0;
-                passed &= LightingAssert.IsTrue(chunk.ApplyJobLightMap(voxels, light, null),
+                passed &= LightingAssert.IsTrue(chunk.ApplyJobLightMap(light, null),
                     "B99: light vanishing from every section reports a change");
-                passed &= LightingAssert.IsTrue(!chunk.ApplyJobLightMap(voxels, light, null),
+                passed &= LightingAssert.IsTrue(!chunk.ApplyJobLightMap(light, null),
                     "B99: re-merging the now-dark map reports NO change");
             }
             finally
             {
-                voxels.Dispose();
                 light.Dispose();
             }
 
@@ -183,7 +181,6 @@ namespace Editor.Validation.Lighting
             const int length = VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth;
             ChunkData chunk = new ChunkData(Vector2Int.zero);
 
-            NativeArray<uint> voxels = new NativeArray<uint>(length, Allocator.Temp);
             NativeArray<ushort> light = new NativeArray<ushort>(length, Allocator.Temp);
             try
             {
@@ -192,8 +189,8 @@ namespace Editor.Validation.Lighting
 
                 // Settle the chunk, then confirm it is quiescent — the state a converged chunk is in when
                 // a neighbor's merge routes a cross-chunk mod into it.
-                chunk.ApplyJobLightMap(voxels, light, null);
-                passed &= LightingAssert.IsTrue(!chunk.ApplyJobLightMap(voxels, light, null),
+                chunk.ApplyJobLightMap(light, null);
+                passed &= LightingAssert.IsTrue(!chunk.ApplyJobLightMap(light, null),
                     "B100: the chunk is quiescent before the simulated cross-chunk write");
 
                 // The main-thread write ApplyCrossChunkLightMod performs: a brighter value on a border
@@ -212,7 +209,7 @@ namespace Editor.Validation.Lighting
 
                 // THE POINT: the border differs from what neighbors last read, yet the merge reports no
                 // change, because nothing changed across THIS merge.
-                passed &= LightingAssert.IsTrue(!chunk.ApplyJobLightMap(voxels, light, null),
+                passed &= LightingAssert.IsTrue(!chunk.ApplyJobLightMap(light, null),
                     "B100: the merge reproducing an already-applied cross-chunk write reports NO change — the signal is per-merge, so this pass would not propagate");
 
                 // And the value is genuinely live, i.e. the "no change" is not because the write was lost.
@@ -222,7 +219,6 @@ namespace Editor.Validation.Lighting
             }
             finally
             {
-                voxels.Dispose();
                 light.Dispose();
             }
 

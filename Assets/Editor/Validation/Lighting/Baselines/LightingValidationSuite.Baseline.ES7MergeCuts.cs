@@ -70,7 +70,6 @@ namespace Editor.Validation.Lighting
         private static bool Baseline_CompactSectionFillMatchesPerElementFill()
         {
             bool passed = true;
-            NativeArray<uint> voxels = new NativeArray<uint>(ChunkMath.CHUNK_VOLUME, Allocator.Temp);
             NativeArray<ushort> light = new NativeArray<ushort>(ChunkMath.CHUNK_VOLUME, Allocator.Temp);
             NativeArray<ushort> filled = new NativeArray<ushort>(ChunkMath.CHUNK_VOLUME, Allocator.Temp);
             try
@@ -82,7 +81,7 @@ namespace Editor.Validation.Lighting
                     chunk.SetVoxel(0, ES7_BLOCK_SECTION * ChunkMath.SECTION_SIZE, 0,
                         BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Stone, 0));
                     for (int i = 0; i < light.Length; i++) light[i] = reference;
-                    chunk.ApplyJobLightMap(voxels, light, null);
+                    chunk.ApplyJobLightMap(light, null);
 
                     passed &= LightingAssert.IsTrue(chunk.SectionUniformSkyLevel[ES7_BLOCK_SECTION] == level,
                         $"B124: level {level} — the block section is compacted to the level, so the fill takes the compact path",
@@ -101,7 +100,6 @@ namespace Editor.Validation.Lighting
             }
             finally
             {
-                voxels.Dispose();
                 light.Dispose();
                 filled.Dispose();
             }
@@ -119,7 +117,6 @@ namespace Editor.Validation.Lighting
         {
             bool passed = true;
             Random rng = new Random(ES7_FUZZ_SEED);
-            NativeArray<uint> voxels = new NativeArray<uint>(ChunkMath.CHUNK_VOLUME, Allocator.Temp);
             NativeArray<ushort> light = new NativeArray<ushort>(ChunkMath.CHUNK_VOLUME, Allocator.Temp);
             NativeArray<ushort> clampedLight = new NativeArray<ushort>(ChunkMath.CHUNK_VOLUME, Allocator.Temp);
             NativeArray<ushort> fullLight = new NativeArray<ushort>(ChunkMath.CHUNK_VOLUME, Allocator.Temp);
@@ -129,20 +126,19 @@ namespace Editor.Validation.Lighting
                 for (int trial = 0; trial < ES7_FUZZ_TRIALS; trial++)
                 {
                     int chunkSeed = rng.Next();
-                    ChunkData clamped = BuildFuzzChunk(chunkSeed, voxels, light);
-                    ChunkData full = BuildFuzzChunk(chunkSeed, voxels, light);
+                    ChunkData clamped = BuildFuzzChunk(chunkSeed, light);
+                    ChunkData full = BuildFuzzChunk(chunkSeed, light);
 
                     int bandMinY = rng.Next(0, ChunkMath.CHUNK_HEIGHT);
                     int bandHeight = rng.Next(bandMinY + 1, ChunkMath.CHUNK_HEIGHT + 1);
                     if (bandMinY > 0 || bandHeight < ChunkMath.CHUNK_HEIGHT) bandedTrials++;
 
-                    clamped.FillJobVoxelMap(voxels);
                     clamped.FillJobLightMap(light);
                     WriteBandRows(rng, light, bandMinY, bandHeight);
 
                     PerfMergeTotals unused = default;
-                    bool clampedChanged = clamped.ApplyJobLightMap(voxels, light, null, bandMinY, bandHeight, ref unused);
-                    bool fullChanged = full.ApplyJobLightMap(voxels, light, null);
+                    bool clampedChanged = clamped.ApplyJobLightMap(light, null, bandMinY, bandHeight, ref unused);
+                    bool fullChanged = full.ApplyJobLightMap(light, null);
 
                     clamped.FillJobLightMap(clampedLight);
                     full.FillJobLightMap(fullLight);
@@ -171,7 +167,6 @@ namespace Editor.Validation.Lighting
             }
             finally
             {
-                voxels.Dispose();
                 light.Dispose();
                 clampedLight.Dispose();
                 fullLight.Dispose();
@@ -189,7 +184,6 @@ namespace Editor.Validation.Lighting
         private static bool Baseline_AbsentUniformSectionCompactsDirectly()
         {
             bool passed = true;
-            NativeArray<uint> voxels = new NativeArray<uint>(ChunkMath.CHUNK_VOLUME, Allocator.Temp);
             NativeArray<ushort> light = new NativeArray<ushort>(ChunkMath.CHUNK_VOLUME, Allocator.Temp);
             try
             {
@@ -203,13 +197,13 @@ namespace Editor.Validation.Lighting
                         if (oldLevel >= 0)
                         {
                             FillUniform(light, LightBitMapping.PackLightData((byte)oldLevel, 0, 0, 0));
-                            chunk.ApplyJobLightMap(voxels, light, null);
+                            chunk.ApplyJobLightMap(light, null);
                         }
 
                         ushort oldLight = oldLevel > 0 ? LightBitMapping.PackLightData((byte)oldLevel, 0, 0, 0) : (ushort)0;
                         ushort newLight = LightBitMapping.PackLightData((byte)level, 0, 0, 0);
                         FillUniform(light, newLight);
-                        bool changed = chunk.ApplyJobLightMap(voxels, light, null);
+                        bool changed = chunk.ApplyJobLightMap(light, null);
 
                         byte expectedByte = level == 0 ? ES7_NOT_COMPACT : (byte)level;
                         bool ok = changed == (oldLight != newLight);
@@ -223,14 +217,13 @@ namespace Editor.Validation.Lighting
 
                 ChunkData blocklit = new ChunkData(Vector2Int.zero);
                 FillUniform(light, LightBitMapping.PackLightData(ES7_FULL_SKY, ES7_BLOCKLIGHT, 0, 0));
-                passed &= LightingAssert.IsTrue(blocklit.ApplyJobLightMap(voxels, light, null)
+                passed &= LightingAssert.IsTrue(blocklit.ApplyJobLightMap(light, null)
                                                 && blocklit.sections[0] != null
                                                 && blocklit.SectionUniformSkyLevel[0] == ES7_NOT_COMPACT,
                     "B126: uniform light with block light keeps a section, uncompacted, and reports a change");
             }
             finally
             {
-                voxels.Dispose();
                 light.Dispose();
             }
 
@@ -245,20 +238,18 @@ namespace Editor.Validation.Lighting
         private static bool Baseline_OutOfBandPromotionStaysPromoted()
         {
             bool passed = true;
-            NativeArray<uint> voxels = new NativeArray<uint>(ChunkMath.CHUNK_VOLUME, Allocator.Temp);
             NativeArray<ushort> light = new NativeArray<ushort>(ChunkMath.CHUNK_VOLUME, Allocator.Temp);
             NativeArray<ushort> clampedLight = new NativeArray<ushort>(ChunkMath.CHUNK_VOLUME, Allocator.Temp);
             NativeArray<ushort> fullLight = new NativeArray<ushort>(ChunkMath.CHUNK_VOLUME, Allocator.Temp);
             try
             {
-                ChunkData clamped = BuildPromotionChunk(voxels, light);
-                ChunkData full = BuildPromotionChunk(voxels, light);
+                ChunkData clamped = BuildPromotionChunk(light);
+                ChunkData full = BuildPromotionChunk(light);
                 passed &= LightingAssert.IsTrue(
                     clamped.SectionUniformSkyLevel[ES7_PROMOTED_SECTION] == ES7_FULL_SKY && clamped.sections[ES7_PROMOTED_SECTION] != null,
                     "B127: setup — the section holds a block and is compact at full sky");
 
                 // The job's snapshot, then the mid-flight write that promotes the section.
-                clamped.FillJobVoxelMap(voxels);
                 clamped.FillJobLightMap(light);
                 uint stone = BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Stone, 0);
                 int promotedY = ES7_PROMOTED_SECTION * ChunkMath.SECTION_SIZE + 1;
@@ -268,8 +259,8 @@ namespace Editor.Validation.Lighting
                     "B127: the write promoted the compact section");
 
                 PerfMergeTotals unused = default;
-                bool clampedChanged = clamped.ApplyJobLightMap(voxels, light, null, 0, ES7_LOW_BAND_HEIGHT, ref unused);
-                bool fullChanged = full.ApplyJobLightMap(voxels, light, null);
+                bool clampedChanged = clamped.ApplyJobLightMap(light, null, 0, ES7_LOW_BAND_HEIGHT, ref unused);
+                bool fullChanged = full.ApplyJobLightMap(light, null);
                 clamped.FillJobLightMap(clampedLight);
                 full.FillJobLightMap(fullLight);
 
@@ -282,7 +273,6 @@ namespace Editor.Validation.Lighting
             }
             finally
             {
-                voxels.Dispose();
                 light.Dispose();
                 clampedLight.Dispose();
                 fullLight.Dispose();
@@ -292,12 +282,12 @@ namespace Editor.Validation.Lighting
         }
 
         /// <summary>A chunk whose every section is compact at full sky, the promoted section holding one block.</summary>
-        private static ChunkData BuildPromotionChunk(NativeArray<uint> voxels, NativeArray<ushort> light)
+        private static ChunkData BuildPromotionChunk(NativeArray<ushort> light)
         {
             ChunkData chunk = new ChunkData(Vector2Int.zero);
             chunk.SetVoxel(0, ES7_PROMOTED_SECTION * ChunkMath.SECTION_SIZE, 0, BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Stone, 0));
             FillUniform(light, LightBitMapping.PackLightData(ES7_FULL_SKY, 0, 0, 0));
-            chunk.ApplyJobLightMap(voxels, light, null);
+            chunk.ApplyJobLightMap(light, null);
             return chunk;
         }
 
@@ -305,7 +295,7 @@ namespace Editor.Validation.Lighting
         /// Builds a chunk from <paramref name="seed"/> alone, so two calls give identical chunks: per section a random
         /// state, blocks where the state has them, and one full merge to classify everything.
         /// </summary>
-        private static ChunkData BuildFuzzChunk(int seed, NativeArray<uint> voxels, NativeArray<ushort> light)
+        private static ChunkData BuildFuzzChunk(int seed, NativeArray<ushort> light)
         {
             Random rng = new Random(seed);
             ChunkData chunk = new ChunkData(Vector2Int.zero);
@@ -323,8 +313,7 @@ namespace Editor.Validation.Lighting
                 Es7FillPattern(rng, light, sec * ChunkMath.SECTION_VOLUME, ChunkMath.SECTION_VOLUME, pattern);
             }
 
-            chunk.FillJobVoxelMap(voxels);
-            chunk.ApplyJobLightMap(voxels, light, null);
+            chunk.ApplyJobLightMap(light, null);
             return chunk;
         }
 

@@ -2401,18 +2401,12 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     {
         // LI-1: the job wrote light only into the center [2,18) region of the padded volume — extract it
         // back into the section-contiguous center LightMap, then merge through the same ApplyJobLightMap.
-        // Voxels are never modified in-job, so jobData.Map (the unchanged center voxel snapshot) is still
-        // the correct merge reference. LI-2: only the job's gathered band rows are extracted; above them
+        // The merge writes light only and reads blocks from the live sections. LI-2: only the job's gathered
+        // band rows are extracted; above them
         // LightMap keeps its schedule-time snapshot, which the job provably did not change.
         ChunkMath.ExtractCenterLight(jobData.PaddedLight, jobData.LightMap, jobData.BandMinY, jobData.BandHeight);
 
-        if (PerfStore.SlotsActive)
-        {
-            for (int s = 0; s < ChunkMath.SECTIONS_PER_CHUNK; s++)
-                if (ChunkMath.IsSectionOutsideBand(s, jobData.BandMinY, jobData.BandHeight)) _mergeTotals.OutOfBandSections++;
-        }
-
-        return chunkData.ApplyJobLightMap(jobData.Map, jobData.LightMap, _world.BlockTypes, jobData.BandMinY, jobData.BandHeight,
+        return chunkData.ApplyJobLightMap(jobData.LightMap, _world.BlockTypes, jobData.BandMinY, jobData.BandHeight,
             ref _mergeTotals);
     }
 

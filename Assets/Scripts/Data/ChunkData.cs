@@ -1479,49 +1479,50 @@ namespace Data
         /// (the Bug 08 path-2 defer/drain), so they are never silently reverted.
         /// </para>
         /// </summary>
-        /// <param name="jobVoxelMap">The job's input voxel map snapshot (section-contiguous, full chunk).</param>
         /// <param name="jobLightMap">The job's computed light map (section-contiguous, full chunk).</param>
         /// <param name="blockTypes">Block palette for the instrumented-build block-count verifier, or null to skip it
         /// (the harness passes null — counts are meshing-only, light-irrelevant).</param>
         /// <returns>True if any voxel's effective light value differs from its pre-merge value. P9-2 uses
         /// this to re-arm the edge-check cascade on effect rather than on stability; a pass that returns
         /// false left every border byte-identical to what the neighbors already read.</returns>
-        public bool ApplyJobLightMap(NativeArray<uint> jobVoxelMap, NativeArray<ushort> jobLightMap,
-            [CanBeNull] BlockType[] blockTypes)
+        public bool ApplyJobLightMap(NativeArray<ushort> jobLightMap, [CanBeNull] BlockType[] blockTypes)
         {
             PerfMergeTotals unused = default;
-            return ApplyJobLightMap(jobVoxelMap, jobLightMap, blockTypes, 0, ChunkMath.CHUNK_HEIGHT, ref unused);
+            return ApplyJobLightMap(jobLightMap, blockTypes, 0, ChunkMath.CHUNK_HEIGHT, ref unused);
         }
 
         /// <summary>
-        /// <see cref="ApplyJobLightMap(NativeArray{uint}, NativeArray{ushort}, BlockType[])"/> clamped to the job's
+        /// <see cref="ApplyJobLightMap(NativeArray{ushort}, BlockType[])"/> clamped to the job's
         /// gathered band (LI-2): a section entirely outside <c>[bandMinY, bandHeight)</c> is left as it is — section,
         /// light and compact byte — because there the light map still holds the schedule-time copy of this chunk's own
-        /// light. Charges the churned sections to <paramref name="totals"/> while the monitor's slots are active, and
-        /// the block-count verifier's time and results in instrumented builds.
+        /// light. Charges the out-of-band and churned sections to <paramref name="totals"/> while the monitor's slots are
+        /// active, and the block-count verifier's time and results in instrumented builds. Blocks come from the live
+        /// sections, never from a job snapshot: the merge writes light only.
         /// <para>
         /// A mid-flight edit that promoted a compact section outside the band leaves it promoted until an in-band
         /// merge: the light is identical, only the representation differs (and the band summaries that read the
         /// compact bytes can come out wider, never wrong).
         /// </para>
         /// </summary>
-        /// <param name="jobVoxelMap">The job's input voxel map snapshot (section-contiguous, full chunk). Not read: blocks
-        /// come from the live sections, and an absent section has none.</param>
         /// <param name="jobLightMap">The job's computed light map (section-contiguous, full chunk).</param>
         /// <param name="blockTypes">Block palette for the instrumented-build block-count verifier, or null to skip it.</param>
         /// <param name="bandMinY">The job's first gathered row (global Y); 0 merges from the bottom.</param>
         /// <param name="bandHeight">The row above the job's last gathered row (global Y, exclusive); <c>CHUNK_HEIGHT</c> merges to the top.</param>
         /// <param name="totals">The lighting merge's running totals.</param>
         /// <returns>True if any voxel's effective light value differs from its pre-merge value.</returns>
-        public bool ApplyJobLightMap(NativeArray<uint> jobVoxelMap, NativeArray<ushort> jobLightMap,
-            [CanBeNull] BlockType[] blockTypes, int bandMinY, int bandHeight, ref PerfMergeTotals totals)
+        public bool ApplyJobLightMap(NativeArray<ushort> jobLightMap, [CanBeNull] BlockType[] blockTypes, int bandMinY,
+            int bandHeight, ref PerfMergeTotals totals)
         {
             const int sectionVolume = ChunkMath.SECTION_VOLUME;
             bool changedAnyLight = false;
 
             for (int s = 0; s < sections.Length; s++)
             {
-                if (ChunkMath.IsSectionOutsideBand(s, bandMinY, bandHeight)) continue;
+                if (ChunkMath.IsSectionOutsideBand(s, bandMinY, bandHeight))
+                {
+                    if (PerfStore.SlotsActive) totals.OutOfBandSections++;
+                    continue;
+                }
 
                 int indexOffset = s * sectionVolume;
                 ChunkSection section = sections[s];
