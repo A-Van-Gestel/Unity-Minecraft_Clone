@@ -1,7 +1,7 @@
 # Performance Monitor & Logger Overhaul Design
 
-**Version:** 1.17  
-**Date:** 2026-10-06  
+**Version:** 1.18  
+**Date:** 2026-10-18  
 **Status:** In progress — PM-0 ✅ complete (2026-10-03, Master answers in §8); PM-1 ✅ complete (2026-10-03, §7.2;
 confirmed in an IL2CPP Master build); PM-2 ✅ complete (2026-10-04, §7.3; confirmed in an IL2CPP Master build); PM-3 ✅
 complete (2026-10-04, §7.4; confirmed in an IL2CPP Master build); PM-4 ✅ complete (2026-10-05, §7.5; confirmed in an
@@ -1212,11 +1212,12 @@ ES-0 row sent "the rest" to PM-6, but the drain stamp was never in PM-6's scope.
 
 ### Extension roadmap
 
-| Version | Extension                                                                                     |
-|---------|-----------------------------------------------------------------------------------------------|
-| **v2**  | Per-worker job timeline (swimlanes) from the PM-4 timestamps, viewable in the HUD or exported |
-| **v2**  | Remote/live view over a local socket for a second-monitor dashboard (local only)              |
-| **v3+** | Automatic regression detection across saved sessions — own design doc                         |
+| Version | Extension                                                                                                                                                                                                                                                                                                 |
+|---------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **v2**  | Per-worker job timeline (swimlanes) from the PM-4 timestamps, viewable in the HUD or exported                                                                                                                                                                                                             |
+| **v2**  | Remote/live view over a local socket for a second-monitor dashboard (local only)                                                                                                                                                                                                                          |
+| **v2**  | Decide the lighting livelock tripwire's future (`Diagnostics.LightingLivelockWatchdog`, kept after `_FIXED_BUGS.md` Lighting #27): fold it in as an opt-in check — a tier-gated probe, or a PM-7 `EngineLog` category — or delete it if no livelock recurs. Today it is ungated and logs once per session |
+| **v3+** | Automatic regression detection across saved sessions — own design doc                                                                                                                                                                                                                                     |
 
 ---
 
@@ -1279,6 +1280,10 @@ Answers 1–4 come from `EngineApiProbe_2026-10-03_13-52-20.log`: a `Windows - P
 ---
 
 ## Document History
+
+* **v1.18** - Extension roadmap (2026-10-18): the lighting livelock tripwire built to catch Lighting Bug 23 (now
+  `_FIXED_BUGS.md` Lighting #27) stays ungated for now; folding it into the monitor as an opt-in check, or deleting
+  it, is listed as a v2 decision.
 
 * **v1.17** - `DiskSaveRawBytes` (2026-10-10, shipped with the roadmap's `ES-26`): each written save also counts its
   uncompressed size, and `/perf stats` and the run-end summary print the compression ratio. This closes PM-4's deferred
