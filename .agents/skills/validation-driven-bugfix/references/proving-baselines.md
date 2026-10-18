@@ -33,6 +33,12 @@ writing a baseline, running a prove-red, or writing "closed" into a doc.
 - **prove_red cannot see a K-scenario.** It counts `[FAIL]` lines, and a known-bug scenario logs its
   expected-red assertions with `Debug.Log` on purpose. To prove a fix red, add a loud baseline that asserts
   the fixed decision directly (Bug 23's B128 beside its repro K23a, now B129) and mutate the fix against that.
+- **Leave the tree alone while a run is in flight.** The script compares `git status` before and after
+  and reports any change, docs and Python included, so an edit made "safely" outside `Assets/` still
+  voids the verdict and costs a full rerun (2026-10-18).
+- **On a large suite `--expect` cannot be checked.** The Lighting suite (122 scenarios) rolls its
+  earliest console entries out, and the script then exits 2 with "earliest console entries were
+  dropped" even when the summary is red. Read the run's `[FAIL]` lines and summary yourself for the verdict.
 - **Write the `Prove-red:` docstring after the run**, transcribing the mutation that actually went red.
   One written while authoring is a prediction; when the evidence also lives in a fidelity-doc table,
   reconcile both in one step.
@@ -109,6 +115,11 @@ writing a baseline, running a prove-red, or writing "closed" into a doc.
   are where the defects live; a struct-in / struct-out `Advance()` (pattern: `FootfallTracker`) makes
   every transition a test case. "The wiring stays an in-game check" is fine for sampling and playback,
   never for edge detection.
+- **A harness edit does not necessarily reach the production trigger.** Bug 23's top-row end-to-end scenario
+  (place a block on the top row beside a seam) settled on the oracle with and without the fix, because
+  the harness never sent the cross-seam removal the fix was about. It was dropped, and only the direct
+  veto baseline B130 remained. An end-to-end scenario counts only once it has been seen red: run it
+  against the unfixed code (or mutate the fix) before keeping it.
 - **Write out the sequence an instrument generates** (a fixture, dev command or fuzz seed) and confirm
   the target state appears in it — ask what ordering its parameters force, not what they permit.
 - **A gate proves only the function it exercises.** For tools that extract candidates and then decide,
