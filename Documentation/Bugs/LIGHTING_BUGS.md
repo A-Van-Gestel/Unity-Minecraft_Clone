@@ -76,10 +76,35 @@ the next diagnostic step below separates them.
 3. The Capture session file (`PerfLogs/PerfSession_*.csv`) shows `LightInFlight` = 2 and `LightCompleted` = 2 on
    every frame from then on.
 
+**Observed rate (2026-10-18).** 1 of 14 Master runs that day: the vd-10 run on the ES-7 Step 0 build (`5d3205ae`).
+The other 13 completed — one vd-10 and one vd-32 run of that build, then the ES-7 A/B (3 vd-10 + 2 vd-32 runs each on
+`5d3205ae` and on the post-ES-7a build `f5006286`). Five clean runs of `f5006286` are not evidence that ES-7a changed
+the rate. A clean vd-10 benchmark run takes about 70 s, so a timeout of about 8 minutes per run detects a hit cheaply.
+
 **Next diagnostic step.** Identify the two chunks and why each merge re-arms the other: log the coordinates and
 the scan arm (`LightingScanDecision`) of every lighting job scheduled once generation and meshing are idle. The
 `voxel-debugging` skill owns this; a deterministic repro then goes into the Lighting suite
 (`validation-driven-bugfix`).
+
+The diagnostic has to run in a Master player. The Editor has never reproduced the bug, and a Master build at the
+`Release` managed code variant compiles out everything gated on `UNITY_INCLUDE_INSTRUMENTATION`
+(`Documentation/Performance/README.md` §"Managed Code Variant governs instrumentation"). It therefore needs an
+ungated, log-once trigger that costs a counter compare when silent: for example, the same chunk completing unstable
+many passes in a row while generation and meshing are idle. It should log the chunk and its band, whether the job's own
+`IsStable` or `LightingJobProcessor.IsEffectivelyStable` (real cross-chunk mods) made the pass unstable, each outbound
+mod's target and route, the chunk's `LightingWork` bits and `RemainingEdgeCheckRounds`, and the same state for its
+neighbors. Both benchmark waits that hang on this bug (`BenchmarkController.WaitForChunkPipelineToSettle` and
+`World.ForceUnloadAllChunks`, which loop on `JobManager.HasActiveJobs`) would turn a hit into a logged, finished run
+if they gave up after a bounded time and reported it.
+
+**Watchdog (2026-10-18).** `Diagnostics.LightingLivelockWatchdog`, owned by `WorldJobManager` and not gated on
+instrumentation, trips after 600 consecutive merging lighting passes in which every merge was unstable while no
+generation or mesh job was in flight. It then records the next 12 merges (band, edge check, the job's seeds, the job's own stability,
+each outbound mod with its route, target light and whether it applied, drained deferred mods, stale pull-back claims
+cleared, the chunk's and its 8
+neighbors' `LightingWork` bits and edge rounds) plus every schedule the scan makes meanwhile with its arm, and writes them
+as one `[LIGHTING] Bug 23 watchdog` warning. The benchmark waits were left unbounded: a hit costs one run timeout,
+and letting `ForceUnloadAllChunks` proceed with lighting jobs in flight would return their chunks to the pool mid-job.
 
 **Found by:** the ES-0 re-measurement (`ENGINE_SCALING_PERFORMANCE_ROADMAP.md` ES-0), whose vd-32 benchmark run it
 blocked.

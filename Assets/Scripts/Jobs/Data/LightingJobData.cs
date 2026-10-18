@@ -2,6 +2,7 @@ using System.Runtime.InteropServices;
 using Data;
 using Unity.Collections;
 using Unity.Jobs;
+using Unity.Mathematics;
 using UnityEngine;
 
 namespace Jobs.Data
@@ -78,6 +79,19 @@ namespace Jobs.Data
         /// to <see cref="LightMap"/>'s schedule-time snapshot. 0 = bottom banding disabled.
         /// </summary>
         public int BandMinY;
+
+        /// <summary>
+        /// Whether the job ran its edge check (<c>NeighborhoodLightingJob.PerformEdgeCheck</c>), kept for the merge's
+        /// livelock watchdog report. Not read by any Burst job.
+        /// </summary>
+        [MarshalAs(UnmanagedType.U1)]
+        public bool PerformEdgeCheck;
+
+        /// <summary>
+        /// The job's seeds — queued skylight nodes, blocklight nodes and skylight recalc columns — recorded only while
+        /// the livelock watchdog is capturing (0 otherwise). Not read by any Burst job.
+        /// </summary>
+        public int3 WatchdogSeeds;
 
         // --- Output data ---
         public NativeArray<uint> Map; // The center chunk voxel snapshot (gather source + ApplyJobLightMap reference)

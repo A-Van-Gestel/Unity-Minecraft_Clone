@@ -292,6 +292,12 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     public ushort LastEffSampleOldLight { get; private set; }
     public ushort LastEffSampleNewLight { get; private set; }
 
+    /// <summary>
+    /// The Lighting Bug 23 tripwire: reports a pass streak of only-unstable merges while generation and meshing are
+    /// idle, ungated so Master players carry it. The lighting scan feeds it the schedules it makes while capturing.
+    /// </summary>
+    public LightingLivelockWatchdog LivelockWatchdog { get; } = new LightingLivelockWatchdog();
+
     #endregion
 
     #region Mesh Orchestration Diagnostics (MP-1)
@@ -1038,6 +1044,13 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
             uint3x3 bandBottomLight = default;
             jobData.BandHeight = ChunkMath.CHUNK_HEIGHT;
             jobData.BandMinY = 0;
+            jobData.PerformEdgeCheck = performEdgeCheck;
+            if (LivelockWatchdog.Capturing)
+            {
+                jobData.WatchdogSeeds = new int3(jobData.SkylightQueue.Count, jobData.BlocklightQueue.Count,
+                    jobData.SkylightRecalcQueue.Count);
+            }
+
             if (usePooledBuffers)
             {
                 LightingBandChunkTop centerTop = chunkData.GetLightingBandTop();
@@ -1706,7 +1719,11 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         LastEffBlockRemoval = 0;
         LastEffSampleValid = false;
 
-        if (LightingJobs.Count == 0) return;
+        if (LightingJobs.Count == 0)
+        {
+            LivelockWatchdog.ObserveNoLightingJobs();
+            return;
+        }
 
         _chunksToRebuildMesh.Clear();
         _unchangedStableMerges.Clear();
@@ -1768,6 +1785,9 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         // completion promoting a neighbor sees the fully-merged pass — MT-2). See the driver's
         // RemoveAndPromote hook for the per-job rationale.
         JobCompletionPass.RunRemoveAndPromote(_completedLightJobs, this);
+
+        LivelockWatchdog.ObservePass(LastProcessedJobCount, LastUnstableJobCount,
+            GenerationJobs.Count == 0 && MeshJobs.Count == 0);
     }
 
     #region JobCompletionPass driver (HF-4 #2)
@@ -1877,16 +1897,29 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         bool counting = lap != 0L;
         if (counting) _mergeTotals.Merges++;
 
+        bool capturing = LivelockWatchdog.Capturing;
+        if (capturing)
+        {
+            LivelockWatchdog.BeginMerge(chunkCoord, jobData.BandMinY, jobData.BandHeight, jobData.PerformEdgeCheck,
+                jobData.WatchdogSeeds, isChunkStable, jobData.Mods.Length, jobData.PullBackClaims.Length);
+        }
+
         if (chunkData != null && chunkData.IsPopulated)
         {
             lightChanged = ApplyLightingJobResult(chunkData, jobData);
             lap = PerfTickTotals.Lap(ref _mergeTotals.ApplyTicks, lap);
+
+            int effectiveBeforeDrain = LastCrossChunkModsEffective;
+            int deferredCount = capturing && _deferredCrossChunkMods.TryGetValue(chunkCoord, out List<DeferredLightMod> pending)
+                ? pending.Count
+                : 0;
 
             // Apply mods other chunks' jobs deferred for THIS chunk while its job was in
             // flight — now that the merge is done they can no longer be overwritten
             // (Bug 08, path 2). Their wake-up nodes flag the chunk for another lighting pass.
             DrainDeferredCrossChunkMods(chunkCoord, chunkData);
             lap = PerfTickTotals.Lap(ref _mergeTotals.DrainTicks, lap);
+            if (capturing) LivelockWatchdog.RecordDrain(deferredCount, LastCrossChunkModsEffective - effectiveBeforeDrain);
 
             // The emitting chunk's voxel origin — excluded from the Bug 13 live-support veto
             // (its data is exactly the stale side the removal mods came from).
@@ -1895,8 +1928,10 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
             // Re-verify the job's snapshot-trusting cross-seam re-lights against live neighbor
             // data, clearing stale ghost light through the removal veto (Bug 14). Runs after the
             // merge + deferred drain so superseded claims are recognized.
+            int staleBeforeVerify = LastStalePullBacksCleared;
             VerifyPullBackClaims(chunkData, emitterOriginXZ, jobData.PullBackClaims);
             lap = PerfTickTotals.Lap(ref _mergeTotals.PullBackTicks, lap);
+            if (capturing) LivelockWatchdog.RecordStalePullBacks(LastStalePullBacksCleared - staleBeforeVerify);
 
             foreach (LightModification mod in jobData.Mods)
             {
@@ -1925,6 +1960,9 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                 // Out-of-world mods can never be consumed; everything else keeps the chunk from
                 // being treated as stable until delivered.
                 hasRealCrossChunkMods |= LightingJobProcessor.CountsAsRealCrossChunkMod(route);
+
+                if (capturing && route != LightingJobProcessor.CrossChunkModRoute.ApplyDirect)
+                    LivelockWatchdog.RecordMod(in mod, route, 0, false);
 
                 switch (route)
                 {
@@ -1955,7 +1993,16 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                         // neighbor (plus channel/op breakdown + a sample) to characterize the
                         // §4.2 non-convergence mode.
                         LastCrossChunkModsApplyRouted++;
-                        ApplyCrossChunkLightMod(neighborChunk, in mod, emitterOriginXZ);
+                        if (!capturing)
+                        {
+                            ApplyCrossChunkLightMod(neighborChunk, in mod, emitterOriginXZ);
+                            continue;
+                        }
+
+                        Vector3Int targetLocal = _world.worldData.GetLocalVoxelPositionInChunk(mod.GlobalPosition);
+                        ushort targetLightBefore = neighborChunk.GetLightData(targetLocal.x, targetLocal.y, targetLocal.z);
+                        bool applied = ApplyCrossChunkLightMod(neighborChunk, in mod, emitterOriginXZ);
+                        LivelockWatchdog.RecordMod(in mod, route, targetLightBefore, applied);
                         continue;
                 }
             }
@@ -2030,6 +2077,38 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         }
 
         PerfTickTotals.Lap(ref _mergeTotals.CascadeTicks, lap);
+
+        if (capturing) RecordLivelockMerge(chunkCoord, chunkData, lightChanged, hasRealCrossChunkMods, isChunkStable);
+    }
+
+    /// <summary>
+    /// Closes the livelock watchdog's record of one merge: the verdict, the chunk's resulting state and the state of its
+    /// 8 neighbors. Runs only while the watchdog is capturing.
+    /// </summary>
+    /// <param name="chunkCoord">The merged chunk.</param>
+    /// <param name="chunkData">Its data, or null when it vanished.</param>
+    /// <param name="lightChanged">Whether the merge changed its light.</param>
+    /// <param name="hasRealCrossChunkMods">Whether any outbound mod counted toward instability.</param>
+    /// <param name="effectiveStable">The stability the merge acted on.</param>
+    private void RecordLivelockMerge(ChunkCoord chunkCoord, ChunkData chunkData, bool lightChanged,
+        bool hasRealCrossChunkMods, bool effectiveStable)
+    {
+        LivelockWatchdog.EndMerge(lightChanged, hasRealCrossChunkMods, effectiveStable, chunkData);
+        for (int dx = -1; dx <= 1; dx++)
+        {
+            for (int dz = -1; dz <= 1; dz++)
+            {
+                if (dx == 0 && dz == 0) continue;
+
+                ChunkCoord neighborCoord = chunkCoord.Neighbor(dx, dz);
+                ChunkData neighbor = World.IsChunkInWorld(neighborCoord)
+                    ? _world.worldData.RequestChunk(neighborCoord.ToVoxelOrigin(), false)
+                    : null;
+                LivelockWatchdog.RecordNeighbor(dx, dz, neighbor, LightingJobs.ContainsKey(neighborCoord));
+            }
+        }
+
+        LivelockWatchdog.CompleteMerge();
     }
 
     /// <summary>

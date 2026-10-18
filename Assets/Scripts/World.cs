@@ -3192,6 +3192,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                             // ScheduleLightingUpdate). On success the schedule clears every lighting flag, so
                             // the chunk is removed from the work sets — it re-enters via its completion's flag
                             // callback / PromoteNeighborhood; a declined schedule parks it (MT-2).
+                            LightingWork workBeforeSchedule = chunkData.Work;
                             if (action == LightingScanDecision.ScanAction.ScheduleInitial)
                                 chunkData.RecalculateSkylight();
                             else if (action == LightingScanDecision.ScanAction.ScheduleEdge)
@@ -3207,6 +3208,9 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                                 // §3.1 rate ceiling is consumed by the schedule, not by the merge.
                                 PipelineTelemetry.StampLightScheduled(chunkCoord);
                                 _lightWork.Remove(pos);
+
+                                if (JobManager.LivelockWatchdog.Capturing)
+                                    JobManager.LivelockWatchdog.RecordSchedule(chunkCoord, action, workBeforeSchedule);
                             }
                             else
                             {
