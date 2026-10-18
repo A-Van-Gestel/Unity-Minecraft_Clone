@@ -106,6 +106,16 @@ neighbors' `LightingWork` bits and edge rounds) plus every schedule the scan mak
 as one `[LIGHTING] Bug 23 watchdog` warning. The benchmark waits were left unbounded: a hit costs one run timeout,
 and letting `ForceUnloadAllChunks` proceed with lighting jobs in flight would return their chunks to the pool mid-job.
 
+**First harvest (2026-10-18): 0 hits in 20 runs.** Master build of `d5e7e272` (the watchdog commit; its type and
+message string confirmed present in the build's IL2CPP metadata), Capture tier, budgets pinned
+(`maxMeshRebuildsPerFrame=10`, `maxLightJobsPerFrame=32`): 18 vd-10 runs (Gen `200`, loading `50` m/s, 70–73 s each,
+timeout 300 s) and 2 vd-32 runs (Gen `50`, loading `50` m/s, 124 and 160 s). All exited 0 and none tripped the
+watchdog. At the earlier rate of 1 in 14, 20 clean runs in a row have probability 0.23, so this does not show the
+rate changed; the day's Master total is 1 hit in 34 runs. Both vd-32 runs logged "3 generated chunks did not settle
+their lighting before the settle watchdog moved on" and still completed, so that pre-generation warning also appears
+without the livelock and is weak evidence of it. Logs: `Tools/Python/output/player_runs/b23w_*_Player.log`. The next
+batches reuse the same build and arguments.
+
 **Found by:** the ES-0 re-measurement (`ENGINE_SCALING_PERFORMANCE_ROADMAP.md` ES-0), whose vd-32 benchmark run it
 blocked.
 
