@@ -68,6 +68,11 @@ namespace Editor.Validation.Lighting
         {
             // Bug 09 still needs a faithful repro (see note above).
 
+            scenarios.Add(new Scenario(
+                "K23a: Two sky-exposed seam voxels left at a stale 14 with pending wake nodes settle back to 15 under concurrent flights — no cross-seam re-light livelock (Bug 23)",
+                KnownBug_Bug23SkyExposedSeamPairSettles,
+                knownBugId: "Bug 23"));
+
             // NOTE on Bug 18 (fidelity finding C10; found + FIXED 2026-07-12): the RGB twin of the Bug 12
             // sourceless cross-seam loop. Two equal-color lamps mutually lighting a seam, both broken in the
             // same wave, settled stable-but-wrong over-bright because RGB blocklight had the Bug 17 removal

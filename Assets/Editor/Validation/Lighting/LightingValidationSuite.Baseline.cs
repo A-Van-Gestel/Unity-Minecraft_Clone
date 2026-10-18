@@ -139,6 +139,10 @@ namespace Editor.Validation.Lighting
             // fill and the merge. Lives in Baselines/LightingValidationSuite.Baseline.ES7MergeCuts.cs. ---
             AddEs7MergeCutsBaselineScenarios(scenarios);
 
+            // --- Bug 23 (B128): the cross-chunk removal veto credits the vertical sky column. Lives in
+            // Baselines/LightingValidationSuite.Baseline.Bug23VerticalVeto.cs. ---
+            AddBug23VetoBaselineScenarios(scenarios);
+
             // --- LI-2 band differential gate (B75-B78): identical world scripts run banded vs full
             // height must produce bit-identical fields with equal round counts; B78 is the gate's
             // prove-red (a headroom-stripped band must be caught). Lives in
@@ -298,6 +302,10 @@ namespace Editor.Validation.Lighting
         /// <summary>Hook for the ES-7 lighting-cut baselines (Baselines/…Baseline.ES7MergeCuts.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
         static partial void AddEs7MergeCutsBaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the Bug 23 vertical-sky veto baseline (Baselines/…Baseline.Bug23VerticalVeto.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddBug23VetoBaselineScenarios(List<Scenario> scenarios);
 
         /// <summary>Hook for the LI-2 band differential gate baselines (implemented in Baselines/LightingValidationSuite.Baseline.BandDifferential.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>

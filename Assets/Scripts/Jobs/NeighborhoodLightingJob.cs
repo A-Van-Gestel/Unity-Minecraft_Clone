@@ -1567,7 +1567,7 @@ namespace Jobs
         {
             // VO-4: this must test the same faces PropagateLight's isVerticalSkylight rule does, or the
             // Bug 12 initiator fires on voxels the BFS is holding at an undimmed 15 through a partial
-            // block's open half — and the veto's support model, which tops out at 14, cannot defend them.
+            // block's open half. The veto's in-chunk support mirrors the same rule (InChunkSkylightSupport).
             BlockTypeJobData props = BlockTypes[BurstVoxelDataBitMapping.GetId(packed)];
             if (!LightAttenuation.IsTransparentThroughFace(in props, BurstVoxelDataBitMapping.GetMeta(packed), TOP_FACE))
                 return false;

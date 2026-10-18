@@ -16,6 +16,11 @@ namespace Helpers
     /// </summary>
     public static class CrossChunkLightModApplier
     {
+        // VoxelData.FaceChecks indices of the +Y and -Y faces, and full sky — the vertical-column rule's terms.
+        private const int TOP_FACE = 2;
+        private const int BOTTOM_FACE = 3;
+        private const byte FULL_SKY = 15;
+
         /// <summary>
         /// The outcome of evaluating a cross-chunk light modification against a voxel's current light value.
         /// </summary>
@@ -183,6 +188,11 @@ namespace Helpers
         /// veto a legitimate removal. Semi-transparent neighbors (glass/leaves/water) DO propagate and are
         /// kept, and since VO-4 so does a partial block through the faces its volume leaves open.
         /// </para>
+        /// <para>
+        /// The neighbor directly above supports a full 15 when the BFS's vertical-skylight rule would carry it
+        /// down undimmed: it holds full sky and both faces the column crosses (its bottom, the target's top) cost
+        /// nothing to cross (<see cref="LightAttenuation.IsTransparentThroughFace"/>).
+        /// </para>
         /// </summary>
         /// <param name="chunk">The chunk receiving the cross-chunk modification.</param>
         /// <param name="localPos">The local voxel position the modification targets.</param>
@@ -206,7 +216,20 @@ namespace Helpers
                 // The target's face toward this neighbor is i, so the neighbor's face toward the target —
                 // the one the light leaves through — is the opposite one.
                 byte s = LightBitMapping.GetSkylight(chunk.GetLightData(n.x, n.y, n.z));
-                byte support = LightAttenuation.Attenuate(s, entryCost.OpacityOnEntryThrough(i));
+                byte entryOpacity = entryCost.OpacityOnEntryThrough(i);
+
+                // The BFS's vertical sky column (PropagateLight's isVerticalSkylight): full sky falls through
+                // cost-free faces undimmed, so the voxel above supports 15, not 15 − 1. Without it a removal
+                // sent across the seam clears a voxel its own column keeps at 15 — the Bug 23 livelock.
+                if (i == TOP_FACE && s == FULL_SKY && entryOpacity == 0)
+                {
+                    uint above = chunk.GetVoxel(n.x, n.y, n.z);
+                    if (LightAttenuation.IsTransparentThroughFace(getBlockData(BurstVoxelDataBitMapping.GetId(above)),
+                            BurstVoxelDataBitMapping.GetMeta(above), BOTTOM_FACE))
+                        return FULL_SKY;
+                }
+
+                byte support = LightAttenuation.Attenuate(s, entryOpacity);
                 if (support <= best)
                     continue; // can't improve the best support — skip the voxel read + source check
 

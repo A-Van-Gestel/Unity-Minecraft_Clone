@@ -16,7 +16,10 @@ This document outlines **open** bugs related to the current lighting implementat
 ## Bug 23: Two Lighting Jobs Re-Schedule Every Frame Forever
 
 **Severity:** Medium (a permanent ~0.8 ms/frame main-thread cost, and it stops any harness that waits for idle jobs)  
-**Status:** Open — observed 2026-10-10 (vd 32) and 2026-10-18 (vd 10) in IL2CPP Master players, not yet root-caused; no repro scenario yet
+**Status:** Fixed in code (October 2026) — awaiting in-game confirmation and a Master no-recurrence batch. Root cause
+confirmed 2026-10-18 from a watchdog capture; repro `K23a`, guard `B128`  
+**Files:** `Assets/Scripts/Helpers/CrossChunkLightModApplier.cs` (`InChunkSkylightSupport`),
+`Assets/Scripts/Jobs/NeighborhoodLightingJob.cs` (`PropagateDarkness`)
 
 **Description:**
 At view distance 32 (first sighting; vd 10 below) the lighting pipeline never goes idle. From about four minutes into the run until the player was
@@ -115,6 +118,39 @@ rate changed; the day's Master total is 1 hit in 34 runs. Both vd-32 runs logged
 their lighting before the settle watchdog moved on" and still completed, so that pre-generation warning also appears
 without the livelock and is weak evidence of it. Logs: `Tools/Python/output/player_runs/b23w_*_Player.log`. The next
 batches reuse the same build and arguments.
+
+**Second harvest (2026-10-18): 1 hit in 24 more runs.** Same build and arguments: 22 vd-10 runs clean, 2 vd-32 runs,
+one of which (`b23w_v32_4`) tripped the watchdog and was killed at its 8-minute timeout. The watchdog build's total is
+1 hit in 44 runs.
+
+**Root cause (confirmed 2026-10-18).** The capture named chunks `13,18` and `13,19` and the seam voxels
+`(223,79,303)` / `(223,79,304)`. Regenerating seed 0 in the Editor showed both are air on a grass floor under open sky,
+beside an oak canopy, so both belong at sky 15 through the BFS's vertical-skylight rule. Every pass:
+
+1. Each chunk's job carried a removal seed (old level 15) on its own seam voxel, left there by the other chunk's
+   previous mods. Its darkness wave found the cross-seam voxel at 14 in its snapshot — below the removed 15 — so it
+   emitted a level-0 mod for it, then re-lit it sideways to 13 and 14. A job cannot re-light a cross-seam voxel from its
+   own column: propagation stops at the seam.
+2. The receiving chunk adjudicated the removal with `InChunkSkylightSupport`, which attenuated every neighbor —
+   including the sky-15 voxel straight above — to `15 − 1 = 14`. Support 14 is below the current 15, so the removal
+   applied (15 → 0 → 13 → 14) and woke the receiver with the same removal seed.
+3. The receiver's job restored its voxel to 15 from the column above and sent the mirror mods back.
+
+Both jobs therefore ended unstable every pass with real cross-chunk mods, and generation and meshing had nothing to
+react to. The canopy beside the seam is the likely way the pair first fell out of step; once both seam voxels held 14
+with removal seeds pending, the loop sustained itself on plain open ground (`K23a` reproduces it on a superflat).
+
+**Fix (2026-10-18).** `InChunkSkylightSupport` credits the in-chunk neighbor directly above with a full 15 under the
+BFS's own vertical rule: it holds 15, and both faces the column crosses (its bottom, the target's top) cost nothing
+(`LightAttenuation.IsTransparentThroughFace`). The removal is vetoed, the sideways 13/14 placements no-op, the
+receiver is not woken, and the emitter's next pass has no seeds and ends stable. Stability and cascade rules are
+unchanged.
+
+**Validation.** `K23a` (known-bug scenario): from the captured state — both seam voxels at 14 with old-15 wake nodes —
+the two chunks lit as concurrent flights never settled before the fix (both 14, unstable every round) and settle in 2
+rounds on the oracle after it. `B128` asserts the veto directly: 15 under an open column, below 15 under a sky-15 water
+voxel or into a dim-glass target. Validate All 845/845; three mutations of the fix proved red, and dropping the
+water-above guard also breaks `B53`, `B58`, `B59`, `B61`, `B64` and `B70`, the Bug 12–15 guards.
 
 **Found by:** the ES-0 re-measurement (`ENGINE_SCALING_PERFORMANCE_ROADMAP.md` ES-0), whose vd-32 benchmark run it
 blocked.
