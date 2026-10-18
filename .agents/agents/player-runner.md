@@ -34,7 +34,7 @@ machine path into any file.
    unreachable → wait ~5 s, retry once, then STOP. Record `git status --short` (your cleanup must
    leave it exactly like this).
 2. **Record the active build profile** with `unity command eval` (player-capture §1). Note the
-   exact asset path, including its case, or that it was null.
+   exact asset path, including its case, or that it was null. Record `PlayerSettings.bundleVersion` too.
 3. **Build** with `unity command build --profileName … --outputPath "$OUT" --confirm true --result-only`
    (add `--options '["Development"]'` for a Development build), where `$OUT` is absolute:
    `OUT="$(cd .. && pwd -W)/<folder>/Minecraft Clone.exe"` — never a relative path, whose base the
@@ -52,7 +52,10 @@ machine path into any file.
    `Assets/UniversalRenderPipelineGlobalSettings.asset` only if the build changed them **and** they were
    clean in the step-1 snapshot; one that was already modified holds the user's work — leave it and
    report it. If `ProjectSettings/ProjectSettings.asset` changed (the build stamps the date into
-   `bundleVersion`), leave it and report it — the parent commits it. Then compare `git status --short` with step 1
+   `bundleVersion`), leave it and report it — the parent commits it — unless the delegation prompt asks to restore
+   it. Then set it back in the Editor, not with `git restore` alone: the stamp also lives in the Editor's memory, and
+   the next asset save writes it back. `unity command eval 'PlayerSettings.bundleVersion = "<step-2 value>";
+   AssetDatabase.SaveAssets(); return PlayerSettings.bundleVersion;'` restores both. Then compare `git status --short` with step 1
    and report any other difference without touching it.
 
 ## Report — short, verbatim where it matters
