@@ -198,32 +198,11 @@ namespace Editor.WorldTools
             int flatIndex = ChunkMath.GetFlattenedIndexInChunk(localX, localY, localZ);
             if (flatIndex < 0 || flatIndex >= targetMap.Length) return;
 
-            uint existing = targetMap[flatIndex];
-            ushort existingId = (ushort)(existing & 0xFFFF);
+            ushort existingId = BurstVoxelDataBitMapping.GetId(targetMap[flatIndex]);
 
-            // Apply replacement rules
-            switch (mod.Rule)
-            {
-                case ReplacementRule.OnlyReplaceAir:
-                    if (existingId != BlockIDs.Air) return;
-                    break;
-                case ReplacementRule.ForcePlace:
-                    if (existingId == BlockIDs.Bedrock) return;
-                    break;
-                case ReplacementRule.Default:
-                default:
-                    if (existingId == BlockIDs.Bedrock) return;
-                    if (existingId != BlockIDs.Air && existingId != BlockIDs.Water)
-                    {
-                        if (_pipelineRunner.JobDataManager != null)
-                        {
-                            BlockTypeJobData existingProps = _pipelineRunner.JobDataManager.BlockTypesJobData[existingId];
-                            if (existingProps.IsSolid && !existingProps.IsTransparentForMesh) return;
-                        }
-                    }
-
-                    break;
-            }
+            // The game's own replacement rule, so the preview shows the blocks a real world generates.
+            BlockDatabase db = EditorBlockDatabaseCache.Database;
+            if (db == null || !BlockTagUtility.CanApplyMod(in mod, existingId, db.blockTypes)) return;
 
             targetMap[flatIndex] = BurstVoxelDataBitMapping.PackVoxelData(mod.ID, mod.Meta);
         }

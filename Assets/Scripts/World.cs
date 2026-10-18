@@ -3901,63 +3901,12 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
             }
 
             // --- 2. Check Placement Rules ---
-            // Special Case: If the mod is to place Air (ID 0), it's a "break" action.
-            // We should always allow this, unless the target is unbreakable.
-            if (v.ID == BlockIDs.Air)
+            // A position with no voxel to read has nothing to protect, so the mod goes through.
+            Vector3Int targetPos = v.GlobalPosition;
+            if (worldData.TryGetVoxel(targetPos.x, targetPos.y, targetPos.z, out VoxelState existingState) &&
+                !BlockTagUtility.CanApplyMod(in v, existingState.ID, BlockTypes))
             {
-                Vector3Int breakPos = v.GlobalPosition;
-                if (worldData.TryGetVoxel(breakPos.x, breakPos.y, breakPos.z, out VoxelState stateToBreak) &&
-                    (BlockTypes[stateToBreak.ID].tags & BlockTags.UNBREAKABLE) != 0)
-                {
-                    continue; // Cannot break an unbreakable block.
-                }
-            }
-            else // This is a "place" action, so run the full rule check.
-            {
-                bool canPlace = true;
-                Vector3Int placePos = v.GlobalPosition;
-
-                if (worldData.TryGetVoxel(placePos.x, placePos.y, placePos.z, out VoxelState existingState))
-                {
-                    switch (v.Rule)
-                    {
-                        case ReplacementRule.ForcePlace:
-                            // Force placement, but still respect Unbreakable blocks.
-                            if ((BlockTypes[existingState.ID].tags & BlockTags.UNBREAKABLE) != 0)
-                                canPlace = false;
-                            break;
-
-                        case ReplacementRule.OnlyReplaceAir:
-                            // Only allow placement if the existing block is Air (ID 0).
-                            if (existingState.ID != BlockIDs.Air)
-                                canPlace = false;
-                            break;
-
-                        case ReplacementRule.Default:
-                        default:
-                            // --- Use the default Block Tag system ---
-                            // World-gen and player edits consult different replacement masks: a structure may
-                            // overwrite leaves while stacking, but the player holding that block must not.
-                            BlockType incomingProps = BlockTypes[v.ID];
-                            BlockType existingProps = BlockTypes[existingState.ID];
-
-                            bool canReplace = v.Source == VoxelModSource.WorldGen
-                                ? BlockTagUtility.CanReplaceForWorldGen(incomingProps, existingProps)
-                                : BlockTagUtility.CanReplaceForPlacement(incomingProps, existingProps);
-
-                            if (!canReplace)
-                            {
-                                canPlace = false;
-                            }
-
-                            break;
-                    }
-                }
-
-                if (!canPlace)
-                {
-                    continue; // Skip this VoxelMod, move to the next in the queue.
-                }
+                continue; // Skip this VoxelMod, move to the next in the queue.
             }
 
             // --- 3. If chunk is ready, Apply Modification ---

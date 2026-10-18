@@ -178,6 +178,6 @@ Represents a request to change a block in the world. It is used to decouple the 
 - **`ushort ID`**: the block to place.
 - **`byte Meta`**: the raw 8-bit metadata byte, schema-agnostic. It replaced the earlier separate `Orientation` + `FluidLevel` fields (PER_BLOCK_METADATA_SCHEMAS §7.4); its interpretation is resolved from the target block's `MetadataSchema` at replay time.
 - **`bool ImmediateUpdate`**: whether the edit must be applied without waiting for the batched pass.
-- **`ReplacementRule Rule`**: placement override logic (e.g., `OnlyReplaceAir`, `ForcePlace`). `Default` defers to the Block Tag system.
+- **`ReplacementRule Rule`**: placement override logic (e.g., `OnlyReplaceAir`, `ForcePlace`). `Default` defers to the Block Tag system. `BlockTagUtility.CanApplyMod` evaluates the rule for `World.ApplyModifications` and for the editor tools that replay generation (3D chunk preview, `TerrainBlockDump`). Two hand-kept mirrors remain and must follow it: `BehaviorTestWorld.CanPlace` (the behavior suite's live-edit replay) and `Tools/UnityCli/PlayMode/TickShapeProbe.cs` (its mod-acceptance count); both resolve `Default` against the placement mask only.
 - **`VoxelModSource Source`**: which context produced the mod (`Live` for player/behavior/replayed edits, `WorldGen` for generation-time expansion). It selects *which* `canReplaceTags` field the `Default` rule consults.
 - **Usage:** Added to `World._modifications` queue. Processed at the end of the frame to ensure thread safety and batching of mesh rebuilds.

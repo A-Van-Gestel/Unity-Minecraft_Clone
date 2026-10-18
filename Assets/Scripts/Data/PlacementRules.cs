@@ -152,5 +152,41 @@ namespace Data
         /// <returns>True if the generation may replace the existing block, false otherwise.</returns>
         public static bool CanReplaceForWorldGen(BlockType incomingProps, BlockType existingProps) =>
             CanReplace(incomingProps, existingProps, incomingProps.worldGenCanReplaceTags);
+
+        /// <summary>
+        /// The single replacement rule for applying a <see cref="VoxelMod"/> over an existing block — what
+        /// <c>World.ApplyModifications</c> runs, and what the editor tools that replay generation must run to show the
+        /// same blocks. Placing air breaks anything but an unbreakable block; otherwise the mod's
+        /// <see cref="ReplacementRule"/> decides, <see cref="ReplacementRule.Default"/> through the tag mask that matches
+        /// its <see cref="VoxelModSource"/>.
+        /// </summary>
+        /// <param name="mod">The modification to apply.</param>
+        /// <param name="existingId">The block id currently at the mod's position.</param>
+        /// <param name="blockTypes">The block palette, indexed by id.</param>
+        /// <returns>True if the mod may replace the existing block.</returns>
+        public static bool CanApplyMod(in VoxelMod mod, ushort existingId, BlockType[] blockTypes)
+        {
+            BlockType existingProps = blockTypes[existingId];
+            bool existingUnbreakable = (existingProps.tags & BlockTags.UNBREAKABLE) != 0;
+            if (mod.ID == BlockIDs.Air) return !existingUnbreakable;
+
+            switch (mod.Rule)
+            {
+                case ReplacementRule.ForcePlace:
+                    return !existingUnbreakable;
+
+                case ReplacementRule.OnlyReplaceAir:
+                    return existingId == BlockIDs.Air;
+
+                case ReplacementRule.Default:
+                default:
+                    // World-gen and player edits consult different replacement masks: a structure may overwrite
+                    // leaves while stacking, but the player holding that block must not.
+                    BlockType incomingProps = blockTypes[mod.ID];
+                    return mod.Source == VoxelModSource.WorldGen
+                        ? CanReplaceForWorldGen(incomingProps, existingProps)
+                        : CanReplaceForPlacement(incomingProps, existingProps);
+            }
+        }
     }
 }

@@ -5,13 +5,10 @@
 //         Arguments: seed, minX, minY, minZ, maxX, maxY, maxZ (voxel space, inclusive; every one required).
 //         Compiled in memory on each call, never imported by Unity.
 // NEEDS   Edit mode is enough — no scene, no Play mode. Uses the Standard world type and BlockDatabase assets.
-// TRAP    This is freshly generated terrain plus structures (trees), the same generator a new world runs. It does not
-//         include player edits, fluid flow or anything else that changed after generation, and it uses the default
-//         generation feature flags rather than a player's settings. Read a saved world's region files instead
+// TRAP    This is freshly generated terrain plus structures (trees), the same generator and replacement rule a new world
+//         runs. It does not include player edits, fluid flow or anything else that changed after generation, and it uses
+//         the default generation feature flags rather than a player's settings. Read a saved world's region files instead
 //         (Tools/Python/inspect_save_chunks.py) when those matter.
-//
-// Origin: Lighting Bug 23 (_FIXED_BUGS.md Lighting #27). A Master-player watchdog named two livelocked seam voxels;
-// dumping seed 0 around them showed open sky beside an oak canopy, which pinned the cross-chunk veto's 15-vs-14 defect.
 
 using System.Collections.Generic;
 using System.Text;
@@ -94,7 +91,7 @@ namespace UnityCli
                 {
                     foreach (VoxelMod mod in runner.ExpandStructure(marker))
                     {
-                        if (TryApply(runner, maps, mod)) applied++;
+                        if (TryApply(db.blockTypes, maps, mod)) applied++;
                     }
                 }
 
@@ -129,9 +126,8 @@ namespace UnityCli
             return sb.ToString();
         }
 
-        /// <summary>Applies one structure voxel under the generator's replacement rules (the 3D preview's rules).</summary>
-        private static bool TryApply(EditorChunkPipelineRunner runner, Dictionary<Vector2Int, NativeArray<uint>> maps,
-            VoxelMod mod)
+        /// <summary>Applies one structure voxel under the game's replacement rule (<c>BlockTagUtility.CanApplyMod</c>).</summary>
+        private static bool TryApply(BlockType[] blockTypes, Dictionary<Vector2Int, NativeArray<uint>> maps, VoxelMod mod)
         {
             Vector2Int origin = new Vector2Int(
                 ChunkMath.VoxelToChunk(mod.GlobalPosition.x) * ChunkMath.CHUNK_WIDTH,
@@ -141,15 +137,7 @@ namespace UnityCli
 
             int index = ChunkMath.GetFlattenedIndexInChunk(mod.GlobalPosition.x - origin.x, mod.GlobalPosition.y,
                 mod.GlobalPosition.z - origin.y);
-            ushort existing = BurstVoxelDataBitMapping.GetId(map[index]);
-
-            if (existing == BlockIDs.Bedrock) return false;
-            if (mod.Rule == ReplacementRule.OnlyReplaceAir && existing != BlockIDs.Air) return false;
-            if (mod.Rule == ReplacementRule.Default && existing != BlockIDs.Air && existing != BlockIDs.Water)
-            {
-                BlockTypeJobData props = runner.JobDataManager.BlockTypesJobData[existing];
-                if (props.IsSolid && !props.IsTransparentForMesh) return false;
-            }
+            if (!BlockTagUtility.CanApplyMod(in mod, BurstVoxelDataBitMapping.GetId(map[index]), blockTypes)) return false;
 
             map[index] = BurstVoxelDataBitMapping.PackVoxelData(mod.ID, mod.Meta);
             return true;
