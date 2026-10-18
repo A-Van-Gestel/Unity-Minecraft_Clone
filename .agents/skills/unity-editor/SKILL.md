@@ -69,6 +69,7 @@ Retry it; it is not a hang.
 | Profiler data                          | `run_script` on `Tools/UnityCli/Profiler/ProfilerQueries.cs`                              |
 | Load/drive a world in Play mode, capture | `run_script` on `Tools/UnityCli/PlayMode/WorldRig.cs` (recipe `playmode-world`)         |
 | Behavior-tick input on a live world      | `run_script` on `Tools/UnityCli/PlayMode/TickShapeProbe.cs` (`Measure`, after `WorldRig.Launch`; `AuditSleepers` checks the registration contract) |
+| Generated blocks at given coordinates (edit mode) | `run_script` on `Tools/UnityCli/WorldGen/TerrainBlockDump.cs` (`Dump` with seed + voxel box) |
 
 ## Routing
 
