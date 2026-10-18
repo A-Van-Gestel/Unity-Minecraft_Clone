@@ -92,6 +92,11 @@ first as its own commit.
   `WorldJobManager.ProcessGenerationJobs` (its `AvgActive` only counts), and
   `ActiveVoxelScanBenchmark`'s `T_bitmask`/`T_register` legs are managed replicas — only `T_current`
   calls production. A count column or a replica named after the method is not coverage.
+- **Per-job ratios of a per-frame slot are not comparable when the legs' frame rates differ.** A slot that carries
+  per-frame work besides its per-job work (`LightSchedule`, `MeshSchedule`) spreads that fixed cost over fewer jobs in
+  the faster leg, so its cost per job can rise while the change helped (ES-7.1: +15–19 % per job at 3× the frames).
+  Score per-job costs with a timer around the per-job work itself, or compare legs at matched job density.
+  `Tools/Python/summarize_ab_legs.py` tabulates a multi-run A/B per phase from `summarize_perf_session.py` outputs.
 - **The route's own noise is ±1–5 % per phase** (same code, two runs). A change worth <1 % of a pass
   cannot be resolved by any benchmark here: measure the work removed with deterministic counters
   (calls, iterations) and price it with an editor micro A/B. Never read a single-run swing inside

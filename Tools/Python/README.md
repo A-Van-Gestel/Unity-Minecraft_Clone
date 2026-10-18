@@ -47,17 +47,18 @@ A known gap is recorded as an `expectedFailure` test that names it, so a fix sho
 
 ## Validation and measurement
 
-| Script                          | Does                                                                                        |
-|---------------------------------|---------------------------------------------------------------------------------------------|
-| `prove_red.py`                  | Proves a suite goes red under a source mutation, restores byte for byte; `--batch` for many |
-| `session_cost_report.py`        | Claude Code session cost: main context, turn mix by category, subagents; `--agents` rollup  |
-| `tabulate_tick_hitches.py`      | Tabulates Tick-led hitch records from player-run performance summaries                      |
-| `attribute_startup_tail.py`     | Which slot led each slow frame of a startup run's drained → stable tail (Capture sessions)  |
-| `summarize_perf_session.py`     | Per-phase slots, counters, jobs, I/O and hitches from a Capture session + report            |
-| `run_player.py`                 | Runs one `-mc-run` session in a built player: timeout + kill, saved Player.log, report path |
-| `inspect_save_chunks.py`        | Decodes region files and identifies each chunk payload's historical layout                  |
-| `verify_floordiv_parity.py`     | Exhaustive parity proof for the structure cell-election floor-div fix                       |
-| `verify_liquid_noise_period.py` | Float32 model of `LiquidCore.hlsl`'s noise (the FLUID #20 evidence)                         |
+| Script                          | Does                                                                                           |
+|---------------------------------|------------------------------------------------------------------------------------------------|
+| `prove_red.py`                  | Proves a suite goes red under a source mutation, restores byte for byte; `--batch` for many    |
+| `session_cost_report.py`        | Claude Code session cost: main context, turn mix by category, subagents; `--agents` rollup     |
+| `tabulate_tick_hitches.py`      | Tabulates Tick-led hitch records from player-run performance summaries                         |
+| `attribute_startup_tail.py`     | Which slot led each slow frame of a startup run's drained → stable tail (Capture sessions)     |
+| `summarize_perf_session.py`     | Per-phase slots, counters, jobs, I/O and hitches from a Capture session + report               |
+| `summarize_ab_legs.py`          | Per-run and per-leg table of a player A/B for one phase, from `summarize_perf_session` outputs |
+| `run_player.py`                 | Runs one `-mc-run` session in a built player: timeout + kill, saved Player.log, report path    |
+| `inspect_save_chunks.py`        | Decodes region files and identifies each chunk payload's historical layout                     |
+| `verify_floordiv_parity.py`     | Exhaustive parity proof for the structure cell-election floor-div fix                          |
+| `verify_liquid_noise_period.py` | Float32 model of `LiquidCore.hlsl`'s noise (the FLUID #20 evidence)                            |
 
 ## Generators and bulk edits
 
