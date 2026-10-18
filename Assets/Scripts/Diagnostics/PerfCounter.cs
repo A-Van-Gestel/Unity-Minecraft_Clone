@@ -189,7 +189,7 @@ namespace Diagnostics
         /// <summary>Lighting-merge time spent extracting each job's band and merging it into the sections, recount included, in microseconds.</summary>
         MergeApplyUs,
 
-        /// <summary>The part of <see cref="MergeApplyUs"/> spent recounting each merged section's blocks, in microseconds.</summary>
+        /// <summary>The part of <see cref="MergeApplyUs"/> the instrumented-build block-count verifier spent, in microseconds; 0 in other builds.</summary>
         MergeCountsUs,
 
         /// <summary>Lighting-merge time spent draining cross-chunk mods deferred for the merged chunks, in microseconds.</summary>
@@ -233,6 +233,12 @@ namespace Diagnostics
 
         /// <summary>The skylight nodes those unloaded chunks held.</summary>
         UnloadPendingSkyNodes,
+
+        /// <summary>Merged sections whose stored block counts the instrumented-build verifier recounted.</summary>
+        MergeCountChecks,
+
+        /// <summary>Those whose stored counts disagreed with their voxels.</summary>
+        MergeCountDrifts,
 
         /// <summary>Number of counters; not a counter.</summary>
         Count,

@@ -1,6 +1,7 @@
 using System.Reflection;
 using Data;
 using Diagnostics;
+using Editor.Validation.Behavior.Framework;
 using Helpers;
 using Jobs.BurstData;
 using Unity.Collections;
@@ -12,8 +13,9 @@ namespace Editor.Validation.PerfMonitoring
     /// The lighting-merge half of the suite: <see cref="PerfMergeTotals"/> sampled into the <c>Merge*</c> and
     /// <c>Unload*</c> counters, the band predicate behind the out-of-band count, and the production
     /// <see cref="ChunkData.ApplyJobLightMap(NativeArray{uint}, NativeArray{ushort}, BlockType[], ref PerfMergeTotals)"/>
-    /// charging its recount and churn. World-free: no suite stands up the production lighting merge, so the probes in
-    /// <c>WorldJobManager.MergeCompletedLightingJob</c> are not reached here.
+    /// charging its churn and its instrumented-build block-count verifier (the Editor compiles with
+    /// <c>UNITY_INCLUDE_INSTRUMENTATION</c>). World-free: no suite stands up the production lighting merge, so the probes
+    /// in <c>WorldJobManager.MergeCompletedLightingJob</c> are not reached here.
     /// </summary>
     public static partial class PerfMonitorValidationSuite
     {
@@ -51,7 +53,15 @@ namespace Editor.Validation.PerfMonitoring
             (nameof(PerfMergeTotals.ChurnedSections), PerfCounter.MergeChurnedSections, false),
             (nameof(PerfMergeTotals.UnloadPendingSkyChunks), PerfCounter.UnloadPendingSkyChunks, false),
             (nameof(PerfMergeTotals.UnloadPendingSkyNodes), PerfCounter.UnloadPendingSkyNodes, false),
+            (nameof(PerfMergeTotals.CountChecks), PerfCounter.MergeCountChecks, false),
+            (nameof(PerfMergeTotals.CountDrifts), PerfCounter.MergeCountDrifts, false),
         };
+
+        /// <summary>The kept section's non-air count after its one stone voxel.</summary>
+        private const int KEPT_SECTION_BLOCKS = 1;
+
+        /// <summary>The wrong non-air count the drift check plants in the kept section.</summary>
+        private const int PLANTED_NON_AIR = 7;
 
         #region Scenarios
 
@@ -76,18 +86,31 @@ namespace Editor.Validation.PerfMonitoring
                 && ChunkMath.IsSectionOutsideBand(6, 0, ChunkMath.SECTION_SIZE * 6)
                 && !ChunkMath.IsSectionOutsideBand(5, 0, ChunkMath.SECTION_SIZE * 6 - 1));
 
+            BlockType[] palette = TestBehaviorBlockPalette.Create();
             PerfMergeTotals totals = default;
-            bool changed = ApplyChurnFixture(ref totals);
+            bool changed = ApplyChurnFixture(ref totals, palette, plantDrift: false, out ChunkData _);
             ok &= Check("A real merge over one kept section and one uniform-lit absent section reports a change", changed);
-            ok &= Check($"It counts exactly one churned section (got {totals.ChurnedSections}) and times the kept section's recount",
+            ok &= Check($"It counts exactly one churned section (got {totals.ChurnedSections}) and times the kept section's verifier",
                 totals.ChurnedSections == 1 && totals.CountsTicks > 0);
-            ok &= Check("The apply charges only its own two fields",
+            ok &= Check($"The verifier recounts the one kept section and finds its maintained counts current (checks {totals.CountChecks}, drifts {totals.CountDrifts})",
+                totals.CountChecks == 1 && totals.CountDrifts == 0);
+            ok &= Check("The apply charges only its own fields",
                 totals.ApplyTicks == 0 && totals.Merges == 0 && totals.OutOfBandSections == 0);
+
+            PerfMergeTotals drift = default;
+            ApplyChurnFixture(ref drift, palette, plantDrift: true, out ChunkData drifted);
+            ok &= Check($"A planted non-air count is caught as one drift and repaired to {KEPT_SECTION_BLOCKS} (got {drifted.sections[0].nonAirCount})",
+                drift.CountChecks == 1 && drift.CountDrifts == 1 && drifted.sections[0].nonAirCount == KEPT_SECTION_BLOCKS);
+
+            PerfMergeTotals noPalette = default;
+            ApplyChurnFixture(ref noPalette, null, plantDrift: false, out ChunkData _);
+            ok &= Check("Without a palette (the lighting harness) the verifier does not run", noPalette.CountChecks == 0);
 
             PerfStore.SetTier(PerfTier.Basic);
             PerfMergeTotals below = default;
-            ApplyChurnFixture(ref below);
-            ok &= Check("Below Systems the same merge adds nothing", below.Equals(default(PerfMergeTotals)));
+            ApplyChurnFixture(ref below, palette, plantDrift: false, out ChunkData _);
+            ok &= Check("Below Systems the merge adds no time or churn; the verifier still checks",
+                below.ChurnedSections == 0 && below.CountsTicks == 0 && below.CountChecks == 1 && below.CountDrifts == 0);
             return ok;
         });
 
@@ -135,14 +158,19 @@ namespace Editor.Validation.PerfMonitoring
 
         /// <summary>
         /// Merges a job map into a fresh chunk whose section 0 holds a block: section 0 gets mixed sky light (kept and
-        /// recounted), <see cref="CHURN_SECTION"/> uniform full sky (rented, compacted and returned), the rest stays dark.
+        /// verified), <see cref="CHURN_SECTION"/> uniform full sky (rented, compacted and returned), the rest stays dark.
         /// </summary>
         /// <param name="totals">The totals the merge charges.</param>
+        /// <param name="palette">The block palette handed to the merge, or null as the lighting harness passes.</param>
+        /// <param name="plantDrift">Whether to overwrite the kept section's non-air count with a wrong value first.</param>
+        /// <param name="chunk">The merged chunk.</param>
         /// <returns>The merge's change report.</returns>
-        private static bool ApplyChurnFixture(ref PerfMergeTotals totals)
+        private static bool ApplyChurnFixture(ref PerfMergeTotals totals, BlockType[] palette, bool plantDrift, out ChunkData chunk)
         {
-            ChunkData chunk = new ChunkData(Vector2Int.zero);
-            chunk.SetVoxel(0, 0, 0, BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Stone, 0));
+            chunk = new ChunkData(Vector2Int.zero);
+            chunk.SetVoxel(0, 0, 0, BurstVoxelDataBitMapping.PackVoxelData(BlockIDs.Stone, 0),
+                palette?[BlockIDs.Stone], palette?[BlockIDs.Air]);
+            if (plantDrift) chunk.sections[0].nonAirCount = PLANTED_NON_AIR;
 
             NativeArray<uint> voxels = new NativeArray<uint>(ChunkMath.CHUNK_VOLUME, Allocator.Temp);
             NativeArray<ushort> light = new NativeArray<ushort>(ChunkMath.CHUNK_VOLUME, Allocator.Temp);
@@ -155,7 +183,7 @@ namespace Editor.Validation.PerfMonitoring
                 for (int i = 0; i < ChunkMath.SECTION_VOLUME; i++)
                     light[churnOffset + i] = LightBitMapping.PackLightData(FULL_SKY, 0, 0, 0);
 
-                return chunk.ApplyJobLightMap(voxels, light, null, ref totals);
+                return chunk.ApplyJobLightMap(voxels, light, palette, ref totals);
             }
             finally
             {

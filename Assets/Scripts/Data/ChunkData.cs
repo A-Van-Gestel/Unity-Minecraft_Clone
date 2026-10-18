@@ -1477,8 +1477,8 @@ namespace Data
         /// </summary>
         /// <param name="jobVoxelMap">The job's input voxel map snapshot (section-contiguous, full chunk).</param>
         /// <param name="jobLightMap">The job's computed light map (section-contiguous, full chunk).</param>
-        /// <param name="blockTypes">Block palette for section count recalculation, or null to recompute
-        /// the non-air count only (the harness passes null — counts are meshing-only, light-irrelevant).</param>
+        /// <param name="blockTypes">Block palette for the instrumented-build block-count verifier, or null to skip it
+        /// (the harness passes null — counts are meshing-only, light-irrelevant).</param>
         /// <returns>True if any voxel's effective light value differs from its pre-merge value. P9-2 uses
         /// this to re-arm the edge-check cascade on effect rather than on stability; a pass that returns
         /// false left every border byte-identical to what the neighbors already read.</returns>
@@ -1490,12 +1490,13 @@ namespace Data
         }
 
         /// <summary>
-        /// <see cref="ApplyJobLightMap(NativeArray{uint}, NativeArray{ushort}, BlockType[])"/>, charging the section
-        /// recount's time and the churned sections to <paramref name="totals"/> while the monitor's slots are active.
+        /// <see cref="ApplyJobLightMap(NativeArray{uint}, NativeArray{ushort}, BlockType[])"/>, charging the churned
+        /// sections to <paramref name="totals"/> while the monitor's slots are active, and the block-count verifier's
+        /// time and results in instrumented builds.
         /// </summary>
         /// <param name="jobVoxelMap">The job's input voxel map snapshot (section-contiguous, full chunk).</param>
         /// <param name="jobLightMap">The job's computed light map (section-contiguous, full chunk).</param>
-        /// <param name="blockTypes">Block palette for section count recalculation, or null to recompute the non-air count only.</param>
+        /// <param name="blockTypes">Block palette for the instrumented-build block-count verifier, or null to skip it.</param>
         /// <param name="totals">The lighting merge's running totals.</param>
         /// <returns>True if any voxel's effective light value differs from its pre-merge value.</returns>
         public bool ApplyJobLightMap(NativeArray<uint> jobVoxelMap, NativeArray<ushort> jobLightMap,
@@ -1583,11 +1584,10 @@ namespace Data
                         // Try to compact the light data into a uniform sky byte.
                         TryCompactSectionLight(s, section, sectionHasData, sectionHasLight);
 
+                        // The merge writes light only, so the block counts SetVoxel maintains are still current.
                         if (!isNewSection && sections[s] != null)
                         {
-                            long countsStart = PerfStore.Begin();
-                            section.RecalculateCounts(blockTypes);
-                            PerfTickTotals.Lap(ref totals.CountsTicks, countsStart);
+                            VerifySectionCounts(s, section, blockTypes, ref totals);
                         }
                         else if (isNewSection && sections[s] == null && PerfStore.SlotsActive)
                         {
@@ -1600,6 +1600,46 @@ namespace Data
             }
 
             return changedAnyLight;
+        }
+
+        /// <summary>
+        /// Instrumented builds only: recounts a section the merge kept and compares the result with the counts
+        /// <see cref="SetVoxel(int, int, int, uint, BlockType, BlockType)"/> maintains, which the merge relies on. A drift
+        /// is repaired, counted, and logged once per totals owner. The flowing-fluid count is compared only when it was
+        /// computed under the current fluid palette — a stale one is the emitter scanner's to repair.
+        /// </summary>
+        /// <param name="sectionIndex">The section's index, for the log.</param>
+        /// <param name="section">The kept section.</param>
+        /// <param name="blockTypes">The block palette, or null to skip the check.</param>
+        /// <param name="totals">The lighting merge's running totals.</param>
+        [Conditional("UNITY_INCLUDE_INSTRUMENTATION")]
+        private void VerifySectionCounts(int sectionIndex, ChunkSection section, [CanBeNull] BlockType[] blockTypes,
+            ref PerfMergeTotals totals)
+        {
+            if (blockTypes == null) return;
+
+            long start = PerfStore.Begin();
+            section.CountVoxels(blockTypes, out int nonAir, out int opaque, out int emissive, out int emitterFluid);
+            bool fluidComparable = section.emitterFluidGeneration == FluidBlockLookup.Generation;
+            bool drifted = nonAir != section.nonAirCount || opaque != section.opaqueCount || emissive != section.emissiveCount
+                           || (fluidComparable && emitterFluid != section.emitterFluidCount);
+            totals.CountChecks++;
+
+            if (drifted)
+            {
+                totals.CountDrifts++;
+                if (totals.CountDrifts == 1)
+                {
+                    Debug.LogError($"[ES-7] Block counts drifted in chunk {Position} section {sectionIndex}: stored " +
+                                   $"nonAir {section.nonAirCount} opaque {section.opaqueCount} emissive {section.emissiveCount} " +
+                                   $"fluid {section.emitterFluidCount}, voxels say {nonAir} / {opaque} / {emissive} / {emitterFluid}. " +
+                                   "A voxel write bypassed the counts SetVoxel maintains; later drifts are only counted.");
+                }
+
+                section.RecalculateCounts(blockTypes);
+            }
+
+            PerfTickTotals.Lap(ref totals.CountsTicks, start);
         }
 
         /// <summary>

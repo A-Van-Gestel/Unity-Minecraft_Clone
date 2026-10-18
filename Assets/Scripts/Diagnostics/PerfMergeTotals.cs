@@ -1,14 +1,16 @@
 namespace Diagnostics
 {
     /// <summary>
-    /// Running totals of the lighting merge's main-thread parts — applying the job's light map (with the section recount
-    /// inside it), draining deferred cross-chunk mods, verifying pull-back claims, routing the job's outbound mods, and the
-    /// stability, cascade and re-mesh bookkeeping — with the work counts behind them, plus the chunks the unload pass
+    /// Running totals of the lighting merge's main-thread parts — applying the job's light map (with the
+    /// instrumented-build block-count verifier inside it), draining deferred cross-chunk mods, verifying pull-back claims,
+    /// routing the job's outbound mods, and the stability, cascade and re-mesh bookkeeping — with the work counts behind
+    /// them, plus the chunks the unload pass
     /// tears down with skylight nodes still queued. The owner samples them into the per-frame <c>Merge*</c> and
     /// <c>Unload*</c> <see cref="PerfCounter"/>s.
     /// <para>
     /// Timed with <see cref="PerfTickTotals.Lap"/> from a <see cref="PerfStore.Begin()"/> start, and counted only when
-    /// that start is non-zero, so below <see cref="PerfTier.Systems"/> each probe costs one static read. Main thread only.
+    /// that start is non-zero, so below <see cref="PerfTier.Systems"/> each probe costs one static read — except the
+    /// verifier's <see cref="CountChecks"/> and <see cref="CountDrifts"/>, which are correctness checks. Main thread only.
     /// </para>
     /// </summary>
     public struct PerfMergeTotals
@@ -16,7 +18,7 @@ namespace Diagnostics
         /// <summary>Extracting the job's band and merging it into the sections (<see cref="CountsTicks"/> included), in ticks.</summary>
         public long ApplyTicks;
 
-        /// <summary>The per-section block recount inside the apply, in ticks.</summary>
+        /// <summary>The instrumented-build block-count verifier inside the apply, in ticks; 0 in other builds.</summary>
         public long CountsTicks;
 
         /// <summary>Draining the cross-chunk mods other jobs deferred for the merged chunk, in ticks.</summary>
@@ -60,5 +62,11 @@ namespace Diagnostics
 
         /// <summary>The skylight nodes those chunks held.</summary>
         public long UnloadPendingSkyNodes;
+
+        /// <summary>Kept sections whose stored block counts the instrumented-build verifier recounted, at every monitor tier.</summary>
+        public long CountChecks;
+
+        /// <summary>Those whose stored counts disagreed with their voxels (and were repaired).</summary>
+        public long CountDrifts;
     }
 }

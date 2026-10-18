@@ -189,6 +189,22 @@ namespace Data
                 return;
             }
 
+            CountVoxels(blockTypes, out nonAirCount, out opaqueCount, out emissiveCount, out emitterFluidCount);
+            emitterFluidGeneration = FluidBlockLookup.Generation;
+        }
+
+        /// <summary>
+        /// Counts the section's voxels the way <see cref="RecalculateCounts"/> does, without storing anything — so a
+        /// caller can compare fresh counts with the maintained ones.
+        /// </summary>
+        /// <param name="blockTypes">The blockTypes array to look up opacity.</param>
+        /// <param name="nonAir">Voxels whose block ID is not air.</param>
+        /// <param name="opaque">Those whose block is opaque.</param>
+        /// <param name="emissive">Those whose block emits light.</param>
+        /// <param name="emitterFluid">Those holding flowing fluid.</param>
+        public unsafe void CountVoxels([NotNull] BlockType[] blockTypes, out int nonAir, out int opaque, out int emissive,
+            out int emitterFluid)
+        {
             int localNonAir = 0;
             int localOpaque = 0;
             int localEmissive = 0;
@@ -228,11 +244,10 @@ namespace Data
                 }
             }
 
-            nonAirCount = localNonAir;
-            opaqueCount = localOpaque;
-            emissiveCount = localEmissive;
-            emitterFluidCount = localFlowing;
-            emitterFluidGeneration = FluidBlockLookup.Generation;
+            nonAir = localNonAir;
+            opaque = localOpaque;
+            emissive = localEmissive;
+            emitterFluid = localFlowing;
         }
     }
 }

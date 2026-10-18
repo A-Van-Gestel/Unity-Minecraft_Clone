@@ -318,6 +318,13 @@ namespace Commands
                 $"{PerfStore.SumCounter(PerfCounter.MergeUnchangedRemeshes)} of them by unchanged merges; " +
                 $"unloads with skylight pending {PerfStore.SumCounter(PerfCounter.UnloadPendingSkyChunks)} " +
                 $"({PerfStore.SumCounter(PerfCounter.UnloadPendingSkyNodes)} nodes)"));
+
+            long checks = PerfStore.SumCounter(PerfCounter.MergeCountChecks);
+            if (checks == 0) return;
+
+            long drifts = PerfStore.SumCounter(PerfCounter.MergeCountDrifts);
+            lines.Add(new ConsoleLine(drifts == 0 ? ConsoleLineSeverity.Info : ConsoleLineSeverity.Warning,
+                $"  Block-count verifier: {checks} kept sections recounted, {drifts} drifted"));
         }
 
         /// <summary>A merge count's window sum per merged job.</summary>

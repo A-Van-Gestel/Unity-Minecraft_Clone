@@ -3448,6 +3448,8 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         PerfStore.SampleTotal(PerfCounter.MergeChurnedSections, totals.ChurnedSections);
         PerfStore.SampleTotal(PerfCounter.UnloadPendingSkyChunks, totals.UnloadPendingSkyChunks);
         PerfStore.SampleTotal(PerfCounter.UnloadPendingSkyNodes, totals.UnloadPendingSkyNodes);
+        PerfStore.SampleTotal(PerfCounter.MergeCountChecks, totals.CountChecks);
+        PerfStore.SampleTotal(PerfCounter.MergeCountDrifts, totals.CountDrifts);
     }
 
     /// <summary>Samples the behavior tick's running totals into the <c>Tick*</c> counters and the fluid ticker pool's misses.</summary>
