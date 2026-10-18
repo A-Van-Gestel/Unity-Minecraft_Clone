@@ -8,7 +8,9 @@ WHAT THIS DOES
       - the `LightMerge`, `LightSchedule` and `MeshSchedule` slots (mean ms per frame);
       - per job: merge and apply ms per merged job, schedule ms per completed light and mesh job;
       - the lighting merge's parts and counts (ES-7 Step 0 counters), and the jobs completed.
-    Columns a run's summary lacks (an older capture without the merge counters) read nan.
+    Columns a run's summary lacks (an older capture without the merge counters) read nan, and so do all three slots when
+    the summary has no slot table for the phase (a mistyped --phase). A slot missing from a table that is there reads 0:
+    the summary leaves out slots below its noise floor.
 
 WHAT IT READS / WRITES
     Reads `<dir>/<tag>_summary.md` and `<dir>/<tag>_report.log` for every tag; writes Markdown to stdout.
@@ -84,7 +86,9 @@ def run_metrics(folder, tag, phase, group):
 
     frames = num(overview.get("Frames"))
     merges_per_frame = num(merge.get("Merges/frame"))
-    light_merge, light_schedule, mesh_schedule = (slots.get(s, 0.0) for s in ("LightMerge", "LightSchedule", "MeshSchedule"))
+    slot_default = 0.0 if phase in tables else math.nan
+    light_merge, light_schedule, mesh_schedule = (slots.get(s, slot_default)
+                                                  for s in ("LightMerge", "LightSchedule", "MeshSchedule"))
     light_jobs, mesh_jobs = jobs.get("Light", math.nan), jobs.get("Mesh", math.nan)
 
     def ratio(a, b):
