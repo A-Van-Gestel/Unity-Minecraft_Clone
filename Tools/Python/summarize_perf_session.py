@@ -58,6 +58,8 @@ GAUGES = ["GenerationQueue", "GenerationInFlight", "LightReady", "LightWaiting",
           "MeshOutputsPooled", "IoInFlight"]
 JOB_TYPES = ["Generation", "Light", "Mesh", "Fluid", "FluidSoundScan"]
 TICK_PARTS = ["TickListUs", "TickPrepareUs", "TickScheduleUs", "TickWaitUs", "TickGrassUs", "TickFluidReplayUs"]
+# MergeCountsUs runs inside MergeApplyUs, so it is a column of its own rather than a part.
+MERGE_PARTS = ["MergeApplyUs", "MergeDrainUs", "MergePullBackUs", "MergeRouteUs", "MergeCascadeUs"]
 POOL_MISSES = ["SectionPoolMisses", "DataPoolMisses", "JobArrayMisses", "MeshOutputMisses", "SaveBufferMisses",
                "FluidTickerPoolMisses", "UntimedJobs"]
 
@@ -333,6 +335,27 @@ def tick_table(phases):
                   "Fluid chunks/frame", "Snapshot MB/frame", "Grass voxels/frame"], rows)
 
 
+def merge_table(phases):
+    rows = []
+    for p in phases:
+        frames = p.rows or 1
+        merges = p.sums["MergeJobs"]
+        merge = sum(p.values.get("LightMerge", [])) / frames
+        parts = [p.sums[part] / frames / US_PER_MS for part in MERGE_PARTS]
+        per_merge = [fmt(p.sums[name] / merges, 2) if merges else "n/a"
+                     for name in ["MergeOutOfBandSections", "MergeChurnedSections"]]
+        rows.append([p.label, fmt(merge, 3)] + [fmt(v, 3) for v in parts] +
+                    [fmt(merge - sum(parts), 3), fmt(p.sums["MergeCountsUs"] / frames / US_PER_MS, 3),
+                     fmt(merges / frames, 1), per_op(p.sums["MergeApplyUs"], merges),
+                     p.sums["MergeStable"], p.sums["MergeStableUnchanged"], p.sums["MergeSelfRemeshes"],
+                     p.sums["MergeNeighborRemeshes"], p.sums["MergeUnchangedRemeshes"]] + per_merge +
+                    [p.sums["UnloadPendingSkyChunks"], p.sums["UnloadPendingSkyNodes"]])
+    return table(["Phase", "LightMerge ms", "Apply", "Drain", "PullBack", "Route", "Cascade", "Other",
+                  "of Apply: counts", "Merges/frame", "Apply ms/merge", "Stable", "Stable unchanged",
+                  "Self remeshes", "Neighbor remeshes", "By unchanged", "Out-of-band sections/merge",
+                  "Churned/merge", "Unloads with sky pending", "Their nodes"], rows)
+
+
 def pool_table(phases):
     rows = [[p.label] + [p.sums[name] for name in POOL_MISSES] for p in phases]
     return table(["Phase"] + POOL_MISSES, rows)
@@ -385,7 +408,8 @@ def summarize(report_lines, folder, session=None):
            "", phase_overview(phases), "", "### Slots per phase (mean over every frame of the phase)", "",
            slot_tables(phases, slots), "", "### Gauges", "", gauge_table(phases), "", "### Jobs", "",
            job_table(phases), "", "### Disk I/O", "", io_table(phases), "", "### Behavior tick (ms per frame)", "",
-           tick_table(phases), "", "### Pool misses and untimed jobs (phase totals)", "", pool_table(phases), "",
+           tick_table(phases), "", "### Lighting merge (ms per frame; counts are phase totals)", "",
+           merge_table(phases), "", "### Pool misses and untimed jobs (phase totals)", "", pool_table(phases), "",
            "### Hitch records", "", hitch_table(phases)]
     if problems:
         out += ["", "### Cross-check problems", ""] + [f"- {line}" for line in problems]

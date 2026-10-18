@@ -186,6 +186,54 @@ namespace Diagnostics
         /// <summary>Fluid tickers the ticker pool had to create; each allocates its native scratch on its first prepare.</summary>
         FluidTickerPoolMisses,
 
+        /// <summary>Lighting-merge time spent extracting each job's band and merging it into the sections, recount included, in microseconds.</summary>
+        MergeApplyUs,
+
+        /// <summary>The part of <see cref="MergeApplyUs"/> spent recounting each merged section's blocks, in microseconds.</summary>
+        MergeCountsUs,
+
+        /// <summary>Lighting-merge time spent draining cross-chunk mods deferred for the merged chunks, in microseconds.</summary>
+        MergeDrainUs,
+
+        /// <summary>Lighting-merge time spent re-verifying pull-back claims against live neighbors, in microseconds.</summary>
+        MergePullBackUs,
+
+        /// <summary>Lighting-merge time spent routing outbound cross-chunk mods, support scans included, in microseconds.</summary>
+        MergeRouteUs,
+
+        /// <summary>Lighting-merge time spent on stability, the edge-check cascade and the merge's mesh requests, in microseconds.</summary>
+        MergeCascadeUs,
+
+        /// <summary>Lighting jobs merged.</summary>
+        MergeJobs,
+
+        /// <summary>Merges that left their chunk stable.</summary>
+        MergeStable,
+
+        /// <summary>Stable merges whose apply reported no light change.</summary>
+        MergeStableUnchanged,
+
+        /// <summary>Mesh rebuilds stable merges newly queued for their own chunks.</summary>
+        MergeSelfRemeshes,
+
+        /// <summary>Mesh rebuilds stable merges newly queued for their cardinal neighbors.</summary>
+        MergeNeighborRemeshes,
+
+        /// <summary>The newly queued self and neighbor mesh rebuilds that came from unchanged stable merges.</summary>
+        MergeUnchangedRemeshes,
+
+        /// <summary>Sections the merges walked that lie entirely outside their job's gathered band.</summary>
+        MergeOutOfBandSections,
+
+        /// <summary>Absent sections a merge rented for uniform light only to compact and return them.</summary>
+        MergeChurnedSections,
+
+        /// <summary>Chunks unloaded with skylight nodes still queued.</summary>
+        UnloadPendingSkyChunks,
+
+        /// <summary>The skylight nodes those unloaded chunks held.</summary>
+        UnloadPendingSkyNodes,
+
         /// <summary>Number of counters; not a counter.</summary>
         Count,
     }

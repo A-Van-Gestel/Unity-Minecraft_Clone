@@ -20,7 +20,7 @@ namespace Editor.Validation.PerfMonitoring
     /// scenarios (B11–B19: GC readings, frame-timing back-fill, hitch detection) live in the <c>.Frame</c> part, and the
     /// coverage scenarios (B20–B23: the unattributed remainder and the counters) in the <c>.Coverage</c> part, and the
     /// worker scenarios (B24–B30: job timing, per-job samples and storage I/O) in the <c>.Workers</c> part, the tick
-    /// breakdown (B31) in the <c>.Tick</c> part, the export scenarios (B32–B37: phase statistics, the tier floor and export) in the <c>.Export</c> part, and the startup timeline (B38 on) in the <c>.Startup</c> part.
+    /// breakdown (B31) in the <c>.Tick</c> part, the export scenarios (B32–B37: phase statistics, the tier floor and export) in the <c>.Export</c> part, the startup timeline (B38–B39) in the <c>.Startup</c> part, and the lighting-merge breakdown (B40) in the <c>.Merge</c> part.
     /// <para>
     /// Timing <i>values</i> are not asserted beyond "zero" versus "positive" — wall-clock durations are not
     /// deterministic. Every scenario that touches the static store starts and ends from
@@ -105,6 +105,7 @@ namespace Editor.Validation.PerfMonitoring
                 new Scenario("B37 Export limits: parts each with a header, the session cap counts what it drops, a write failure stops cleanly and counts the hitch it loses", RunB37ExportLimits),
                 new Scenario("B38 Startup timeline: marks from the scene request, the drain at its settled run's first frame, the settle window and its slack", RunB38StartupDrainAndStable),
                 new Scenario("B39 Startup timeline: leaving the start chunk interrupts, no settle times out, the anchor falls back to Awake, the request is taken once", RunB39StartupInterruptAndTimeout),
+                new Scenario("B40 Merge breakdown: every totals field maps to its counter, the band predicate is row-exact, a real merge charges its recount and churn; nothing below Systems", RunB40MergeBreakdown),
             };
             return ValidationSuiteRunner.Execute("Performance Monitor", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }

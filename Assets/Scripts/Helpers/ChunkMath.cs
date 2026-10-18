@@ -470,6 +470,21 @@ namespace Helpers
         }
 
         /// <summary>
+        /// Whether a section lies entirely outside a lighting job's gathered rows <c>[bandMinY, bandHeight)</c> — the
+        /// rows <see cref="ExtractCenterLight"/> leaves at their schedule-time snapshot. A partly covered section is inside.
+        /// </summary>
+        /// <param name="sectionIndex">The section, 0 at the bottom of the chunk.</param>
+        /// <param name="bandMinY">The band's first gathered row (global Y).</param>
+        /// <param name="bandHeight">The row above the band's last gathered row (global Y, exclusive).</param>
+        /// <returns>True when no row of the section was gathered.</returns>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        public static bool IsSectionOutsideBand(int sectionIndex, int bandMinY, int bandHeight)
+        {
+            int sectionMinY = sectionIndex * SECTION_SIZE;
+            return sectionMinY + SECTION_SIZE <= bandMinY || sectionMinY >= bandHeight;
+        }
+
+        /// <summary>
         /// Calculates the flat array index within a single section based on local section coordinates.
         /// </summary>
         /// <param name="x">Local X (0-15)</param>

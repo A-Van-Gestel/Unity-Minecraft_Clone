@@ -3425,6 +3425,29 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         PerfStore.SampleTotal(PerfCounter.IoBackgroundOps, StorageIoStats.BackgroundOps);
 
         SampleTickCounters();
+        SampleMergeCounters(in JobManager.MergeTotals);
+    }
+
+    /// <summary>Samples the lighting merge's running totals into the <c>Merge*</c> and <c>Unload*</c> counters.</summary>
+    /// <param name="totals">The merge's running totals.</param>
+    private static void SampleMergeCounters(in PerfMergeTotals totals)
+    {
+        PerfStore.SampleTotal(PerfCounter.MergeApplyUs, PerfStore.TicksToMicros(totals.ApplyTicks));
+        PerfStore.SampleTotal(PerfCounter.MergeCountsUs, PerfStore.TicksToMicros(totals.CountsTicks));
+        PerfStore.SampleTotal(PerfCounter.MergeDrainUs, PerfStore.TicksToMicros(totals.DrainTicks));
+        PerfStore.SampleTotal(PerfCounter.MergePullBackUs, PerfStore.TicksToMicros(totals.PullBackTicks));
+        PerfStore.SampleTotal(PerfCounter.MergeRouteUs, PerfStore.TicksToMicros(totals.RouteTicks));
+        PerfStore.SampleTotal(PerfCounter.MergeCascadeUs, PerfStore.TicksToMicros(totals.CascadeTicks));
+        PerfStore.SampleTotal(PerfCounter.MergeJobs, totals.Merges);
+        PerfStore.SampleTotal(PerfCounter.MergeStable, totals.StableMerges);
+        PerfStore.SampleTotal(PerfCounter.MergeStableUnchanged, totals.StableUnchangedMerges);
+        PerfStore.SampleTotal(PerfCounter.MergeSelfRemeshes, totals.SelfRemeshes);
+        PerfStore.SampleTotal(PerfCounter.MergeNeighborRemeshes, totals.NeighborRemeshes);
+        PerfStore.SampleTotal(PerfCounter.MergeUnchangedRemeshes, totals.UnchangedRemeshes);
+        PerfStore.SampleTotal(PerfCounter.MergeOutOfBandSections, totals.OutOfBandSections);
+        PerfStore.SampleTotal(PerfCounter.MergeChurnedSections, totals.ChurnedSections);
+        PerfStore.SampleTotal(PerfCounter.UnloadPendingSkyChunks, totals.UnloadPendingSkyChunks);
+        PerfStore.SampleTotal(PerfCounter.UnloadPendingSkyNodes, totals.UnloadPendingSkyNodes);
     }
 
     /// <summary>Samples the behavior tick's running totals into the <c>Tick*</c> counters and the fluid ticker pool's misses.</summary>
@@ -3527,13 +3550,13 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         if (onNorthBorder) AddChunksToUpdateVisualization(coord.Neighbor(0, 1));
     }
 
-    private void QueueNeighborRebuild(ChunkCoord neighborCoord, bool immediate = false)
+    private bool QueueNeighborRebuild(ChunkCoord neighborCoord, bool immediate = false)
     {
         Vector2Int neighborVoxelPos = neighborCoord.ToVoxelOrigin();
-        if (worldData.TryGetChunk(neighborVoxelPos, out ChunkData neighborData) && neighborData.Chunk != null)
-        {
-            RequestChunkMeshRebuild(neighborData.Chunk, immediate);
-        }
+        if (!worldData.TryGetChunk(neighborVoxelPos, out ChunkData neighborData) || neighborData.Chunk == null)
+            return false;
+
+        return RequestChunkMeshRebuild(neighborData.Chunk, immediate);
     }
 
     /// <summary>
@@ -3541,13 +3564,15 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// Typically called when a central chunk stabilizes its lighting, changing the boundary appearance of its neighbors.
     /// </summary>
     /// <param name="chunkCoord">The chunk coordinate of the central chunk.</param>
-    public void RequestNeighborMeshRebuilds(ChunkCoord chunkCoord)
+    /// <returns>How many of the four were newly queued; an already-queued neighbor is not counted.</returns>
+    public int RequestNeighborMeshRebuilds(ChunkCoord chunkCoord)
     {
         // Queue rebuilds for all 4 direct neighbors
-        QueueNeighborRebuild(chunkCoord.Neighbor(0, 1)); // North
-        QueueNeighborRebuild(chunkCoord.Neighbor(0, -1)); // South
-        QueueNeighborRebuild(chunkCoord.Neighbor(1, 0)); // East
-        QueueNeighborRebuild(chunkCoord.Neighbor(-1, 0)); // West
+        int queued = QueueNeighborRebuild(chunkCoord.Neighbor(0, 1)) ? 1 : 0; // North
+        if (QueueNeighborRebuild(chunkCoord.Neighbor(0, -1))) queued++; // South
+        if (QueueNeighborRebuild(chunkCoord.Neighbor(1, 0))) queued++; // East
+        if (QueueNeighborRebuild(chunkCoord.Neighbor(-1, 0))) queued++; // West
+        return queued;
     }
 
     /// <summary>
@@ -4096,7 +4121,8 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// </summary>
     /// <param name="chunk">The chunk to rebuild</param>
     /// <param name="immediate">If true, rebuild the chunk as soon as possible</param>
-    public void RequestChunkMeshRebuild([CanBeNull] Chunk chunk, bool immediate = false)
+    /// <returns>True when the chunk was newly queued; false for a null or inactive chunk, or one already queued.</returns>
+    public bool RequestChunkMeshRebuild([CanBeNull] Chunk chunk, bool immediate = false)
     {
         CountMeshRequest(chunk); // MP-1/F8 (instrumented builds only)
 
@@ -4104,10 +4130,10 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         // 1. Don't queue null chunks.
         // 2. Don't queue inactive chunks (they are out of view or being destroyed).
         if (chunk == null || !chunk.IsActive)
-            return;
+            return false;
 
         // TryEnqueue rejects duplicates by coordinate (O(1)); immediate links at the head, normal at the tail.
-        _meshBuildQueue.TryEnqueue(chunk, immediate);
+        return _meshBuildQueue.TryEnqueue(chunk, immediate);
     }
 
     /// <summary>
@@ -4305,6 +4331,16 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
             // unload arms converge, and read-only: it mutates no pipeline flag and cannot influence the
             // unload decision above.
             PipelineTelemetry.StampUnloaded(chunkCoord);
+
+            // ES-7: frontier chunks leave with skylight nodes queued, which the save snapshot copies and the load
+            // replays — counted here, where each chunk leaves exactly once.
+            int pendingSkyNodes = data.SkylightQueueCount;
+            if (pendingSkyNodes > 0 && PerfStore.SlotsActive)
+            {
+                ref PerfMergeTotals mergeTotals = ref JobManager.MergeTotals;
+                mergeTotals.UnloadPendingSkyChunks++;
+                mergeTotals.UnloadPendingSkyNodes += pendingSkyNodes;
+            }
 
             // 1. Persist Orphaned Lighting Queue
             if (worldData.SkylightRecalculationQueue.TryGetValue(chunkVoxelPos, out HashSet<Vector2Int> globalCols))

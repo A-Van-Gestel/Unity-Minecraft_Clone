@@ -55,6 +55,20 @@ namespace Commands
         [NoAutoStaticsCleanup] // immutable table
         private static readonly string[] s_tickPartNames = { "List", "Prepare", "Schedule", "Wait", "Grass", "Replay" };
 
+        /// <summary>
+        /// The lighting merge's timed parts, in merge order; <see cref="s_mergePartNames"/> labels them. The recount
+        /// (<see cref="PerfCounter.MergeCountsUs"/>) runs inside Apply, so it is shown under it rather than as a part.
+        /// </summary>
+        [NoAutoStaticsCleanup] // immutable table
+        private static readonly PerfCounter[] s_mergeParts =
+        {
+            PerfCounter.MergeApplyUs, PerfCounter.MergeDrainUs, PerfCounter.MergePullBackUs, PerfCounter.MergeRouteUs,
+            PerfCounter.MergeCascadeUs,
+        };
+
+        [NoAutoStaticsCleanup] // immutable table
+        private static readonly string[] s_mergePartNames = { "Apply", "Drain", "PullBack", "Route", "Cascade" };
+
         /// <inheritdoc/>
         public string Name => "perf";
 
@@ -207,6 +221,7 @@ namespace Commands
             }
 
             AddTickLines(lines);
+            AddMergeLines(lines);
             AddCounterLines(lines);
             AddWorkerLines(lines);
             AddDiskLines(lines);
@@ -261,6 +276,53 @@ namespace Commands
             lines.Add(new ConsoleLine(ConsoleLineSeverity.Info,
                 $"  {"Other".PadRight(SLOT_NAME_WIDTH)} {Ms((float)(tick.Mean - partsMeanMs))} avg"));
         }
+
+        /// <summary>
+        /// Adds the lighting merge's split — each part's statistics, the recount inside Apply, and the average the parts
+        /// leave unexplained — then the merge's work counts per merged job.
+        /// </summary>
+        private static void AddMergeLines(List<ConsoleLine> lines)
+        {
+            PerfWindowSummary merge = PerfStore.SummarizeSlotMs(PerfSlot.LightMerge);
+            if (merge.Mean == 0f) return;
+
+            lines.Add(new ConsoleLine(ConsoleLineSeverity.Info, "Merge split (avg / p99 / worst ms):"));
+            double partsMeanMs = 0.0;
+            for (int i = 0; i < s_mergeParts.Length; i++)
+            {
+                PerfWindowSummary s = PerfStore.SummarizeCounter(s_mergeParts[i]);
+                partsMeanMs += s.Mean / MICROSECONDS_PER_MILLISECOND;
+                lines.Add(new ConsoleLine(ConsoleLineSeverity.Info,
+                    $"  {s_mergePartNames[i].PadRight(SLOT_NAME_WIDTH)} {UsAsMs(s.Mean)} / {UsAsMs(s.P99)} / {UsAsMs(s.Max)}"));
+                if (s_mergeParts[i] != PerfCounter.MergeApplyUs) continue;
+
+                PerfWindowSummary counts = PerfStore.SummarizeCounter(PerfCounter.MergeCountsUs);
+                lines.Add(new ConsoleLine(ConsoleLineSeverity.Info,
+                    $"  {"  of which counts".PadRight(SLOT_NAME_WIDTH)} {UsAsMs(counts.Mean)} / {UsAsMs(counts.P99)} / {UsAsMs(counts.Max)}"));
+            }
+
+            lines.Add(new ConsoleLine(ConsoleLineSeverity.Info,
+                $"  {"Other".PadRight(SLOT_NAME_WIDTH)} {Ms((float)(merge.Mean - partsMeanMs))} avg"));
+
+            long merges = PerfStore.SumCounter(PerfCounter.MergeJobs);
+            if (merges == 0) return;
+
+            lines.Add(new ConsoleLine(ConsoleLineSeverity.Info,
+                $"  {merges} merges: {PerfStore.SumCounter(PerfCounter.MergeStable)} stable, " +
+                $"{PerfStore.SumCounter(PerfCounter.MergeStableUnchanged)} of them unchanged; per merge " +
+                $"{PerMerge(PerfCounter.MergeOutOfBandSections, merges)} out-of-band sections, " +
+                $"{PerMerge(PerfCounter.MergeChurnedSections, merges)} churned"));
+            lines.Add(new ConsoleLine(ConsoleLineSeverity.Info,
+                $"  Remeshes newly queued: {PerfStore.SumCounter(PerfCounter.MergeSelfRemeshes)} self, " +
+                $"{PerfStore.SumCounter(PerfCounter.MergeNeighborRemeshes)} neighbor, " +
+                $"{PerfStore.SumCounter(PerfCounter.MergeUnchangedRemeshes)} of them by unchanged merges; " +
+                $"unloads with skylight pending {PerfStore.SumCounter(PerfCounter.UnloadPendingSkyChunks)} " +
+                $"({PerfStore.SumCounter(PerfCounter.UnloadPendingSkyNodes)} nodes)"));
+        }
+
+        /// <summary>A merge count's window sum per merged job.</summary>
+        private static string PerMerge(PerfCounter counter, long merges) =>
+            ((double)PerfStore.SumCounter(counter) / merges).ToString(RATIO_FORMAT, CultureInfo.InvariantCulture);
 
         /// <summary>Adds the job workers' utilization over the counter frames and each timed job type's per-job latency and busy time.</summary>
         private static void AddWorkerLines(List<ConsoleLine> lines)
@@ -436,8 +498,13 @@ namespace Commands
             if (record.TopSlotCount > 0)
             {
                 record.GetTopSlot(0, out PerfSlot top, out float _);
-                string largestPart = top == PerfSlot.Tick ? LargestTickPart(hitches, age, record.WorstRow) : null;
-                if (largestPart != null) text += $"; Tick led by {largestPart}";
+                string largestPart = top switch
+                {
+                    PerfSlot.Tick => LargestPart(hitches, age, record.WorstRow, s_tickParts, s_tickPartNames),
+                    PerfSlot.LightMerge => LargestPart(hitches, age, record.WorstRow, s_mergeParts, s_mergePartNames),
+                    _ => null,
+                };
+                if (largestPart != null) text += $"; {top} led by {largestPart}";
             }
 
             // The worst frame's non-zero counters: the queue and pool levels the spike happened at.
@@ -455,23 +522,23 @@ namespace Commands
         }
 
         /// <summary>
-        /// The largest timed tick part in one row of a hitch record, as "name ms", or null when no part recorded time — a
-        /// frame without a behavior tick, whose near-empty <see cref="PerfSlot.Tick"/> can still top an idle hitch.
+        /// The largest timed part of a slot in one row of a hitch record, as "name ms", or null when no part recorded
+        /// time — a frame without the slot's work, whose near-empty slot can still top an idle hitch.
         /// </summary>
-        private static string LargestTickPart(PerfHitchDetector hitches, int age, int row)
+        private static string LargestPart(PerfHitchDetector hitches, int age, int row, PerfCounter[] parts, string[] names)
         {
             int largest = 0;
-            int largestUs = hitches.GetRecordCounter(age, row, s_tickParts[0]);
-            for (int i = 1; i < s_tickParts.Length; i++)
+            int largestUs = hitches.GetRecordCounter(age, row, parts[0]);
+            for (int i = 1; i < parts.Length; i++)
             {
-                int us = hitches.GetRecordCounter(age, row, s_tickParts[i]);
+                int us = hitches.GetRecordCounter(age, row, parts[i]);
                 if (us <= largestUs) continue;
 
                 largest = i;
                 largestUs = us;
             }
 
-            return largestUs > 0 ? $"{s_tickPartNames[largest]} {UsAsMs(largestUs)} ms" : null;
+            return largestUs > 0 ? $"{names[largest]} {UsAsMs(largestUs)} ms" : null;
         }
 
         private static string MsOrNa(float value) => float.IsNaN(value) ? "n/a" : Ms(value);

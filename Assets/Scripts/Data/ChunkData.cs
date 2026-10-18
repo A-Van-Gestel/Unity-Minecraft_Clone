@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
+using Diagnostics;
 using Helpers;
 using JetBrains.Annotations;
 using Jobs;
@@ -1459,6 +1460,22 @@ namespace Data
         public bool ApplyJobLightMap(NativeArray<uint> jobVoxelMap, NativeArray<ushort> jobLightMap,
             [CanBeNull] BlockType[] blockTypes)
         {
+            PerfMergeTotals unused = default;
+            return ApplyJobLightMap(jobVoxelMap, jobLightMap, blockTypes, ref unused);
+        }
+
+        /// <summary>
+        /// <see cref="ApplyJobLightMap(NativeArray{uint}, NativeArray{ushort}, BlockType[])"/>, charging the section
+        /// recount's time and the churned sections to <paramref name="totals"/> while the monitor's slots are active.
+        /// </summary>
+        /// <param name="jobVoxelMap">The job's input voxel map snapshot (section-contiguous, full chunk).</param>
+        /// <param name="jobLightMap">The job's computed light map (section-contiguous, full chunk).</param>
+        /// <param name="blockTypes">Block palette for section count recalculation, or null to recompute the non-air count only.</param>
+        /// <param name="totals">The lighting merge's running totals.</param>
+        /// <returns>True if any voxel's effective light value differs from its pre-merge value.</returns>
+        public bool ApplyJobLightMap(NativeArray<uint> jobVoxelMap, NativeArray<ushort> jobLightMap,
+            [CanBeNull] BlockType[] blockTypes, ref PerfMergeTotals totals)
+        {
             int indexOffset = 0;
             const int sectionVolume = ChunkMath.SECTION_VOLUME;
             bool changedAnyLight = false;
@@ -1542,7 +1559,15 @@ namespace Data
                         TryCompactSectionLight(s, section, sectionHasData, sectionHasLight);
 
                         if (!isNewSection && sections[s] != null)
+                        {
+                            long countsStart = PerfStore.Begin();
                             section.RecalculateCounts(blockTypes);
+                            PerfTickTotals.Lap(ref totals.CountsTicks, countsStart);
+                        }
+                        else if (isNewSection && sections[s] == null && PerfStore.SlotsActive)
+                        {
+                            totals.ChurnedSections++;
+                        }
                     }
                 }
 

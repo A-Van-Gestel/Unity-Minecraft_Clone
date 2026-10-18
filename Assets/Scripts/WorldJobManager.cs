@@ -107,6 +107,9 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     /// <summary>Job buffers retained by the chunk job array pool, ready to rent.</summary>
     public int JobArraysPooled => _jobArrayPool.PooledCount;
 
+    /// <summary>The lighting merge's running totals; the unload pass adds its pending-skylight counts here too.</summary>
+    public ref PerfMergeTotals MergeTotals => ref _mergeTotals;
+
     /// <summary>The full-chunk job buffer pool, for main-thread work outside this manager that needs a voxel map.</summary>
     public ChunkJobArrayPool JobArrayPool => _jobArrayPool;
 
@@ -459,6 +462,12 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     private readonly Dictionary<ChunkCoord, ChunkData> _meshJobTargets = new Dictionary<ChunkCoord, ChunkData>();
 
     private readonly HashSet<ChunkCoord> _chunksToRebuildMesh = new HashSet<ChunkCoord>();
+
+    // The pass's stable merges that changed no light, so the deferred self re-mesh loop can attribute its requests.
+    // Filled only while the monitor's slots are active.
+    private readonly HashSet<ChunkCoord> _unchangedStableMerges = new HashSet<ChunkCoord>();
+
+    private PerfMergeTotals _mergeTotals;
     private readonly Dictionary<ChunkCoord, HashSet<Vector2Int>> _droppedLightUpdates = new Dictionary<ChunkCoord, HashSet<Vector2Int>>();
 
     /// <summary>
@@ -1700,6 +1709,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         if (LightingJobs.Count == 0) return;
 
         _chunksToRebuildMesh.Clear();
+        _unchangedStableMerges.Clear();
         // _completedLightJobs is cleared + repopulated by JobCompletionPass.RunMergeLoop below.
 
         foreach (HashSet<Vector2Int> set in _droppedLightUpdates.Values)
@@ -1741,14 +1751,18 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
             Debug.Log($"[LIGHTING] Processed {_completedLightJobs.Count.ToString()} jobs. Saved updates for {_droppedLightUpdates.Count.ToString()} unloaded chunks ({totalColumns.ToString()} columns)");
         }
 
+        long remeshStart = PerfStore.Begin();
         foreach (ChunkCoord chunkCoord in _chunksToRebuildMesh)
         {
             Chunk chunk = _world.GetChunkFromChunkCoord(chunkCoord);
-            if (chunk != null)
+            if (chunk != null && _world.RequestChunkMeshRebuild(chunk, immediate: true) && remeshStart != 0L)
             {
-                _world.RequestChunkMeshRebuild(chunk, immediate: true);
+                _mergeTotals.SelfRemeshes++;
+                if (_unchangedStableMerges.Contains(chunkCoord)) _mergeTotals.UnchangedRemeshes++;
             }
         }
+
+        PerfTickTotals.Lap(ref _mergeTotals.CascadeTicks, remeshStart);
 
         // Remove + promote every enrolled job, strictly after the whole merge loop (shared skeleton, so a
         // completion promoting a neighbor sees the fully-merged pass — MT-2). See the driver's
@@ -1859,14 +1873,20 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         // non-null but not populated skips the merge below and still reaches the cascade decision, so a
         // false here would silently start declining its cascades.
         bool lightChanged = true;
+        long lap = PerfStore.Begin();
+        bool counting = lap != 0L;
+        if (counting) _mergeTotals.Merges++;
+
         if (chunkData != null && chunkData.IsPopulated)
         {
             lightChanged = ApplyLightingJobResult(chunkData, jobData);
+            lap = PerfTickTotals.Lap(ref _mergeTotals.ApplyTicks, lap);
 
             // Apply mods other chunks' jobs deferred for THIS chunk while its job was in
             // flight — now that the merge is done they can no longer be overwritten
             // (Bug 08, path 2). Their wake-up nodes flag the chunk for another lighting pass.
             DrainDeferredCrossChunkMods(chunkCoord, chunkData);
+            lap = PerfTickTotals.Lap(ref _mergeTotals.DrainTicks, lap);
 
             // The emitting chunk's voxel origin — excluded from the Bug 13 live-support veto
             // (its data is exactly the stale side the removal mods came from).
@@ -1876,6 +1896,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
             // data, clearing stale ghost light through the removal veto (Bug 14). Runs after the
             // merge + deferred drain so superseded claims are recognized.
             VerifyPullBackClaims(chunkData, emitterOriginXZ, jobData.PullBackClaims);
+            lap = PerfTickTotals.Lap(ref _mergeTotals.PullBackTicks, lap);
 
             foreach (LightModification mod in jobData.Mods)
             {
@@ -1938,6 +1959,8 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                         continue;
                 }
             }
+
+            lap = PerfTickTotals.Lap(ref _mergeTotals.RouteTicks, lap);
         }
         else
         {
@@ -1945,6 +1968,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
             // so mods other chunks deferred for it can never be drained — degrade them to
             // the persisted pending stores instead.
             DegradeDeferredCrossChunkMods(chunkCoord);
+            lap = PerfTickTotals.Lap(ref _mergeTotals.DrainTicks, lap);
         }
 
         // Override stability: If the Burst job reported not-stable solely because
@@ -1956,7 +1980,18 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         if (isChunkStable)
         {
             _chunksToRebuildMesh.Add(chunkCoord);
-            _world.RequestNeighborMeshRebuilds(chunkCoord);
+            int neighborRemeshes = _world.RequestNeighborMeshRebuilds(chunkCoord);
+            if (counting)
+            {
+                _mergeTotals.StableMerges++;
+                _mergeTotals.NeighborRemeshes += neighborRemeshes;
+                if (!lightChanged)
+                {
+                    _mergeTotals.StableUnchangedMerges++;
+                    _mergeTotals.UnchangedRemeshes += neighborRemeshes;
+                    _unchangedStableMerges.Add(chunkCoord);
+                }
+            }
 
             // After a chunk's initial lighting stabilizes, schedule iterative
             // edge-check rounds (self + neighbors). During initial world generation,
@@ -1993,6 +2028,8 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
             if (chunkData != null) chunkData.FlagLightWork();
             LastUnstableJobCount++;
         }
+
+        PerfTickTotals.Lap(ref _mergeTotals.CascadeTicks, lap);
     }
 
     /// <summary>
@@ -2288,7 +2325,14 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         // the correct merge reference. LI-2: only the job's gathered band rows are extracted; above them
         // LightMap keeps its schedule-time snapshot, which the job provably did not change.
         ChunkMath.ExtractCenterLight(jobData.PaddedLight, jobData.LightMap, jobData.BandMinY, jobData.BandHeight);
-        return chunkData.ApplyJobLightMap(jobData.Map, jobData.LightMap, _world.BlockTypes);
+
+        if (PerfStore.SlotsActive)
+        {
+            for (int s = 0; s < ChunkMath.SECTIONS_PER_CHUNK; s++)
+                if (ChunkMath.IsSectionOutsideBand(s, jobData.BandMinY, jobData.BandHeight)) _mergeTotals.OutOfBandSections++;
+        }
+
+        return chunkData.ApplyJobLightMap(jobData.Map, jobData.LightMap, _world.BlockTypes, ref _mergeTotals);
     }
 
     #region IDisposable
