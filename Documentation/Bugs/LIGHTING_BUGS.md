@@ -13,13 +13,13 @@ This document outlines **open** bugs related to the current lighting implementat
 
 > All previously listed lighting bugs (01–08, 10–21) have been fixed. See [`_FIXED_BUGS.md`](./_FIXED_BUGS.md) for details.
 
-## Bug 23: Two Lighting Jobs Re-Schedule Every Frame Forever at View Distance 32
+## Bug 23: Two Lighting Jobs Re-Schedule Every Frame Forever
 
 **Severity:** Medium (a permanent ~0.8 ms/frame main-thread cost, and it stops any harness that waits for idle jobs)  
-**Status:** Open — observed 2026-10-10 in an IL2CPP Master player, not yet root-caused; no repro scenario yet
+**Status:** Open — observed 2026-10-10 (vd 32) and 2026-10-18 (vd 10) in IL2CPP Master players, not yet root-caused; no repro scenario yet
 
 **Description:**
-At view distance 32 the lighting pipeline never goes idle. From about four minutes into the run until the player was
+At view distance 32 (first sighting; vd 10 below) the lighting pipeline never goes idle. From about four minutes into the run until the player was
 closed 23 minutes later, **exactly two lighting jobs completed and two were scheduled every frame**, while the
 generation queue, generation jobs, mesh queue and mesh jobs were all zero and the scheduler's waiting set held a
 constant 387 chunks. The merges changed nothing visible: 0.001 mesh jobs completed per frame over the same window.
@@ -46,8 +46,26 @@ frame.
 wrote its report), so the livelock appeared in 1 of 2 vd-32 runs. The FP-10 / P-8 captures of 2026-08 also completed
 their vd-32 legs.
 
-**Not seen at view distance 10:** in the three vd-10 runs of the same build, frames with lighting jobs in flight
-while generation and meshing were idle numbered 320–352 of ~190 000, all transient.
+**Seen at view distance 10 too (2026-10-18).** The three vd-10 runs of the 2026-10-10 build stayed transient (320–352
+of ~190 000 frames with lighting jobs in flight while generation and meshing were idle). A Master player at `5d3205ae`
+(`-mc-set benchmarkGenerationSpeeds=200 -mc-set benchmarkLoadingSpeeds=50`, vd 10) then locked up at "Transition —
+Drain + Save + Unload": `World.ForceUnloadAllChunks` waits on the same `HasActiveJobs`. The ensure pass just before it
+logged one generated chunk that did not settle its lighting before the settle watchdog moved on. An identical retry
+completed, as did a vd-32 run of the same build.
+
+ES-7's merge counters (`PerfMonitor` `Merge*`, last 20 000 frames of the stuck session) narrow the mechanism:
+
+| Quantity                                        | Value                                     |
+|-------------------------------------------------|-------------------------------------------|
+| Merges / stable merges per frame                | 2 / **0** — every pass reports not stable |
+| Scheduler waiting set                           | 138 (constant)                            |
+| Apply / route / drain per frame                 | 0.58 / 0.011 / 0.006 ms — almost no mods  |
+| Sections outside the job's band / churned       | 4 / 2 per merge                           |
+| Mesh requests from the merges, mesh completions | 0 / 0                                     |
+
+Every pass ends unstable while routing almost no mods, and nothing downstream reacts. The counters cannot say whether
+the job's own `IsStable` is false or a few real cross-chunk mods veto stability (`LightingJobProcessor.IsEffectivelyStable`);
+the next diagnostic step below separates them.
 
 **Reproduction Steps:**
 
