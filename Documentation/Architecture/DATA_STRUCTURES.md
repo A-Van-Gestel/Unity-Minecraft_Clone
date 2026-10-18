@@ -75,7 +75,9 @@ This class represents a 16x16x16 cube of voxels. It acts as the atomic unit of s
 - **`int opaqueCount`**: Tracks how many blocks are fully opaque. `IsFullySolid => opaqueCount >= SECTION_VOLUME`, used to identify fully solid underground sections.
 - **`int emissiveCount`**: Tracks how many blocks emit light, so a section with no emitters can be skipped by blocklight work.
 
-All three counters are recomputed together by `RecalculateCounts(blockTypes)`.
+All three counters are recomputed together by `RecalculateCounts(blockTypes)` (generation and disk load); between
+recounts `ChunkData.SetVoxel` maintains them on every write. The lighting merge writes light only and relies on those
+maintained counts instead of recounting; instrumented builds recount each section it keeps and log the first drift.
 
 ### 2.2. `ChunkData.cs` (The Data Container)
 

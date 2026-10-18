@@ -1,6 +1,6 @@
 # Performance Monitor & Logger Overhaul Design
 
-**Version:** 1.16  
+**Version:** 1.17  
 **Date:** 2026-10-06  
 **Status:** In progress — PM-0 ✅ complete (2026-10-03, Master answers in §8); PM-1 ✅ complete (2026-10-03, §7.2;
 confirmed in an IL2CPP Master build); PM-2 ✅ complete (2026-10-04, §7.3; confirmed in an IL2CPP Master build); PM-3 ✅
@@ -437,7 +437,7 @@ public enum LogLevel : byte { Off, Error, Warning, Info, Verbose }
 
 ### 4.9 Coverage map
 
-*As of 2026-10-05 (PM-8), derived from the code — the probe sites, the per-frame scripts and the job structs — not from the
+*As of 2026-10-05 (PM-8), plus the lighting merge's counters added by ES-7 on 2026-10-18; derived from the code — the probe sites, the per-frame scripts and the job structs — not from the
 sections above.* Every phase that adds, moves or removes a probe updates this section in the same commit. Before relying
 on it for a coverage analysis, re-derive it with the commands at the end: the tables are a snapshot, the commands are
 the check. Whether a system has had a performance *analysis* pass is a different question, tracked as `AC-1`…`AC-10` in
@@ -507,11 +507,11 @@ bytes), saves on every path (serialize and write time, payload bytes and their u
 it covers, and the operations in flight. Region files touched outside it — the migration step, the world list — and the
 non-chunk files (`level.dat`, pending modifications, pending lighting) are not counted.
 
-**Counters (Systems tier).** 58, sampled in `World.SamplePerfCounters`:
+**Counters (Systems tier).** 76, sampled in `World.SamplePerfCounters`:
 - *Gauges (14):* the pipeline queues and jobs in flight (`GenerationQueue`, `GenerationInFlight`, `LightReady`,
   `LightWaiting`, `LightInFlight`, `MeshQueue`, `MeshInFlight`, `ModificationQueue`), residency (`ResidentChunks`,
   `ActiveChunks`, `ActiveSections`), the native pools' idle stock (`JobArraysPooled`, `MeshOutputsPooled`) and `IoInFlight`.
-- *Per-frame counts (44):* pool misses (section, chunk data, job array, mesh output, save buffer); completed / latency /
+- *Per-frame counts (62):* pool misses (section, chunk data, job array, mesh output, save buffer); completed / latency /
   busy for each of the five job types, and `UntimedJobs`; the twelve disk I/O counts; the behavior tick's six timed parts
   (`TickListUs`, `TickPrepareUs`, `TickScheduleUs`, `TickWaitUs`, `TickGrassUs`, `TickFluidReplayUs`, from
   `PerfTickTotals`), its counts (`TickFluidChunks`, `TickFluidVoxels`, `TickSnapshotKb`, `TickGrassVoxels`) and
@@ -519,12 +519,23 @@ non-chunk files (`level.dat`, pending modifications, pending lighting) are not c
   (16 KB each, grass and fluid prepares together), `TickPrepareUs` includes the grass prepares, and `TickGrassUs` is
   the grass jobs' replay — the grass rules run on workers, inside `TickWaitUs`.
   The tick's drain bookkeeping and ticker returns are timed by no part: `/perf stats` shows them as the average "Other".
+- *The lighting merge (18, ES-7, from `PerfMergeTotals` owned by `WorldJobManager`):* five timed parts of `LightMerge` —
+  `MergeApplyUs` (band extract + `ChunkData.ApplyJobLightMap`), `MergeDrainUs` (deferred cross-chunk mods), `MergePullBackUs`,
+  `MergeRouteUs` (outbound mods and their support scans), `MergeCascadeUs` (stability, the edge-check cascade and the
+  merge's mesh requests) — plus `MergeCountsUs` inside the apply (the instrumented-build block-count verifier; 0 in a
+  release player). Counts: `MergeJobs`, `MergeStable`, `MergeStableUnchanged`, `MergeSelfRemeshes`,
+  `MergeNeighborRemeshes`, `MergeUnchangedRemeshes` (newly queued rebuilds only), `MergeOutOfBandSections`,
+  `MergeChurnedSections`, `UnloadPendingSkyChunks` and `UnloadPendingSkyNodes` (the unload pass), and the verifier's
+  `MergeCountChecks` / `MergeCountDrifts`, which count at every tier in instrumented builds. `MergeChurnedSections`
+  reads 0 by construction since ES-7.3 compacts those sections without a rent; it stays as a tripwire for that path. `/perf stats` prints a
+  "Merge split" block and `/perf hitches` names the largest part ("LightMerge led by …"); the job pass's own
+  bookkeeping (completion, release, promotion) is the "Other".
 
 **Known gaps.**
 
 | Gap                                                                                                                                                                                         | Consequence                                                                                              | Owner                                                          |
 |---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------|----------------------------------------------------------------|
-| Other composite slots (`LightMerge`, `Unload`)                                                                                                                                              | a hitch they lead cannot say which part                                                                  | PM-8's pattern (§7.6), if their hitches warrant it — not filed |
+| Other composite slots (`Unload`; `LightMerge` was split by ES-7 on 2026-10-18)                                                                                                              | a hitch they lead cannot say which part                                                                  | PM-8's pattern (§7.6), if their hitches warrant it — not filed |
 | Per-chunk fluid prepare distribution                                                                                                                                                        | the prepare is a per-frame sum, so a few heavy chunks and many light ones read alike                     | not filed — PM-8 decision 2                                    |
 | Unity's own main-thread work: uGUI layout and canvas rebuilds, the renderer features' Render Graph recording (UI band composite and blur, cloud prepass, underwater overlay), animation     | in the frame's CPU time, in no slot                                                                      | not filed; `AC-4` covers the UI blur's cost statically         |
 | A whole-frame remainder                                                                                                                                                                     | CPU time outside every slot and outside `World.Update` has no figure                                     | not filed                                                      |
@@ -1273,6 +1284,8 @@ Answers 1–4 come from `EngineApiProbe_2026-10-03_13-52-20.log`: a `Windows - P
   uncompressed size, and `/perf stats` and the run-end summary print the compression ratio. This closes PM-4's deferred
   decision 3 (§7.5, kept as recorded); §4.9's counter inventory is 57.
 
+* **v1.17** - §4.9 coverage map (2026-10-18, ES-7): the lighting merge's 18 counters (`PerfMergeTotals`, the
+  `LightMerge` split on PM-8's pattern) — counters 58 → 76; the `LightMerge` composite-slot gap closed.
 * **v1.16** - Benchmark settings (2026-10-10): `OverlayBenchmarkSettingsFromDisk` and the defaults pin it served are
   removed, since every automated run already inherited the whole settings file; reports list each value that differs
   from the defaults instead (a dated note under Option B, and markers where the shipped phases named the whitelist).
