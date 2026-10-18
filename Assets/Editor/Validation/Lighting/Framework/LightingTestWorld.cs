@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using Data;
+using Diagnostics;
 using Helpers;
 using Jobs;
 using Jobs.BurstData;
@@ -860,7 +861,9 @@ namespace Editor.Validation.Lighting.Framework
                 // first (mirror of WorldJobManager.ApplyLightingJobResult), then merge; voxels are unchanged.
                 // LI-2: band rows only — outside them CenterLight keeps its schedule-time snapshot.
                 ChunkMath.ExtractCenterLight(flight.PaddedLight, flight.CenterLight, flight.BandMinY, flight.BandHeight);
-                chunk.Data.ApplyJobLightMap(flight.CenterVoxels, flight.CenterLight, null);
+                PerfMergeTotals unusedTotals = default;
+                chunk.Data.ApplyJobLightMap(flight.CenterVoxels, flight.CenterLight, null, flight.BandMinY, flight.BandHeight,
+                    ref unusedTotals);
 
                 // Drain mods deferred for this chunk while its job was in flight
                 // (mirror of WorldJobManager.DrainDeferredCrossChunkMods).

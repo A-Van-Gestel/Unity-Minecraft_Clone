@@ -105,7 +105,7 @@ namespace Editor.Validation.PerfMonitoring
                 new Scenario("B37 Export limits: parts each with a header, the session cap counts what it drops, a write failure stops cleanly and counts the hitch it loses", RunB37ExportLimits),
                 new Scenario("B38 Startup timeline: marks from the scene request, the drain at its settled run's first frame, the settle window and its slack", RunB38StartupDrainAndStable),
                 new Scenario("B39 Startup timeline: leaving the start chunk interrupts, no settle times out, the anchor falls back to Awake, the request is taken once", RunB39StartupInterruptAndTimeout),
-                new Scenario("B40 Merge breakdown: every totals field maps to its counter, the band predicate is row-exact, a real merge charges its churn and verifies its kept counts (a planted drift is caught and repaired); below Systems only the verifier counts", RunB40MergeBreakdown),
+                new Scenario("B40 Merge breakdown: every totals field maps to its counter, the band predicate is row-exact, a real merge compacts a uniform-lit absent section without churn and verifies its kept counts (a planted drift is caught and repaired); below Systems only the verifier counts", RunB40MergeBreakdown),
             };
             return ValidationSuiteRunner.Execute("Performance Monitor", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }

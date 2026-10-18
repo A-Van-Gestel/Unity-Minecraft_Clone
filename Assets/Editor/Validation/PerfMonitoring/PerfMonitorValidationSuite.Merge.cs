@@ -12,14 +12,14 @@ namespace Editor.Validation.PerfMonitoring
     /// <summary>
     /// The lighting-merge half of the suite: <see cref="PerfMergeTotals"/> sampled into the <c>Merge*</c> and
     /// <c>Unload*</c> counters, the band predicate behind the out-of-band count, and the production
-    /// <see cref="ChunkData.ApplyJobLightMap(NativeArray{uint}, NativeArray{ushort}, BlockType[], ref PerfMergeTotals)"/>
-    /// charging its churn and its instrumented-build block-count verifier (the Editor compiles with
-    /// <c>UNITY_INCLUDE_INSTRUMENTATION</c>). World-free: no suite stands up the production lighting merge, so the probes
+    /// <see cref="ChunkData.ApplyJobLightMap(NativeArray{uint}, NativeArray{ushort}, BlockType[], int, int, ref PerfMergeTotals)"/>
+    /// compacting a uniform-lit absent section without churn, and its instrumented-build block-count verifier (the
+    /// Editor compiles with <c>UNITY_INCLUDE_INSTRUMENTATION</c>). World-free: no suite stands up the production lighting merge, so the probes
     /// in <c>WorldJobManager.MergeCompletedLightingJob</c> are not reached here.
     /// </summary>
     public static partial class PerfMonitorValidationSuite
     {
-        /// <summary>The section the scenario lights uniformly while it is absent — the churn case.</summary>
+        /// <summary>The section the scenario lights uniformly while it is absent — compacted without a rent, so no churn.</summary>
         private const int CHURN_SECTION = 3;
 
         private const byte FULL_SKY = 15;
@@ -88,10 +88,11 @@ namespace Editor.Validation.PerfMonitoring
 
             BlockType[] palette = TestBehaviorBlockPalette.Create();
             PerfMergeTotals totals = default;
-            bool changed = ApplyChurnFixture(ref totals, palette, plantDrift: false, out ChunkData _);
+            bool changed = ApplyChurnFixture(ref totals, palette, plantDrift: false, out ChunkData merged);
             ok &= Check("A real merge over one kept section and one uniform-lit absent section reports a change", changed);
-            ok &= Check($"It counts exactly one churned section (got {totals.ChurnedSections}) and times the kept section's verifier",
-                totals.ChurnedSections == 1 && totals.CountsTicks > 0);
+            ok &= Check($"The uniform-lit absent section compacts with no section and no churn (churned {totals.ChurnedSections}); the kept section's verifier is timed",
+                totals.ChurnedSections == 0 && merged.sections[CHURN_SECTION] == null
+                && merged.SectionUniformSkyLevel[CHURN_SECTION] == FULL_SKY && totals.CountsTicks > 0);
             ok &= Check($"The verifier recounts the one kept section and finds its maintained counts current (checks {totals.CountChecks}, drifts {totals.CountDrifts})",
                 totals.CountChecks == 1 && totals.CountDrifts == 0);
             ok &= Check("The apply charges only its own fields",
@@ -183,7 +184,7 @@ namespace Editor.Validation.PerfMonitoring
                 for (int i = 0; i < ChunkMath.SECTION_VOLUME; i++)
                     light[churnOffset + i] = LightBitMapping.PackLightData(FULL_SKY, 0, 0, 0);
 
-                return chunk.ApplyJobLightMap(voxels, light, palette, ref totals);
+                return chunk.ApplyJobLightMap(voxels, light, palette, 0, ChunkMath.CHUNK_HEIGHT, ref totals);
             }
             finally
             {

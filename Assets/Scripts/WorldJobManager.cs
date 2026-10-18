@@ -2332,7 +2332,8 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                 if (ChunkMath.IsSectionOutsideBand(s, jobData.BandMinY, jobData.BandHeight)) _mergeTotals.OutOfBandSections++;
         }
 
-        return chunkData.ApplyJobLightMap(jobData.Map, jobData.LightMap, _world.BlockTypes, ref _mergeTotals);
+        return chunkData.ApplyJobLightMap(jobData.Map, jobData.LightMap, _world.BlockTypes, jobData.BandMinY, jobData.BandHeight,
+            ref _mergeTotals);
     }
 
     #region IDisposable

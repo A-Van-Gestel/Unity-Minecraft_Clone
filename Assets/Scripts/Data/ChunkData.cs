@@ -1465,7 +1465,7 @@ namespace Data
         }
 
         /// <summary>
-        /// Merges a completed lighting job's full light map into this chunk's sections (full overwrite),
+        /// Merges a completed lighting job's full light map into this chunk's sections (full overwrite, every section),
         /// recompacting uniform-sky sections and creating/returning sections as light appears or vanishes.
         /// Moved here from <c>WorldJobManager.ApplyLightingJobResult</c> so the production main-thread
         /// path and the editor lighting validation harness merge through identical section/compaction code.
@@ -1486,28 +1486,40 @@ namespace Data
             [CanBeNull] BlockType[] blockTypes)
         {
             PerfMergeTotals unused = default;
-            return ApplyJobLightMap(jobVoxelMap, jobLightMap, blockTypes, ref unused);
+            return ApplyJobLightMap(jobVoxelMap, jobLightMap, blockTypes, 0, ChunkMath.CHUNK_HEIGHT, ref unused);
         }
 
         /// <summary>
-        /// <see cref="ApplyJobLightMap(NativeArray{uint}, NativeArray{ushort}, BlockType[])"/>, charging the churned
-        /// sections to <paramref name="totals"/> while the monitor's slots are active, and the block-count verifier's
-        /// time and results in instrumented builds.
+        /// <see cref="ApplyJobLightMap(NativeArray{uint}, NativeArray{ushort}, BlockType[])"/> clamped to the job's
+        /// gathered band (LI-2): a section entirely outside <c>[bandMinY, bandHeight)</c> is left as it is — section,
+        /// light and compact byte — because there the light map still holds the schedule-time copy of this chunk's own
+        /// light. Charges the churned sections to <paramref name="totals"/> while the monitor's slots are active, and
+        /// the block-count verifier's time and results in instrumented builds.
+        /// <para>
+        /// A mid-flight edit that promoted a compact section outside the band leaves it promoted until an in-band
+        /// merge: the light is identical, only the representation differs (and the band summaries that read the
+        /// compact bytes can come out wider, never wrong).
+        /// </para>
         /// </summary>
-        /// <param name="jobVoxelMap">The job's input voxel map snapshot (section-contiguous, full chunk).</param>
+        /// <param name="jobVoxelMap">The job's input voxel map snapshot (section-contiguous, full chunk). Not read: blocks
+        /// come from the live sections, and an absent section has none.</param>
         /// <param name="jobLightMap">The job's computed light map (section-contiguous, full chunk).</param>
         /// <param name="blockTypes">Block palette for the instrumented-build block-count verifier, or null to skip it.</param>
+        /// <param name="bandMinY">The job's first gathered row (global Y); 0 merges from the bottom.</param>
+        /// <param name="bandHeight">The row above the job's last gathered row (global Y, exclusive); <c>CHUNK_HEIGHT</c> merges to the top.</param>
         /// <param name="totals">The lighting merge's running totals.</param>
         /// <returns>True if any voxel's effective light value differs from its pre-merge value.</returns>
         public bool ApplyJobLightMap(NativeArray<uint> jobVoxelMap, NativeArray<ushort> jobLightMap,
-            [CanBeNull] BlockType[] blockTypes, ref PerfMergeTotals totals)
+            [CanBeNull] BlockType[] blockTypes, int bandMinY, int bandHeight, ref PerfMergeTotals totals)
         {
-            int indexOffset = 0;
             const int sectionVolume = ChunkMath.SECTION_VOLUME;
             bool changedAnyLight = false;
 
             for (int s = 0; s < sections.Length; s++)
             {
+                if (ChunkMath.IsSectionOutsideBand(s, bandMinY, bandHeight)) continue;
+
+                int indexOffset = s * sectionVolume;
                 ChunkSection section = sections[s];
                 bool sectionHasData = false;
                 bool isNewSection = false;
@@ -1527,27 +1539,24 @@ namespace Data
 
                 if (section == null)
                 {
-                    bool needsSection = false;
-                    for (int i = 0; i < sectionVolume; i++)
+                    // An absent section holds no blocks (a rented one would be zeroed), so uniform sky light over it
+                    // ends as no section plus a compact byte — set that directly instead of renting, filling,
+                    // classifying and returning a section. Dark ends as no section and no byte.
+                    ushort first = jobLightMap[indexOffset];
+                    bool uniform = true;
+                    for (int i = 1; i < sectionVolume && uniform; i++)
+                        uniform = jobLightMap[indexOffset + i] == first;
+
+                    if (uniform && LightBitMapping.GetMaxBlocklight(first) == 0)
                     {
-                        if (jobVoxelMap[indexOffset + i] != 0 || jobLightMap[indexOffset + i] != 0)
-                        {
-                            needsSection = true;
-                            break;
-                        }
+                        if (first != 0) SectionUniformSkyLevel[s] = LightBitMapping.GetSkylight(first);
+                        if (first != oldUniformLight) changedAnyLight = true;
+                        continue;
                     }
 
-                    if (needsSection)
-                    {
-                        section = GetNewSection();
-                        sections[s] = section;
-                        isNewSection = true;
-                    }
-                    else if (oldUniformLight != 0)
-                    {
-                        // Stays absent, so every voxel now reads 0 — a change iff it read non-zero before.
-                        changedAnyLight = true;
-                    }
+                    section = GetNewSection();
+                    sections[s] = section;
+                    isNewSection = true;
                 }
 
                 if (section != null)
@@ -1595,8 +1604,6 @@ namespace Data
                         }
                     }
                 }
-
-                indexOffset += sectionVolume;
             }
 
             return changedAnyLight;
