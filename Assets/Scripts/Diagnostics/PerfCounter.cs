@@ -186,7 +186,7 @@ namespace Diagnostics
         /// <summary>Fluid tickers the ticker pool had to create; each allocates its native scratch on its first prepare.</summary>
         FluidTickerPoolMisses,
 
-        /// <summary>Lighting-merge time spent extracting each job's band and merging it into the sections, recount included, in microseconds.</summary>
+        /// <summary>Lighting-merge time spent extracting each job's band and merging it into the sections, the instrumented-build count verifier included, in microseconds.</summary>
         MergeApplyUs,
 
         /// <summary>The part of <see cref="MergeApplyUs"/> the instrumented-build block-count verifier spent, in microseconds; 0 in other builds.</summary>
