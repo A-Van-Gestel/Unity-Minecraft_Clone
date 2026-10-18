@@ -1142,9 +1142,12 @@ namespace Data
             uint oldValue = sections[sectionY].voxels[index];
 
             // -- Update Counts --
-            // Handle NonAirCount for optimization
-            if (oldValue == 0 && value != 0) sections[sectionY].nonAirCount++;
-            else if (oldValue != 0 && value == 0) sections[sectionY].nonAirCount--;
+            // NonAirCount tests the block id alone, the definition ChunkSection.CountVoxels recounts with: an air
+            // voxel carrying metadata is still air.
+            bool wasNonAir = (oldValue & BurstVoxelDataBitMapping.ID_MASK) != 0;
+            bool isNonAir = (value & BurstVoxelDataBitMapping.ID_MASK) != 0;
+            if (!wasNonAir && isNonAir) sections[sectionY].nonAirCount++;
+            else if (wasNonAir && !isNonAir) sections[sectionY].nonAirCount--;
 
             // Handle OpaqueCount for meshing optimization
             bool isNewOpaque = newBlockProperties != null && newBlockProperties.IsOpaque;
@@ -1179,7 +1182,8 @@ namespace Data
 
         /// <summary>
         /// Simplified SetVoxel for raw data setting where properties are unknown or assumed consistent (e.g. generation).
-        /// Warning: This does NOT update OpaqueCount correctly. Use with caution or call RecalculateCounts afterwards.
+        /// Warning: This does NOT update OpaqueCount correctly, and nothing repairs it later (the lighting merge trusts the
+        /// maintained counts). Use the full overload, or call RecalculateCounts afterwards.
         /// </summary>
         /// <param name="x">Local X (0-15)</param>
         /// <param name="y">Local Y (0-ChunkHeight)</param>

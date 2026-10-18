@@ -71,7 +71,7 @@ This class represents a 16x16x16 cube of voxels. It acts as the atomic unit of s
 
 - **`uint[] voxels`**: A flat array of `4096` integers ($16^3$). Stores block ID + metadata (no light data).
 - **`ushort[] LightData`**: A parallel flat array of `4096` unsigned shorts. Stores all light channels: `[Sky:4][BlockR:4][BlockG:4][BlockB:4]`. Accessed via `LightBitMapping` helpers. This is the sole authority for light values — the `uint` voxel carries no light bits.
-- **`int nonAirCount`**: Tracks how many blocks are not Air. `IsEmpty => nonAirCount == 0`, used to quickly skip empty sections during processing.
+- **`int nonAirCount`**: Tracks how many voxels hold a non-air block ID (metadata on an air voxel does not count). `IsEmpty => nonAirCount == 0`, used to quickly skip empty sections during processing.
 - **`int opaqueCount`**: Tracks how many blocks are fully opaque. `IsFullySolid => opaqueCount >= SECTION_VOLUME`, used to identify fully solid underground sections.
 - **`int emissiveCount`**: Tracks how many blocks emit light, so a section with no emitters can be skipped by blocklight work.
 

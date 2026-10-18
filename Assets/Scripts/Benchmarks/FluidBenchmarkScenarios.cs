@@ -149,10 +149,11 @@ namespace Benchmarks
         private static void FillBox(ChunkData cd, int x0, int x1, int y0, int y1, int z0, int z1, ushort id, byte meta)
         {
             uint packed = BurstVoxelDataBitMapping.PackVoxelData(id, meta);
+            BlockType[] blockTypes = World.Instance.BlockTypes;
             for (int x = x0; x <= x1; x++)
             for (int y = y0; y <= y1; y++)
             for (int z = z0; z <= z1; z++)
-                cd.SetVoxel(x, y, z, packed);
+                cd.SetVoxel(x, y, z, packed, blockTypes[id], blockTypes[BurstVoxelDataBitMapping.GetId(cd.GetVoxel(x, y, z))]);
         }
 
         // ── Real-world (full-pipeline) flood — used by the full-world fluid stress pass ──────────────
