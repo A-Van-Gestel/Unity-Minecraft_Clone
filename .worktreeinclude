@@ -1,0 +1,18 @@
+# Ignored files that a new git worktree gets copied: worktrunk (`wt step copy-ignored --require-include`) and the Strata
+# agent tooling (agent\worktree.py) both read this file. A file is copied only if it is git-ignored AND matched here.
+#
+# Never list Library/ (Unity's cache, gigabytes; a worktree is not opened in the Editor), Assets/settings.json (the
+# player's own settings), .claude/settings.local.json, .mcp.json (its UNITY_PROJECT_PATH names the main checkout),
+# UserSettings/, Logs/, tool state (.gsd/, .utmp/, .bg-shell/) or scratch output (Tools/Python/output/).
+
+# Agent rules, skills and subagents: junctions into the tracked .agents/, recreated pointing at the worktree's own copy
+.claude/agents
+.claude/rules
+.claude/skills
+
+# CodeGraph index (relative paths, re-synced on the worktree's commit)
+.codegraph/codegraph.db
+
+# Not the .csproj/.sln files: their package projects compile sources under Library/PackageCache by relative path, so
+# `dotnet build` fails in a worktree without Library/ (tested 2026-10-25: 758 errors). C# work that needs a build stays in
+# the main checkout; a worktree suits Tools/Python and Documentation work.
