@@ -131,7 +131,7 @@ at the top; per the repo's Python protocol, substantial persistent tooling belon
    reference covers what it checks.
 2. **Read the file back once** and confirm: frontmatter opens at byte 0, `name` matches the
    directory, description under 1024 chars. `python Tools/Python/check_twin_files.py` proves no
-   file under `.agents/` (or either twin) has a BOM or a non-UTF-8 encoding.
+   file under `.agents/` (or `CLAUDE.md`/`AGENTS.md`) has a BOM or a non-UTF-8 encoding.
 3. **Cross-reference seams, both directions.** If the new skill borders an existing one (shared
    trigger surface), name the split in **both** bodies — add a routing line to the new skill, then
    edit the sibling's body to name the new one. A one-way seam is how two skills end up both

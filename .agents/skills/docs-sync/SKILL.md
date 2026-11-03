@@ -122,8 +122,8 @@ wins where a path is in both):
   `Assets/Editor/PropertyDrawers/`, …). The exceptions are the validation harnesses with a fidelity
   doc in the table (+ the `validation-driven-bugfix` skill).
 - `Assets/Scripts/Legacy/` and third-party `Assets/Scripts/Libraries/` — undocumented by design.
-- Agent tooling — `.agents/`, `CLAUDE.md`, `AGENTS.md`, `Tools/` — documented by the skills, the
-  twin files and `Tools/Python/README.md` themselves, not by `Documentation/`.
+- Agent tooling — `.agents/`, `CLAUDE.md`, `AGENTS.md`, `Tools/` — documented by the skills,
+  `AGENTS.md` and `Tools/Python/README.md` themselves, not by `Documentation/`.
 
 When a change lands only in these areas and alters no documented system, the verdict is
 **no-op / surface-the-gap**, never `needs-new-doc` on reflex. This list is category-level, not
@@ -219,7 +219,7 @@ python Tools/Python/check_doc_refs.py      # @-prefixed doc references
 python Tools/Python/check_doc_links.py     # relative markdown links between docs
 python Tools/Python/check_doc_status.py    # OPEN_WORK_INDEX vs each doc's own **Status:**
 python Tools/Python/align_md_tables.py     # Documentation/ tables column-aligned (--fix aligns)
-python Tools/Python/check_twin_files.py    # CLAUDE.md == AGENTS.md; agent files UTF-8 without BOM
+python Tools/Python/check_twin_files.py    # CLAUDE.md only imports AGENTS.md; agent files UTF-8 without BOM
 ```
 
 `check_doc_status.py` reads a `**Status:**` field only up to the next line that starts with `**` and a

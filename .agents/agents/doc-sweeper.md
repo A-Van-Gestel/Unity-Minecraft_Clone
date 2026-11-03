@@ -28,7 +28,7 @@ The delegation prompt asks for one or both of these jobs.
 3. Everything else is **reported, not fixed** — the right target is a judgment call: dead
    `@Documentation/...` references, dead relative links, OPEN_WORK_INDEX status disagreements,
    `IRREGULAR` tables (rows with more cells than the header, or a header/delimiter cell-count
-   mismatch that GFM does not render as a table) and a CLAUDE.md/AGENTS.md mismatch.
+   mismatch that GFM does not render as a table) and a CLAUDE.md that holds more than its `@AGENTS.md` import.
 4. Run `git diff --no-color --stat` and include it, so the parent can see exactly which
    files `--fix` touched.
 

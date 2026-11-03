@@ -62,8 +62,8 @@ class TwinFilesTests(unittest.TestCase):
     def setUp(self):
         self.repo = CopiedScriptRepo()
         self.repo.install("check_twin_files.py")
-        self.repo.write("CLAUDE.md", "same\nrules\n")
-        self.repo.write("AGENTS.md", "same\nrules\n")
+        self.repo.write("CLAUDE.md", "@AGENTS.md\n")
+        self.repo.write("AGENTS.md", "rules\n")
         self.repo.write(".agents/skills/demo/SKILL.md", "---\nname: demo\n---\n")
 
     def tearDown(self):
@@ -73,30 +73,41 @@ class TwinFilesTests(unittest.TestCase):
         with open(self.repo.path(relative), "wb") as handle:
             handle.write(content)
 
-    def test_identical_differing_and_missing(self):
+    def test_stub_ok_extra_content_and_missing(self):
         code, out = self.repo.run_copy("check_twin_files.py")
         self.assertEqual(code, 0, out)
+        self.assertIn("OK: CLAUDE.md imports AGENTS.md", out)
         self.assertIn("OK: 3 agent guidance files", out)
-        self.repo.write("AGENTS.md", "same\nstale\n")
+        self.repo.write("CLAUDE.md", "@AGENTS.md\n- a Claude-only rule\n")
         code, out = self.repo.run_copy("check_twin_files.py")
         self.assertEqual(code, 1, out)
-        self.assertIn("line 2", out)
+        self.assertIn("found: - a Claude-only rule", out)
         os.remove(self.repo.path("AGENTS.md"))
         self.assertEqual(self.repo.run_copy("check_twin_files.py")[0], 2)
+
+    def test_stub_allows_html_comments_but_needs_the_import(self):
+        self.repo.write("CLAUDE.md", "<!-- Instructions live in\nAGENTS.md. -->\n\n@AGENTS.md\n")
+        self.assertEqual(self.repo.run_copy("check_twin_files.py")[0], 0)
+        self.repo.write("CLAUDE.md", "<!-- only a comment -->\n")
+        code, out = self.repo.run_copy("check_twin_files.py")
+        self.assertEqual(code, 1, out)
+        self.assertIn("(no @AGENTS.md line)", out)
 
     def test_bom_in_a_skill_fails_and_names_the_file(self):
         self.write_bytes(".agents/skills/demo/SKILL.md", b"\xef\xbb\xbf---\nname: demo\n---\n")
         code, out = self.repo.run_copy("check_twin_files.py")
         self.assertEqual(code, 1, out)
         self.assertIn("SKILL.md has a UTF-8 BOM", out)
-        self.assertIn("OK: CLAUDE.md == AGENTS.md", out)
+        self.assertIn("OK: CLAUDE.md imports AGENTS.md", out)
 
-    def test_bom_on_identical_twins_still_fails(self):
-        for name in ("CLAUDE.md", "AGENTS.md"):
-            self.write_bytes(name, b"\xef\xbb\xbfsame\n")
+    def test_bom_on_a_valid_stub_still_fails(self):
+        self.write_bytes("CLAUDE.md", b"\xef\xbb\xbf@AGENTS.md\n")
+        self.write_bytes("AGENTS.md", b"\xef\xbb\xbfrules\n")
         code, out = self.repo.run_copy("check_twin_files.py")
         self.assertEqual(code, 1, out)
+        self.assertIn("OK: CLAUDE.md imports AGENTS.md", out)
         self.assertIn("CLAUDE.md has a UTF-8 BOM", out)
+        self.assertIn("AGENTS.md has a UTF-8 BOM", out)
 
     def test_utf16_and_invalid_utf8_fail(self):
         self.write_bytes(".agents/skills/demo/SKILL.md", "---\n".encode("utf-16"))
