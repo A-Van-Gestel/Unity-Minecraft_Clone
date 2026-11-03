@@ -99,6 +99,12 @@ a new file **every line is added**, which means the delta rule softens nothing:
 read the whole file and run every gate its path triggers. A new file under
 `Assets/Scripts/Jobs/` gets the full Burst + hot-path + pool pass.
 
+**The user may keep a local-only layer**: dev tweaks, debug overrides or parked
+follow-ups left modified (or untracked) on every branch and never committed. Take
+it from where the user records it (project memory) or ask, and drop those files
+and hunks from an intermediate scope before any gate runs. They produce no
+findings, and "tree not clean" is not one. A committed range never contains them.
+
 The scope you resolved also picks the **mode**, because a review run mid-work and
 a review run before merge want different output:
 
@@ -180,7 +186,7 @@ about what the change was "about".
 
 | Shard | Gates | Load when the diff touches |
 |---|---|---|
-| `references/gates-core.md` | 1, 2, 3, 4, 24 | **always** |
+| `references/gates-core.md` | 1, 2, 3, 4, 24, 25, 26 | **always** |
 | `references/gates-jobs.md` | 5, 6, 7 | `Assets/Scripts/Jobs/`, an `Update`/`LateUpdate`/`FixedUpdate`, a meshing / chunk-loop body, or a job-dispatch wrapper |
 | `references/gates-serialization.md` | 8, 9 | `Assets/Scripts/Serialization/`, `ChunkData.cs`, `ChunkStorageManager.cs`, or a `[SerializeField]` / public field on a `MonoBehaviour` / `ScriptableObject` |
 | `references/gates-pipeline.md` | 10, 11, 12 | `World.cs`, `WorldJobManager.cs`, `ChunkPoolManager.cs`, a pooled type (`Chunk.cs`, `Data/ChunkData.cs`, `Data/ChunkSection.cs`, `VisualizerChunkData.cs`), lighting / fluid / meshing / chunk-management code, or a newly added mutable `static` |
@@ -241,6 +247,8 @@ are the part that matters, and the exceptions are where false positives come fro
 | 22 | Global state published around the graph (no `AllowGlobalStateModification`, global with no consumer) | rendering |
 | 23 | Renderer-feature lifecycle leak (`Create` not idempotent, material or `RTHandle` never released) | rendering |
 | 24 | A comment that no longer describes the code (narrates history, asserts a contract that does not exist, prose broken by a rename, inline comment past three lines) | core |
+| 25 | Behavior change shipped without a test (a fix or new branch no scenario or test reaches; a claimed test that does not exist) | core |
+| 26 | Logic the diff re-implements (a block that already exists in a helper or sibling script) | core |
 
 ### On an intermediate run: what may wait, and what may not
 
@@ -281,9 +289,10 @@ judgment. Hand each earned shard to its own runner and keep steps 4 and 5 here.
 The brief, the report shape and what to check in it are in
 [references/fanout.md](references/fanout.md) — read it before spawning.
 
-**Fan out when** the diff earns a shard besides `core`, or changes more than ~50
-lines (`git diff --no-color --numstat $RANGE`, plus every line of an untracked
-file). Below that, run inline: spawning costs more than it saves.
+**Fan out when** the diff earns two or more shards (`core` plus one) **and**
+changes more than ~50 lines (`git diff --no-color --numstat $RANGE`, plus every
+line of an untracked file). Below that, run inline: spawning costs more than it
+saves.
 
 Pick the runner in this order:
 

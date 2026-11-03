@@ -19,6 +19,8 @@ the shard it names and `references/settled-decisions.md`, and follow all three e
 - **Every gate in the shard gets a ledger line**, including the ones the file list makes look
   irrelevant. A missing line means the parent treats the gate as not run.
 - **Untracked files are fully added** — read them whole.
+- **The brief's local-only layer is not the change.** Drop those files and hunks before any gate
+  runs; they produce no candidates, and a dirty tree is not one.
 - **Open the rule a gate names.** `.agents/rules/*.md`, `Documentation/Guides/*.md` and sibling
   skills are not loaded for you; the shard summarizes them and the carve-outs live in the source.
 - **Completeness claims** ("every caller", "no other site"): `codegraph_explore` or the `codegraph`

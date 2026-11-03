@@ -1,6 +1,6 @@
 # Core gates — always run
 
-These five (1–4 and 24) apply to any diff, whatever it touches, and they are the
+These seven (1–4 and 24–26) apply to any diff, whatever it touches, and they are the
 only gates that do. The other six shards — `jobs`, `serialization`, `pipeline`,
 `coordinates`, `rendering`, `docs` — are loaded per the router in `SKILL.md`.
 
@@ -247,3 +247,71 @@ handles. High when it explains a guard, because a reader who believes a stale
 reason deletes the guard. Low for bulk alone — an inline comment past three lines
 with nothing false in it; say whether the code wants an extracted method instead,
 as the style guide asks.
+
+---
+
+## Gate 25 — Behavior change shipped without a test
+
+**What fails.** A bug fix with no regression scenario can be undone by the next
+refactor without any suite going red, and new branching logic with no scenario is
+unverified by construction. The validation suites guard whole systems, not the
+specific branch the diff adds: a green suite that never reaches the new `if` proves
+nothing about it. This gate lives in core because it must fire when **no** test file
+changed, which is exactly the case to catch.
+
+**How to check.**
+
+```bash
+# is this a fix? (commit subjects of a committed range, branch name)
+case "$RANGE" in *...*) git log --no-color --format=%s "${RANGE/.../..}";; esac; git rev-parse --abbrev-ref HEAD
+# production files changed vs test files changed
+git diff --no-color --name-only $RANGE | grep -E '\.(cs|py)$' | grep -vE '^Assets/Editor/Validation/|^Tools/Python/tests/'
+git diff --no-color --name-only $RANGE | grep -E '^Assets/Editor/Validation/|^Tools/Python/tests/'
+```
+
+For each changed production file with new `if`/`switch`/`catch`/early-return logic
+or a changed condition, find the suite that owns the system
+(`Assets/Editor/Validation/<System>/`; `Tools/Python/tests/test_<script>.py` for a
+helper script) and check the diff adds or changes a scenario or test that reaches
+the changed member: `grep -rn '<member>' <suite dir>`, not just any change in the
+folder. For an intermediate scope (`RANGE=HEAD`/`--staged`) the `git log` line prints
+nothing: judge "is this a fix" from the branch name and the conversation.
+
+**Not a finding:**
+
+- A pure rename/move, a comment or doc change, a constant retune, or logic the
+  diff only re-indents.
+- A system with no validation suite and no practical way to add one (a render
+  feature verified by eye, a UI layout): name the manual check instead, Low at most.
+- The user said the scenario comes in a later commit: on an intermediate run that is
+  `Still owed before merge`.
+
+**Delta-based.**
+
+**Severity.** Medium for a bug fix with no regression scenario, or a fix in the
+chunk pipeline, lighting or the on-disk format with none (those regress silently).
+Low for new logic in a system that has no suite. High when a commit, the plan or
+the conversation claims a scenario or test that does not exist.
+
+---
+
+## Gate 26 — Logic the diff re-implements
+
+**What fails.** The diff writes a block that already exists in a helper —
+`ChunkMath`, `WorldOrigin`, `ChunkCoord`, a `*Helper`/`*Utility` class, a shared job
+utility, or a sibling `Tools/Python/` script. Two copies drift: the next fix lands in
+one of them, and the other keeps the bug.
+
+**How to check.** For each new block of more than ~10 lines, grep `Assets/Scripts/`
+and `Assets/Editor/` (or `Tools/Python/`) for its most distinctive call or
+expression before accepting it as new; `codegraph_explore` with the helper's likely
+name orients. A conversion between coordinate spaces written inline is gate 14,
+not this one.
+
+**Not a finding:** a deliberate Burst-local copy of a managed helper (Burst jobs
+cannot call it), with a comment naming the original; a one-line expression.
+
+**Delta-based.** Only what the diff adds.
+
+**Severity.** Low; Medium when the original carries a fix or guard the copy lacks.
+Never a Blocker. Route broader cleanup to `/simplify`.

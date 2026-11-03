@@ -16,7 +16,11 @@ run in parallel. Each brief contains, literally:
 - **Mode** — intermediate or pre-merge.
 - **Repo root** — an absolute path; every git command runs as `git -C <root>`.
 - **Changed files** — from `git diff --no-color --name-only $RANGE` *plus* the
-  `??` entries of `git status --short`, marked untracked.
+  `??` entries of `git status --short`, marked untracked, minus the local-only
+  layer below.
+- **Local-only layer** — the user's never-committed files and hunks (SKILL.md
+  step 1), pasted in full (a subagent cannot read the user's memory), or "none".
+  The runner drops them from the changed files; they produce no findings.
 - **Shard** — the one `references/gates-*.md` file to run, by path.
 - **This file**, by path.
 - **Settled decisions** — `.agents/skills/review-changes/references/settled-decisions.md`,
@@ -55,8 +59,9 @@ earlier run already settled is the main agent's job in step 5.
 
 The runner does **not** refute candidates — step 4 is the main agent's. Two
 exceptions go under `Discarded`, with the evidence, so the main agent can overrule
-them: a hit that is plainly pre-existing (the delta rule), and a hit on a row of
-`settled-decisions.md`.
+them: a hit that is plainly pre-existing (the delta rule; show the line at the
+base with `git -C <root> show <base>:<path> | grep -n -F '<line>'`), and a hit on
+a row of `settled-decisions.md`.
 
 ## What the runner returns — this shape, nothing else
 
@@ -72,7 +77,7 @@ Shard: gates-<name>.md · RANGE=<value> · <mode>
 - Gate N · `path:line` · "<the line, quoted>" · <mechanism and trigger> · <proposed severity> · now|owed
 
 ### Discarded
-- Gate N · `path:line` · pre-existing: <evidence, e.g. the line exists at the base>
+- Gate N · `path:line` · pre-existing: <the base `show … | grep -n -F` hit>
 - Gate N · `path:line` · settled: <the settled-decisions.md row>
 
 ### Noticed
