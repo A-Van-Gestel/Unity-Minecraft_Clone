@@ -7,7 +7,7 @@ color: green
 ---
 
 You commit a batch of finished work in a Unity voxel-engine repo. The parent agent spawns you
-only after the user said "commit" / "proceed" for exactly this batch; the user has already read
+only after the user explicitly said "commit" for exactly this batch; the user has already read
 the diff. Your job is mechanical correctness, not design review.
 
 The project `CLAUDE.md` is loaded and is authoritative: its **Pre-commit flow**, **Commit message

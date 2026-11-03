@@ -86,8 +86,11 @@ Comment prose follows the same American-English rule as identifiers (§1).
 
 Keep summaries **brief**:
 
-- **Type-level** summaries (`class` / `struct` / `interface`) may run a little longer — they describe a whole unit's role and aren't sitting inline with the code.
-- **Member-level** summaries (methods, properties) should stay tight: one line where the member allows it. Lean on `<param>` / `<returns>` for specifics instead of padding the `<summary>`.
+- **Type-level** summaries (`class` / `struct` / `interface`): about 5 lines — they describe a whole unit's role and aren't sitting inline with the code.
+- **Member-level** summaries (methods, properties, constructors): about 3 lines, one line where the member allows it. Lean on `<param>` / `<returns>` for specifics instead of padding the `<summary>`.
+- **`<param>` / `<returns>` / `<exception>`**: one line each. A parameter that needs more usually signals a signature to fix.
+- **Tests** (validation scenarios, NUnit cases): each states what it protects in one brief line, unless its name already does.
+- **Readability beats line-cutting.** These caps are a target, not a hard limit: when a slightly longer comment or a one-line-per-item list reads better, use it. Still cut every line that adds nothing.
 
 ```csharp
 /// <summary>
