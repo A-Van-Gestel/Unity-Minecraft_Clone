@@ -9,9 +9,13 @@ WHAT IT IS FOR
     turns it replaced.
 
 WHERE IT READS
-    ~/.claude/projects/<repo path with every non-alphanumeric character as '-'>/<session>.jsonl
-    and <session>/subagents/agent-*.jsonl (+ .meta.json for the agent type). One API response can
-    span several transcript lines with the same message id; usage is taken once per id.
+    ~/.claude/projects/<repo path with every non-alphanumeric character as '-'>/<session>.jsonl and
+    <session>/subagents/agent-*.jsonl (+ .meta.json for the agent type). One API response can span
+    several transcript lines with the same message id; usage is taken once per id.
+    Worktree sessions get their own project folder, so those are read too: `<...>--claude-worktrees-<name>`
+    (Claude Code mangles the worktree path) and a `<...>-<branch>` sibling folder when one of its
+    transcripts' `cwd` values starts with `<repo>.` (worktrunk names its worktrees `<repo>.<branch>`).
+    A sibling whose transcripts show another project (a `<repo> Backup` folder, say) is skipped.
 
 COST MODEL (API-price equivalent, USD per million tokens — an estimate, not a bill)
     input / output / cache read; cache writes at 2x input (1 h TTL) or 1.25x input (5 min TTL).
@@ -55,10 +59,81 @@ WRITE_5M_FACTOR = 1.25
 PER_MILLION = 1_000_000
 
 
-def projects_dir():
-    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    mangled = re.sub(r"[^A-Za-z0-9]", "-", repo_root)
+FIRST_TRANSCRIPT_LINES = 50  # how much of one transcript the sibling folder check reads
+WORKTREE_INFIX = "--claude-worktrees-"  # Claude Code mangles a worktree's /.claude/worktrees/ path into this
+# The folder patterns transcript_files searches, kept for the "no transcripts found" message.
+SEARCH_SUFFIXES = (os.sep + "*.jsonl",
+                   WORKTREE_INFIX + "*" + os.sep + "*.jsonl",
+                   "-*" + os.sep + "*.jsonl")
+
+
+def repo_root():
+    """The checkout this script sits in (realpath: a worktree can reach it through a link)."""
+    return os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__))))
+
+
+def projects_dir(root=None):
+    """The Claude Code transcript folder of a checkout, its path mangled into a folder name."""
+    mangled = re.sub(r"[^A-Za-z0-9]", "-", root if root is not None else repo_root())
     return os.path.join(os.path.expanduser("~"), ".claude", "projects", mangled)
+
+
+def first_cwd(path):
+    """The first recorded working folder of a transcript, or None in its first 50 lines."""
+    with open(path, encoding="utf-8", errors="replace") as handle:
+        for number, line in enumerate(handle):
+            if number >= FIRST_TRANSCRIPT_LINES:
+                return None
+            try:
+                record = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(record, dict) and "cwd" in record:
+                return record["cwd"] if isinstance(record.get("cwd"), str) else None
+    return None
+
+
+def sibling_run_there(folder, root):
+    """True when this sibling folder's transcripts ran in the `<repo>.<branch>` worktrunk sibling."""
+    expected = os.path.normcase(root).replace("\\", "/") + "."
+    for path in glob.glob(os.path.join(glob.escape(folder), "*.jsonl")):
+        cwd = first_cwd(path)
+        if cwd is not None:
+            return os.path.normcase(cwd).replace("\\", "/").startswith(expected)
+    return False
+
+
+def search_dirs(main_dir, root=None):
+    """Every transcript folder of this checkout: its own, Claude Code worktrees, worktrunk siblings."""
+    root = root if root is not None else repo_root()
+    escaped = glob.escape(main_dir)
+    worktrees = [d for d in glob.glob(escaped + WORKTREE_INFIX + "*") if os.path.isdir(d)]
+    yield main_dir
+    for folder in worktrees:
+        yield folder
+    for folder in glob.glob(escaped + "-*"):
+        if os.path.isdir(folder) and folder not in worktrees and sibling_run_there(folder, root):
+            yield folder
+
+
+def transcript_files(main_dir, root=None):
+    """This checkout's transcripts (its own plus its worktrees' folders), oldest first by mtime."""
+    files = []
+    for folder in search_dirs(main_dir, root):
+        files.extend(glob.glob(os.path.join(glob.escape(folder), "*.jsonl")))
+    return sorted(files, key=os.path.getmtime)
+
+
+def worktree_of(path, main_dir=None):
+    """The worktree a transcript belongs to, or None when it is the main checkout's session."""
+    main_dir = main_dir if main_dir is not None else projects_dir()
+    folder, name = os.path.dirname(path), os.path.basename(os.path.dirname(path))
+    if os.path.normcase(folder) == os.path.normcase(main_dir):
+        return None
+    if WORKTREE_INFIX in name:
+        return name.split(WORKTREE_INFIX, 1)[1]
+    prefix = os.path.basename(main_dir) + "-"
+    return name[len(prefix):] if name.startswith(prefix) else None
 
 
 def price_for(model):
@@ -199,11 +274,13 @@ def rollup(files):
     return dict(rows)
 
 
-def report_session(path, show_categories):
+def report_session(path, show_categories, main_dir):
     session_id = os.path.basename(path)[:-len(".jsonl")]
+    worktree = worktree_of(path, main_dir)
     turns = read_turns(path)
     main = summarize(turns)
-    print(f"\n=== {session_id[:8]}  main: {main['turns']} turns, ctx avg {main['avg_ctx'] / 1e3:.0f}k "
+    tag = f" [worktree {worktree}]" if worktree else ""
+    print(f"\n=== {session_id[:8]}{tag}  main: {main['turns']} turns, ctx avg {main['avg_ctx'] / 1e3:.0f}k "
           f"/ peak {main['max_ctx'] / 1e3:.0f}k, {main['models']}, ~${main['cost']:.2f}")
 
     if show_categories:
@@ -237,18 +314,20 @@ def main():
     if args.last < 1:
         parser.error("--last must be at least 1")
 
-    files = sorted(glob.glob(os.path.join(projects_dir(), "*.jsonl")), key=os.path.getmtime)
+    main_dir = projects_dir()
+    files = transcript_files(main_dir)
     if args.sessions:
         files = [f for f in files if any(os.path.basename(f).startswith(s) for s in args.sessions)]
     else:
         files = files[-args.last:]
     if not files:
-        print(f"no transcripts found under {projects_dir()}")
+        searched = ", ".join(glob.escape(main_dir) + suffix for suffix in SEARCH_SUFFIXES)
+        print(f"no transcripts found under: {searched}")
         return 2
     if args.agents:
         rollup(files)
         return 0
-    grand = sum(report_session(f, args.categories) for f in files)
+    grand = sum(report_session(f, args.categories, main_dir) for f in files)
     if len(files) > 1:
         print(f"\nAll {len(files)} session(s): ~${grand:.2f} (API-price equivalent, estimate)")
     return 0

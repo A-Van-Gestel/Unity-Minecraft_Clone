@@ -1,0 +1,18 @@
+# Worktrunk (git-wt) project hooks: a new worktree gets its agent links, a copy of the CodeGraph index and live links to
+# the primary checkout's local-only files (_REFERENCES/ plans, notes). Rules: AGENTS.md § Worktrees (worktrunk).
+
+[[pre-start]]
+agents = "python Tools/Python/setup_agent_links.py"
+
+# Not `wt step copy-ignored`: through the .claude/agents junction it copies the primary's untracked agent files into
+# the new branch. The CodeGraph index is the one ignored file worth copying (relative paths, re-synced on commit).
+[[pre-start]]
+codegraph = "mkdir -p .codegraph && cp {{ primary_worktree_path }}/.codegraph/codegraph.db .codegraph/"
+
+[[pre-start]]
+# The primary checkout's copy of the script, so a branch older than it still gets its links.
+local = "python {{ primary_worktree_path }}/Tools/Python/wt_link_local.py {{ primary_worktree_path }} {{ worktree_path }}"
+
+# git worktree remove leaves an NTFS junction (and so the folder) behind: drop the links first.
+[pre-remove]
+unlink = "python {{ primary_worktree_path }}/Tools/Python/wt_link_local.py --unlink {{ worktree_path }}"

@@ -198,6 +198,18 @@ The `rider` MCP server exposes Rider's inspection, refactoring and build engines
 - Rider refactorings do NOT handle Unity-side concerns (`.meta` sibling renames, serialized-key renames, prefab/scene GUID references): the `refactor-safely` and `unity-file-ops` guardrails still apply.
 - A Rider build is MSBuild against Unity-generated `.csproj` files — the "new `.cs` file not yet in the project" gotcha applies exactly as to `dotnet build`.
 
+## Worktrees (worktrunk)
+
+A worktree lets a dedicated session (for example a Strata agent run) work on a branch while the main checkout keeps the Editor. worktrunk (`git-wt`) puts it next to the repo as `<repo>.<branch>`; `.config/wt.toml` holds its hooks. Approve them once per machine with `git-wt config approvals add` in an interactive terminal: a Strata `--branch` run never passes `--yes`, so an unapproved hook fails it.
+
+- **`git-wt switch --create <branch> --no-cd`** runs the pre-start hooks: `setup_agent_links.py` (the worktree's own `.claude/` junctions), a copy of the CodeGraph index, and `wt_link_local.py`, which links the primary's `.git/info/exclude` set (`_REFERENCES/` plans, notes) in, live: folders as junctions, files as hard links.
+- **`git-wt remove <branch> --foreground -f -D`** runs `wt_link_local.py --unlink` first: `git worktree remove` does not follow a junction but leaves it, and so the folder, behind. Never delete a worktree folder by hand while its junctions are in it.
+- **No Unity work in a worktree**: no Editor, no `unity` CLI, no suites, no `dotnet build` (the `.csproj` files need `Library/`). It suits `Tools/Python/`, `Documentation/` and agent/skill work; C# work that needs a compile stays in the main checkout.
+- **Local-only files created after the switch** inside a linked folder appear at once; a new top-level local-only path needs a rerun of `wt_link_local.py <primary> <worktree>`.
+- **Check CodeGraph before trusting it**: `codegraph status` must name the worktree. The copied index starts at the primary's state and re-syncs from there.
+- A worktree session's transcripts land in their own `~/.claude/projects/` folder; `session_cost_report.py` reads those too, tagged `[worktree <name>]`.
+- **After a Claude Code or worktrunk upgrade**, smoke-test a worktree session: `git-wt switch --create wt-check --no-cd`, then from that folder `claude -p "$(cat Tools/Python/wt_session_check_prompt.txt)" --permission-mode default --allowedTools "Bash(codegraph status)" --output-format json`. Expect the skills and agents listed, `MEMORY.md` quoted and `codegraph status` naming the worktree; then `git-wt remove wt-check --foreground -f -D`.
+
 ## System Environment & Capabilities
 
 - **Python Environment:** Python 3.14 is available on the host. Use it whenever Python is a better fit than C# (LUT generation, math prototyping, data transforms, save-file inspection, repo-wide automation, etc.). Place persistent scripts in `Tools/Python/` at the repo root — **never under `Assets/`**, which would drag them into Unity's asset pipeline. See the `python-scripting` skill for the full protocol (venv conventions, C# code-gen style, constraints).

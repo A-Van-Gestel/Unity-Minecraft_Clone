@@ -1,0 +1,12 @@
+This is an automated environment check. Answer from your own context, do not guess, keep it short. Do not edit any file.
+
+1. CWD: print your primary working directory.
+2. SKILLS: list every skill name in your available-skills listing (names only, comma-separated).
+3. AGENTS: list every agent type available to the Agent tool (names only, comma-separated).
+4. MEMORY: give the auto-memory directory path from your system prompt, and quote the first line of MEMORY.md as loaded in your context. If no MEMORY.md content is in your context, say NO MEMORY.
+5. CLAUDE.MD: is a section titled "Worktrees (worktrunk)" in your context? YES/NO.
+6. TOOLS: is any mcp__codegraph__ tool in your tool list? YES/NO (name it).
+7. Run exactly these Bash commands, one call each, and report each one's outcome (output or denial):
+   a. git rev-parse --show-toplevel
+   b. ls -d _REFERENCES/Plans .claude/skills .claude/agents
+8. CODEGRAPH: run exactly `codegraph status` via Bash and report its "Project:" line.

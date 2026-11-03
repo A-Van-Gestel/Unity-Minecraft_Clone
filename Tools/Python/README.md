@@ -22,21 +22,22 @@ a Store stub on this machine). Everything is stdlib-only unless `requirements.tx
 
 ## Git helpers (`git add -p` and `rebase -i` are unavailable here)
 
-| Script                | Does                                                                                        |
-|-----------------------|---------------------------------------------------------------------------------------------|
-| `stage_hunks.py`      | Lists a file's hunks, stages the chosen ones, prints the staged diff                        |
-| `fold_into_commit.py` | `fixup <rev> [paths]` then `squash`: folds changes into unpushed commits, gated + backed up |
+| Script                | Does                                                                                                                                                                                     |
+|-----------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `stage_hunks.py`      | Lists a file's hunks, stages the chosen ones, prints the staged diff                                                                                                                     |
+| `fold_into_commit.py` | `fixup <rev> [paths]` then `squash`: folds changes into unpushed commits, gated + backed up                                                                                              |
+| `wt_link_local.py`    | worktrunk hook: links local-only files into a worktree (junction, hard link); `--unlink` undoes it. `wt_session_check_prompt.txt` smoke-tests a worktree session (AGENTS.md § Worktrees) |
 
 ## Tests
 
 `python Tools/Python/tests/run_tests.py` (stdlib `unittest`, ~30 s; `run_tests.py fold` runs one module) covers
 the scripts above that the pre-commit flow and the subagents depend on: `fold_into_commit`, `stage_hunks`,
 `audit_reserialize_guids`, `check_american_english`, `align_md_tables`, `check_twin_files`,
-`setup_agent_links` and `session_cost_report`, plus the doc checkers (`check_markdown_breaks`, `check_doc_refs`,
+`setup_agent_links`, `session_cost_report` and `wt_link_local`, plus the doc checkers (`check_markdown_breaks`, `check_doc_refs`,
 `check_doc_links`, `check_doc_status`), `doc_impact_map`, `rename_tokens`, `summarize_perf_session`, `run_player`, and `prove_red`'s
 argument, restore and batch logic (its Editor half is stubbed). Each test builds its own throwaway directory or git repo
-under the system temp directory. Run it after changing one of those scripts, and add a test for each behavior you
-add or fix.
+(worktree linking adds a linked worktree inside that repo) under the system temp directory. Run it after changing one of
+those scripts, and add a test for each behavior you add or fix.
 A known gap is recorded as an `expectedFailure` test that names it, so a fix shows up as an unexpected success.
 
 ## Setup
@@ -47,18 +48,18 @@ A known gap is recorded as an `expectedFailure` test that names it, so a fix sho
 
 ## Validation and measurement
 
-| Script                          | Does                                                                                           |
-|---------------------------------|------------------------------------------------------------------------------------------------|
-| `prove_red.py`                  | Proves a suite goes red under a source mutation, restores byte for byte; `--batch` for many    |
-| `session_cost_report.py`        | Claude Code session cost: main context, turn mix by category, subagents; `--agents` rollup     |
-| `tabulate_tick_hitches.py`      | Tabulates Tick-led hitch records from player-run performance summaries                         |
-| `attribute_startup_tail.py`     | Which slot led each slow frame of a startup run's drained → stable tail (Capture sessions)     |
-| `summarize_perf_session.py`     | Per-phase slots, counters, jobs, I/O and hitches from a Capture session + report               |
-| `summarize_ab_legs.py`          | Per-run and per-leg table of a player A/B for one phase, from `summarize_perf_session` outputs |
-| `run_player.py`                 | Runs one `-mc-run` session in a built player: timeout + kill, saved Player.log, report path    |
-| `inspect_save_chunks.py`        | Decodes region files and identifies each chunk payload's historical layout                     |
-| `verify_floordiv_parity.py`     | Exhaustive parity proof for the structure cell-election floor-div fix                          |
-| `verify_liquid_noise_period.py` | Float32 model of `LiquidCore.hlsl`'s noise (the FLUID #20 evidence)                            |
+| Script                          | Does                                                                                             |
+|---------------------------------|--------------------------------------------------------------------------------------------------|
+| `prove_red.py`                  | Proves a suite goes red under a source mutation, restores byte for byte; `--batch` for many      |
+| `session_cost_report.py`        | Claude Code session cost (incl. worktrees): main context, turn mix, subagents; `--agents` rollup |
+| `tabulate_tick_hitches.py`      | Tabulates Tick-led hitch records from player-run performance summaries                           |
+| `attribute_startup_tail.py`     | Which slot led each slow frame of a startup run's drained → stable tail (Capture sessions)       |
+| `summarize_perf_session.py`     | Per-phase slots, counters, jobs, I/O and hitches from a Capture session + report                 |
+| `summarize_ab_legs.py`          | Per-run and per-leg table of a player A/B for one phase, from `summarize_perf_session` outputs   |
+| `run_player.py`                 | Runs one `-mc-run` session in a built player: timeout + kill, saved Player.log, report path      |
+| `inspect_save_chunks.py`        | Decodes region files and identifies each chunk payload's historical layout                       |
+| `verify_floordiv_parity.py`     | Exhaustive parity proof for the structure cell-election floor-div fix                            |
+| `verify_liquid_noise_period.py` | Float32 model of `LiquidCore.hlsl`'s noise (the FLUID #20 evidence)                              |
 
 ## Generators and bulk edits
 

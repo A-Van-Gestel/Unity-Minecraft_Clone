@@ -1,4 +1,5 @@
-"""session_cost_report.py: turn categorization, the per-agent-type rollup, and empty-input safety."""
+"""session_cost_report.py: turn categorization, the transcript folders of a checkout and its worktrees,
+the per-agent-type rollup, and empty-input safety."""
 import contextlib
 import io
 import json
@@ -95,6 +96,69 @@ class RollupTests(unittest.TestCase):
         self.assertIn("no subagents", out)
         self.assertIn("main threads", out)
 
+
+class TranscriptDirTests(unittest.TestCase):
+    """transcript_files and worktree_of: this checkout's folder, its Claude Code worktree folders, and
+    the worktrunk `<repo>.<branch>` sibling folder — but not an unrelated same-prefix project folder."""
+
+    def setUp(self):
+        self.root = tempfile.mkdtemp(prefix="cost-test-")
+        self.projects = os.path.join(self.root, "projects")
+        # The fake checkout the folder names are derived from, so a worktrunk sibling's cwd is predictable.
+        self.checkout = os.path.join(self.root, "repo")
+        self.main_dir = os.path.join(self.projects, "repo")
+        os.makedirs(self.main_dir)
+
+    def tearDown(self):
+        shutil.rmtree(self.root, ignore_errors=True)
+
+    def transcript(self, folder_name, name, cwd=None):
+        """One main-thread transcript under projects/<folder_name>/, every line carrying its cwd."""
+        folder = os.path.join(self.projects, folder_name)
+        os.makedirs(folder, exist_ok=True)
+        path = os.path.join(folder, name)
+        record = dict(turn(f"{name}-main"))
+        if cwd is not None:
+            record["cwd"] = cwd
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(json.dumps(record) + "\n")
+        return path
+
+    def header(self, path, main_dir):
+        """The session header line report_session prints for one transcript."""
+        with contextlib.redirect_stdout(io.StringIO()) as out:
+            report.report_session(path, False, main_dir)
+        return out.getvalue()
+
+    def test_claude_worktree_folder_is_included_and_tagged(self):
+        path = self.transcript("repo--claude-worktrees-x", "s1.jsonl",
+                               cwd=os.path.join(self.checkout, ".claude", "worktrees", "x"))
+        self.assertEqual(report.transcript_files(self.main_dir, self.checkout), [path])
+        self.assertEqual(report.worktree_of(path, self.main_dir), "x")
+        self.assertIn("[worktree x]", self.header(path, self.main_dir))
+
+    def test_worktrunk_sibling_included_but_a_same_prefix_folder_is_not(self):
+        included = self.transcript("repo-strata-foo", "w.jsonl", cwd=self.checkout + ".strata-foo")
+        main = self.transcript("repo", "m.jsonl")
+        excluded = self.transcript("repo-Backup", "b.jsonl", cwd=self.checkout + " Backup")
+        files = report.transcript_files(self.main_dir, self.checkout)
+        self.assertIn(main, files)
+        self.assertIn(included, files)
+        self.assertNotIn(excluded, files)
+        self.assertEqual(report.worktree_of(included, self.main_dir), "strata-foo")
+
+    def test_order_is_by_mtime_across_folders(self):
+        newest = self.transcript("repo", "new.jsonl")
+        oldest = self.transcript("repo--claude-worktrees-x", "old.jsonl")
+        middle = self.transcript("repo-strata-foo", "mid.jsonl", cwd=self.checkout + ".strata-foo")
+        for offset, path in enumerate((oldest, middle, newest)):
+            os.utime(path, (1_000_000 + offset * 60, 1_000_000 + offset * 60))
+        self.assertEqual(report.transcript_files(self.main_dir, self.checkout), [oldest, middle, newest])
+
+    def test_main_checkout_transcript_has_no_worktree(self):
+        path = self.transcript("repo", "m.jsonl")
+        self.assertIsNone(report.worktree_of(path, self.main_dir))
+        self.assertNotIn("[worktree", self.header(path, self.main_dir))
 
 if __name__ == "__main__":
     unittest.main()
