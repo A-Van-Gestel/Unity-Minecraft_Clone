@@ -218,4 +218,4 @@ A worktree lets a dedicated session (for example a Strata agent run) work on a b
     - A bare `cat > file` blocks on empty stdin until the timeout. Edit files with the Edit/Write tools, not shell redirection. After any timeout, check `git status --short` / `git diff --stat` before assuming a step applied.
     - `TMPDIR` is unset, so `"$TMPDIR/x"` becomes `/x`: name the session scratchpad explicitly.
     - Git Bash cannot launch a `.bat` whose path contains a space (this repo's path has several): call the underlying script directly.
-    - Python `subprocess.run(..., text=True)` writes CRLF on Windows, so a patch piped to `git apply` fails: pass and read bytes.
+    - Python text mode writes CRLF on Windows: `subprocess.run(..., text=True)` makes a patch piped to `git apply` fail, and `Path.write_text()` (or `open(..., "w")` without `newline=""`) turns a whole file to CRLF. Pass and read bytes (`read_bytes`/`write_bytes`).
