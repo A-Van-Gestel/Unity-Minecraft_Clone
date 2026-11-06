@@ -4746,6 +4746,10 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// <param name="chunkCoord">The chunk coordinate.</param>
     public void AddChunksToUpdateVisualization(ChunkCoord chunkCoord)
     {
+        // Every edit and activation feeds this; with no mode the set would only grow. A switch to a mode
+        // re-queues every active chunk, so nothing is missed.
+        if (visualizationMode == DebugVisualizationMode.None) return;
+
         // Ensure we never add an out-of-bounds coordinate.
         if (IsChunkInWorld(chunkCoord))
         {
@@ -4771,6 +4775,9 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                 Shader.DisableKeyword("DEBUG_LIGHTDATA");
             if (visualizationMode == DebugVisualizationMode.SmoothLightingData)
                 Shader.EnableKeyword("DEBUG_LIGHTDATA");
+
+            if (visualizationMode == DebugVisualizationMode.None)
+                _chunksToUpdateVisualization.Clear();
 
             // If the new mode is not 'None' and not shader-only, request an update for all currently active chunks.
             if (visualizationMode != DebugVisualizationMode.None &&
@@ -4813,6 +4820,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         {
             // Use Pools for tracking collections
             List<ChunkCoord> chunksReadyForVisualization = ListPool<ChunkCoord>.Get();
+            List<ChunkCoord> chunksGone = ListPool<ChunkCoord>.Get();
 
             try
             {
@@ -4828,6 +4836,16 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                             chunksReadyForVisualization.Add(coord);
                         }
                     }
+                    else
+                    {
+                        // An unloaded chunk can never become ready; activation re-queues it if it returns.
+                        chunksGone.Add(coord);
+                    }
+                }
+
+                foreach (ChunkCoord coord in chunksGone)
+                {
+                    _chunksToUpdateVisualization.Remove(coord);
                 }
 
                 if (visualizationMode == DebugVisualizationMode.CollisionBounds)
@@ -4849,6 +4867,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
             finally
             {
                 ListPool<ChunkCoord>.Release(chunksReadyForVisualization);
+                ListPool<ChunkCoord>.Release(chunksGone);
             }
         }
     }
