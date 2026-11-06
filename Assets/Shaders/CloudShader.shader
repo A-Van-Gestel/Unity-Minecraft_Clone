@@ -73,7 +73,9 @@ Shader "Minecraft/CloudShader"
             struct v2f
             {
                 float4 vertex : SV_POSITION;
-                float3 normalWS : TEXCOORD0;
+                // Face shade x day/night x sky tint: built from the face normal and frame-constant globals, so
+                // it is constant per quad and is passed flat instead of re-running the shade curve per pixel.
+                nointerpolation half3 tint : TEXCOORD0;
                 float3 positionWS : TEXCOORD1;
             };
 
@@ -81,16 +83,11 @@ Shader "Minecraft/CloudShader"
             {
                 v2f o;
                 o.vertex = TransformObjectToHClip(v.vertex.xyz);
-                o.normalWS = TransformObjectToWorldNormal(v.normal);
                 o.positionWS = TransformObjectToWorld(v.vertex.xyz);
-                return o;
-            }
 
-            half4 frag(v2f i) : SV_Target
-            {
                 // Cloud faces are axis-aligned, so the dominant normal axis selects the weight
                 // (no normalization needed for a sign/threshold test).
-                half3 n = i.normalWS;
+                half3 n = TransformObjectToWorldNormal(v.normal);
                 half shade =
                     n.y > 0.5 ? FACE_SHADE_TOP : n.y < -0.5 ? FACE_SHADE_BOTTOM : abs(n.x) > 0.5 ? FACE_SHADE_SIDE_X : FACE_SHADE_SIDE_Z;
                 shade = lerp(1.0, shade, _CloudFaceShading);
@@ -109,8 +106,14 @@ Shader "Minecraft/CloudShader"
                 float noonShadow = VoxelLightToShadow(1.0, 1.0, minGlobalLightLevel, maxGlobalLightLevel);
                 half dayNight = skyShadow / noonShadow;
 
+                o.tint = shade * dayNight * SkylightColor;
+                return o;
+            }
+
+            half4 frag(v2f i) : SV_Target
+            {
                 half4 col = _Color;
-                col.rgb *= shade * dayNight * SkylightColor;
+                col.rgb *= i.tint;
 
                 // Fade the cloudscape's outer edge instead of ending in a hard line at the coverage radius.
                 float dist = length(i.positionWS.xz - _WorldSpaceCameraPos.xz);
