@@ -2947,12 +2947,21 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         if (_lastChunkBordersState != ShowChunkBorders)
         {
             long borderToggleStart = PerfStore.Begin(PerfSlot.BorderToggle);
-            foreach (GameObject borderObject in _chunkBorders.Values)
+            if (ShowChunkBorders)
             {
-                if (borderObject != null)
+                foreach (ChunkCoord coord in _activeChunks)
                 {
-                    borderObject.SetActive(ShowChunkBorders);
+                    CreateChunkBorder(coord);
                 }
+            }
+            else
+            {
+                foreach (GameObject borderObject in _chunkBorders.Values)
+                {
+                    if (borderObject != null) ChunkPool.ReturnBorder(borderObject);
+                }
+
+                _chunkBorders.Clear();
             }
 
             _lastChunkBordersState = ShowChunkBorders;
@@ -4723,6 +4732,10 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// <param name="chunkCoord">The chunk coordinate.</param>
     private void CreateChunkBorder(ChunkCoord chunkCoord)
     {
+        // Borders exist only while shown: activation is the crossing frame's hot path, and the toggle
+        // builds the active set when they are turned on.
+        if (!ShowChunkBorders) return;
+
         if (chunkBorderPrefab == null)
         {
             Debug.LogError("ChunkBorderPrefab must be assigned in the World inspector.", this);
@@ -4734,9 +4747,6 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         // POOLING: Use ChunkPoolManager
         Vector3 pos = WorldOrigin.VoxelToUnity(chunkCoord.ToVoxelOrigin());
         GameObject borderObject = ChunkPool.GetBorder(chunkBorderPrefab, pos, _chunkBorderParent, chunkCoord);
-
-        // Ensure state matches setting (Pool might return active object, but setting might be off)
-        borderObject.SetActive(ShowChunkBorders);
         _chunkBorders.Add(chunkCoord, borderObject);
     }
 
