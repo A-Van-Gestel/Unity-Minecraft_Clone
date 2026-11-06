@@ -1,7 +1,7 @@
 # Performance Monitor & Logger Overhaul Design
 
-**Version:** 1.18  
-**Date:** 2026-10-18  
+**Version:** 1.19  
+**Date:** 2026-11-06  
 **Status:** In progress — PM-0 ✅ complete (2026-10-03, Master answers in §8); PM-1 ✅ complete (2026-10-03, §7.2;
 confirmed in an IL2CPP Master build); PM-2 ✅ complete (2026-10-04, §7.3; confirmed in an IL2CPP Master build); PM-3 ✅
 complete (2026-10-04, §7.4; confirmed in an IL2CPP Master build); PM-4 ✅ complete (2026-10-05, §7.5; confirmed in an
@@ -495,6 +495,7 @@ Outside `World.Update` (a slot here may contain world work it triggers, e.g. a c
 | `NeighborhoodLightingJob`                                                                                          | Lighting       | ✅                                                                                 |
 | `MeshGenerationJob`, `MeshPostProcessJob`                                                                          | Meshing        | ✅ one record per chain                                                            |
 | `FluidTickJob`                                                                                                     | Fluids         | ✅ one record per chunk                                                            |
+| `GrassTickJob`                                                                                                     | —              | ❌ no record of its own: the behavior tick's grass jobs run inside `TickWaitUs`    |
 | `FluidEmitterScanJob`                                                                                              | FluidSoundScan | ✅ the scanner's own one-record pool                                               |
 | `CloudPatternJob`                                                                                                  | —              | ❌ rare rebuild, completed where it is scheduled, inside `Clouds` / `ViewDistance` |
 | `VoxelVisualizerJob`                                                                                               | —              | ❌ debug visualizer                                                                |
@@ -561,6 +562,9 @@ for f in $(grep -rlE "void (Update|LateUpdate|FixedUpdate)\(\)" Assets/Scripts -
 grep -rln "public JobBusyTimer Timer;" Assets/Scripts
 grep -rnE "struct \w+ : IJob\w*" Assets/Scripts --include=*.cs
 ```
+
+`python Tools/Python/check_perf_coverage_map.py` runs these derivations and fails on a probed slot or job struct
+this section does not name (`--list` prints them).
 
 The counters and their sources are the body of `World.SamplePerfCounters`.
 
@@ -1281,6 +1285,9 @@ Answers 1–4 come from `EngineApiProbe_2026-10-03_13-52-20.log`: a `Windows - P
 
 ## Document History
 
+* **v1.19** - §4.9 coverage map (2026-11-06): `GrassTickJob` (ES-29's Burst grass tick) added to the worker-jobs
+  table as untimed. `Tools/Python/check_perf_coverage_map.py` now runs the section's re-deriving commands and
+  reports a slot or job struct the map does not name; the re-deriving block points at it.
 * **v1.18** - Extension roadmap (2026-10-18): the lighting livelock tripwire built to catch Lighting Bug 23 (now
   `_FIXED_BUGS.md` Lighting #27) stays ungated for now; folding it into the monitor as an opt-in check, or deleting
   it, is listed as a v2 decision.
@@ -1357,5 +1364,5 @@ Answers 1–4 come from `EngineApiProbe_2026-10-03_13-52-20.log`: a `Windows - P
 
 ---
 
-**Last Updated:** 2026-10-10  
+**Last Updated:** 2026-11-06  
 **Next Review:** when PM-5 starts (PM-6 complete 2026-10-06)

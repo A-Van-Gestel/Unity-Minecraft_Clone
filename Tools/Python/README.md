@@ -19,6 +19,7 @@ a Store stub on this machine). Everything is stdlib-only unless `requirements.tx
 | `audit_reserialize_guids.py`  | No Unity YAML/`.meta` file lost a `guid:` reference (pre-commit step 0)         |
 | `check_perf_session_files.py` | Structure of Performance Monitor Capture-tier session and hitch files           |
 | `doc_impact_map.py`           | Changed paths → candidate owning docs from `docs-sync` Step 1 (2 = unparsed)    |
+| `check_perf_coverage_map.py`  | §4.9 coverage map lists every perf slot, per-frame script and timed job struct  |
 
 ## Git helpers (`git add -p` and `rebase -i` are unavailable here)
 
@@ -34,7 +35,8 @@ a Store stub on this machine). Everything is stdlib-only unless `requirements.tx
 the scripts above that the pre-commit flow and the subagents depend on: `fold_into_commit`, `stage_hunks`,
 `audit_reserialize_guids`, `check_american_english`, `align_md_tables`, `check_twin_files`,
 `setup_agent_links`, `session_cost_report` and `wt_link_local`, plus the doc checkers (`check_markdown_breaks`, `check_doc_refs`,
-`check_doc_links`, `check_doc_status`), `doc_impact_map`, `rename_tokens`, `summarize_perf_session`, `run_player`, and `prove_red`'s
+`check_doc_links`, `check_doc_status` and `check_perf_coverage_map`), `doc_impact_map`, `rename_tokens`,
+`summarize_perf_session`, `run_player`, and `prove_red`'s
 argument, restore and batch logic (its Editor half is stubbed). Each test builds its own throwaway directory or git repo
 (worktree linking adds a linked worktree inside that repo) under the system temp directory. Run it after changing one of
 those scripts, and add a test for each behavior you add or fix.
