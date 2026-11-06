@@ -133,6 +133,32 @@ class RunSuiteTests(unittest.TestCase):
             self.assertEqual(budget.suite_wait(), 260)
 
 
+class RecompileTests(unittest.TestCase):
+    """recompile against a stubbed CLI: the HTTP 400 retry."""
+
+    def recompile(self, responses):
+        self.calls = calls = []
+        replies = iter(responses)
+
+        def unity(*args, timeout=600):
+            calls.append(args[0])
+            if args[0] == "recompile":
+                return mock.Mock(stdout=next(replies), stderr="")
+            return mock.Mock(stdout='{"status": "ready"}', stderr="")
+
+        with mock.patch.object(prove_red, "unity", unity), mock.patch.object(prove_red.time, "sleep"):
+            return prove_red.recompile()
+
+    def test_a_400_on_the_first_recompile_is_retried(self):
+        self.assertEqual(self.recompile(["400 Bad Request", '{"errors": 2}']), 2)
+        self.assertEqual(self.calls.count("recompile"), 2)
+
+    def test_retries_stop_at_the_limit(self):
+        with self.assertRaises(RuntimeError):
+            self.recompile(["400 Bad Request"] * (prove_red.RECOMPILE_RETRIES + 1))
+        self.assertEqual(self.calls.count("recompile"), prove_red.RECOMPILE_RETRIES + 1)
+
+
 class EditorStub:
     """Stands in for the Editor: compiles and runs suites against the files on disk, per test."""
 

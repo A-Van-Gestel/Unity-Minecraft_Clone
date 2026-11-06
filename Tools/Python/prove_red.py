@@ -75,6 +75,8 @@ BACKUP_DIR = REPO_ROOT / "Tools" / "Python" / "output" / "prove_red"
 
 JOB_WAIT_SLICE_SECONDS = 90
 STILL_RUNNING_EXIT_CODE = 6
+RECOMPILE_RETRIES = 5
+RECOMPILE_RETRY_DELAY_SECONDS = 3
 CONSOLE_TAIL = 2000  # the Editor console keeps its last 2000 entries
 FAIL_PATTERN = re.compile(r"\[FAIL\]")
 FAILED_BASELINES_PATTERN = re.compile(r"Failed baselines \(")
@@ -112,7 +114,7 @@ def json_payload(text):
 def wait_until_ready(max_polls=300):
     """Polls the Editor until it reports ready (compilation and domain reload finished)."""
     for _ in range(max_polls):
-        status = unity("command", "editor_status", "--result-only", timeout=30)
+        status = unity("command", "editor", "status", "--result-only", timeout=30)
         if '"status": "ready"' in status.stdout:
             return
         time.sleep(1)
@@ -122,6 +124,13 @@ def wait_until_ready(max_polls=300):
 def recompile():
     """Recompiles every assembly; returns the compiler's error count."""
     result = unity("recompile", "--format", "json")
+    for _ in range(RECOMPILE_RETRIES):
+        # The first recompile after a file write is refused (HTTP 400) while auto-refresh imports it.
+        if "400 Bad Request" not in result.stdout + result.stderr:
+            break
+        time.sleep(RECOMPILE_RETRY_DELAY_SECONDS)
+        wait_until_ready()
+        result = unity("recompile", "--format", "json")
     match = re.search(r'"errors":\s*(\d+)', result.stdout)
     wait_until_ready()
     if match is None:
@@ -137,7 +146,7 @@ def tree_status():
 
 def console_entries():
     """Returns the newest console entries as (seq, message) pairs."""
-    result = unity("command", "console", "--level", "all", "--tail", str(CONSOLE_TAIL), "--result-only", timeout=60)
+    result = unity("command", "console", "get", "--level", "all", "--tail", str(CONSOLE_TAIL), "--result-only", timeout=60)
     entries = json_payload(result.stdout).get("entries", [])
     return [(entry.get("seq", 0), entry.get("message", "")) for entry in entries]
 
@@ -148,7 +157,7 @@ def run_suite(menu_path, max_wait_seconds):
     The messages start with DROPPED_MARKER when the first new seq does not follow the last one seen before the run:
     the run's earliest entries fell out of the console tail."""
     before = max((seq for seq, _ in console_entries()), default=0)
-    submitted = unity("command", "menu", "--path", menu_path, "--detach", "--format", "json", timeout=60)
+    submitted = unity("command", "editor", "invoke_menu", "--path", menu_path, "--detach", "--format", "json", timeout=60)
     job_id = re.search(r'"jobId":\s*"([0-9a-f]+)"', submitted.stdout)
     if job_id is None:
         raise RuntimeError(f"the menu item did not start a job:\n{submitted.stdout}{submitted.stderr}")
