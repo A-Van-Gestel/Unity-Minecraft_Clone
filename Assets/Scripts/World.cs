@@ -4303,7 +4303,9 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                 if (globalCols != null && globalCols.Count > 0)
                 {
                     PersistOrphanedSkylightColumns(chunkVoxelPos, globalCols);
-                    Debug.Log($"[LIGHTING RESCUE] Saved {globalCols.Count.ToString()} orphaned skylight columns for chunk {chunkCoord.ToString()}");
+                    // Hundreds per far traversal, each with a stack trace: diagnostic only.
+                    if (settings.enableDiagnosticLogs)
+                        Debug.Log($"[LIGHTING RESCUE] Saved {globalCols.Count.ToString()} orphaned skylight columns for chunk {chunkCoord.ToString()}");
                 }
 
                 worldData.SkylightRecalculationQueue.Remove(chunkVoxelPos);
@@ -4327,12 +4329,12 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                 // the write lands (drained per frame; flushed synchronously at quit).
                 Task<ChunkSaveResult> saveTask = StorageManager.SaveChunkAsync(data, _shutdownTokenSource.Token);
 
-                saveTask.ContinueWith(t =>
-                {
-                    // Failures surface as ChunkSaveResult.Failed and route to the retry registry; a faulted
-                    // task here means SaveChunkAsync itself broke its contract — log loud.
-                    if (t.IsFaulted) Debug.LogError($"[UnloadChunks] Save task faulted for {chunkCoord}: {t.Exception}");
-                });
+                // Failures surface as ChunkSaveResult.Failed and route to the retry registry; a faulted
+                // task here means SaveChunkAsync itself broke its contract — log loud. Static + state: no
+                // closure or delegate per save.
+                saveTask.ContinueWith(
+                    static (t, state) => Debug.LogError($"[UnloadChunks] Save task faulted for {(ChunkCoord)state}: {t.Exception}"),
+                    chunkCoord, TaskContinuationOptions.OnlyOnFaulted);
 
                 // Safe to unmark at fire time: durability responsibility transfers to the save (and, on
                 // failure, its retry registry). The recycled `data` ref must never linger in ModifiedChunks —
