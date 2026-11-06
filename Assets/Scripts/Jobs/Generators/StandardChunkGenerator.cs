@@ -869,11 +869,11 @@ namespace Jobs.Generators
         }
 
         /// <inheritdoc />
-        public IEnumerable<VoxelMod> ExpandStructure(StructureSpawnMarker marker)
+        public void ExpandStructure(StructureSpawnMarker marker, List<VoxelMod> output)
         {
             CompositeStructureTemplate template = _structureTemplateLookup[marker.PoolEntryIndex];
             if (template == null)
-                yield break;
+                return;
 
             Vector3Int rootPos = new Vector3Int(marker.Position.x, marker.Position.y, marker.Position.z);
             Vector3Int cursor = rootPos + template.pivotOffset;
@@ -926,13 +926,13 @@ namespace Jobs.Generators
                     {
                         MetadataSchema schema = _blockTypesJobData[block.blockID].MetadataSchema;
                         byte rotatedMeta = BurstVoxelMetadataUtility.RotateMetaY(schema, block.meta, totalRotationSteps);
-                        yield return new VoxelMod
+                        output.Add(new VoxelMod
                         {
                             GlobalPosition = cursor + RotatePosition(block.localPosition, totalRotationSteps),
                             ID = block.blockID,
                             Rule = block.rule,
                             Meta = rotatedMeta,
-                        };
+                        });
                     }
                 }
                 else if (component.type == StructureComponentType.StackedPart)
@@ -948,13 +948,13 @@ namespace Jobs.Generators
                         {
                             MetadataSchema schema = _blockTypesJobData[block.blockID].MetadataSchema;
                             byte rotatedMeta = BurstVoxelMetadataUtility.RotateMetaY(schema, block.meta, totalRotationSteps);
-                            yield return new VoxelMod
+                            output.Add(new VoxelMod
                             {
                                 GlobalPosition = cursor + offset + RotatePosition(block.localPosition, totalRotationSteps),
                                 ID = block.blockID,
                                 Rule = block.rule,
                                 Meta = rotatedMeta,
-                            };
+                            });
                         }
                     }
 

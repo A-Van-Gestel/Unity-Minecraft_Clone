@@ -152,7 +152,7 @@ namespace Legacy
         }
 
         /// <inheritdoc />
-        public IEnumerable<VoxelMod> ExpandStructure(StructureSpawnMarker marker)
+        public void ExpandStructure(StructureSpawnMarker marker, List<VoxelMod> output)
         {
             Vector3Int position = new Vector3Int(marker.Position.x, marker.Position.y, marker.Position.z);
 
@@ -179,7 +179,8 @@ namespace Legacy
             int maxHeight = _legacyBiomes[strongestBiomeIndex].maxHeight;
 
             // Legacy path: PoolEntryIndex maps directly to flora type (0 = tree, 1 = cactus)
-            return LegacyStructure.GenerateMajorFlora(marker.PoolEntryIndex, position, minHeight, maxHeight);
+            foreach (VoxelMod mod in LegacyStructure.GenerateMajorFlora(marker.PoolEntryIndex, position, minHeight, maxHeight))
+                output.Add(mod);
         }
 
         /// <inheritdoc />

@@ -1,6 +1,6 @@
 # Modular World Generation & World Types
 
-**Version:** 2.8  
+**Version:** 2.9  
 **Date:** 2026-04-03  
 **Status:** Implemented (2026-05-14)  
 **Target:** Unity 6.4 (Mono for dev; IL2CPP for production)  
@@ -27,6 +27,12 @@ and §6.3** were re-derived from code — `World.cs`, `WorldJobManager.cs`,
 ---
 
 ## Document History
+
+### v2.9 (from v2.8) — List-filling structure expansion
+
+- **§2.2, §5.1:** `IChunkGenerator.ExpandStructure(StructureSpawnMarker, List<VoxelMod> output)` appends to a
+  caller-owned list instead of returning an iterator (2026-11-06, `ES-9`); `WorldJobManager` reuses one list for
+  every marker.
 
 ### v2.8 (from v2.7) — Job timing parameter
 
@@ -232,9 +238,9 @@ namespace Jobs.Generators
         /// Expands a structure spawn marker (queued by the generation job) into a full set of VoxelMods
         /// (trunk + leaves, cactus body, etc.). Called on the main thread during
         /// WorldJobManager.ProcessGenerationJobs(). Each generator owns its own structure templates and
-        /// random strategy.
+        /// random strategy. Appends to output; the caller owns and clears it.
         /// </summary>
-        IEnumerable<VoxelMod> ExpandStructure(StructureSpawnMarker marker);
+        void ExpandStructure(StructureSpawnMarker marker, List<VoxelMod> output);
 
         /// <summary>
         /// Resolves the biome at a voxel-space column on the main thread, through the same
@@ -895,9 +901,10 @@ There are two drain arms, both terminating in the same call:
   `StructureSpawnMarker` values written by the job, so they are dequeued and passed straight through.
 
 ```csharp
-IEnumerable<VoxelMod> structureMods = _chunkGenerator.ExpandStructure(marker);
+_structureMods.Clear();
+_chunkGenerator.ExpandStructure(marker, _structureMods);
 
-foreach (VoxelMod sm in structureMods)
+foreach (VoxelMod sm in _structureMods)
 {
     VoxelMod worldGenMod = sm;
     worldGenMod.Source = VoxelModSource.WorldGen;
@@ -915,9 +922,10 @@ Two properties of that loop are load-bearing:
   drain breaks, marks the job not fully processed, and leaves the remaining markers queued for a
   later frame. A single chunk full of large structures therefore cannot monopolise a frame.
 
-The interface method is `IEnumerable<VoxelMod> ExpandStructure(StructureSpawnMarker marker)`
-(`Assets/Scripts/Jobs/Generators/IChunkGenerator.cs:93`), implemented by both
-`StandardChunkGenerator` and `LegacyChunkGenerator`.
+The interface method is `void ExpandStructure(StructureSpawnMarker marker, List<VoxelMod> output)`
+(`Assets/Scripts/Jobs/Generators/IChunkGenerator.cs:97`), implemented by both
+`StandardChunkGenerator` and `LegacyChunkGenerator`. It appends to a list the caller owns, so the drain
+reuses one `_structureMods` list for every marker and expansion allocates no iterator.
 
 > **Scope of the strategy seam:** `ScheduleMeshing()`, `ScheduleLightingUpdate()`,
 > `ProcessMeshJobs()`, and `ProcessLightingJobs()` are world-type-agnostic — they operate on

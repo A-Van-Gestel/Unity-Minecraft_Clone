@@ -87,9 +87,12 @@ namespace UnityCli
                 }
 
                 int applied = 0;
+                List<VoxelMod> mods = new List<VoxelMod>();
                 foreach (StructureSpawnMarker marker in markers)
                 {
-                    foreach (VoxelMod mod in runner.ExpandStructure(marker))
+                    mods.Clear();
+                    runner.ExpandStructure(marker, mods);
+                    foreach (VoxelMod mod in mods)
                     {
                         if (TryApply(db.blockTypes, maps, mod)) applied++;
                     }

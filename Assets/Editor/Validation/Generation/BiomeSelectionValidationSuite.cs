@@ -9,6 +9,7 @@ using Editor.DataGeneration;
 using Editor.WorldTools.Libraries;
 using Editor.Dev;
 using Editor.Validation.Framework;
+using Jobs.Data;
 using Jobs.Generators;
 using Jobs.Helpers;
 using Libraries;
@@ -94,6 +95,8 @@ namespace Editor.Validation.Generation
                 new Scenario("B16 cell offsets agree with their own recorded distance", B16_OffsetDistanceIdentity),
                 new Scenario("B17 stepping along a reported bearing closes the distance to that biome",
                     B17_BearingPointsAtTheBiome),
+                new Scenario("B18 structure expansion is bit-identical to the golden", B18_StructureExpansionGolden),
+                new Scenario("B19 structure expansion into a warm list allocates nothing", B19_StructureExpansionAllocatesNothing),
             };
             return ValidationSuiteRunner.Execute("Biome Selection", scenarios, KnownBugChannel.Bug, logToConsole, showProgress);
         }
@@ -358,12 +361,80 @@ namespace Editor.Validation.Generation
         /// </remarks>
         private static bool B13_BlendedHeightGolden()
         {
-            string path = TerrainHeightGoldenCapture.GoldenFilePath;
+            return MatchesGolden("B13", "blended-height", TerrainHeightGoldenCapture.GoldenFilePath, static sb =>
+            {
+                FastNoiseLite.InitializeLookupTables();
+                return TerrainHeightGoldenCapture.Emit(sb);
+            });
+        }
+
+        /// <summary>
+        /// Pins <c>ExpandStructure</c>'s output — position, ID, meta and rule of every mod, in emission order — for the
+        /// markers of a fixed chunk block, near and at ±2²⁴. No other suite reaches structure expansion.
+        /// <para><b>Prove-red:</b> skip <c>RotateMetaY</c> in the static-part branch.</para>
+        /// </summary>
+        private static bool B18_StructureExpansionGolden()
+        {
+            return MatchesGolden("B18", "structure-expansion", StructureExpansionGoldenCapture.GoldenFilePath,
+                StructureExpansionGoldenCapture.Emit);
+        }
+
+        /// <summary>
+        /// Expands every golden marker of the first seed into one reused list: once the list has grown, expansion
+        /// must record no managed allocation (the main-thread generation pass runs it per marker).
+        /// <para><b>Prove-red:</b> allocate a <c>List</c> per call inside <c>ExpandStructure</c>.</para>
+        /// </summary>
+        private static bool B19_StructureExpansionAllocatesNothing()
+        {
+            bool passed = true;
+            int control = GcAllocProbe.Count(static () => GC.KeepAlive(new List<VoxelMod>(16)));
+            if (!GcAllocProbe.IsLive("B19", "a new list", control, ref passed)) return passed;
+
+            EditorChunkPipelineRunner runner = StructureExpansionGoldenCapture.CreateRunner(StructureExpansionGoldenCapture.Seeds[0]);
+            try
+            {
+                List<StructureSpawnMarker> markers = StructureExpansionGoldenCapture.CollectMarkers(runner);
+                if (markers.Count == 0) return Expect(false, "B19: the chunk block produced no structure markers.");
+
+                List<VoxelMod> mods = new List<VoxelMod>();
+                Action expandAll = () =>
+                {
+                    foreach (StructureSpawnMarker marker in markers)
+                    {
+                        mods.Clear();
+                        runner.ExpandStructure(marker, mods);
+                    }
+                };
+
+                expandAll();
+                int allocations = GcAllocProbe.Count(expandAll);
+                passed &= Expect(allocations == 0,
+                    $"B19: expanding {markers.Count} markers into a warm list recorded {allocations} GC.Alloc samples (expected 0)");
+            }
+            finally
+            {
+                runner.Dispose();
+            }
+
+            return passed;
+        }
+
+        /// <summary>
+        /// Re-emits a golden table with the capture's own emitter and compares it row by row, text for text: the
+        /// assertion is bit-identity, and a missing golden fails rather than re-capturing.
+        /// </summary>
+        /// <param name="id">Scenario id for the log line.</param>
+        /// <param name="label">What the rows hold, for the messages.</param>
+        /// <param name="path">The committed golden table.</param>
+        /// <param name="emit">The capture's emitter; returns the rows it wrote.</param>
+        /// <returns>True when every row matches.</returns>
+        private static bool MatchesGolden(string id, string label, string path, Func<StringBuilder, int> emit)
+        {
             if (!File.Exists(path))
             {
                 return Expect(false,
-                    $"Terrain height golden missing at {path}. It is committed with the suite — restore it " +
-                    "from git rather than re-capturing, which would re-bless current behavior.");
+                    $"{id}: golden missing at {path}. It is committed with the suite — restore it from git rather " +
+                    "than re-capturing, which would re-bless current behavior.");
             }
 
             List<string> expected = new List<string>();
@@ -373,13 +444,11 @@ namespace Editor.Validation.Generation
                 expected.Add(line);
             }
 
-            if (expected.Count == 0) return Expect(false, "Terrain height golden has no data rows.");
-
-            FastNoiseLite.InitializeLookupTables();
+            if (expected.Count == 0) return Expect(false, $"{id}: the {label} golden has no data rows.");
 
             StringBuilder sb = new StringBuilder();
-            int rows = TerrainHeightGoldenCapture.Emit(sb);
-            if (rows <= 0) return Expect(false, "Height capture produced no rows.");
+            int rows = emit(sb);
+            if (rows <= 0) return Expect(false, $"{id}: the {label} capture produced no rows.");
 
             List<string> actual = new List<string>();
             foreach (string line in sb.ToString().Split('\n'))
@@ -392,8 +461,8 @@ namespace Editor.Validation.Generation
             if (actual.Count != expected.Count)
             {
                 return Expect(false,
-                    $"Height row count changed: golden has {expected.Count}, capture produced {actual.Count}. " +
-                    "The sampled column set moved, so the comparison would be meaningless.");
+                    $"{id}: {label} row count changed: golden has {expected.Count}, capture produced {actual.Count}. " +
+                    "The sampled set moved, so the comparison would be meaningless.");
             }
 
             int mismatches = 0;
@@ -408,11 +477,10 @@ namespace Editor.Validation.Generation
 
             if (mismatches > 0)
             {
-                return Expect(false,
-                    $"{mismatches} of {expected.Count} blended-height rows changed. First: {firstMismatch}");
+                return Expect(false, $"{id}: {mismatches} of {expected.Count} {label} rows changed. First: {firstMismatch}");
             }
 
-            Debug.Log($"  B13: {expected.Count} blended-height rows bit-identical to the golden.");
+            Debug.Log($"  {id}: {expected.Count} {label} rows bit-identical to the golden.");
             return true;
         }
 

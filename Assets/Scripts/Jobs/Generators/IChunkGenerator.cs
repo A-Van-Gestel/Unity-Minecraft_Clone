@@ -93,8 +93,8 @@ namespace Jobs.Generators
         /// </summary>
         /// <param name="marker">The spawn marker as queued by the generation job.
         /// Contains the global position and the pool entry index.</param>
-        /// <returns>An enumerable of VoxelMods representing the full structure.</returns>
-        IEnumerable<VoxelMod> ExpandStructure(StructureSpawnMarker marker);
+        /// <param name="output">Receives the structure's VoxelMods, appended; the caller owns and clears it.</param>
+        void ExpandStructure(StructureSpawnMarker marker, List<VoxelMod> output);
 
         /// <summary>
         /// Resolves the biome at a column on the main thread, through the same selection the

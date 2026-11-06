@@ -122,10 +122,10 @@ namespace Editor.WorldTools.Libraries
         /// Must be called on the main thread after generation completes.
         /// </summary>
         /// <param name="marker">The spawn marker emitted during generation.</param>
-        /// <returns>An enumerable of voxel modifications representing the full structure.</returns>
-        public IEnumerable<VoxelMod> ExpandStructure(StructureSpawnMarker marker)
+        /// <param name="output">Receives the structure's voxel modifications, appended; the caller owns and clears it.</param>
+        public void ExpandStructure(StructureSpawnMarker marker, List<VoxelMod> output)
         {
-            return _generator.ExpandStructure(marker);
+            _generator.ExpandStructure(marker, output);
         }
 
         /// <summary>

@@ -429,6 +429,9 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     private readonly List<ChunkCoord> _completedMeshJobs = new List<ChunkCoord>();
     private readonly List<ChunkCoord> _completedLightJobs = new List<ChunkCoord>();
 
+    // One structure's mods at a time, refilled per marker: expansion allocates nothing once it has grown.
+    private readonly List<VoxelMod> _structureMods = new List<VoxelMod>();
+
     // P-4 §3.4 fairness: the budgeted passes iterate a key snapshot from a rotating start index
     // instead of raw Dictionary order. Dictionary free-slot reuse places NEW jobs at early entry
     // indices, so a plain foreach + budget break under sustained window expiry would serve fresh
@@ -1344,9 +1347,10 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                         Position = new int3(mod.GlobalPosition.x, mod.GlobalPosition.y, mod.GlobalPosition.z),
                         PoolEntryIndex = mod.ID,
                     };
-                    IEnumerable<VoxelMod> floraMods = _chunkGenerator.ExpandStructure(marker);
+                    _structureMods.Clear();
+                    _chunkGenerator.ExpandStructure(marker, _structureMods);
 
-                    foreach (VoxelMod fm in floraMods)
+                    foreach (VoxelMod fm in _structureMods)
                     {
                         // World-generation expansion: resolve the Default replacement rule against the broad
                         // worldGenCanReplaceTags (not the player placement mask).
@@ -1371,9 +1375,10 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                 {
                     while (jobEntry.Value.StructureSpawns.TryDequeue(out StructureSpawnMarker marker))
                     {
-                        IEnumerable<VoxelMod> structureMods = _chunkGenerator.ExpandStructure(marker);
+                        _structureMods.Clear();
+                        _chunkGenerator.ExpandStructure(marker, _structureMods);
 
-                        foreach (VoxelMod sm in structureMods)
+                        foreach (VoxelMod sm in _structureMods)
                         {
                             // World-generation expansion: resolve the Default replacement rule against the broad
                             // worldGenCanReplaceTags (not the player placement mask).

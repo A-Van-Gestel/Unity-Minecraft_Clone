@@ -162,9 +162,12 @@ namespace Editor.WorldTools
             _statusText = $"Expanding {_pendingMarkers.Count} structures...";
             Repaint();
 
+            List<VoxelMod> mods = new List<VoxelMod>();
             foreach (StructureSpawnMarker marker in _pendingMarkers)
             {
-                foreach (VoxelMod mod in _pipelineRunner.ExpandStructure(marker))
+                mods.Clear();
+                _pipelineRunner.ExpandStructure(marker, mods);
+                foreach (VoxelMod mod in mods)
                 {
                     ApplyVoxelModToMap(mod);
                 }
