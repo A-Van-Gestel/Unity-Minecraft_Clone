@@ -30,10 +30,10 @@ machine path into any file.
 
 ## Procedure
 
-1. **State check.** `unity command editor_status --result-only`: in Play mode → STOP and report;
+1. **State check.** `unity command editor status --result-only`: in Play mode → STOP and report;
    unreachable → wait ~5 s, retry once, then STOP. Record `git status --short` (your cleanup must
    leave it exactly like this).
-2. **Record the active build profile** with `unity command eval` (player-capture §1). Note the
+2. **Record the active build profile** with `unity command script eval` (player-capture §1). Note the
    exact asset path, including its case, or that it was null. Record `PlayerSettings.bundleVersion` too.
 3. **Build** with `unity command build --profileName … --outputPath "$OUT" --confirm true --result-only`
    (add `--options '["Development"]'` for a Development build), where `$OUT` is absolute:
@@ -54,7 +54,7 @@ machine path into any file.
    report it. If `ProjectSettings/ProjectSettings.asset` changed (the build stamps the date into
    `bundleVersion`), leave it and report it — the parent commits it — unless the delegation prompt asks to restore
    it. Then set it back in the Editor, not with `git restore` alone: the stamp also lives in the Editor's memory, and
-   the next asset save writes it back. `unity command eval 'PlayerSettings.bundleVersion = "<step-2 value>";
+   the next asset save writes it back. `unity command script eval 'PlayerSettings.bundleVersion = "<step-2 value>";
    AssetDatabase.SaveAssets(); return PlayerSettings.bundleVersion;'` restores both. Then compare `git status --short` with step 1
    and report any other difference without touching it.
 

@@ -1,8 +1,8 @@
 // Play-mode world rig for the Unity CLI: list saves, launch a world, drive it, and capture frames.
 //
-// RUN     unity command run_script --file Tools/UnityCli/PlayMode/WorldRig.cs \
+// RUN     unity command script run --file Tools/UnityCli/PlayMode/WorldRig.cs \
 //             --entry UnityCli.WorldRig.<Entry> --args '<json array>' --result-only
-//         Every argument is required (run_script applies no C# defaults). Compiled in memory on each
+//         Every argument is required (script run applies no C# defaults). Compiled in memory on each
 //         call, never imported by Unity.
 // NEEDS   Saves works in edit mode. Launch needs Play mode on the MainMenu scene; everything else
 //         needs a loaded World scene. Entering Play mode is the user's call.
@@ -18,7 +18,7 @@ using Object = UnityEngine.Object;
 
 namespace UnityCli
 {
-    /// <summary>Entry points for driving a live world from the shell through <c>run_script</c>.</summary>
+    /// <summary>Entry points for driving a live world from the shell through <c>script run</c>.</summary>
     public static class WorldRig
     {
         private const string WORLD_SCENE = "Scenes/World";

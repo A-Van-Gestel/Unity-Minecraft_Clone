@@ -1,6 +1,6 @@
 <objective>
 Profiler analysis from the shell. All queries live in one repo script,
-`Tools/UnityCli/Profiler/ProfilerQueries.cs`, compiled in memory by `run_script` on each call (no
+`Tools/UnityCli/Profiler/ProfilerQueries.cs`, compiled in memory by `script run` on each call (no
 domain reload, never imported by Unity). Works on frames recorded live in play mode **or** loaded
 from a saved `.data` capture. Recording control (arm, auto-stop, save) lives in a second script,
 `Tools/UnityCli/Profiler/ProfilerCapture.cs`, because it changes the Profiler's state.
@@ -9,7 +9,7 @@ from a saved `.data` capture. Recording control (arm, auto-stop, save) lives in 
 <calling>
 
 ```bash
-unity command run_script --file Tools/UnityCli/Profiler/ProfilerQueries.cs \
+unity command script run --file Tools/UnityCli/Profiler/ProfilerQueries.cs \
     --entry UnityCli.ProfilerQueries.<Entry> --args '<json array>' --result-only
 ```
 
@@ -46,7 +46,7 @@ report — is the `perf-benchmark` skill's `references/player-capture.md`):
    Development build.
 2. `ArmAutoStop` with the phase marker (e.g. `Benchmark.Generation.200mps`) — before or after entering Play mode.
 3. Start the run **muted** — a player with `-mc-mute` (`perf-benchmark` "Unattended runs"), Play mode with
-   `unity command eval "Launch.LaunchSession.MuteForSession(); return 0;"` once playing — and keep a background shell loop polling (`until … grep -q SAVED; do sleep 5; done`). The poll
+   `unity command script eval "Launch.LaunchSession.MuteForSession(); return 0;"` once playing — and keep a background shell loop polling (`until … grep -q SAVED; do sleep 5; done`). The poll
    does not stop the capture — the hook does, within a few frames, because a player rendering hundreds of fps
    after the phase overruns the 2000-frame buffer between two 5 s polls. Entering Play mode reloads the domain and
    drops the hook; the next `Poll` reinstalls it, so the loop must be running.
@@ -81,7 +81,7 @@ Editor Play mode the same threads record as `Scripting Threads / Thread Pool Wor
 5. Job threads: `Threads` on that frame, then `FrameSelfTime` with the worker's index.
 6. `Clear` if you loaded a capture.
 
-**Bottom-up and cross-thread questions** have no entry. Write a short `eval` against the same API
+**Bottom-up and cross-thread questions** have no entry. Write a short `script eval` against the same API
 (`UnityEditorInternal.ProfilerDriver.GetHierarchyFrameDataView`, `HierarchyFrameDataView` with
 `columnSelfTime` / `columnGcMemory`, `GetItemChildren`, `GetItemPath`), or add an entry point to
 `ProfilerQueries.cs`. Always `Dispose()` the view (use `using`).
@@ -90,7 +90,7 @@ Editor Play mode the same threads record as `Scripting Threads / Thread Pool Wor
 
 <pitfalls>
 
-- **`eval` formats numbers with the Editor's locale** (a decimal comma here). Format with
+- **`script eval` formats numbers with the Editor's locale** (a decimal comma here). Format with
   `CultureInfo.InvariantCulture` when numbers are compared or parsed.
 - **Frame 0 is startup**; skip it for steady-state analysis.
 - `HierarchyFrameDataView.GetItemCallsCount()` does not exist; read `columnCalls`.

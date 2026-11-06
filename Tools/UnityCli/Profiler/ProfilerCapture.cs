@@ -1,11 +1,11 @@
 // Profiler capture control for agents, run through the Unity CLI against a live Editor:
 //
-//   unity command run_script --file Tools/UnityCli/Profiler/ProfilerCapture.cs \
+//   unity command script run --file Tools/UnityCli/Profiler/ProfilerCapture.cs \
 //       --entry UnityCli.ProfilerCapture.<Method> --args '[...]' --result-only
 //
 // Unlike ProfilerQueries.cs (read-only), these entries change the Profiler's state: they clear frames, switch on
 // recording and GC.Alloc call stacks, and stop + save. Lives outside Assets/ for the same reasons as ProfilerQueries.cs.
-// run_script compiles a fresh assembly per call, so state between calls is kept in SessionState.
+// script run compiles a fresh assembly per call, so state between calls is kept in SessionState.
 
 using System;
 using System.Collections.Generic;
@@ -42,7 +42,7 @@ namespace UnityCli
         private const string KEY_HAS_PREVIOUS_MODE = "UnityCli.ProfilerCapture.HasPreviousMode";
         private const string KEY_PREVIOUS_MODE = "UnityCli.ProfilerCapture.PreviousMode";
 
-        // Each run_script call compiles a new assembly, so this token belongs to the call that registered the hook;
+        // Each script run call compiles a new assembly, so this token belongs to the call that registered the hook;
         // the hook removes itself once SessionState names a different one.
         private static string s_token;
 

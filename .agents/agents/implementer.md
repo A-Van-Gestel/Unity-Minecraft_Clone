@@ -62,7 +62,7 @@ prompt names, never `/tmp` or the repo (`TMPDIR` is unset on this machine).
 
 ## Procedure
 
-1. **State check.** `unity command editor_status --result-only`. Play mode → STOP and report
+1. **State check.** `unity command editor status --result-only`. Play mode → STOP and report
    "editor is in Play mode". Unreachable (exit 7 / network error) → wait ~5 s, retry once, then STOP.
    `ls Tools/Python/output/prove_red/` lists any `.bak` → STOP and report the list (a killed earlier
    prove-red; only the parent restores or deletes backups).
@@ -71,14 +71,14 @@ prompt names, never `/tmp` or the repo (`TMPDIR` is unset on this machine).
    `.agents/skills/validation-driven-bugfix/references/proving-baselines.md`.
 3. **Compile.** `unity recompile --format json` — never `dotnet build` alone, which cannot see a new
    `.cs` file. Exit 6 → fix your own errors and recompile. Then wait for the reload:
-   `until unity command editor_status --result-only | grep -q '"status": "ready"'; do sleep 1; done`.
+   `until unity command editor status --result-only | grep -q '"status": "ready"'; do sleep 1; done`.
 4. **Lint.** `mcp__rider__lint_files` on your changed `.cs` files: clean in every line you touched;
    findings on untouched lines are pre-existing — list, never fix. Tool missing or failing →
    "Rider: not run".
 5. **Suite.** Run the step's suite as the preloaded `run-validation-suite` skill says:
-   `unity command menu --path "<menu path>" --detach --format json`, then
+   `unity command editor invoke_menu --path "<menu path>" --detach --format json`, then
    `unity job wait <jobId> --timeout 90` as separate calls until it returns. Read the console with
-   `unity command console --tail <n> --result-only`, raising `<n>` until the summary line is inside
+   `unity command console get --tail <n> --result-only`, raising `<n>` until the summary line is inside
    the window, and save that dump to `<scratchpad>/suite_<n>.txt`. Green before you go on, and the
    new scenario's own `[PASS]` line must be there — a green suite without it ran nothing new.
 6. **Prove every new or changed scenario red**: `python -u Tools/Python/prove_red.py --file <src>

@@ -151,7 +151,7 @@ def category(name, tool_input):
                       r"|checkout|reset|rebase|apply|restore|range-diff)\b", command)
                 or re.search(r"(fold_into_commit|stage_hunks|audit_reserialize_guids)\.py", command)):
             return "git"
-        if re.search(r"unity (recompile|command editor_status)|until unity|dotnet build", command):
+        if re.search(r"unity (recompile|command editor status)|until unity|dotnet build", command):
             return "compile/wait"
         if "Validate" in command:
             return "validation"

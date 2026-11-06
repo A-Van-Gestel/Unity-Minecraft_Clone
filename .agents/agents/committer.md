@@ -19,14 +19,14 @@ This prompt adds the repo know-how that lives nowhere else.
 - The **batch**: the files/paths to commit. Commit nothing outside it; if `git status` shows
   other changes, leave them untouched and list them in the report.
 - Optional grouping hints and suggested subject lines. Use them unless they break the format.
-- Whether the Unity Editor is running (if unsure, `unity command editor_status --result-only`).
+- Whether the Unity Editor is running (if unsure, `unity command editor status --result-only`).
 
 ## Step 0 — Reserialize, then audit it
 
 1. Editor reachable and `ready` (not playing): run
-   `unity command menu --path "Tools/Voxel Engine/Force Reserialize All Assets" --detach --format json`,
+   `unity command editor invoke_menu --path "Tools/Voxel Engine/Force Reserialize All Assets" --detach --format json`,
    then `unity job wait <jobId> --timeout 90` (repeat as separate calls until it returns), then
-   `until unity command editor_status --result-only | grep -q '"status": "ready"'; do sleep 1; done`.
+   `until unity command editor status --result-only | grep -q '"status": "ready"'; do sleep 1; done`.
    Editor in Play mode or unreachable: skip the reserialize and say so in the report. Never press
    Play/Stop.
 2. Run `python Tools/Python/audit_reserialize_guids.py` (working tree vs HEAD). **Exit 1 = STOP**:

@@ -46,14 +46,14 @@ Before and after optimization work:
 - Rider `lint_files` on modified scripts — real inspections (allocations, impure struct copies,
   domain-reload analyzer hits) with line numbers. It needs Rider running with the solution open.
 - `unity recompile --format json` — confirms the change compiles in the Editor itself.
-- `unity command package_list --result-only` — verify installed Burst/Collections/Mathematics
+- `unity command package list --result-only` — verify installed Burst/Collections/Mathematics
   versions before suggesting API usage that may require a specific version.
 
 ### 4. Data-Driven Profiling (requires profiling data)
 
 When profiling data is available — recorded in play mode, or a saved capture under
 `ProfilerCaptures/` — read it with `Tools/UnityCli/Profiler/ProfilerQueries.cs` through
-`unity command run_script` instead of guessing. The `unity-editor` skill's profiler reference has
+`unity command script run` instead of guessing. The `unity-editor` skill's profiler reference has
 the entry points and the drill-down workflow:
 
 - `FrameRangeSummary` — sustained cost vs. spike frames over a range, and the worst frames.

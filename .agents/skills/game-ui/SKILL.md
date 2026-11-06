@@ -41,7 +41,7 @@ assuming no contract exists.
 
 ## Step 1 — Inspect the live state first
 
-Query what exists (`get_scene_hierarchy`, `find_gameobjects`, `get_serialized_fields` — see
+Query what exists (`scene get_hierarchy`, `gameobject find`, `component get_fields` — see
 `unity-editor`) before changing anything, and search `Assets/Prefabs/UI/` for an existing component
 prefab (`Button`, `Dropdown`, `Toggle`, sliders, input fields, headings) before building one.
 
@@ -127,7 +127,7 @@ its own band.
    Revert only the unwanted hunks (reverse-apply them with `git apply -R`, checked first with
    `--check`), never the whole file, which would also discard the intended edit and theirs. Report
    churn you cannot separate cleanly rather than guessing.
-3. **Look at it:** `capture_game_view` (`unity-editor`). Band UI is game-camera-only, so the Scene view
+3. **Look at it:** `capture game_view` (`unity-editor`). Band UI is game-camera-only, so the Scene view
    never shows it. Play mode needs the user's go-ahead.
 4. **Suites** (via `run-validation-suite`) when the change touches bands, canvases, raycasters or the
    blur: `Minecraft Clone/Dev/Validate UI Band Layers`, and `Validate UI Blur Render` for backdrop work.

@@ -1,6 +1,6 @@
 # Unity CLI Editor Bridge
 
-**Version:** 1.6  
+**Version:** 1.7  
 **Date:** 2026-09-27  
 **Status:** Implemented (Stable)  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production) — agent tooling, Editor only
@@ -43,7 +43,7 @@ The `UC-*` IDs were issued by the design this document was promoted from
 | ID       | What                                                                     | Status        | Now covered by      |
 |----------|--------------------------------------------------------------------------|---------------|---------------------|
 | **UC-0** | Trial: CLI + Pipeline package beside the old bridge                      | ✅ 2026-09-27 | §1, §2              |
-| **UC-1** | Profiler queries as a repo-owned `run_script` file                       | ✅ 2026-09-27 | §6                  |
+| **UC-1** | Profiler queries as a repo-owned `script run` file                       | ✅ 2026-09-27 | §6                  |
 | **UC-2** | Agent docs: `unity-editor` skill, `CLAUDE.md`/`AGENTS.md`, config, sweep | ✅ 2026-09-27 | §1, §3              |
 | **UC-3** | Cutover: verified backup, old package removed, footprint measured        | ✅ 2026-09-27 | §7, §9              |
 | **UC-4** | `unity mcp` evaluation + trimmed-old-bridge hybrid                       | ✅ 2026-09-27 | §10 (both rejected) |
@@ -78,18 +78,18 @@ Commands are self-describing: `unity command --query <term> --detail full --form
 each command's JSON schema from the live Editor, so no parameter list is transcribed anywhere.
 
 **Arguments** are `--name value`. A command parameter named `format` collides with the global
-`--format` flag and is rejected before it reaches the Editor. `eval` takes its code positionally.
+`--format` flag and is rejected before it reaches the Editor. `script eval` takes its code positionally.
 
 **Output.** `--result-only` returns the payload; `--format json` returns an envelope with
 `success` and `errors[].code`. Exit codes: `0` success, `2` bad arguments, `6` the operation
 failed; per the CLI's release notes, `7` when no Editor responds.
 
 **Project path.** Without it, every call scans for running Editors, which dominates latency (a
-trivial `eval` measured ~2.2 s cold without a path vs ~0.36 s with one). `UNITY_PROJECT_PATH=.`
+trivial `script eval` measured ~2.2 s cold without a path vs ~0.36 s with one). `UNITY_PROJECT_PATH=.`
 in the agent environment removes the scan whenever the shell sits at the repo root; from any
 other directory the CLI fails with *"Not a Unity project"* rather than guessing.
 
-**`eval`** compiles its code as a method body against the loaded assemblies:
+**`script eval`** compiles its code as a method body against the loaded assemblies:
 
 - Reflection and `System.IO` are available.
 - **`using` directives are rejected** (they parse as `using` statements); write names fully
@@ -98,12 +98,12 @@ other directory the CLI fails with *"Not a Unity project"* rather than guessing.
 - Numbers format with the Editor's culture (`1,5` under `nl-BE`).
 - The default timeout is 30 s (`--timeout` raises it).
 
-**`run_script`** compiles a `.cs` file in memory (no import, no domain reload), from any path, and
+**`script run`** compiles a `.cs` file in memory (no import, no domain reload), from any path, and
 calls a named static entry point with a JSON `args` array converted to its parameter types. **C#
 default parameter values are not applied** — every argument must be passed.
 
-**Console.** `console` returns entries plus a `cursor` and `session`; passing them back as
-`--since` / `--since_session` reads only new entries.
+**Console.** `console get` returns entries plus a `cursor` and `session`; passing them back as
+`--since` / `--since-session` reads only new entries.
 
 ---
 
@@ -114,13 +114,13 @@ file created moments earlier, and returns Unity's own errors with file and line:
 `6` on compile errors.
 
 **It returns when compilation ends, before the domain reload that loads the result.** A command
-sent straight after it fails with a network error; once `editor_status` reports
+sent straight after it fails with a network error; once `editor status` reports
 `"status": "ready"`, the new code is live (a changed constant read back its new value). The gate
 is therefore:
 
 ```bash
 unity recompile --format json && \
-until unity command editor_status --result-only | grep -q '"status": "ready"'; do sleep 1; done
+until unity command editor status --result-only | grep -q '"status": "ready"'; do sleep 1; done
 ```
 
 Without a running Editor, `dotnet build` of the two project assemblies is the fallback; it cannot
@@ -129,7 +129,7 @@ see a new `.cs` file until Unity regenerates the `.csproj` (see `CLAUDE.md`'s Ex
 **Play mode holds the gate.** `Assets/Editor/ProjectUtilities/PlayModeReloadGuard.cs` locks assembly reloads from
 entering Play mode until exiting it, because the engine's runtime state does not survive a Play-mode reload. Unity then
 defers the compile too: with a source change pending, `unity recompile` prints nothing and blocks until Play mode stops,
-and `editor_status` reports `compiling` throughout. With no change pending it returns `up_to_date` at once.
+and `editor status` reports `compiling` throughout. With no change pending it returns `up_to_date` at once.
 
 ---
 
@@ -158,19 +158,19 @@ and `editor_status` reports `compiling` throughout. With no change pending it re
 
 ## 5. Captures
 
-`capture_scene_view` / `capture_game_view` can save a PNG. Their paths are confined to the
-**authoring root, `Assets`**: a path such as `Temp/x.png` resolves to `Assets/Temp/x.png` and gets
-imported with a `.meta`, and `set_authoring_root` accepts only folders under `Assets/`. Unity
-skips folders ending in `~`, so **`Assets/AgentCaptures~/`** receives captures without an import
-or a `.meta`, and `.gitignore` excludes it. `width`/`height` size a saved file; `max_resolution`
-applies only to an image returned inline.
+`capture scene_view` / `capture game_view` / `capture editor_window` save a PNG to `--output-path`.
+A relative path resolves from the **project root** and an absolute one is accepted, so a capture
+always names the full **`Assets/AgentCaptures~/<name>.png`**: Unity skips folders ending in `~`, so it
+gets no import or `.meta`, and `.gitignore` excludes it. Any other folder under `Assets/` is imported.
+`width`/`height` size a saved file; `max-resolution` applies only to an image returned inline.
+`capture screenshot` is deprecated in favor of the two view captures.
 
 ---
 
 ## 6. Profiler analysis
 
 `Tools/UnityCli/Profiler/ProfilerQueries.cs` sits outside `Assets/`, so neither Unity nor
-`dotnet build` compiles it; `run_script` compiles it per call. Entry points (`UnityCli.
+`dotnet build` compiles it; `script run` compiles it per call. Entry points (`UnityCli.
 ProfilerQueries.*`): `Status`, `Load` (a saved `.data` capture), `Clear`, `Threads`,
 `FrameRangeSummary`, `OverallGc`, `GcCallstacks`, `FrameTopTime`, `FrameSelfTime`. They read
 `UnityEditorInternal.ProfilerDriver` frames through `HierarchyFrameDataView` (`GcCallstacks` reads
@@ -183,7 +183,7 @@ records; `ArmAutoStop` adds an `EditorApplication.update` hook that stops and sa
 frames after a phase marker's last frame; `Poll` reports progress; `Disarm` abandons a capture;
 `ConnectToPlayer` points the Profiler at a running development player by its discovered identifier. The stop
 runs in the Editor, not in a shell poll, because a player rendering hundreds of fps fills the Profiler's
-2000-frame buffer faster than a shell can poll. The hook lives in a `run_script` assembly, so a domain
+2000-frame buffer faster than a shell can poll. The hook lives in a `script run` assembly, so a domain
 reload (entering Play mode) drops it: its parameters and a heartbeat sit in `SessionState`, and `Poll`
 reinstalls it once the heartbeat goes stale. Clearing frames restarts the frame indices at 0, which the
 scan detects and restarts from. The save (or `Disarm`) restores the call-stack mode in force before the
@@ -231,7 +231,7 @@ a Release build, and the IL2CPP linker strips them. **Measured on the RC 94 IL2C
 - **The Development-build size delta was not measured.** Development players carry
   `Unity.Pipeline` and the Roslyn plugins by design.
 - **No Unity-aware lint.** Script inspections come from Rider (`lint_files`), not the Editor.
-- **`eval` has no Undo group of its own.** Undoable edits open one with
+- **`script eval` has no Undo group of its own.** Undoable edits open one with
   `Undo.IncrementCurrentGroup()` + `SetCurrentGroupName`, or use the `gameobjects` setters, which
   are single Undo steps.
 - **The CLI is machine-global and self-updating**, while the Pipeline package is pinned per
@@ -256,7 +256,7 @@ bridge installed is `61480be4`.
 
 | Alternative                                                                                | Why rejected                                                                                                                                                                                                                                                                                                                                                                                                                                                | Date       |
 |--------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------|
-| `unity mcp` (the CLI's own MCP server) as a standing server                                | Nothing the shell path lacks; every tool call capped at a fixed 60 s with no detach; 5 s `eval` default; 160 tools (~26k-token list). Kept only as the documented fallback for an agent without shell access.                                                                                                                                                                                                                                               | 2026-09-27 |
+| `unity mcp` (the CLI's own MCP server) as a standing server                                | Nothing the shell path lacks; every tool call capped at a fixed 60 s with no detach; 5 s `script eval` default; 160 tools (~26k-token list). Kept only as the documented fallback for an agent without shell access.                                                                                                                                                                                                                                        | 2026-09-27 |
 | Hybrid: trimmed old bridge beside the CLI                                                  | No old tool was unique. Its `Unity_Profiler_*` tools never worked over MCP (null `conversationContext`), `ValidateScript` is whole-file substring heuristics, captures had no size control.                                                                                                                                                                                                                                                                 | 2026-09-27 |
 | Keep ai.assistant installed alongside the CLI                                              | Two bridges, 19 patches to maintain, a deprecated package pinned against entitlement changes.                                                                                                                                                                                                                                                                                                                                                               | 2026-09-27 |
 | Upgrade ai.assistant to ≥ 2.13                                                             | Reintroduces the entitlement enforcement the 2.6.0-pre.1 pin avoided.                                                                                                                                                                                                                                                                                                                                                                                       | 2026-09-27 |
@@ -264,13 +264,16 @@ bridge installed is `61480be4`.
 | Install Unity's official agent plugin (`Unity-Technologies/unity-agent-plugin`, 32 skills) | All-or-nothing: ~16 KB of always-loaded skill descriptions (1.6× this project's whole set), UI skills that steer editor tooling to UI Toolkit against the IMGUI `editor-tool` standard, and 2D/IAP/ads/multiplayer skills with no use here. Adapted instead: the Render Graph checklist into `.agents/rules/render-graph.md` + `review-changes` gates 20–23, the Safe Mode note into `unity-editor`, and `ui-ugui`'s layout craft into the `game-ui` skill. | 2026-09-27 |
 | `set_authoring_root` to save captures under `Temp/`                                        | Measured: the root is confined to folders under `Assets/`; the `~` folder works.                                                                                                                                                                                                                                                                                                                                                                            | 2026-09-27 |
 | `unity shell` to cut per-call latency                                                      | Measured ~1.2 s per call either way; the cost is the per-command Editor scan, which the project path removes.                                                                                                                                                                                                                                                                                                                                               | 2026-09-27 |
-| `eval_file` for the profiler queries                                                       | Takes no arguments; `run_script` passes typed arguments to named entry points.                                                                                                                                                                                                                                                                                                                                                                              | 2026-09-27 |
+| `script eval_file` for the profiler queries                                                | Takes no arguments; `script run` passes typed arguments to named entry points.                                                                                                                                                                                                                                                                                                                                                                              | 2026-09-27 |
 | Accept a profiler gap                                                                      | `burst-optimization` routes its evidence step through profiler queries.                                                                                                                                                                                                                                                                                                                                                                                     | 2026-09-27 |
 
 ---
 
 ## Document History
 
+* **v1.7** - `com.unity.pipeline` 0.10.0-exp.1: every `unity command` name is now `<group> <name>`
+  (`editor status`, `script eval`, `editor invoke_menu`, …); §5: capture paths resolve from the project root,
+  `capture editor_window` added, `capture screenshot` deprecated (2026-11-06).
 * **v1.6** - §3: Play mode holds the compile gate — `PlayModeReloadGuard` locks reloads while the Editor plays, so
   `unity recompile` blocks on a pending change until Play stops (2026-10-06).
 * **v1.5** - §6: `ProfilerCapture.ConnectToPlayer`, for the `perf-benchmark` skill's player-capture recipe (2026-10-03).
@@ -289,5 +292,5 @@ bridge installed is `61480be4`.
 
 ---
 
-**Last Updated:** 2026-09-27  
+**Last Updated:** 2026-11-06  
 **Next Review:** on a Unity CLI or `com.unity.pipeline` version bump (re-check §7 on the next release build after one)

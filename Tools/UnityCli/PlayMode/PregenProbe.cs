@@ -3,10 +3,10 @@
 // once it ends and the asynchronous unload saves have drained, checks independently of the driver that every chunk
 // of the rectangle is either on disk (ChunkStorageManager.CollectSavedChunks) or resident and populated.
 //
-// RUN     unity command run_script --file Tools/UnityCli/PlayMode/PregenProbe.cs --entry UnityCli.PregenProbe.Start
+// RUN     unity command script run --file Tools/UnityCli/PlayMode/PregenProbe.cs --entry UnityCli.PregenProbe.Start
 //         --args '[minX, minZ, maxX, maxZ]' --result-only          (chunk coordinates, inclusive)
-// READ    Each run_script call compiles a NEW assembly with fresh statics, so read progress by reflection into the
-//         assembly Start reported (assemblyName), e.g. unity command eval "foreach (var a in
+// READ    Each script run call compiles a NEW assembly with fresh statics, so read progress by reflection into the
+//         assembly Start reported (assemblyName), e.g. unity command script eval "foreach (var a in
 //         System.AppDomain.CurrentDomain.GetAssemblies()) { if (!a.GetName().Name.StartsWith(\"<assemblyName>\"))
 //         continue; return (string)a.GetType(\"UnityCli.PregenProbe\").GetMethod(\"Report\").Invoke(null, null); }
 //         return \"not found\";" --result-only

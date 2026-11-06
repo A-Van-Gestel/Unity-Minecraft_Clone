@@ -20,7 +20,7 @@ Load on demand — not needed for every activation:
 |--------------------------------------------------------------------------------------------|----------------------------------------------------------------|
 | Analyzer report sections, metric interpretation ranges, grid-size vs zone-frequency table | [references/analyzer-metrics.md](references/analyzer-metrics.md)     |
 | Parameter catalog, SerializedObject property paths, formulas, suppression math, guidelines | [references/parameter-reference.md](references/parameter-reference.md) |
-| Ready-to-adapt `run_script` files (asset edits, trunk diagnostic, biome lookup)            | [references/cli-scripts.md](references/cli-scripts.md)                |
+| Ready-to-adapt `script run` files (asset edits, trunk diagnostic, biome lookup)            | [references/cli-scripts.md](references/cli-scripts.md)                |
 
 ## Cave Density Analyzer Tool
 
@@ -28,19 +28,19 @@ The project includes a dedicated analysis tool at `Assets/Editor/Dev/CaveDensity
 
 ### How to run it
 
-Call the static API through `unity command eval` (mechanics: the `unity-editor` skill). `eval`
+Call the static API through `unity command script eval` (mechanics: the `unity-editor` skill). `script eval`
 rejects `using` directives, so write the names fully qualified:
 
 ```bash
 # Single biome (in WorldTypeDefinition)
-unity command eval 'return Editor.Dev.CaveDensityAnalyzer.RunAnalysis(8, 42, 0, 0, "Grasslands");' --timeout 180 --result-only
+unity command script eval 'return Editor.Dev.CaveDensityAnalyzer.RunAnalysis(8, 42, 0, 0, "Grasslands");' --timeout 180 --result-only
 
 # With forceRefresh — use immediately after a SerializedObject config change
 # to guarantee the analysis reads the updated asset data.
-unity command eval 'return Editor.Dev.CaveDensityAnalyzer.RunAnalysis(8, 42, 0, 0, "Grasslands", forceRefresh: true);' --timeout 180 --result-only
+unity command script eval 'return Editor.Dev.CaveDensityAnalyzer.RunAnalysis(8, 42, 0, 0, "Grasslands", forceRefresh: true);' --timeout 180 --result-only
 
 # With trunkMode override — e.g. exclude trunk worms to isolate local-only density
-unity command eval 'return Editor.Dev.CaveDensityAnalyzer.RunAnalysis(8, 42, 0, 0, "Grasslands", Editor.Dev.TrunkWormMode.Exclude);' --timeout 180 --result-only
+unity command script eval 'return Editor.Dev.CaveDensityAnalyzer.RunAnalysis(8, 42, 0, 0, "Grasslands", Editor.Dev.TrunkWormMode.Exclude);' --timeout 180 --result-only
 ```
 
 Parameters: `RunAnalysis(gridSize, seed, originX, originZ, singleBiomeMode, biome)`. For biomes
@@ -99,4 +99,4 @@ If caves appear everywhere despite high attenuation, grep the three evaluation p
 
 ## Modifying biome .asset files (hard rule)
 
-Per CLAUDE.md rules, never edit `.asset` files directly. Use a `run_script` file with `SerializedObject` — a ready-to-adapt script (including the exact-filename biome lookup that avoids the "Grasslands" / "Steep Grasslands" substring-match trap) is in [references/cli-scripts.md](references/cli-scripts.md), and the full property-path catalog is in [references/parameter-reference.md](references/parameter-reference.md).
+Per CLAUDE.md rules, never edit `.asset` files directly. Use a `script run` file with `SerializedObject` — a ready-to-adapt script (including the exact-filename biome lookup that avoids the "Grasslands" / "Steep Grasslands" substring-match trap) is in [references/cli-scripts.md](references/cli-scripts.md), and the full property-path catalog is in [references/parameter-reference.md](references/parameter-reference.md).

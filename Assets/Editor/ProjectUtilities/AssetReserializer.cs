@@ -18,7 +18,7 @@ namespace Editor.ProjectUtilities
         /// Forcibly loads and re-serializes all assets, flushing any outstanding data changes to disk.
         /// This is useful when changes in serialize field names or structs occur, and assets need to be updated.
         /// <para>
-        /// Runs without a confirmation dialog so a command-line call (<c>unity command menu … --detach</c>) cannot block on
+        /// Runs without a confirmation dialog so a command-line call (<c>unity command editor invoke_menu … --detach</c>) cannot block on
         /// it; the work only rewrites assets in their current format. Asset imports it triggers can end in a domain reload.
         /// </para>
         /// </summary>

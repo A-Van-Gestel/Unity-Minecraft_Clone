@@ -21,18 +21,18 @@ context names, never `/tmp` (`TMPDIR` is unset on this machine).
 ## Procedure
 
 0. **Record `git status --short`** before anything else.
-1. **State check.** `unity command editor_status --result-only`. If it reports Play mode, STOP and
+1. **State check.** `unity command editor status --result-only`. If it reports Play mode, STOP and
    report "editor is in Play mode" — never press Play, Pause or Stop. If it is unreachable
    (exit 7 / network error), wait ~5 s and retry once; still unreachable → STOP and report.
 2. **Compile current code.** `unity recompile --format json`. Exit 6 = compile errors: STOP and
    report the `error CS…` lines verbatim. Then wait for the reload:
-   `until unity command editor_status --result-only | grep -q '"status": "ready"'; do sleep 1; done`.
+   `until unity command editor status --result-only | grep -q '"status": "ready"'; do sleep 1; done`.
 3. **Run.** For each requested suite (or `Validate All` when asked for "all"):
-   `unity command menu --path "Minecraft Clone/Dev/Validate <Name>" --detach --format json`, then
+   `unity command editor invoke_menu --path "Minecraft Clone/Dev/Validate <Name>" --detach --format json`, then
    `unity job wait <jobId> --timeout 90` as separate shell calls until it returns. Never a bare,
    unbounded `unity job wait`. Run suites one at a time, never in parallel. One run per suite:
    never re-run a red suite to see whether it passes — report a flake as it came.
-4. **Read the console** with `unity command console --tail <n> --result-only`, raising `<n>` until
+4. **Read the console** with `unity command console get --tail <n> --result-only`, raising `<n>` until
    the suite's summary line is inside the window. For Validate All you need the whole
    `=== Validate All — combined summary ===` block.
 5. **Record `git status --short` again.** Any difference from step 0 goes at the top of the

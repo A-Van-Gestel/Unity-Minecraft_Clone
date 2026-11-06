@@ -1,11 +1,11 @@
 // Profiler queries for agents, run through the Unity CLI against a live Editor:
 //
-//   unity command run_script --file Tools/UnityCli/Profiler/ProfilerQueries.cs \
+//   unity command script run --file Tools/UnityCli/Profiler/ProfilerQueries.cs \
 //       --entry UnityCli.ProfilerQueries.<Method> --args '[...]' --result-only
 //
-// Every parameter must be passed in --args: run_script does not apply C# default values.
+// Every parameter must be passed in --args: script run does not apply C# default values.
 // Lives outside Assets/ on purpose: neither Unity nor dotnet build compiles it, and editing it
-// never triggers an import or domain reload. run_script compiles it in memory on every call.
+// never triggers an import or domain reload. script run compiles it in memory on every call.
 // Replaces the Unity_Profiler_* MCP tools (Documentation/Architecture/UNITY_CLI_EDITOR_BRIDGE.md §6).
 
 using System;

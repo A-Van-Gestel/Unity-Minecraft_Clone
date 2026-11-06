@@ -24,12 +24,12 @@ with a network error:
 
 ```bash
 unity recompile --format json && \
-until unity command editor_status --result-only | grep -q '"status": "ready"'; do sleep 1; done
+until unity command editor status --result-only | grep -q '"status": "ready"'; do sleep 1; done
 ```
 
 Verified: a constant changed three times read back its new value each time through this gate.
 
-**In Play mode the idle state is `"playing"`, never `"ready"`** — after `editor_play`, wait for
+**In Play mode the idle state is `"playing"`, never `"ready"`** — after `editor.playmode start`, wait for
 `'"status": "playing"'` (it follows the play-entry domain reload). A loop that requires `"ready"` while
 playing spins until its timeout.
 
@@ -40,15 +40,15 @@ playing spins until its timeout.
 **"Run Validate All / a long generator / anything over 30 s"**
 
 ```bash
-unity command clear_console
-unity command menu --path "Minecraft Clone/Dev/Validate All" --detach --format json   # → jobId
+unity command console clear
+unity command editor invoke_menu --path "Minecraft Clone/Dev/Validate All" --detach --format json   # → jobId
 
 # Then, as SEPARATE shell calls, repeat until the result arrives:
 unity job wait <jobId> --timeout 90
 #   exit 6 + "The job keeps running; reattach ..."  -> run it again
 #   exit 0 + result                                  -> done
 
-unity command console --tail 400 --result-only    # read the summary
+unity command console get --tail 400 --result-only    # read the summary
 ```
 
 Keep each wait under the shell's own timeout (agent shells commonly default to 120 s). A single
@@ -66,13 +66,13 @@ How to read a suite's output is owned by run-validation-suite.
 **"Query a singleton or ScriptableObject"**
 
 ```bash
-unity command eval "var w = UnityEngine.Object.FindAnyObjectByType<World>(); return w == null ? \"no World\" : \"chunks=\" + w.worldData.Chunks.Count;" --result-only
+unity command script eval "var w = UnityEngine.Object.FindAnyObjectByType<World>(); return w == null ? \"no World\" : \"chunks=\" + w.worldData.Chunks.Count;" --result-only
 
-unity command eval "var g = UnityEditor.AssetDatabase.FindAssets(\"t:BlockDatabase\"); return UnityEditor.AssetDatabase.GUIDToAssetPath(g[0]);" --result-only
+unity command script eval "var g = UnityEditor.AssetDatabase.FindAssets(\"t:BlockDatabase\"); return UnityEditor.AssetDatabase.GUIDToAssetPath(g[0]);" --result-only
 ```
 
 For anything longer than a few lines, write a `.cs` file under the scratchpad (or `Tools/UnityCli/`
-if it is worth keeping) with a `public static` entry point and run it with `run_script`.
+if it is worth keeping) with a `public static` entry point and run it with `script run`.
 
 </recipe>
 
@@ -80,11 +80,11 @@ if it is worth keeping) with a `public static` entry point and run it with `run_
 
 **"Change the scene so the user can undo it"**
 
-Prefer the `gameobjects` setters (one Undo step each). From `eval`, open a named group first,
-because `eval` does not start one:
+Prefer the `gameobjects` setters (one Undo step each). From `script eval`, open a named group first,
+because `script eval` does not start one:
 
 ```bash
-unity command eval "UnityEditor.Undo.IncrementCurrentGroup(); UnityEditor.Undo.SetCurrentGroupName(\"Agent: add probe\"); var go = new UnityEngine.GameObject(\"Probe\"); UnityEditor.Undo.RegisterCreatedObjectUndo(go, \"Agent: add probe\"); return go.GetEntityId().ToString();" --result-only
+unity command script eval "UnityEditor.Undo.IncrementCurrentGroup(); UnityEditor.Undo.SetCurrentGroupName(\"Agent: add probe\"); var go = new UnityEngine.GameObject(\"Probe\"); UnityEditor.Undo.RegisterCreatedObjectUndo(go, \"Agent: add probe\"); return go.GetEntityId().ToString();" --result-only
 ```
 
 </recipe>
@@ -94,12 +94,12 @@ unity command eval "UnityEditor.Undo.IncrementCurrentGroup(); UnityEditor.Undo.S
 **"See what the Scene/Game view shows"**
 
 ```bash
-unity command capture_scene_view --save_path "Assets/AgentCaptures~/view.png" --width 960 --height 540 --result-only
+unity command capture scene_view --output-path "Assets/AgentCaptures~/view.png" --width 960 --height 540 --result-only
 # then open the PNG with the Read tool; delete the folder when done
 ```
 
-`capture_game_view --source camera --camera "<name>"` renders one camera. Keep captures small:
-the image costs context in proportion to its pixel count. `max_resolution` applies only to inline
+`capture game_view --source camera --camera "<name>"` renders one camera. Keep captures small:
+the image costs context in proportion to its pixel count. `max-resolution` applies only to inline
 images, never to a saved file.
 
 </recipe>
@@ -108,22 +108,22 @@ images, never to a saved file.
 
 **"Load a world in Play mode, set it up, and capture a frame"**
 
-The entry points live in `Tools/UnityCli/PlayMode/WorldRig.cs` (`run_script`, never imported):
+The entry points live in `Tools/UnityCli/PlayMode/WorldRig.cs` (`script run`, never imported):
 
 ```bash
-RIG() { unity command run_script --file Tools/UnityCli/PlayMode/WorldRig.cs \
+RIG() { unity command script run --file Tools/UnityCli/PlayMode/WorldRig.cs \
           --entry "UnityCli.WorldRig.$1" --args "$2" --result-only; }
 
 RIG Saves '[5]'                           # edit mode OK; current-version saves only
-unity command editor_play                 # the user's call — say so first; wait for "playing"
+unity command editor.playmode start                 # the user's call — say so first; wait for "playing"
 RIG Launch '["Probe", 4242, true]'        # MainMenu only; true = fresh world at the current version
 RIG Status '[]'                           # poll: chunks > 0, then cameraCell off (0, -999999, 0)
 RIG Command '["/fly"]'                    # without it gravity drops a posed player within ~2 s
 RIG Command '["/time set noon"]'; RIG Command '["/time freeze"]'
-unity command eval "var w = UnityEngine.Object.FindAnyObjectByType<World>(); return w.PlaceBlockCommand(0, 74, 6, Data.BlockIDs.Stone).ToString();" --result-only
+unity command script eval "var w = UnityEngine.Object.FindAnyObjectByType<World>(); return w.PlaceBlockCommand(0, 74, 6, Data.BlockIDs.Stone).ToString();" --result-only
 RIG Pose '[0.5, 76.6, -2.5, 0, 8]'        # eye in VOXEL space, yaw, pitch (+ looks down)
 RIG Capture '["<scratchpad>/frame.png", 480, 270]'   # a LATER call than any state change
-unity command editor_stop                 # when done
+unity command editor.playmode stop                 # when done
 ```
 
 Verified 2026-10-09 end to end on a fresh seed-4242 world (noon and midnight frames of a placed wall).
@@ -152,8 +152,8 @@ Verified 2026-10-09 end to end on a fresh seed-4242 world (noon and midnight fra
 
 **"Read a `[SerializeField]` value from a scene object"**
 
-1. `unity command get_scene_hierarchy --result-only` → the object's `instanceId`.
-2. `unity command get_serialized_fields --target <instanceId> --component <Type> --result-only`
+1. `unity command scene get_hierarchy --result-only` → the object's `instanceId`.
+2. `unity command component get_fields --target <instanceId> --component <Type> --result-only`
    (private serialized fields included; enums come back as names).
 
 </recipe>
@@ -180,23 +180,24 @@ re-run the audit from code.
 
 <gotchas>
 
-1. **Save paths are confined to `Assets/`.** `Temp/x.png` becomes `Assets/Temp/x.png` and is
-   imported with a `.meta`. Only `Assets/AgentCaptures~/` (gitignored, never imported) is safe.
-2. **Project types need their namespace in `eval`** — `Data.BlockIDs.Stone`. Global-namespace types
-   (`World`, `Player`, `SaveSystem`) bind as-is: `eval` injects no namespace, so the `global::` prefixes
+1. **Relative save paths resolve from the project root.** Always pass the full
+   `Assets/AgentCaptures~/<name>.png` (gitignored, never imported): `Temp/x.png` lands in the project's
+   `Temp/`, and any other folder under `Assets/` is imported with a `.meta`.
+2. **Project types need their namespace in `script eval`** — `Data.BlockIDs.Stone`. Global-namespace types
+   (`World`, `Player`, `SaveSystem`) bind as-is: `script eval` injects no namespace, so the `global::` prefixes
    in old MCP-bridge snippets are unnecessary.
 3. **Default timeout is 30 s.** `--timeout` raises it; long work uses `--detach`.
 4. **A call during a domain reload fails fast** — retry it.
 5. **A synchronous `wait_for` holds the whole command queue** — use `--async true`.
-6. **`eval` formats numbers with the Editor's locale** (`58033,8`). Key maps by scaled integers
+6. **`script eval` formats numbers with the Editor's locale** (`58033,8`). Key maps by scaled integers
    or format with `CultureInfo.InvariantCulture`.
 7. **A parameter named `format` collides with the global `--format` flag** — omit it.
 8. **Always pass the project path** (`UNITY_PROJECT_PATH` / `--project-path`); auto-detection
    costs ~1 s per call, and `unity shell` does not avoid it.
-9. **`run_script` ignores C# default parameter values** — pass every argument.
+9. **`script run` ignores C# default parameter values** — pass every argument.
 10. **The main thread can be busy** (a long menu item, a compile): calls queue behind it and time
-    out at `--timeout`. `editor_status` shows `compiling` / `domainReloadInProgress`.
-11. **Obsolete APIs fail `eval` compilation**, not just warn — e.g. `Object.GetInstanceID()` in
+    out at `--timeout`. `editor status` shows `compiling` / `domainReloadInProgress`.
+11. **Obsolete APIs fail `script eval` compilation**, not just warn — e.g. `Object.GetInstanceID()` in
     Unity 6.6; use `GetEntityId()`. Check with the `unity-api` tools when unsure.
 12. **Never call `Undo.PerformUndo()` blind.** If the edit before it failed, it reverts whatever
     group is on top, which may be the user's work. Check `Undo.GetCurrentGroupName()` equals the
@@ -217,7 +218,7 @@ re-run the audit from code.
 15. **Play mode holds compiles and reloads.** `Editor/ProjectUtilities/PlayModeReloadGuard` locks assembly
     reloads from entering Play mode until exiting it, because the engine's runtime state does not survive a
     Play-mode reload. With a source change pending, `unity recompile` prints nothing and blocks until Play mode
-    stops, then completes about 2 s later, and `editor_status` reports `compiling` the whole time. Stop Play
+    stops, then completes about 2 s later, and `editor status` reports `compiling` the whole time. Stop Play
     mode first (with the user's consent), or edit only after leaving it; with no change pending it returns
     `up_to_date` at once.
 

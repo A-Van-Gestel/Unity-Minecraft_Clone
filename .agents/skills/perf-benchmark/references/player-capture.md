@@ -14,7 +14,7 @@ Profiler API details (the `ProfilerQueries` / `ProfilerCapture` entries) live in
 ## 1. Build
 
 **First record the active build profile** (`AssetDatabase.GetAssetPath(BuildProfile.GetActiveBuildProfile())`
-via `unity command eval`): it lives in `Library/`, not git, and a build replaces it — §5 restores it. A null
+via `unity command script eval`): it lives in `Library/`, not git, and a build replaces it — §5 restores it. A null
 profile means the classic platform settings were active; record that too.
 
 ```bash
@@ -136,7 +136,7 @@ Run this right after the last run, before docs or reviews.
 
 - A CLI build leaves its target profile active — restore the one recorded in §1:
   `BuildProfile.SetActiveBuildProfile(AssetDatabase.LoadAssetAtPath<BuildProfile>("Assets/Settings/Build Profiles/<name>.asset"))`
-  through `unity command eval` — or `BuildProfile.SetActiveBuildProfile(null)` when §1 recorded a null profile,
+  through `unity command script eval` — or `BuildProfile.SetActiveBuildProfile(null)` when §1 recorded a null profile,
   which makes the platform profile active again.
 - A build rewrites `Assets/Resources/Data/BuildStamp.asset` and may add `m_RuntimeSettings` entries to
   `Assets/UniversalRenderPipelineGlobalSettings.asset`: `git restore` both unless the build is a release.

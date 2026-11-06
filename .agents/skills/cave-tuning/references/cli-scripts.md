@@ -1,18 +1,18 @@
 # Cave Tuning — Ready-to-Adapt Unity CLI Scripts
 
 Companion reference for the `cave-tuning` skill. Each script is a small C# file run with
-`unity command run_script` (see the `unity-editor` skill for the CLI mechanics). Save it under the
+`unity command script run` (see the `unity-editor` skill for the CLI mechanics). Save it under the
 scratchpad, never under `Assets/`, and call its static entry point:
 
 ```bash
-unity command run_script --file <path>.cs --entry <Class>.<Method> --args '[...]' \
+unity command script run --file <path>.cs --entry <Class>.<Method> --args '[...]' \
     --timeout_ms 180000 --timeout 200 --result-only
 ```
 
-`run_script` compiles a real file, so `using` directives work. **Every argument must be passed**
+`script run` compiles a real file, so `using` directives work. **Every argument must be passed**
 (C# default values are not applied). Check a script compiles without running it by adding
-`--dry_run true`. One-line analyzer calls go through `eval` instead, with fully qualified names,
-because `eval` rejects `using` directives (see the skill's "How to run it").
+`--dry-run true`. One-line analyzer calls go through `script eval` instead, with fully qualified names,
+because `script eval` rejects `using` directives (see the skill's "How to run it").
 
 ## Analyzing a biome NOT in the WorldTypeDefinition
 

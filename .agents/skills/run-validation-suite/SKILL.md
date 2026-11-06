@@ -13,7 +13,7 @@ point (VS-2).
 Neighboring concerns owned elsewhere — stated here so the seam is explicit:
 - **Building a new suite, adding a scenario, or fixing a documented bug test-first** → the
   `validation-driven-bugfix` skill (red→green→promote→archive lifecycle).
-- **Live-editor CLI mechanics** (`unity command eval`, console reads, menu execution, detached
+- **Live-editor CLI mechanics** (`unity command script eval`, console reads, menu execution, detached
   jobs) → the `unity-editor` skill; this skill only names the recipes it needs.
 - **Coverage gaps / known blind spots of a specific suite** → that suite's
   `*_VALIDATION_HARNESS_FIDELITY.md` under `Documentation/Architecture/Testing Framework/`.
@@ -33,7 +33,7 @@ it. Before trusting any suite run after an edit:
 
 1. `unity recompile --format json` — compiles the running Editor's assemblies, new files included,
    and must come back clean (exit `0`).
-2. Wait for the domain reload that loads them: poll `unity command editor_status --result-only`
+2. Wait for the domain reload that loads them: poll `unity command editor status --result-only`
    until it reports `"status": "ready"`. `recompile` returns **before** that reload.
 3. Only then run the suite. (There is no automatic stale-assembly guard yet — that is the open
    VS-3 item.)
@@ -58,7 +58,7 @@ Sound Engine · Performance Monitor · Validation Framework**
 Each has a `Minecraft Clone/Dev/Validate <name>` menu item, plus the aggregate **Validate All** —
 **with two where the menu path is NOT the display name**: `Voxel Occlusion` → *Validate Occlusion*,
 and `Sky & Celestial` → *Validate Sky*. Use the display name for `RunSelected`, the menu path for
-`unity command menu --path`; crossing them fails (an unknown subset name rejects the whole request).
+`unity command editor invoke_menu --path`; crossing them fails (an unknown subset name rejects the whole request).
 
 Not in the aggregate (run individually): the nightly fuzz deep-runs (`Validate Lighting Engine
 (Border Height Fuzz)`, `(Bug 09 Geometry Fuzz)`, `(Bug 05 Canopy Fuzz)`,
@@ -76,11 +76,11 @@ Subset names are the **display names** (case-insensitive), comma-separated; a si
 smaller set. Output order is registry order regardless of request order.
 
 **Agent recipe (Unity CLI).** Two ways:
-- `unity command menu --path "Minecraft Clone/Dev/Validate …"`, then read the summary with
-  `unity command console --tail <n> --result-only`.
-- `unity command eval` calling `Editor.Validation.Framework.ValidationSuiteCI.RunSelected("…", true)`
+- `unity command editor invoke_menu --path "Minecraft Clone/Dev/Validate …"`, then read the summary with
+  `unity command console get --tail <n> --result-only`.
+- `unity command script eval` calling `Editor.Validation.Framework.ValidationSuiteCI.RunSelected("…", true)`
   and returning the counts from the `AggregateRunResult` (`SuiteCount`, `BaselinePassed`,
-  `BaselineFailed`, `BugsReproduced`, …). `eval`'s `success` reflects compile + execution only;
+  `BaselineFailed`, `BugsReproduced`, …). `script eval`'s `success` reflects compile + execution only;
   suite warnings (known-bug repros, `B7 INCONCLUSIVE`) do not flip it.
 
 **Runtime budget.** A full pass takes about **3.5 minutes** (last measured 2026-09-27: 3 min 28 s to
@@ -89,17 +89,17 @@ together take seconds. That is far past a command's 30 s default timeout, so run
 
 | Want | Do |
 |---|---|
-| The full aggregate, agent-driven | `unity command menu --path "Minecraft Clone/Dev/Validate All" --detach`, then bounded `unity job wait <jobId> --timeout 90` calls |
+| The full aggregate, agent-driven | `unity command editor invoke_menu --path "Minecraft Clone/Dev/Validate All" --detach`, then bounded `unity job wait <jobId> --timeout 90` calls |
 | The full aggregate, by hand | `Minecraft Clone/Dev/Validate All` from the Editor menu |
-| A fast agent-side sweep | `eval` → `RunSelected(...)` over the registry **without `"Lighting Engine"`** (seconds) |
+| A fast agent-side sweep | `script eval` → `RunSelected(...)` over the registry **without `"Lighting Engine"`** (seconds) |
 
-**Detached recipe:** `unity command clear_console`, fire the menu item with `--detach` (the reply
+**Detached recipe:** `unity command console clear`, fire the menu item with `--detach` (the reply
 carries a `jobId`), then call `unity job wait <jobId> --timeout 90` as separate shell calls until one
 returns the result (each bounded one that runs out exits `6` with *"The job keeps running"*; see the
-`unity-editor` recipes), then read the combined summary with `unity command console --tail 400
+`unity-editor` recipes), then read the combined summary with `unity command console get --tail 400
 --result-only`. A detached job neither blocks the shell nor re-runs.
 
-**Do not schedule long work from `eval` via `EditorApplication.delayCall`.** The call returns
+**Do not schedule long work from `script eval` via `EditorApplication.delayCall`.** The call returns
 `success: true`, and the queued delegate then does not run on any predictable schedule. Observed
 2026-08-25: no output for **70 minutes** on an idle editor, and it then fired unprompted when an
 unrelated `RequestScriptCompilation` pumped the editor, **executing the pre-edit assembly** and
@@ -118,7 +118,7 @@ Unity -batchmode -projectPath <path> \
 It runs the selected suites (all by default), writes NUnit3 XML (default
 `TestResults/validation-results.xml`, gitignored), and **exits 0 only when every baseline passed and
 no suite ran nothing, else 1**. Do **not** pass `-quit` (it exits itself), and **never** call
-`RunHeadless` from `unity command eval` in a live editor — `EditorApplication.Exit` would quit the
+`RunHeadless` from `unity command script eval` in a live editor — `EditorApplication.Exit` would quit the
 editor. (Batchmode also needs Unity license activation on the runner.)
 
 ## Step 3 — Read the console output
@@ -143,7 +143,7 @@ Per-suite summary line: green `ALL N … BASELINE TESTS PASSED` or red
 
 **For `Validate All`, that combined block is the verdict.** The console keeps only its last 2000 entries
 and a full run logs more, so the early suites' own `ALL N … PASSED` lines have rolled out by the end;
-their absence from `unity command console` is expected, not a missing verdict. Two cross-checks that
+their absence from `unity command console get` is expected, not a missing verdict. Two cross-checks that
 do not work: counting console errors (each known-bug repro logs its `[FAIL]` lines at error level, so a
 green run is never error-free) and the ring buffer itself. The one that does: grep `Logs/Editor.log`
 from the last `=== Validate All: running` line for `[FAIL]`, `REGRESSION` and `ISOLATION VIOLATION`,

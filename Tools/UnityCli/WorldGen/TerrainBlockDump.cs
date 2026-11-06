@@ -1,6 +1,6 @@
 // Offline terrain dump for the Unity CLI: regenerate a seed's chunks in the Editor and print the blocks inside a voxel box.
 //
-// RUN     unity command run_script --file Tools/UnityCli/WorldGen/TerrainBlockDump.cs \
+// RUN     unity command script run --file Tools/UnityCli/WorldGen/TerrainBlockDump.cs \
 //             --entry UnityCli.TerrainBlockDump.Dump --args '[0, 220, 75, 301, 226, 83, 306]' --result-only
 //         Arguments: seed, minX, minY, minZ, maxX, maxY, maxZ (voxel space, inclusive; every one required).
 //         Compiled in memory on each call, never imported by Unity.
@@ -24,7 +24,7 @@ using UnityEngine;
 
 namespace UnityCli
 {
-    /// <summary>Entry point for dumping regenerated terrain blocks through <c>run_script</c>.</summary>
+    /// <summary>Entry point for dumping regenerated terrain blocks through <c>script run</c>.</summary>
     public static class TerrainBlockDump
     {
         private const string WORLD_TYPE_PATH = "Assets/Data/WorldGen/WorldTypes/Standard.asset";

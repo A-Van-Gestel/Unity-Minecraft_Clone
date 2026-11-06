@@ -8,9 +8,9 @@
     "allow": [
       "Bash(unity recompile:*)",
       "Bash(unity status:*)",
-      "Bash(unity command editor_status:*)",
-      "Bash(unity command console:*)",
-      "Bash(unity command console_status:*)",
+      "Bash(unity command editor status:*)",
+      "Bash(unity command console get:*)",
+      "Bash(unity command console status:*)",
       "Bash(unity job status:*)",
       "Bash(unity job wait:*)",
       "mcp__codegraph__*",

@@ -133,7 +133,7 @@ writing a baseline, running a prove-red, or writing "closed" into a doc.
   a fresh process and hides this. `Validate All` can hide it too: Command Console `B37` went red only
   when run alone after a Play session moved `WorldOrigin`, because an earlier suite in the aggregate
   resets the origin first. Reproduce a suspected leak by setting the static (e.g.
-  `Helpers.WorldOrigin.SetOrigin(...)` via `eval`) and running that one suite.
+  `Helpers.WorldOrigin.SetOrigin(...)` via `script eval`) and running that one suite.
 - **`job.Run()` needs every container constructed**, including `[ReadOnly]` inputs the tested path
   never indexes: pass zero-length arrays, never `default`.
 - **Never name a suite namespace after a type the `Editor.Validation.*` tree references.**
@@ -148,7 +148,7 @@ writing a baseline, running a prove-red, or writing "closed" into a doc.
   `python -c "d=open('Library/ScriptAssemblies/Assembly-CSharp.dll','rb').read(); print('LITERAL'.encode('utf-16-le') in d)"`.
   Added literals must be present, reverted ones absent.
 - **A rebuilt DLL can still be unloaded:** the domain reload waits while the main thread is busy (a
-  long menu-item run). For a pure decision function, call it from `unity command eval` with inputs where
+  long menu-item run). For a pure decision function, call it from `unity command script eval` with inputs where
   correct and mutated code differ observably — once to confirm the mutation is live, once after reverting.
 - **`git stash` does not prove a commit compiles standalone.** Stashed untracked `.cs` files stay listed
   in the generated `.csproj` (`CS2001` per file), and their contents are not compiled at all.

@@ -374,7 +374,7 @@ after each commit and a final docs-sync commit flipping the closed items' status
 > **Cold-start checklist for any wave** (matches how Wave 1 was executed):
 > 1. `unity recompile --format json` after edits (falls back to `dotnet build "Assembly-CSharp-Editor.csproj"`
 >    only when no Editor is running).
-> 2. Wait until `unity command editor_status` reports `ready` — `recompile` returns before the domain reload
+> 2. Wait until `unity command editor status` reports `ready` — `recompile` returns before the domain reload
 >    that loads the new code. A bare `dotnet build` does **not** make the Editor re-run the menu suite
 >    (stale-code trap — see [[feedback-editor-validation-workflow]]).
 > 3. Run `Minecraft Clone/Dev/Validate Meshing` (menu item), read the console, confirm

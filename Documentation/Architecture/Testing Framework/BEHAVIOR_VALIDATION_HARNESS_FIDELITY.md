@@ -481,7 +481,7 @@ chained-vs-separate equality baseline (B10) was the guard for MR-5.
 
 Mirrors the meshing/lighting wave structure: each wave leaves the suite green and unblocks the next. Build
 **test-first**, one commit per scenario, all baselines green after each (the `validation-driven-bugfix`
-lifecycle), driven via the menu item + `unity command console` (see §8 for the Unity CLI mechanics).
+lifecycle), driven via the menu item + `unity command console get` (see §8 for the Unity CLI mechanics).
 
 ### Wave 0 — Harness infrastructure · ✅ DONE (2026-06-20)
 
@@ -598,14 +598,14 @@ doc, and the inbound cross-references were updated (`PERFORMANCE_IMPROVEMENTS_RE
 
 - **Run it:** menu item **`Minecraft Clone/Dev/Validate Behavior`**. Green when the console logs
   `ALL N BEHAVIOR BASELINE TESTS PASSED`.
-- **Driving it from an agent** goes through the Unity CLI (the `unity-editor` skill). `unity command eval`
+- **Driving it from an agent** goes through the Unity CLI (the `unity-editor` skill). `unity command script eval`
   compiles fresh against the loaded assemblies on every call, which makes it the way to probe state the menu
   cannot show; reflection and `System.IO` are available, but `using` directives are not, so write types fully
   qualified.
 - **New-file / edit cycle:** after editing, `unity recompile --format json` (it covers new `.cs` files and
-  lists compile errors with file and line) → wait until `unity command editor_status` reports `ready` → run
-  the suite. `unity command clear_console` before a run, then read only what you need with
-  `unity command console --level error` (or `--tail <n>`).
+  lists compile errors with file and line) → wait until `unity command editor status` reports `ready` → run
+  the suite. `unity command console clear` before a run, then read only what you need with
+  `unity command console get --level error` (or `--tail <n>`).
 - **Capturing a golden master:** leave the scenario's golden constant null/empty; `GoldenMaster.AssertOrCapture`
   logs the snapshot between `<<<GOLDEN-BEGIN>>>`/`<<<GOLDEN-END>>>`. Paste it into the constant, re-run to
   confirm `golden master matched`. **Confirm the behavior in-game first** (per Wave 1).

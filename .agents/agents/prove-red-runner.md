@@ -23,7 +23,7 @@ whether to pass `--no-baseline` (only when the parent says so).
 ## Procedure
 
 1. Record `git status --short`.
-2. **State check.** `unity command editor_status --result-only`. If it reports Play mode, STOP and
+2. **State check.** `unity command editor status --result-only`. If it reports Play mode, STOP and
    report "editor is in Play mode" — never press Play, Pause or Stop. Unreachable (exit 7 / network
    error) → wait ~5 s and retry once; still unreachable → STOP and report.
 3. Run once, with timeout 600000:

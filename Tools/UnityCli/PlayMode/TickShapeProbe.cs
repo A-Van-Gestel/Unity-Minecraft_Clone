@@ -1,7 +1,7 @@
 // Behavior-tick input probe for the Unity CLI: what the active-voxel buckets of a live world hold right now, and what
 // the tick's snapshot copies for them.
 //
-// RUN     unity command run_script --file Tools/UnityCli/PlayMode/TickShapeProbe.cs \
+// RUN     unity command script run --file Tools/UnityCli/PlayMode/TickShapeProbe.cs \
 //             --entry UnityCli.TickShapeProbe.Measure --args '[]' --result-only
 //         Compiled in memory on each call, never imported by Unity.
 // NEEDS   A loaded World scene in Play mode (WorldRig.Launch). Sample right after a teleport onto new terrain to see a
@@ -29,7 +29,7 @@ using Object = UnityEngine.Object;
 
 namespace UnityCli
 {
-    /// <summary>Entry points for measuring the behavior tick's input on a live world through <c>run_script</c>.</summary>
+    /// <summary>Entry points for measuring the behavior tick's input on a live world through <c>script run</c>.</summary>
     public static class TickShapeProbe
     {
         // The tick's read reach below and above its active voxels (FluidBurstTicker / GrassBurstTicker).

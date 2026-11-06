@@ -62,7 +62,7 @@ Any player build — Master included — starts a harness from the command line 
   targets `DevSettings` and is rejected outside development builds. The run otherwise inherits the build's
   `settings.json`, exactly like a menu launch. Overrides are never written back to the file.
 - `-mc-mute` — `masterVolume=0` for the session. **An agent running a harness always passes it.** In an Editor
-  Play-mode run, the same mute is `Launch.LaunchSession.MuteForSession()` through `unity command eval` once Play
+  Play-mode run, the same mute is `Launch.LaunchSession.MuteForSession()` through `unity command script eval` once Play
   mode is on (the domain reload on entering Play mode would drop it if applied earlier).
 - `-mc-quit` — exit when the run has written its report: exit code `0` = report written, `1` = run aborted or no
   report, `2` = invalid arguments (nothing ran). `Player.log` records `[Launch] Run finished: report <path>, exit code <n>`.

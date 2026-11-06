@@ -1,6 +1,6 @@
 ---
 name: unity-editor
-description: Reference card and recipes for driving the live Unity Editor from the shell with the Unity CLI (`unity command`, `unity recompile`, `unity job`) — running C# in the Editor (eval/run_script), compile checks, console reads, menu items and code generation, long operations as detached jobs, scene/GameObject/serialized-field inspection, asset queries, captures, and profiler analysis. Use when you need to interact with the running Editor rather than just read/write files, when the user says "check it compiles in Unity", "run the menu item", "read the console", "capture the view", "profile this", or mentions unity-mcp / Unity_RunCommand (the old MCP bridge this replaces). For running validation suites use run-validation-suite; for debugging workflows use voxel-debugging.
+description: Reference card and recipes for driving the live Unity Editor from the shell with the Unity CLI (`unity command`, `unity recompile`, `unity job`) — running C# in the Editor (eval/script run), compile checks, console reads, menu items and code generation, long operations as detached jobs, scene/GameObject/serialized-field inspection, asset queries, captures, and profiler analysis. Use when you need to interact with the running Editor rather than just read/write files, when the user says "check it compiles in Unity", "run the menu item", "read the console", "capture the view", "profile this", or mentions unity-mcp / Unity_RunCommand (the old MCP bridge this replaces). For running validation suites use run-validation-suite; for debugging workflows use voxel-debugging.
 metadata:
   unity-cli-authored-against: Unity CLI 1.0.0-beta.11 + com.unity.pipeline 0.8.0-exp.1
   unity-cli-last-verified: "2026-09-27"
@@ -39,7 +39,7 @@ the live Editor.
 Editor, sees brand-new `.cs` files, and prints Unity's own `error CS…` with file and line. Exit
 `0` = clean, `6` = compile errors, `7` = no Editor (fall back to `dotnet build`, see `CLAUDE.md`;
 an Editor that is open but unreachable may be in Safe Mode, gotcha 14 in `references/recipes.md`).
-It returns **before** the domain reload that loads the new code. Wait for `editor_status` to
+It returns **before** the domain reload that loads the new code. Wait for `editor status` to
 report `ready` before running anything that needs it (recipe in `references/recipes.md`).
 In Play mode a pending change neither compiles nor reloads until Play stops, so `unity recompile`
 blocks — leave Play mode first (gotcha 15).
@@ -47,29 +47,29 @@ blocks — leave Play mode first (gotcha 15).
 **Domain reloads.** A call that lands during a reload fails fast (network error / HTTP 400).
 Retry it; it is not a hang.
 
-**Play mode affects the user's Editor.** Always confirm with the user before `editor_play`,
-`editor_pause` or `editor_stop`.
+**Play mode affects the user's Editor.** Always confirm with the user before `editor.playmode start`,
+`editor.playmode pause` or `editor.playmode stop`.
 
 ## Quick reference
 
 | Need                                   | Command                                                                                   |
 |----------------------------------------|-------------------------------------------------------------------------------------------|
-| Run C# in the Editor                   | `unity command eval "<C#>" --result-only` (expression body, `return X;`)                  |
-| Run a C# file with arguments           | `unity command run_script --file <path> --entry Ns.Type.Method --args '[...]'`            |
+| Run C# in the Editor                   | `unity command script eval "<C#>" --result-only` (expression body, `return X;`)                  |
+| Run a C# file with arguments           | `unity command script run --file <path> --entry Ns.Type.Method --args '[...]'`            |
 | Does it compile in Unity?              | `unity recompile --format json`                                                           |
-| Read the console                       | `unity command console --level error --tail 20 --result-only`                             |
-| Run a menu item                        | `unity command menu --path "Minecraft Clone/…"` (`--detach` if long)                      |
+| Read the console                       | `unity command console get --level error --tail 20 --result-only`                             |
+| Run a menu item                        | `unity command editor invoke_menu --path "Minecraft Clone/…"` (`--detach` if long)                      |
 | Wait for a detached job                | `unity job wait <jobId> --timeout 90` (repeat until the result arrives)                  |
-| Editor state                           | `unity command editor_status --result-only`                                               |
-| Scene tree / find objects              | `get_scene_hierarchy`, `find_gameobjects`                                                 |
-| Serialized fields (incl. private)      | `get_serialized_fields --target <instanceId> --component <Type>`                          |
-| Find assets / GUIDs                    | `find_assets --type <Type>` or `--name <name>`                                            |
-| Packages                               | `package_list`                                                                            |
-| See what a view shows                  | `capture_scene_view` / `capture_game_view` → `Assets/AgentCaptures~/`, then read the PNG  |
-| Profiler data                          | `run_script` on `Tools/UnityCli/Profiler/ProfilerQueries.cs`                              |
-| Load/drive a world in Play mode, capture | `run_script` on `Tools/UnityCli/PlayMode/WorldRig.cs` (recipe `playmode-world`)         |
-| Behavior-tick input on a live world      | `run_script` on `Tools/UnityCli/PlayMode/TickShapeProbe.cs` (`Measure`, after `WorldRig.Launch`; `AuditSleepers` checks the registration contract) |
-| Generated blocks at given coordinates (edit mode) | `run_script` on `Tools/UnityCli/WorldGen/TerrainBlockDump.cs` (`Dump` with seed + voxel box) |
+| Editor state                           | `unity command editor status --result-only`                                               |
+| Scene tree / find objects              | `scene get_hierarchy`, `gameobject find`                                                 |
+| Serialized fields (incl. private)      | `component get_fields --target <instanceId> --component <Type>`                          |
+| Find assets / GUIDs                    | `asset find --type <Type>` or `--name <name>`                                            |
+| Packages                               | `package list`                                                                            |
+| See what a view shows                  | `capture scene_view` / `capture game_view` → `Assets/AgentCaptures~/`, then read the PNG  |
+| Profiler data                          | `script run` on `Tools/UnityCli/Profiler/ProfilerQueries.cs`                              |
+| Load/drive a world in Play mode, capture | `script run` on `Tools/UnityCli/PlayMode/WorldRig.cs` (recipe `playmode-world`)         |
+| Behavior-tick input on a live world      | `script run` on `Tools/UnityCli/PlayMode/TickShapeProbe.cs` (`Measure`, after `WorldRig.Launch`; `AuditSleepers` checks the registration contract) |
+| Generated blocks at given coordinates (edit mode) | `script run` on `Tools/UnityCli/WorldGen/TerrainBlockDump.cs` (`Dump` with seed + voxel box) |
 
 ## Routing
 
@@ -82,13 +82,15 @@ Retry it; it is not a hang.
 
 ## Constraints
 
-- **Confirm before play mode** (`editor_play` / `editor_pause` / `editor_stop`).
-- **Never save captures outside `Assets/AgentCaptures~/`.** Save paths are confined to `Assets/`,
-  and any other folder there gets imported with a `.meta` file. Unity skips `~` folders.
+- **Confirm before play mode** (`editor.playmode start` / `editor.playmode pause` / `editor.playmode stop`).
+- **Never save captures outside `Assets/AgentCaptures~/`; pass that full path.** A relative path
+  resolves from the project root, so a bare `AgentCaptures~/x.png` lands outside the gitignored folder,
+  and any other folder under `Assets/` gets imported with a `.meta` file. Unity skips `~` folders.
 - **Long work goes through `--detach` + bounded `unity job wait --timeout 90` calls**, not a raised
   `--timeout` on a blocking call, and never one unbounded wait longer than the shell's timeout.
-- **Destructive asset commands** (`delete_asset`, overwriting `write_text_file`, …) take
-  `--confirm true`; run them with `--dry_run true` first.
+- **Destructive asset commands** (`asset delete`, overwriting `write_text_file`, …) take
+  `--confirm true`; run them with `--dry-run true` first.
+- **First `unity recompile` after a file write may return `400 Bad Request`** while auto-refresh imports; retry after a few seconds.
 - **Version drift:** this card was verified against the versions in `metadata`. If `unity --version`
-  or `package_list` shows newer ones, re-check behavior against `unity command --query` and update
+  or `package list` shows newer ones, re-check behavior against `unity command --query` and update
   the card and its `metadata`.

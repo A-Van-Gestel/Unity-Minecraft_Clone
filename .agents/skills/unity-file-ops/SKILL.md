@@ -30,16 +30,16 @@ Every asset that Unity tracks has a `{asset}.meta` sibling containing a GUID. Sc
 
 Live Editor commands (mechanics: the `unity-editor` skill) complement file-level operations:
 
-- `unity command find_assets --name <name>` (or `--type <Type>`) — an asset's path and GUID without parsing `.meta` files.
-- `get_scene_hierarchy` → `get_serialized_fields --target <instanceId> --component <Type>` — verify component references are wired correctly after a move or rename, private `[SerializeField]` values included.
+- `unity command asset find --name <name>` (or `--type <Type>`) — an asset's path and GUID without parsing `.meta` files.
+- `scene get_hierarchy` → `component get_fields --target <instanceId> --component <Type>` — verify component references are wired correctly after a move or rename, private `[SerializeField]` values included.
 - `get_tags_layers` / `set_tags_layers` — verify tags and layers exist before referencing them in code, or create them instead of asking the user.
-- `unity command console --level warn --tail 50 --result-only` — after a file operation, check for "missing script", "missing reference", or "duplicate GUID" warnings that indicate a break the compiler won't catch.
+- `unity command console get --level warn --tail 50 --result-only` — after a file operation, check for "missing script", "missing reference", or "duplicate GUID" warnings that indicate a break the compiler won't catch.
 
 ### Deleting serialized assets
 
 Before deleting a prefab, ScriptableObject, or scene:
 
-1. Search for references by GUID, not by filename. Use `unity command find_assets` to get the GUID, or open the `.meta` file and copy the `guid:` value. Then `Grep` the project for that 32-character string.
+1. Search for references by GUID, not by filename. Use `unity command asset find` to get the GUID, or open the `.meta` file and copy the `guid:` value. Then `Grep` the project for that 32-character string.
 2. Check `.unity` scenes and `.prefab` files for hits — those are the call sites Unity will break.
 3. If references exist, either update them to a replacement asset or confirm with the user that breakage is intended.
 

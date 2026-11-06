@@ -53,6 +53,6 @@ Generic rename/move tools miss these. Check each before applying edits:
 - `codegraph callers <newName>` (CLI) — Re-run on the newly named symbol to ensure references survived and re-linked properly.
 - Run `unity recompile --format json` (covers runtime + editor assemblies and new files); without a running Editor, fall back to the `dotnet build` pair in `CLAUDE.md`.
 - **Live Editor verification (Unity CLI, mechanics in the `unity-editor` skill):** After the refactor compiles:
-    - `unity command find_assets --name <name>` on moved/renamed assets to confirm the GUID is preserved.
-    - `get_serialized_fields` on affected scene or prefab objects to verify component references didn't break.
-    - `unity command console --level warn --tail 50 --result-only` — check for "missing script" or "missing reference" warnings that indicate a GUID break the compiler can't catch.
+    - `unity command asset find --name <name>` on moved/renamed assets to confirm the GUID is preserved.
+    - `component get_fields` on affected scene or prefab objects to verify component references didn't break.
+    - `unity command console get --level warn --tail 50 --result-only` — check for "missing script" or "missing reference" warnings that indicate a GUID break the compiler can't catch.
