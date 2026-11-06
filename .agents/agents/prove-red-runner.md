@@ -32,7 +32,8 @@ whether to pass `--no-baseline` (only when the parent says so).
    `--budget 540` keeps the run under the tool's 600 s limit: entries that no longer fit are not
    started and show as `NOT RUN`. The script owns every mutation, restore, checksum and recompile;
    do not touch the files it names. Never start it twice. If the tool moves it to the background,
-   wait for it.
+   wait for it. Before declaring a backgrounded run dead, check its PID (`tasklist //FI "PID eq <pid>"`)
+   and the log's last line: a live python process means it is still running — keep waiting.
 4. Record `git status --short` again. Any difference from step 1 → report it verbatim as
    **TREE CHANGED** at the top of the report. Do not fix it. A killed run cleans nothing up: quote
    its last `backup:` line too, so the parent can restore from it.
