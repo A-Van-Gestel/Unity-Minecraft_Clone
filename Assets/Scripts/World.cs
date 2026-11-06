@@ -1500,7 +1500,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                             Debug.Log($"[LoadOrGenerateChunk] Restoring {localCols.Count} lighting columns for chunk {chunkCoord}");
     #endif
 
-                        HashSet<Vector2Int> globalCols = HashSetPool<Vector2Int>.Get();
+                        HashSet<Vector2Int> globalCols = ChunkColumnSets.Rent();
                         foreach (Vector2Int lCol in localCols)
                         {
                             globalCols.Add(new Vector2Int(lCol.x + chunkVoxelPos.x, lCol.y + chunkVoxelPos.y));

@@ -225,7 +225,15 @@ namespace Editor.Validation.Lighting
             // compares the lazy and pre-evaluated paths over all 64 inputs, B122 pins the laziness itself.
             // Lives in Baselines/LightingValidationSuite.Baseline.LazyGateEquivalence.cs. ---
             AddLazyGateEquivalenceBaselineScenarios(scenarios);
+
+            // --- ES-30 pre-sized column sets (B131): the live skylight queue's sets never regrow while a chunk's
+            // columns are queued. Lives in Baselines/LightingValidationSuite.Baseline.ES30ColumnSets.cs. ---
+            AddEs30ColumnSetBaselineScenarios(scenarios);
         }
+
+        /// <summary>Hook for the ES-30 column-set baseline B131 (implemented in Baselines/LightingValidationSuite.Baseline.ES30ColumnSets.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddEs30ColumnSetBaselineScenarios(List<Scenario> scenarios);
 
         /// <summary>Hook for the LP-6 lazy-gate baselines B121-B122 (implemented in Baselines/LightingValidationSuite.Baseline.LazyGateEquivalence.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>

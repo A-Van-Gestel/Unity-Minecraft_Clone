@@ -461,7 +461,7 @@ namespace Data
             // OPTIMIZATION: Grab from the global pool
             if (!SkylightRecalculationQueue.TryGetValue(chunkVoxelPos, out HashSet<Vector2Int> columns))
             {
-                columns = HashSetPool<Vector2Int>.Get();
+                columns = ChunkColumnSets.Rent();
                 SkylightRecalculationQueue[chunkVoxelPos] = columns;
             }
 

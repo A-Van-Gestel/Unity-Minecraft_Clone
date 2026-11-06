@@ -1404,7 +1404,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                 if (_world.settings.enableLighting &&
                     _world.LightingStateManager.TryGetAndRemove(jobEntry.Key, out HashSet<Vector2Int> localLightCols))
                 {
-                    HashSet<Vector2Int> globalLightCols = HashSetPool<Vector2Int>.Get();
+                    HashSet<Vector2Int> globalLightCols = ChunkColumnSets.Rent();
                     foreach (Vector2Int lCol in localLightCols)
                     {
                         globalLightCols.Add(new Vector2Int(lCol.x + chunkData.Position.x, lCol.y + chunkData.Position.y));
