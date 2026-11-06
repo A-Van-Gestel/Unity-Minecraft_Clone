@@ -15,27 +15,13 @@ namespace Editor.WorldTools
         private static VertexAttributeDescriptor[] VertexLayout => SectionRenderer.Layout;
 
         /// <summary>
-        /// Converts a <see cref="MeshDataJobOutput"/> into Unity <see cref="Mesh"/> objects, one per
-        /// non-empty section. Section meshes are stored in <see cref="_sectionMeshes"/> for rendering.
+        /// Converts a post-processed <see cref="MeshDataJobOutput"/> (section-space vertices, relativized indices and
+        /// an interleaved stream 3 — the post-process already ran before the handle reported completion) into Unity
+        /// <see cref="Mesh"/> objects, one per non-empty section. Section meshes are stored in
+        /// <see cref="_sectionMeshes"/> for rendering.
         /// </summary>
         private void ConvertMeshOutput(ChunkCoord chunkCoord, MeshDataJobOutput output)
         {
-            // Run a fast Burst job to adjust coordinate spaces from Chunk-Space to Section-Space
-            // and interleave Normal + LightData into stream 3.
-            MeshPostProcessJob postProcessJob = new MeshPostProcessJob
-            {
-                Vertices = output.Vertices,
-                OpaqueTris = output.Triangles,
-                TransparentTris = output.TransparentTriangles,
-                FluidTris = output.FluidTriangles,
-                Stats = output.SectionStats,
-                Normals = output.Normals,
-                LightData = output.LightData,
-                InterleavedStream3 = output.InterleavedStream3,
-                SectionHeight = ChunkMath.SECTION_SIZE,
-            };
-            postProcessJob.Schedule().Complete();
-
             // Center the preview grid around the origin.
             // There are (_chunkRadius * 2) visible chunks, so total width is (_chunkRadius * 2 * 16).
             // Half of that is _chunkRadius * 16.
@@ -119,6 +105,9 @@ namespace Editor.WorldTools
                 mesh.SetSubMeshes(descriptors, 0, subMeshCount, flags);
                 descriptors.Dispose();
 
+                // These bounds are averaged into the preview's orbit center, so they must track the geometry:
+                // the constant section-cell box (the runtime's MR-4 shape) would bias that center into empty
+                // space, hence the tight per-section recalculation stays.
                 mesh.RecalculateBounds();
 
                 float sectionY = s * ChunkMath.SECTION_SIZE;

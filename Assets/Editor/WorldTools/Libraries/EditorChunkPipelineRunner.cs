@@ -243,14 +243,16 @@ namespace Editor.WorldTools.Libraries
         }
 
         /// <summary>
-        /// Schedules a mesh generation job for the given chunk using stored (lit) map data.
+        /// Schedules a mesh generation job for the given chunk using stored (lit) map data, then chains the
+        /// chunk-space → section-space post-process onto it so the output is final when the handle completes.
         /// </summary>
         /// <param name="chunkCoord">The chunk coordinate to mesh.</param>
         /// <param name="chunkVoxelPos">The voxel-space origin of the chunk.</param>
         /// <param name="maps">Dictionary of all chunk maps keyed by voxel origin.</param>
         /// <param name="clipBounds">Axis-aligned clip bounds. Use <see cref="MeshClipBounds.Disabled"/> for no clipping.</param>
         /// <param name="smoothLighting">Smooth lighting quality level for the mesh job.</param>
-        /// <returns>A tuple of the combined job handle and mesh output, or null if neighbors are missing.</returns>
+        /// <returns>A tuple of the full job-chain handle (mesh job, post-process, input disposals) and the mesh
+        /// output, or null if neighbors are missing.</returns>
         public (JobHandle handle, MeshDataJobOutput output)? ScheduleMeshing(
             ChunkCoord chunkCoord,
             Vector2Int chunkVoxelPos,
@@ -337,29 +339,45 @@ namespace Editor.WorldTools.Libraries
                 Output = meshOutput,
             };
 
-            JobHandle meshJobHandle = job.Schedule();
+            // Chained like the runtime's mesher: the output is final section-space geometry by the time the
+            // returned handle completes, with no main-thread post-process per chunk.
+            MeshPostProcessJob postJob = new MeshPostProcessJob
+            {
+                Vertices = meshOutput.Vertices,
+                OpaqueTris = meshOutput.Triangles,
+                TransparentTris = meshOutput.TransparentTriangles,
+                FluidTris = meshOutput.FluidTriangles,
+                Stats = meshOutput.SectionStats,
+                Normals = meshOutput.Normals,
+                LightData = meshOutput.LightData,
+                InterleavedStream3 = meshOutput.InterleavedStream3,
+                SectionHeight = ChunkMath.SECTION_SIZE,
+            };
 
-            // Schedule disposal of snapshot copies after the job completes
+            JobHandle meshJobHandle = job.Schedule();
+            JobHandle chainHandle = postJob.Schedule(meshJobHandle);
+
+            // The disposals hang off the whole chain so the handle returned below covers the post-process too.
             NativeArray<JobHandle> disposalHandles = new NativeArray<JobHandle>(19, Allocator.Persistent);
-            disposalHandles[0] = mapCopy.Dispose(meshJobHandle);
-            disposalHandles[1] = sectionData.Dispose(meshJobHandle);
-            disposalHandles[2] = southCopy.Dispose(meshJobHandle);
-            disposalHandles[3] = northCopy.Dispose(meshJobHandle);
-            disposalHandles[4] = westCopy.Dispose(meshJobHandle);
-            disposalHandles[5] = eastCopy.Dispose(meshJobHandle);
-            disposalHandles[6] = northEastCopy.Dispose(meshJobHandle);
-            disposalHandles[7] = southEastCopy.Dispose(meshJobHandle);
-            disposalHandles[8] = southWestCopy.Dispose(meshJobHandle);
-            disposalHandles[9] = northWestCopy.Dispose(meshJobHandle);
-            disposalHandles[10] = lightMapCopy.Dispose(meshJobHandle);
-            disposalHandles[11] = lightSouthCopy.Dispose(meshJobHandle);
-            disposalHandles[12] = lightNorthCopy.Dispose(meshJobHandle);
-            disposalHandles[13] = lightWestCopy.Dispose(meshJobHandle);
-            disposalHandles[14] = lightEastCopy.Dispose(meshJobHandle);
-            disposalHandles[15] = lightNorthEastCopy.Dispose(meshJobHandle);
-            disposalHandles[16] = lightSouthEastCopy.Dispose(meshJobHandle);
-            disposalHandles[17] = lightSouthWestCopy.Dispose(meshJobHandle);
-            disposalHandles[18] = lightNorthWestCopy.Dispose(meshJobHandle);
+            disposalHandles[0] = mapCopy.Dispose(chainHandle);
+            disposalHandles[1] = sectionData.Dispose(chainHandle);
+            disposalHandles[2] = southCopy.Dispose(chainHandle);
+            disposalHandles[3] = northCopy.Dispose(chainHandle);
+            disposalHandles[4] = westCopy.Dispose(chainHandle);
+            disposalHandles[5] = eastCopy.Dispose(chainHandle);
+            disposalHandles[6] = northEastCopy.Dispose(chainHandle);
+            disposalHandles[7] = southEastCopy.Dispose(chainHandle);
+            disposalHandles[8] = southWestCopy.Dispose(chainHandle);
+            disposalHandles[9] = northWestCopy.Dispose(chainHandle);
+            disposalHandles[10] = lightMapCopy.Dispose(chainHandle);
+            disposalHandles[11] = lightSouthCopy.Dispose(chainHandle);
+            disposalHandles[12] = lightNorthCopy.Dispose(chainHandle);
+            disposalHandles[13] = lightWestCopy.Dispose(chainHandle);
+            disposalHandles[14] = lightEastCopy.Dispose(chainHandle);
+            disposalHandles[15] = lightNorthEastCopy.Dispose(chainHandle);
+            disposalHandles[16] = lightSouthEastCopy.Dispose(chainHandle);
+            disposalHandles[17] = lightSouthWestCopy.Dispose(chainHandle);
+            disposalHandles[18] = lightNorthWestCopy.Dispose(chainHandle);
 
             JobHandle combinedDisposalHandle = JobHandle.CombineDependencies(disposalHandles);
             JobHandle finalHandle = disposalHandles.Dispose(combinedDisposalHandle);
