@@ -4,6 +4,7 @@ using System.Text;
 using Data;
 using Helpers;
 using UnityEngine;
+using Editor.Validation.Framework;
 using Scenario = Editor.Validation.Framework.Scenario;
 
 namespace Editor.Validation.MeshQueue
@@ -239,29 +240,18 @@ namespace Editor.Validation.MeshQueue
         }
 
         /// <summary>
-        /// B7 — After warm-up, a full enqueue-then-drain cycle over a pre-sized queue must allocate zero
-        /// managed bytes (the pooled-slot / struct-enumerator design). A self-check first confirms the GC
-        /// counter actually observes allocations; on runtimes where it is stubbed (the editor's Mono returns
-        /// a non-moving value), the measurement is reported INCONCLUSIVE rather than failed — the exact-zero
-        /// proof is then deferred to an IL2CPP profiler capture, as with the other MR/MT alloc claims.
-        /// <para><b>Prove-red:</b> back the queue with <c>LinkedList&lt;Chunk&gt;</c> (a node alloc per enqueue)
-        /// and run under a runtime whose allocation counter is live (IL2CPP player).</para>
+        /// B7 — After warm-up, a full enqueue-then-drain cycle over a pre-sized queue must allocate nothing
+        /// (the pooled-slot / struct-enumerator design), counted through <see cref="GcAllocProbe"/> after a
+        /// control proves the probe sees allocations.
+        /// <para><b>Prove-red:</b> allocate inside <see cref="RunEnqueueDrainCycle"/>.</para>
         /// </summary>
         private static bool B7_ZeroAllocSteadyState()
         {
             const int count = 128;
+            bool passed = true;
 
-            // Self-check: confirm the allocation counter is live before trusting a zero reading.
-            long selfBefore = GC.GetAllocatedBytesForCurrentThread();
-            byte[] probe = new byte[8192];
-            long selfAfter = GC.GetAllocatedBytesForCurrentThread();
-            GC.KeepAlive(probe);
-            if (selfAfter - selfBefore <= 0)
-            {
-                Debug.LogWarning("  [INCONCLUSIVE] B7: GC.GetAllocatedBytesForCurrentThread() is not live on this " +
-                                 "runtime (editor Mono) — zero-alloc could not be measured here. Verify via an IL2CPP profiler capture.");
-                return true;
-            }
+            int control = GcAllocProbe.Count(static () => GC.KeepAlive(new byte[8192]));
+            if (!GcAllocProbe.IsLive("B7", "an 8 KB array", control, ref passed)) return passed;
 
             // Pre-size the queue and chunks so the measured cycle neither grows arrays nor resizes the map.
             MeshBuildQueue queue = new MeshBuildQueue(count * 2);
@@ -269,14 +259,13 @@ namespace Editor.Validation.MeshQueue
             for (int i = 0; i < count; i++)
                 chunks[i] = MakeChunk(i, 0);
 
-            // Warm-up cycle: exercise the same code paths (JIT, map buckets) outside the measurement window.
-            RunEnqueueDrainCycle(queue, chunks);
+            // Warm-up through the measured delegate: JIT and map buckets settle outside the window.
+            Action cycle = () => RunEnqueueDrainCycle(queue, chunks);
+            cycle();
 
-            long before = GC.GetAllocatedBytesForCurrentThread();
-            RunEnqueueDrainCycle(queue, chunks);
-            long delta = GC.GetAllocatedBytesForCurrentThread() - before;
-
-            return Check($"B7 warm enqueue+drain allocated {delta} bytes (expected 0)", delta == 0);
+            int allocations = GcAllocProbe.Count(cycle);
+            passed &= Check($"B7 warm enqueue+drain recorded {allocations} GC.Alloc samples (expected 0)", allocations == 0);
+            return passed;
         }
 
         /// <summary>Enqueues every chunk (normal) then drains all via the mutating enumerator. Allocation-free.</summary>
