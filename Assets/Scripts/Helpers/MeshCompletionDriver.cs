@@ -62,6 +62,9 @@ namespace Helpers
             // Deliberately does not claim which half failed: the upload may have completed and only the
             // animation thrown, so "previous mesh kept" would point an investigator at the wrong stage.
             Debug.LogError($"[MESHING] Merging the completed mesh for chunk {key} (upload + load animation) faulted — buffers released, chunk left with whatever mesh it had. {e}");
+
+            // Whatever mesh the chunk kept was not built from the snapshot taken for this job.
+            _host.MarkMeshInputsStale(key);
         }
 
         /// <inheritdoc />

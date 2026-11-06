@@ -834,6 +834,27 @@ public class Settings
              TooltipTags.Warning + "High log spam during chunk loading. Will severely impact performance.")]
     public bool enableSaveSystemDiagnosticLogs = false;
 
+    /// <summary>
+    /// If true, a chunk whose lighting settles re-meshes only the neighbors whose mesh inputs changed since their
+    /// last mesh; if false, it re-meshes all four cardinal neighbors.
+    /// </summary>
+    [Header("Rollback Flags")]
+    [SettingField(SettingsTab.Dev, Label = "Gate Merge Neighbor Remeshes", DebugOnly = true, Order = 20)]
+    [Tooltip("When a chunk's lighting settles, re-mesh only the neighbors whose visible inputs changed.\n\n" +
+             "Off re-meshes all four side neighbors every time.\n\n" +
+             TooltipTags.DefaultColorStart + "On" + TooltipTags.DefaultColorEnd)]
+    public bool gateMergeNeighborRemeshes = true;
+
+    /// <summary>
+    /// If true (and <see cref="gateMergeNeighborRemeshes"/> is on), the gated request also covers the four diagonal
+    /// neighbors, whose meshes read the shared corner column.
+    /// </summary>
+    [SettingField(SettingsTab.Dev, Label = "Gate Includes Diagonals", DebugOnly = true, Order = 21)]
+    [Tooltip("With the merge gate on, also re-mesh diagonal neighbors whose shared corner changed.\n\n" +
+             "Off leaves corner seams as before the gate.\n\n" +
+             TooltipTags.DefaultColorStart + "On" + TooltipTags.DefaultColorEnd)]
+    public bool gateMergeIncludeDiagonals = true;
+
     #endregion
 
     #region Debug Screen Tab

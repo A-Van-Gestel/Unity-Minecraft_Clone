@@ -51,6 +51,12 @@ namespace Diagnostics
         /// <summary>The <see cref="SelfRemeshes"/> and <see cref="NeighborRemeshes"/> requested by unchanged stable merges.</summary>
         public long UnchangedRemeshes;
 
+        /// <summary>ES-7.4 gate: cardinal rebuilds it skipped (gate on), or newly queued with current mesh inputs (gate off).</summary>
+        public long GateSkippable;
+
+        /// <summary>ES-7.4 gate: diagonal rebuilds it newly queued (gate on), or would newly queue (gate off).</summary>
+        public long GateDiagonals;
+
         /// <summary>Sections the apply walked that lie entirely outside the job's gathered band.</summary>
         public long OutOfBandSections;
 

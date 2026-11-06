@@ -229,7 +229,15 @@ namespace Editor.Validation.Lighting
             // --- ES-30 pre-sized column sets (B131): the live skylight queue's sets never regrow while a chunk's
             // columns are queued. Lives in Baselines/LightingValidationSuite.Baseline.ES30ColumnSets.cs. ---
             AddEs30ColumnSetBaselineScenarios(scenarios);
+
+            // --- ES-7.4 mesh-input tracking (B132-B136): which neighbors read which border column, and what a light
+            // write tells them. Lives in Baselines/LightingValidationSuite.Baseline.ES74MeshInputs.cs. ---
+            AddEs74MeshInputBaselineScenarios(scenarios);
         }
+
+        /// <summary>Hook for the ES-7.4 mesh-input baselines B132-B136 (implemented in Baselines/LightingValidationSuite.Baseline.ES74MeshInputs.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddEs74MeshInputBaselineScenarios(List<Scenario> scenarios);
 
         /// <summary>Hook for the ES-30 column-set baseline B131 (implemented in Baselines/LightingValidationSuite.Baseline.ES30ColumnSets.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>

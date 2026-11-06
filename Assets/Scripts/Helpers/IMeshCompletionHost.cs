@@ -47,6 +47,11 @@ namespace Helpers
         /// <param name="key">The chunk coordinate whose mesh was just applied.</param>
         void TriggerLoadAnimation(ChunkCoord key);
 
+        /// <summary>Records that the chunk's visible mesh no longer matches its inputs (production:
+        /// <c>ChunkData.MarkMeshInputsStale</c>), so a later merge next to it re-requests the mesh.</summary>
+        /// <param name="key">The chunk coordinate whose mesh merge faulted.</param>
+        void MarkMeshInputsStale(ChunkCoord key);
+
         /// <summary>Releases a completed job's buffers: the MR-6 central output return plus the pooled input
         /// release. The single release site for both the applied and the discarded branch.</summary>
         /// <param name="job">The completed job whose buffers are being reclaimed.</param>

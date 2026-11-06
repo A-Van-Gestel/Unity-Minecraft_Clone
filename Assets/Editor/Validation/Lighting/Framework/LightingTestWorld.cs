@@ -44,7 +44,7 @@ namespace Editor.Validation.Lighting.Framework
     /// timing-dependent in-flight races of Bug 08 into deterministic scenarios.
     /// </para>
     /// </summary>
-    public sealed partial class LightingTestWorld : IDisposable, INeighborGates
+    public sealed partial class LightingTestWorld : IDisposable, INeighborGates, IChunkDataLookup
     {
         /// <summary>Number of voxels in one full chunk buffer (16 × 128 × 16).</summary>
         public const int ChunkBufferLength = VoxelData.ChunkWidth * VoxelData.ChunkHeight * VoxelData.ChunkWidth;
@@ -446,6 +446,19 @@ namespace Editor.Validation.Lighting.Framework
         /// <returns>True when every in-grid neighbor is fully lit and stable.</returns>
         bool INeighborGates.ReadyAndLit(ChunkCoord coord) =>
             AreNeighborsReadyAndLit(new Vector2Int(coord.X, coord.Z));
+
+        /// <summary><see cref="IChunkDataLookup.TryGetChunkData"/>: a loaded in-grid chunk's data (grid coordinate =
+        /// chunk index); out-of-grid and unloaded chunks are absent, as an unloaded chunk is in production.</summary>
+        /// <param name="coord">The chunk to resolve, in chunk-index space.</param>
+        /// <param name="chunkData">Its data, or null.</param>
+        /// <returns>True when the chunk is in the grid and loaded.</returns>
+        bool IChunkDataLookup.TryGetChunkData(ChunkCoord coord, out ChunkData chunkData)
+        {
+            chunkData = _chunks.TryGetValue(new Vector2Int(coord.X, coord.Z), out TestChunk chunk) && chunk.IsLoaded
+                ? chunk.Data
+                : null;
+            return chunkData != null;
+        }
 
         /// <summary>
         /// Marks a chunk's neighbor terrain data as NOT ready — production's <c>AreNeighborsDataReady</c>
@@ -927,6 +940,9 @@ namespace Editor.Validation.Lighting.Framework
                             continue;
                     }
                 }
+
+                // Mirror of WorldJobManager.MergeCompletedLightingJob: after every write this merge caused here.
+                MeshInputPropagation.Propagate(new ChunkCoord(flight.Coord.x, flight.Coord.y), chunk.Data, this);
             }
             else
             {

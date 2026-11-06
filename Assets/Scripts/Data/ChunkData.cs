@@ -258,6 +258,53 @@ namespace Data
         [NonSerialized]
         private ChunkPoolManager _blocklightQueueOwner;
 
+        // Mesh-input tracking (ES-7.4). Fresh values must differ from the B34 dirty pattern (0x5A / true) so the
+        // reset-vs-fresh backstop covers them.
+        [NonSerialized]
+        private bool _meshInputsCurrent;
+
+        [NonSerialized]
+        private byte _pendingBorderWrites;
+
+        /// <summary>
+        /// True while the last mesh snapshot of this chunk still matches every input the mesher reads: its own voxels
+        /// and light and its neighbors' facing border columns. Cleared by any change to those inputs.
+        /// </summary>
+        public bool MeshInputsCurrent => _meshInputsCurrent;
+
+        /// <summary>The <see cref="ChunkBorderMask"/> bits of neighbors whose facing border light changed and are not yet told.</summary>
+        public byte PendingBorderWrites => _pendingBorderWrites;
+
+        /// <summary>Records that a mesh snapshot of this chunk's current inputs was taken.</summary>
+        public void MarkMeshInputsCurrent() => _meshInputsCurrent = true;
+
+        /// <summary>Records that an input of this chunk's mesh changed since its last snapshot.</summary>
+        public void MarkMeshInputsStale() => _meshInputsCurrent = false;
+
+        /// <summary>Returns and clears the pending border-write bits.</summary>
+        /// <returns>The <see cref="ChunkBorderMask"/> bits accumulated since the previous call.</returns>
+        public byte ConsumePendingBorderWrites()
+        {
+            byte mask = _pendingBorderWrites;
+            _pendingBorderWrites = 0;
+            return mask;
+        }
+
+        /// <summary>A light write changed this chunk: its own mesh is stale and the neighbors in <paramref name="borders"/> read it.</summary>
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void NoteLightChanged(byte borders)
+        {
+            _meshInputsCurrent = false;
+            _pendingBorderWrites |= borders;
+        }
+
+        /// <summary>Freshly populated data: nothing meshed from it yet, and every neighbor read the old (or no) data.</summary>
+        private void NoteRepopulated()
+        {
+            _meshInputsCurrent = false;
+            _pendingBorderWrites = ChunkBorderMask.All;
+        }
+
         public int SkylightQueueCount => _skylightBfsQueue?.Count ?? 0;
         public int BlocklightQueueCount => _blocklightBfsQueue?.Count ?? 0;
 
@@ -373,6 +420,8 @@ namespace Data
             // Lighting flags
             ClearAllLightingWork();
             RemainingEdgeCheckRounds = 2;
+            _meshInputsCurrent = false;
+            _pendingBorderWrites = 0;
 
             // Return the rented queues (the pool clears them, keeping their capacity)
             ReleaseQueue(LightChannel.Sky, ref _skylightBfsQueue, ref _skylightQueueOwner);
@@ -465,6 +514,7 @@ namespace Data
         public void PopulateFromFlattened(NativeArray<uint> flatData)
         {
             const int sectionVoxelCount = ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE;
+            NoteRepopulated();
 
             for (int i = 0; i < sections.Length; i++)
             {
@@ -568,6 +618,7 @@ namespace Data
                     section?.RecalculateCounts(World.Instance.BlockTypes);
             }
 
+            NoteRepopulated();
             IsPopulated = true;
 
 #if UNITY_INCLUDE_INSTRUMENTATION
@@ -695,6 +746,7 @@ namespace Data
             // --- Notify World and Handle Active Voxels ---
 
             // Pass the immediateUpdate flag to the world so it can prioritize the mesh rebuild.
+            _meshInputsCurrent = false;
             World.Instance.NotifyChunkModified(Position, localPos, mod.ImmediateUpdate);
 
             // Maintain the active-voxel buckets directly on the data they describe — no longer routed up through
@@ -1254,7 +1306,11 @@ namespace Data
 
             int localY = y % ChunkMath.SECTION_SIZE;
             int index = x + localY * ChunkMath.SECTION_SIZE + z * ChunkMath.SECTION_SIZE * ChunkMath.SECTION_SIZE;
-            sections[sectionY].LightData[index] = value;
+            ushort[] lightData = sections[sectionY].LightData;
+            if (lightData[index] == value) return;
+
+            lightData[index] = value;
+            NoteLightChanged(ChunkBorderMask.Of(x, z));
         }
 
         #endregion
@@ -1270,6 +1326,10 @@ namespace Data
         // same way PackLightData masks it.
         private const int SKY_LEVEL_COUNT = 16;
         private const int SKY_LEVEL_MASK = SKY_LEVEL_COUNT - 1;
+
+        // Section index layout x + 16·y + 256·z: x is the low 4 bits, z starts at bit 8.
+        private const int SECTION_AXIS_MASK = ChunkMath.SECTION_SIZE - 1;
+        private const int SECTION_Z_SHIFT = 8;
 
         /// <summary>
         /// One full section of packed uniform skylight per sky level (no blocklight), so a compact section reaches a
@@ -1515,6 +1575,7 @@ namespace Data
         {
             const int sectionVolume = ChunkMath.SECTION_VOLUME;
             bool changedAnyLight = false;
+            byte changedBorders = 0;
 
             for (int s = 0; s < sections.Length; s++)
             {
@@ -1555,7 +1616,12 @@ namespace Data
                     if (uniform && LightBitMapping.GetMaxBlocklight(first) == 0)
                     {
                         if (first != 0) SectionUniformSkyLevel[s] = LightBitMapping.GetSkylight(first);
-                        if (first != oldUniformLight) changedAnyLight = true;
+                        if (first != oldUniformLight)
+                        {
+                            changedAnyLight = true;
+                            changedBorders = ChunkBorderMask.All; // every border column of the section changed
+                        }
+
                         continue;
                     }
 
@@ -1580,7 +1646,11 @@ namespace Data
                             : isNewSection
                                 ? (ushort)0
                                 : section.LightData[i];
-                        if (oldVal != lightVal) changedAnyLight = true;
+                        if (oldVal != lightVal)
+                        {
+                            changedAnyLight = true;
+                            changedBorders |= ChunkBorderMask.Of(i & SECTION_AXIS_MASK, i >> SECTION_Z_SHIFT);
+                        }
 
                         section.LightData[i] = lightVal;
 
@@ -1611,6 +1681,7 @@ namespace Data
                 }
             }
 
+            if (changedAnyLight) NoteLightChanged(changedBorders);
             return changedAnyLight;
         }
 

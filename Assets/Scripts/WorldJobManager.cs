@@ -406,6 +406,140 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
 
     #endregion
 
+    #region ES-7.4 mesh-input audit (diagnostics)
+
+    /// <summary>The instance and lifecycle a mesh snapshot was taken from, and its per-part input hashes.</summary>
+    private readonly struct MeshInputRecord
+    {
+        public readonly ChunkData Data;
+        public readonly int Epoch;
+        public readonly ulong[] Parts;
+
+        public MeshInputRecord(ChunkData data, int epoch, ulong[] parts)
+        {
+            Data = data;
+            Epoch = epoch;
+            Parts = parts;
+        }
+    }
+
+    // Per chunk, the input hashes of the snapshot its visible mesh was built from. Written only while
+    // MeshInputAuditArmed is set and only in the Editor or instrumented builds; never read for behavior.
+    private readonly Dictionary<ChunkCoord, MeshInputRecord> _meshInputRecords = new Dictionary<ChunkCoord, MeshInputRecord>();
+    private readonly ulong[] _meshInputAuditScratch = new ulong[MeshInputDigest.PartCount];
+    private bool _meshInputAuditArmed;
+
+    /// <summary>Whether mesh schedules record their input hashes for <see cref="AuditMeshInputs"/>. Setting it clears the records.</summary>
+    public bool MeshInputAuditArmed
+    {
+        get => _meshInputAuditArmed;
+        set
+        {
+            _meshInputAuditArmed = value;
+            _meshInputRecords.Clear();
+        }
+    }
+
+    /// <summary>Records the input hashes of a just-scheduled mesh job's snapshot.</summary>
+    /// <param name="key">The chunk being meshed.</param>
+    /// <param name="data">The chunk data the snapshot was filled from.</param>
+    /// <param name="job">The scheduled job, its input maps filled.</param>
+    [Conditional("UNITY_EDITOR"), Conditional("UNITY_INCLUDE_INSTRUMENTATION")]
+    private void RecordMeshInputs(ChunkCoord key, ChunkData data, in MeshingJobData job)
+    {
+        if (!_meshInputAuditArmed) return;
+
+        ulong[] parts = new ulong[MeshInputDigest.PartCount];
+        MeshInputDigest.Compute(job.Map, job.LightMap, in job.Neighbors, parts);
+        _meshInputRecords[key] = new MeshInputRecord(data, data.LifecycleEpoch, parts);
+    }
+
+    /// <summary>
+    /// Compares every recorded visible mesh's snapshot with its live inputs. Meaningful only at a drained moment:
+    /// a chunk queued for or in a re-mesh is skipped, as its inputs will be re-read.
+    /// </summary>
+    /// <param name="mismatches">Receives one line per mismatched chunk, naming the parts that moved.</param>
+    /// <param name="maxReported">The most lines to add to <paramref name="mismatches"/>.</param>
+    /// <param name="audited">Receives every chunk actually compared, or null.</param>
+    /// <returns>The audit's counts.</returns>
+    public MeshInputAuditResult AuditMeshInputs(List<string> mismatches, int maxReported,
+        ICollection<ChunkCoord> audited = null)
+    {
+        MeshInputAuditResult result = default;
+        foreach (KeyValuePair<ChunkCoord, MeshInputRecord> entry in _meshInputRecords)
+        {
+            ChunkCoord coord = entry.Key;
+            MeshInputRecord record = entry.Value;
+            if (!_world.worldData.TryGetChunkData(coord, out ChunkData live) || !ReferenceEquals(live, record.Data)
+                || live.LifecycleEpoch != record.Epoch)
+            {
+                result.SkippedGone++;
+                continue;
+            }
+
+            if (live.Chunk == null || !live.Chunk.IsActive)
+            {
+                result.SkippedInactive++;
+                continue;
+            }
+
+            if (MeshJobs.ContainsKey(coord) || _world.IsMeshRebuildQueued(coord))
+            {
+                result.SkippedPending++;
+                continue;
+            }
+
+            if (!_world.AreNeighborsMeshReady(coord))
+            {
+                result.SkippedNeighbors++;
+                continue;
+            }
+
+            HashLiveMeshInputs(coord, _meshInputAuditScratch);
+            result.Audited++;
+            audited?.Add(coord);
+
+            string moved = null;
+            for (int part = 0; part < MeshInputDigest.PartCount; part++)
+            {
+                if (record.Parts[part] == _meshInputAuditScratch[part]) continue;
+                moved = moved == null ? MeshInputDigest.PartName(part) : $"{moved}, {MeshInputDigest.PartName(part)}";
+            }
+
+            if (moved == null) continue;
+
+            result.Mismatched++;
+            if (mismatches != null && mismatches.Count < maxReported) mismatches.Add($"{coord}: {moved}");
+        }
+
+        return result;
+    }
+
+    /// <summary>Hashes a chunk's live mesh inputs through the same rent-and-fill path a mesh schedule uses.</summary>
+    /// <param name="coord">The chunk.</param>
+    /// <param name="parts">Receives the per-part hashes.</param>
+    private void HashLiveMeshInputs(ChunkCoord coord, ulong[] parts)
+    {
+        NativeArray<uint> map = default;
+        NativeArray<ushort> light = default;
+        NeighborMapSet neighbors = default;
+        try
+        {
+            map = RentAndFillVoxelMap(coord.ToVoxelOrigin());
+            light = RentAndFillLightMap(coord.ToVoxelOrigin());
+            neighbors = AcquireNeighborMaps(coord, pooled: true, Allocator.Persistent);
+            MeshInputDigest.Compute(map, light, in neighbors, parts);
+        }
+        finally
+        {
+            _jobArrayPool.Return(map);
+            _jobArrayPool.Return(light);
+            _jobArrayPool.Return(in neighbors);
+        }
+    }
+
+    #endregion
+
     // --- Native Buffer Pooling ---
     // Pools the fixed-size full-chunk job input buffers (voxel + light maps) shared by lighting
     // and meshing jobs, avoiding ~1.7 MB of Persistent alloc/dispose churn per job.
@@ -470,6 +604,18 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     // release player this stays permanently EMPTY. Never read it for behavior: it is diagnostics-only, and
     // any logic built on it would silently take the "no entry" branch in shipping builds.
     private readonly Dictionary<ChunkCoord, ChunkData> _meshJobTargets = new Dictionary<ChunkCoord, ChunkData>();
+
+    // Shadow of the ES-7.4 gate: diagonals already counted as requested and not yet meshed, standing in for the mesh
+    // queue's coordinate dedup (the shadow enqueues nothing). Diagnostics only; an entry leaves when its chunk is
+    // scheduled or leaves the mesh queue (ForgetGateShadow / ClearGateShadow), and all leave in Dispose.
+    private readonly HashSet<ChunkCoord> _gateShadowDiagonals = new HashSet<ChunkCoord>();
+
+    /// <summary>Drops a chunk from the gate shadow's stand-in queue when it leaves the real mesh queue unmeshed.</summary>
+    /// <param name="chunkCoord">The chunk whose visual was released.</param>
+    public void ForgetGateShadow(ChunkCoord chunkCoord) => _gateShadowDiagonals.Remove(chunkCoord);
+
+    /// <summary>Empties the gate shadow's stand-in queue when the real mesh queue is cleared.</summary>
+    public void ClearGateShadow() => _gateShadowDiagonals.Clear();
 
     private readonly HashSet<ChunkCoord> _chunksToRebuildMesh = new HashSet<ChunkCoord>();
 
@@ -804,6 +950,11 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
             TrackMeshJobTarget(chunkCoord, chunk.ChunkData);
 
             MeshJobs.Add(chunkCoord, jobData);
+
+            // The snapshot above is the mesh's input; set only once the job is enrolled, so a throw leaves it stale.
+            chunk.ChunkData.MarkMeshInputsCurrent();
+            _gateShadowDiagonals.Remove(chunkCoord);
+            RecordMeshInputs(chunkCoord, chunk.ChunkData, in jobData);
         }
         catch
         {
@@ -1605,6 +1756,13 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     }
 
     /// <inheritdoc />
+    void IMeshCompletionHost.MarkMeshInputsStale(ChunkCoord key)
+    {
+        if (_world.worldData.TryGetChunkData(key, out ChunkData data) && data != null) data.MarkMeshInputsStale();
+        _meshInputRecords.Remove(key); // the visible mesh was not built from the recorded snapshot
+    }
+
+    /// <inheritdoc />
     void IMeshCompletionHost.ReleaseJobData(in MeshingJobData job)
     {
         // MR-6: single output-release site for both branches, symmetric with the input release. The upload
@@ -2014,6 +2172,10 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
             }
 
             lap = PerfTickTotals.Lap(ref _mergeTotals.RouteTicks, lap);
+
+            // Every write this merge caused on this chunk has landed: tell the neighbors whose meshes read a border
+            // that changed, before any stability decision below reads their flags.
+            MeshInputPropagation.Propagate(chunkCoord, chunkData, _world.worldData);
         }
         else
         {
@@ -2033,11 +2195,33 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         if (isChunkStable)
         {
             _chunksToRebuildMesh.Add(chunkCoord);
-            int neighborRemeshes = _world.RequestNeighborMeshRebuilds(chunkCoord);
+
+            // ES-7.4: gated, only neighbors whose mesh inputs changed since their last mesh are asked to re-mesh.
+            bool gate = _world.settings.gateMergeNeighborRemeshes;
+            byte staleNeighbors = gate || counting
+                ? MeshInputPropagation.StaleNeighbors(chunkCoord, _world.worldData)
+                : (byte)0;
+            byte requested = MergeRemeshDecision.NeighborRequests(gate, _world.settings.gateMergeIncludeDiagonals,
+                staleNeighbors);
+            if (counting && gate) CountGatedSkips(chunkCoord, requested);
+
+            byte queuedNeighbors = _world.RequestNeighborMeshRebuilds(chunkCoord, requested);
+            int neighborRemeshes = math.countbits((int)queuedNeighbors);
             if (counting)
             {
                 _mergeTotals.StableMerges++;
                 _mergeTotals.NeighborRemeshes += neighborRemeshes;
+                if (gate)
+                {
+                    _mergeTotals.GateDiagonals += math.countbits(queuedNeighbors & ChunkBorderMask.Diagonals);
+                }
+                else
+                {
+                    _mergeTotals.GateSkippable +=
+                        math.countbits(queuedNeighbors & ~staleNeighbors & ChunkBorderMask.Cardinals);
+                    CountGateDiagonals(chunkCoord, staleNeighbors);
+                }
+
                 if (!lightChanged)
                 {
                     _mergeTotals.StableUnchangedMerges++;
@@ -2201,6 +2385,38 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
 
             if (ApplyCrossChunkLightMod(chunkData, in removal, neighborOriginXZ))
                 LastStalePullBacksCleared++;
+        }
+    }
+
+    /// <summary>The ES-7.4 gate on: counts the cardinals it did not request that an ungated merge would have newly queued.</summary>
+    /// <param name="chunkCoord">The chunk whose merge is stable.</param>
+    /// <param name="requested">The neighbors the gate requests, as <see cref="ChunkBorderMask"/> bits.</param>
+    private void CountGatedSkips(ChunkCoord chunkCoord, byte requested)
+    {
+        byte skipped = (byte)(ChunkBorderMask.Cardinals & ~requested);
+        while (ChunkBorderMask.TryTakeNext(ref skipped, out byte bit))
+        {
+            if (_world.WouldQueueMeshRebuild(ChunkBorderMask.Neighbor(chunkCoord, bit))) _mergeTotals.GateSkippable++;
+        }
+    }
+
+    /// <summary>
+    /// Shadow of the ES-7.4 gate: counts the stale diagonals whose request would cost an extra mesh job — newly queued,
+    /// not yet counted, and with no light work of their own (that work ends in their own merge's self request).
+    /// </summary>
+    /// <param name="chunkCoord">The chunk whose merge is stable.</param>
+    /// <param name="staleNeighbors">Its neighbors with stale mesh inputs, as <see cref="ChunkBorderMask"/> bits.</param>
+    private void CountGateDiagonals(ChunkCoord chunkCoord, byte staleNeighbors)
+    {
+        byte diagonals = (byte)(staleNeighbors & ChunkBorderMask.Diagonals);
+        while (ChunkBorderMask.TryTakeNext(ref diagonals, out byte bit))
+        {
+            ChunkCoord diagonal = ChunkBorderMask.Neighbor(chunkCoord, bit);
+            if (!_world.worldData.TryGetChunkData(diagonal, out ChunkData data) || data == null
+                || data.NeedsInitialLighting || data.HasLightChangesToProcess || data.NeedsEdgeCheck)
+                continue;
+
+            if (_world.WouldQueueMeshRebuild(diagonal) && _gateShadowDiagonals.Add(diagonal)) _mergeTotals.GateDiagonals++;
         }
     }
 
@@ -2452,6 +2668,8 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         GenerationJobs.Clear();
         MeshJobs.Clear();
         _meshJobTargets.Clear(); // MP-4 probe: never outlive the job entries it describes.
+        _gateShadowDiagonals.Clear();
+        _meshInputRecords.Clear();
         LightingJobs.Clear();
 
         // In-flight lighting results are discarded wholesale at shutdown, so mods deferred for

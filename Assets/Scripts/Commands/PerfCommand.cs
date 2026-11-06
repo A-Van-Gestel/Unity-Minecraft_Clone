@@ -318,6 +318,9 @@ namespace Commands
                 $"{PerfStore.SumCounter(PerfCounter.MergeUnchangedRemeshes)} of them by unchanged merges; " +
                 $"unloads with skylight pending {PerfStore.SumCounter(PerfCounter.UnloadPendingSkyChunks)} " +
                 $"({PerfStore.SumCounter(PerfCounter.UnloadPendingSkyNodes)} nodes)"));
+            lines.Add(new ConsoleLine(ConsoleLineSeverity.Info,
+                $"  Remesh gate: {PerfStore.SumCounter(PerfCounter.MergeGateSkippable)} cardinal rebuilds skipped " +
+                $"(or skippable), {PerfStore.SumCounter(PerfCounter.MergeGateDiagonals)} diagonal rebuilds (or would-be)"));
 
             long checks = PerfStore.SumCounter(PerfCounter.MergeCountChecks);
             if (checks == 0) return;

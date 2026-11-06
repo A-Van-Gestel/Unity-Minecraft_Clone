@@ -55,6 +55,8 @@ namespace Editor.Validation.PerfMonitoring
             (nameof(PerfMergeTotals.UnloadPendingSkyNodes), PerfCounter.UnloadPendingSkyNodes, false),
             (nameof(PerfMergeTotals.CountChecks), PerfCounter.MergeCountChecks, false),
             (nameof(PerfMergeTotals.CountDrifts), PerfCounter.MergeCountDrifts, false),
+            (nameof(PerfMergeTotals.GateSkippable), PerfCounter.MergeGateSkippable, false),
+            (nameof(PerfMergeTotals.GateDiagonals), PerfCounter.MergeGateDiagonals, false),
         };
 
         /// <summary>The kept section's non-air count after its one stone voxel.</summary>

@@ -3463,6 +3463,8 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         PerfStore.SampleTotal(PerfCounter.UnloadPendingSkyNodes, totals.UnloadPendingSkyNodes);
         PerfStore.SampleTotal(PerfCounter.MergeCountChecks, totals.CountChecks);
         PerfStore.SampleTotal(PerfCounter.MergeCountDrifts, totals.CountDrifts);
+        PerfStore.SampleTotal(PerfCounter.MergeGateSkippable, totals.GateSkippable);
+        PerfStore.SampleTotal(PerfCounter.MergeGateDiagonals, totals.GateDiagonals);
     }
 
     /// <summary>Samples the behavior tick's running totals into the <c>Tick*</c> counters and the fluid ticker pool's misses.</summary>
@@ -3553,6 +3555,10 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         if (onWestBorder && onNorthBorder) QueueNeighborRebuild(coord.Neighbor(-1, 1), immediate);
         if (onEastBorder && onNorthBorder) QueueNeighborRebuild(coord.Neighbor(1, 1), immediate);
 
+        // The same neighbors read this voxel: their meshes stay stale until re-snapshot, even if a request above
+        // was dropped (no active visual chunk).
+        MeshInputPropagation.MarkStale(coord, ChunkBorderMask.Of(localVoxelPos.x, localVoxelPos.z), worldData);
+
         // --- 2. Queue Debug Visualization Updates ---
 
         // Always update the visualization for the directly modified chunk.
@@ -3575,20 +3581,34 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     }
 
     /// <summary>
-    /// Explicitly queues mesh rebuild jobs for the four cardinal neighbors of a specified chunk.
-    /// Typically called when a central chunk stabilizes its lighting, changing the boundary appearance of its neighbors.
+    /// Queues mesh rebuilds for the named neighbors of a chunk (cardinals and diagonals alike), skipping any without
+    /// an active visual chunk.
     /// </summary>
     /// <param name="chunkCoord">The chunk coordinate of the central chunk.</param>
-    /// <returns>How many of the four were newly queued; an already-queued neighbor is not counted.</returns>
-    public int RequestNeighborMeshRebuilds(ChunkCoord chunkCoord)
+    /// <param name="neighbors">The <see cref="ChunkBorderMask"/> bits of the neighbors to request.</param>
+    /// <returns>The bits of the neighbors newly queued; an already-queued one is not set.</returns>
+    public byte RequestNeighborMeshRebuilds(ChunkCoord chunkCoord, byte neighbors)
     {
-        // Queue rebuilds for all 4 direct neighbors
-        int queued = QueueNeighborRebuild(chunkCoord.Neighbor(0, 1)) ? 1 : 0; // North
-        if (QueueNeighborRebuild(chunkCoord.Neighbor(0, -1))) queued++; // South
-        if (QueueNeighborRebuild(chunkCoord.Neighbor(1, 0))) queued++; // East
-        if (QueueNeighborRebuild(chunkCoord.Neighbor(-1, 0))) queued++; // West
-        return queued;
+        int queued = 0;
+        while (ChunkBorderMask.TryTakeNext(ref neighbors, out byte bit))
+        {
+            if (QueueNeighborRebuild(ChunkBorderMask.Neighbor(chunkCoord, bit))) queued |= bit;
+        }
+
+        return (byte)queued;
     }
+
+    /// <summary>Whether the chunk is waiting in the mesh build queue.</summary>
+    /// <param name="chunkCoord">The chunk to test.</param>
+    /// <returns>True when it is queued.</returns>
+    public bool IsMeshRebuildQueued(ChunkCoord chunkCoord) => _meshBuildQueue.Contains(chunkCoord);
+
+    /// <summary>Whether a mesh request for this chunk would be newly queued (it has an active visual chunk and is not queued).</summary>
+    /// <param name="chunkCoord">The chunk to test.</param>
+    /// <returns>True when <see cref="RequestChunkMeshRebuild"/> would enqueue it.</returns>
+    public bool WouldQueueMeshRebuild(ChunkCoord chunkCoord) =>
+        worldData.TryGetChunkData(chunkCoord, out ChunkData data) && data.Chunk != null && data.Chunk.IsActive
+        && !_meshBuildQueue.Contains(chunkCoord);
 
     /// <summary>
     /// Promotes parked light work in a chunk's 3×3 neighborhood back into the scheduler's ready set.
@@ -3751,8 +3771,8 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// This relaxed gate prevents "wave-front ping-pong" deadlocks where perpetually
     /// rescheduling neighbor lighting jobs would otherwise block meshing indefinitely.
     /// The meshing job reads a snapshot of the neighbor's current voxel data, which is
-    /// valid even if a lighting update is in-flight. Any stale border lighting is corrected
-    /// by the re-mesh triggered when the neighbor's lighting job completes.
+    /// valid even if a lighting update is in-flight. Stale border lighting is corrected
+    /// when that neighbor's lighting settles: its merge re-meshes the chunks whose facing border light changed.
     /// </para>
     /// </summary>
     /// <param name="chunkCoord">The coordinate of the central chunk whose neighbors are to be checked.</param>
@@ -4366,6 +4386,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                 // Remove from mesh queue before returning to pool (O(1)).
                 // This prevents dead chunk references from lingering in the queue (Memory Leak / Logic Error).
                 _meshBuildQueue.Remove(chunkCoord);
+                JobManager?.ForgetGateShadow(chunkCoord);
 
                 // Return to pool
                 ChunkPool.Return(chunkObj);
@@ -4660,6 +4681,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
             {
                 // Remove from mesh queue to prevent processing deactivated chunks (O(1))
                 _meshBuildQueue.Remove(chunkCoord);
+                JobManager?.ForgetGateShadow(chunkCoord);
 
                 // POOLING: Return chunk to pool instead of just deactivating
                 ChunkPool.Return(chunk);
@@ -6298,6 +6320,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
 
         // 5. Clear mesh build queue
         _meshBuildQueue.Clear();
+        JobManager?.ClearGateShadow();
 
         // 6. Return all ChunkData to pool and clear world data
         foreach (ChunkData data in worldData.ChunkValues)

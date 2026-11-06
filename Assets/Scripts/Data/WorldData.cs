@@ -11,7 +11,7 @@ using Debug = UnityEngine.Debug;
 namespace Data
 {
     [Serializable]
-    public class WorldData
+    public class WorldData : IChunkDataLookup
     {
         [MyBox.ReadOnly]
         public string worldName;
@@ -128,6 +128,10 @@ namespace Data
         /// <returns>True when the chunk is loaded.</returns>
         public bool TryGetChunk(Vector2Int chunkVoxelPos, out ChunkData chunkData) =>
             _chunks.TryGetValue(chunkVoxelPos, out chunkData);
+
+        /// <inheritdoc />
+        public bool TryGetChunkData(ChunkCoord coord, out ChunkData chunkData) =>
+            _chunks.TryGetValue(coord.ToVoxelOrigin(), out chunkData);
 
         /// <summary>Adds or replaces the chunk at a voxel-space origin, keeping the voxel-query cache coherent.</summary>
         /// <param name="chunkVoxelPos">The chunk's voxel-space origin.</param>

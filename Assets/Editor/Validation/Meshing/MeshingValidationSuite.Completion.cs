@@ -234,10 +234,10 @@ namespace Editor.Validation.Meshing
         }
 
         /// <summary>
-        /// B32 — a merge whose apply throws must not animate, must still release its buffers, and must not
-        /// abort the pass. Logs one deliberate <c>[MESHING]</c> error (the real driver's stage-2 fault hook).
+        /// B32 — a merge whose apply throws must not animate, must mark the chunk's mesh inputs stale, must still
+        /// release its buffers, and must not abort the pass. Logs one deliberate <c>[MESHING]</c> error.
         /// Prove-red: move <c>TriggerLoadAnimation</c> into a <c>finally</c> around the apply → the faulted
-        /// job animates a chunk whose mesh never landed.
+        /// job animates a chunk whose mesh never landed; drop the stale mark → no <c>Stale(1)</c>.
         /// </summary>
         private static bool B32_DriverMergeFaultNeverAnimates()
         {
@@ -250,13 +250,13 @@ namespace Editor.Validation.Meshing
             JobCompletionPass.RunRemoveAndPromote(enrolled, driver);
 
             const string expected =
-                "IsComplete(1) Complete(1) Apply(1,101) Release(101) " +
+                "IsComplete(1) Complete(1) Apply(1,101) Stale(1) Release(101) " +
                 "IsComplete(2) Complete(2) Apply(2,102) Animate(2) Release(102) " +
                 "Remove(1) Remove(2)";
             string actual = host.OpLog;
 
             bool ok = MeshAssert.IsTrue(
-                "B32.1 a faulting apply releases but never animates, and the pass continues",
+                "B32.1 a faulting apply marks the mesh stale, releases, never animates, and the pass continues",
                 actual == expected,
                 actual == expected
                     ? $"op log matches the contract: {actual}"
@@ -389,6 +389,9 @@ namespace Editor.Validation.Meshing
                 AnimateCount++;
                 Record("Animate", key.X);
             }
+
+            /// <inheritdoc />
+            public void MarkMeshInputsStale(ChunkCoord key) => Record("Stale", key.X);
 
             /// <inheritdoc />
             public void ReleaseJobData(in MeshingJobData job)
