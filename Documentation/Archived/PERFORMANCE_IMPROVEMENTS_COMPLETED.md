@@ -1462,9 +1462,68 @@ validation suite (21 scenarios at ship: floor-div/local/region sweeps over ±204
 >   MSAA were never available: MSAA was already inert in game, so exposing it can only add cost.
 > - **Seed/Save:** ✅ / ✅.
 
+
+### GS-7. ✅ DONE (2026-11-06) — Cloud shader runs the shade curve per-fragment on frame-constant uniforms
+
+> **Closed:** `shade * dayNight * SkylightColor` is computed in `vert` and passed to the fragment stage as a
+> `nointerpolation half3 tint`. It replaces the `normalWS` varying, so the interpolator count is unchanged. The
+> result is exact, because every input is per-face or frame-constant. The shader compiles clean on import.
+
+*(Split out of `GS-3`'s 2026-08-15 analysis. Filed separately because it is exact where GS-3 is not —
+if that split is unwanted, fold it back into GS-3 rather than leaving it here unowned.)*
+
+**Observed:** `CloudShader.shader` lines 100–103 compute the day/night factor per fragment:
+
+```hlsl
+float litSky     = ApplySkyDarken(1.0, GlobalLightLevel);
+float skyShadow  = VoxelLightToShadow(litSky, 1.0, minGlobalLightLevel, maxGlobalLightLevel);
+float noonShadow = VoxelLightToShadow(1.0,   1.0, minGlobalLightLevel, maxGlobalLightLevel);
+half  dayNight   = skyShadow / noonShadow;
+```
+
+Every input is a **global uniform**, so `dayNight` is constant across the entire frame — yet it costs
+**2 `pow` per fragment**, on geometry that covers a large fraction of the sky. HLSL compilers do not
+hoist uniform-only expressions out of the fragment stage. The neighboring `shade` term is likewise
+constant *per face*: it is a ternary chain on `normalWS`, and cloud quads are axis-aligned, so all four
+verts carry the same normal.
+
+**Recommendation:** Move `shade * dayNight * SkylightColor` into `vert` and interpolate the resulting
+`half3`. Unlike GS-3 this is **mathematically exact** — interpolating a value that is constant across
+the primitive yields that constant — so it carries none of GS-3's gradient-fidelity question and needs
+no visual A/B beyond a smoke check. Compute it in the vertex shader rather than on the CPU: a C#
+implementation of the curve would fork `VoxelLightToShadow` into a second source of truth.
+
+> **Impact Analysis:**
+> - **Effort:** 🟢 Low — one shader, ~5 lines, no struct sharing (`CloudShader` has its own `v2f`).
+> - **Risk:** 🟢 Low — exact by construction; the only assumption is that cloud quads stay
+>   axis-aligned, which `MR-9`'s cloud mesher guarantees today. If that ever changes, keep `dayNight`
+>   at the vertex stage and leave `shade` per-fragment.
+> - **Benefit:** 🟡 Medium — scales with cloud screen coverage, not with terrain complexity, so it is
+>   independent of the "no GPU bottleneck on terrain" observation that deferred GS-3.
+> - **Seed/Save:** ✅ / ✅.
+
 ---
 
 ## Debug Tooling
+
+### DT-3. ✅ DONE (2026-11-06) — Visualization update-set fed on every voxel edit even when disabled
+
+> **Closed:** `AddChunksToUpdateVisualization` returns while `visualizationMode` is `None`; switching to `None`
+> clears the set; the drain drops coordinates whose chunk left `_chunkMap` (they can never become ready, and
+> activation re-queues a returning chunk).
+
+**Observed:** The voxel-modification path calls `AddChunksToUpdateVisualization` unconditionally — including when `visualizationMode == None`, which is every frame of normal play. The `_chunksToUpdateVisualization` set only drains while a mode is active, so during normal play it just accumulates (a `HashSet` op per modified chunk per tick batch on the hot modification path, plus growth to every-chunk-ever-touched, including long-unloaded coords that the next mode activation then processes as dead lookups).
+
+**Recommendation:** Gate the adds on `visualizationMode != None` (one branch — the mode-switch handler already queues all active chunks, so nothing is lost while disabled) and clear the set when switching to `None`.
+
+> **Impact Analysis:**
+> - **Effort:** 🟢 Low — a guard + a `Clear()`.
+> - **Risk:** 🟢 Low.
+> - **Benefit:** ⚪ — makes the disabled debug stack genuinely zero-cost on the modification hot
+>   path (fluid ticks), and keeps stale coords out of the first activation.
+> - **Seed/Save:** ✅ / ✅.
+
+---
 
 ### DT-4. ✅ DONE (2026-10-07) — Debug HUD/overlay allocation leftovers post-MT-3
 
@@ -1668,3 +1727,28 @@ Docs fold into the last code commit.
   `string.Format`; at `F7` the fast path printed float noise (`3.3935001` against `3.3935000`). The benchmark's
   label check now compares every Y label of 8 formats (4 parsed, 4 fallback) with invariant `string.Format`, and
   a mismatch logs an error. Reverting the parser to its earlier rule failed 11 labels.
+
+---
+
+## Editor Tooling (WorldTools)
+
+### ET-4. ✅ DONE (2026-11-06) — `MeshPostProcessJob` runs synchronously per chunk in the preview
+
+> **Closed:** `EditorChunkPipelineRunner.ScheduleMeshing` chains `MeshPostProcessJob` onto the mesh job and hangs the
+> snapshot disposals off the chain, so the returned handle covers the post-process; `ConvertMeshOutput` no longer
+> post-processes. `RecalculateBounds` is kept on purpose: the bounds feed the 3D Chunk Preview's orbit center.
+
+**Observed:** `ChunkPreview3DWindow.ConvertMeshOutput` (`ChunkPreview3DWindow.Rendering.cs` ~line 37)
+runs `postProcessJob.Schedule().Complete()` on the main thread per meshed chunk — the exact pattern MR-5 removed from production, where the post-process is chained onto the mesh job at schedule time and is already done by the time the poll sees the handle complete. Minor sibling:
+`mesh.RecalculateBounds()` per section (~line 122) despite the constant 16³ section cell (MR-4's constant-bounds fix applies; the clip-bounds feature only shrinks geometry, so the constant cell stays a valid conservative bound).
+
+**Recommendation:** Chain the post-process inside `EditorChunkPipelineRunner.ScheduleMeshing`
+(`postJob.Schedule(meshJobHandle)`), exactly as `WorldJobManager.ScheduleMeshing` does, and return the combined handle; assign constant section bounds in `ConvertMeshOutput`.
+
+> **Impact Analysis:**
+> - **Effort:** 🟢 Low — mirror an existing production change.
+> - **Risk:** 🟢 Low — same data-flow guarantees as production (B10 proved the chaining
+>   byte-identical there).
+> - **Benefit:** ⚪ (dev-time) — removes a per-chunk main-thread stall from the preview's meshing
+>   phase.
+> - **Seed/Save:** ✅ / ✅.

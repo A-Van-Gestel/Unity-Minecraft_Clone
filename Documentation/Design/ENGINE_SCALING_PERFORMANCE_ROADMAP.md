@@ -1,6 +1,6 @@
 # Engine Scaling Performance Roadmap
 
-**Version:** 1.23  
+**Version:** 1.24  
 **Date:** 2026-10-02  
 **Status:** In progress — `ES-0` ✅ complete (2026-10-10: drain stamp shipped, every-layer re-measurement in §2.6 — added
 `ES-29`), `ES-1`, `ES-2` and `ES-6.1` shipped (2026-10-02); ES-0's GC.Alloc attribution captured (2026-10-03, §2.2.1 —
@@ -10,10 +10,18 @@ per generated chunk); `ES-27` ✅ shipped (2026-10-10: pooled light queues, −9
 `ES-29` ✅ shipped (2026-10-11: shared section arena + Burst grass — Tick-led hitches 9–11 → 0–2 per vd-10 run; its
 probe added `ES-31`); `ES-31` ✅ shipped (2026-10-11: registration screen + two-sided seam wake — fluid voxels ticked
 −99 %, Tick-led hitches 1–3 → 0 per vd-10 run); `ES-7a` ✅ shipped (2026-10-18: slab fill, no merge recount,
-band-clamped merge — merge −48 % per job, 200 m/s generation p50 27.0 → 6.6 ms; `ES-7.4` split off and priced); the rest
-is a near-to-far horizon, not scheduled. Tier 1 items are execution-sized; Tier 2/3
-items each need their own design or implementation plan. Re-verify the anchors named per item before
-starting (§8).  
+band-clamped merge — merge −48 % per job, 200 m/s generation p50 27.0 → 6.6 ms; `ES-7.4` split off and priced);
+`ES-30` ✅ shipped (2026-11-06: `Helpers/ChunkColumnSets.Rent` pre-sizes the lighting merge's pooled column sets
+to 256 — the deferred-mod list left as warm-up); `ES-4`'s **lazy borders** sub-item ✅ shipped (2026-11-06:
+chunk borders exist only while `ShowChunkBorders` is on — pool prewarm and the `LoadSceneAsync` loading screen
+stay open); `ES-9`'s first three slices shipped (2026-11-06: the unload log gated on `enableDiagnosticLogs`, the save's
+fault continuation `static` with `OnlyOnFaulted`, and `ExpandStructure` filling a caller's reused list; the
+offset-table probe, pooled read payloads, the dedicated I/O worker and the section-ownership save stay open);
+§8 question 6 (the Unity API checks) answered — `GraphicsStateCollection` and the `SetData(NativeArray,
+int, int, int)` order confirmed, the two `Graphics` questions deferred to ES-20's prototype, and ES-5's PSO
+warmup is variant-only on today's D3D11 players; the rest is a near-to-far horizon, not scheduled. Tier 1
+items are execution-sized; Tier 2/3 items each need their own design or implementation plan. Re-verify the
+anchors named per item before starting (§8).  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
 
 > A whole-pipeline plan (chunk request → generation/load → lighting → meshing → rendering) for three
@@ -423,10 +431,19 @@ soon as its neighbors are ready) instead of gen → light → mesh barriers — 
 **ES-4 — De-burst the first `Update`.** 🟢 / 🟢. Prewarm the `Chunk` pool during the coroutine's idle
 frames; create chunk borders only while `ShowChunkBorders` is on (build on toggle); load the world scene
 with `LoadSceneAsync` behind a loading screen.
+*Shipped 2026-11-06 — the lazy-borders sub-item:* a chunk border exists only while `ShowChunkBorders` is on.
+Switching it on builds a border for every active chunk, switching it off returns every border to the pool, so the
+first `Update` never builds borders it does not show. The pool prewarm and the `LoadSceneAsync` loading screen
+stay open.
 
 **ES-5 — Shader/PSO warmup.** 🟢 / 🟢. Warm the block, transparent and liquid shader variants during
 loading (`GraphicsStateCollection` in Unity 6, or a `ShaderVariantCollection`) — verify the API first.
-Benefit unmeasured.
+The API check resolved (2026-11-06, §8 Q6): `GraphicsStateCollection` is in `UnityEngine.Rendering`, traced by
+`BeginTrace`/`EndTrace` and written by `SaveToFile`, warmed by `WarmUp(JobHandle[, bool])` /
+`WarmUpProgressively(int, JobHandle[, bool])` (both return the `JobHandle` to chain); its full PSO warmup needs
+`SystemInfo.supportsParallelPSOCreation`, and on D3D11 — the driver today's Master players run on
+(`Tools/Python/run_player.py` passes `-force-d3d11`) — `WarmUp` falls back to `ShaderVariantCollection.WarmUp`.
+On today's players ES-5 is therefore variant warmup only. Benefit unmeasured.
 
 ### Tier 1b — traversal quick wins
 
@@ -503,6 +520,19 @@ pump, and move its `RecalculateCounts` to the deserialize thread via a flat opac
   8.0 KB, async/`Task` I/O 4.7 KB, `RegionFile.SaveChunkData` 1.95 KB. The section-ownership save is worth
   0.45 KB of `Queue` growth in `CreateSerializationSnapshot` as garbage; its case is copying, not GC. The dominant
   save-path cost is ES-26's, not this item's.
+*Shipped 2026-11-06 — three of these slices:*
+- The `[LIGHTING RESCUE]` unload log is gated on `enableDiagnosticLogs`. Its 362–428 stack-traced lines per vd-32
+  Master benchmark run made it the Player.log's most frequent line.
+- The unload save's fault continuation is a `static` lambda with the coordinate passed as state and
+  `TaskContinuationOptions.OnlyOnFaulted`, so a save allocates neither closure nor delegate.
+- `IChunkGenerator.ExpandStructure(StructureSpawnMarker, List<VoxelMod> output)` fills a caller's list instead of
+  returning an iterator, and `WorldJobManager` reuses one list for every marker. That removes the ~8.0 KB per
+  generated chunk §2.2.1 attributes to the iterator — the largest single site left after ES-27, 39 % of the 20.3 KB
+  per chunk. Biome Selection **B19** (expanding every golden marker into a warm list records 0 `GC.Alloc` samples;
+  proven red by a per-call list allocation) and **B18** (the new structure-expansion golden: 3 744 rows over two
+  seeds, a 3×3 chunk block, every 8th marker also at ±2²⁴; proven red by skipping `RotateMetaY`) pin the shape and
+  the output. The IL2CPP GC.Alloc re-capture rides the next Development capture session.
+Still open: the offset-table probe, pooled read payloads, the dedicated I/O worker and the section-ownership save.
 
 **ES-10 — Decide what to persist (open decision).** 🟢 / 🟡. `ChunkData.Populate` marks every generated
 chunk modified (`ChunkData.cs:395`), so all generated terrain is serialized and written. Keeping it is a
@@ -653,6 +683,14 @@ the ES-27 re-capture. The two pooled-collection sites left in the lighting path,
 
 Small (0.54 KB of the 20.3 KB per chunk left after ES-27); the gain is a pool state that converges instead of
 re-growing. Gate on the lighting suite, then a GC.Alloc re-capture showing neither site.
+*Shipped 2026-11-06:* `Helpers/ChunkColumnSets.Rent()` is `HashSetPool<Vector2Int>.Get()` plus
+`EnsureCapacity(256)`, used by the three live-queue feeders — `WorldData.QueueSkylightRecalculation`, the disk-load
+lighting restore in `World.LoadOrGenerateChunk`, and `WorldJobManager`'s disk-load arm. The persisted and transient
+column stores (`LightingStateManager`, the unload conversion, the dropped-update batch) keep a plain `Get`: each
+holds a few columns, and pre-sizing would park ~6 KB sets in a store that grows with the session. The deferred-mod
+`ListPool<DeferredLightMod>` is left as is — its 15 growth calls in 12 frames are warm-up. Guard: Lighting suite
+**B131**, a small pooled set absorbed into `Rent()` at 256 columns and 0 `GC.Alloc` samples, proven red with
+`EnsureCapacity(16)`. The IL2CPP GC.Alloc re-capture rides the next Development capture session.
 
 **ES-31 — Register only the voxels that can act: screen the blanket active-voxel registration.** 🟡 / 🟡. Added
 2026-10-11 from ES-29's probe. Generation registers **every** active-type voxel of a new chunk —
@@ -847,12 +885,12 @@ constants + migration change. Prerequisites: ES-13, ES-18, ES-19.
 | **ES-1 — No frame-paced load**   | Completion counter at `World.cs:1064` — execution packet §7.1                                                        |   🟢   | —                   | ✅ 2026-10-02 (in-game)                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | **ES-2 — Calibration**           | Robust OM-1 lighting probe — execution packet §7.1                                                                   |   🟢   | —                   | ✅ 2026-10-02 (in-game)                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | **ES-3 — Loading mode**          | SU-1 + SU-2, pooled/banded/shared startup snapshots                                                                  |   🟡   | ES-0                | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| **ES-4 — First-Update burst**    | Pool prewarm, lazy borders, async scene load                                                                         |   🟢   | —                   | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| **ES-4 — First-Update burst**    | Pool prewarm, lazy borders, async scene load                                                                         |   🟢   | —                   | lazy borders ✅ 2026-11-06; pool prewarm and loading screen open                                                                                                                                                                                                                                                                                                                                                                                                           |
 | **ES-5 — PSO warmup**            | Shader state prewarm                                                                                                 |   🟢   | —                   | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | **ES-6 — Crossing frame**        | `OnDataPopulated` skip (price first — packet §7.1), spread activations, DT-3                                         |   🟡   | ES-0                | ES-6.1 ✅ 2026-10-02 (in-game); rest open                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | **ES-7 — Lighting cuts**         | Slab fill, counts, band-clamped merge, remesh gating                                                                 |   🟢   | ES-0                | ✅ 2026-10-18 ES-7a = 7.1–7.3 (3 vd-10 + 2 vd-32 Master runs per leg; merge −48 % per job); 7.4 split off, priced, unplanned                                                                                                                                                                                                                                                                                                                                               |
 | **ES-8 — Budgets**               | `ApplyModifications`, SL-2 pump, merge ceiling                                                                       |   🟡   | ES-0                | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| **ES-9 — I/O path**              | Offset-table probe, SL-1, section-ownership save, OM-3                                                               |   🟡   | ES-0                | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| **ES-9 — I/O path**              | Offset-table probe, SL-1, section-ownership save, OM-3                                                               |   🟡   | ES-0                | 3 slices ✅ 2026-11-06 (unload log, fault continuation, `ExpandStructure`); probe, payloads, I/O worker, ownership save open                                                                                                                                                                                                                                                                                                                                               |
 | **ES-10 — Persistence policy**   | Open decision: keep saving unmodified terrain, or only edits                                                         |   🟢   | —                   | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | **ES-11 — Stable-load bit**      | P-5 (⚠️ format)                                                                                                      |   🟡   | ES-0                | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | **ES-25 — Upload/vertex cuts**   | Rendering baseline, 16-bit indices, buffer capacity, per-section dirty upload, shared sub-quad grids, DepthOnly pass |   🟡   | ES-0                | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
@@ -860,7 +898,7 @@ constants + migration change. Prerequisites: ES-13, ES-18, ES-19.
 | **ES-27 — BFS queue regrowth**   | Pool-rent `ChunkData`'s lighting BFS queues instead of growing one pair per pooled chunk                             |   🟢   | —                   | ✅ 2026-10-10 (GC re-capture + 3 Master runs vs a same-session control)                                                                                                                                                                                                                                                                                                                                                                                                    |
 | **ES-28 — UI pass garbage**      | Cache the UI band/blur Render Graph pass names and sorting values — ≈ 0.75 KB/frame of steady-state garbage          |   🟢   | —                   | ✅ 2026-10-10 (suite L20/L21 + Editor GC re-capture)                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | **ES-29 — Behavior tick spikes** | Banded / deduplicated fluid snapshots, the fluid-job wait, Grass-Burst                                               |   🟡   | —                   | ✅ 2026-10-11 (snapshot arena + Burst grass; wait → ES-31; 5+3+1 Master runs per leg)                                                                                                                                                                                                                                                                                                                                                                                      |
-| **ES-30 — Pooled set pre-size**  | Pre-size the lighting merge's pooled column sets (256) and deferred-mod lists — 0.54 KB/chunk                        |   🟢   | —                   | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| **ES-30 — Pooled set pre-size**  | Pre-size the lighting merge's pooled column sets (256); deferred-mod list left as warm-up — 0.54 KB/chunk            |   🟢   | —                   | ✅ 2026-11-06 (suite B131; IL2CPP re-capture pending)                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | **ES-31 — Screen registration**  | Register only voxels that can act, instead of every water/grass voxel of a new chunk                                 |   🟡   | —                   | ✅ 2026-10-11 (fluid voxels ticked −99 %; 2+1+2 Master runs per leg)                                                                                                                                                                                                                                                                                                                                                                                                       |
 | **ES-12 — Jobified merge**       | P-3                                                                                                                  |   🟡   | ES-7                | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | **ES-13 — Sky from heightmap**   | Frontier-seeded initial lighting                                                                                     |   🟡   | ES-12               | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
@@ -1184,10 +1222,21 @@ saving is inferred from step 1's re-entry leg, not re-measured.
    heights quantize to 1/4096 block. Never `half` for sub-quad fractions. Needs an explicit decision
    before G0.
 5. **ES-10's persistence policy** — open decision; inputs in the master report's § AC-9 static pass.
-6. **Unity API checks before code** (unity-api MCP): `GraphicsStateCollection`; the `SetData(NativeArray,
+6. ~~**Unity API checks before code** (unity-api MCP): `GraphicsStateCollection`; the `SetData(NativeArray,
    int, int, int)` parameter order (the MCP listing is ambiguous); whether `RenderPrimitives*` draws run
    the material's ShadowCaster/DepthOnly passes under URP; whether DX12/Vulkan in 6000.6 issue real
-   multi-draw.
+   multi-draw.~~ Answered 2026-11-06:
+   - `GraphicsStateCollection` exists in `UnityEngine.Rendering`: `BeginTrace`/`EndTrace` + `SaveToFile` record;
+     `WarmUp(JobHandle[, bool])` / `WarmUpProgressively(int, JobHandle[, bool])` return a `JobHandle`; full warmup
+     needs `SystemInfo.supportsParallelPSOCreation` (ES-5 has the D3D11 consequence).
+   - `GraphicsBuffer.SetData(NativeArray<T> data, int nativeBufferStartIndex, int graphicsBufferStartIndex,
+     int count)` — source start, destination start, count (from the Editor's own ScriptReference; the unity-api MCP
+     listing of this overload is mis-ordered).
+   - Whether `Graphics.RenderPrimitives*` draws run ShadowCaster/DepthOnly under URP: not stated in the docs;
+     inferred yes (they are submitted like `RenderMesh`, which casts and receives shadows) — verify with the Frame
+     Debugger in ES-20's prototype.
+   - Real multi-draw for `commandCount > 1` on DX12/Vulkan: not answerable from the docs; on D3D11 treat N commands
+     as N draws. A GPU capture in ES-20's prototype answers it.
 7. **Doc and comment drift found by the 2026-10-02 sweeps** — all fixed 2026-10-03 except where noted:
    - ~~`PERFORMANCE_IMPROVEMENTS_REPORT.md`'s P-1 re-scope note says P-1's win is now worker-side, but the
      9-map fill is still main-thread (`WorldJobManager.cs:859–862`).~~ Dated correction appended.
@@ -1242,6 +1291,10 @@ saving is inferred from step 1's re-entry leg, not re-measured.
 
 ## Document History
 
+* **v1.24** - **ES quick-win batch shipped** (2026-11-06): ES-30 (`ChunkColumnSets.Rent` pre-sizes the lighting merge's
+  pooled column sets; Lighting suite B131), ES-4's lazy-borders sub-item, and three ES-9 slices (gated `[LIGHTING RESCUE]`
+  log, `static` unload-save fault continuation, `ExpandStructure` into a reused list; Biome Selection B18/B19). ES-5 notes
+  that its warmup is variant-only on D3D11 players; §8 Q6 (Unity API checks) answered. Entries, plan rows, status line.
 * **v1.23** - **ES-7a shipped** (2026-10-18): Step 0 merge split counters, ES-7.1 slab fill, ES-7.2 no merge recount
   (instrumented-build count verifier), ES-7.3 band-clamped merge with direct compaction of absent uniform-sky sections;
   Master A/B against a fresh build of the Step 0 commit. ES-7 entry (shipped note; ES-7.4 defects and price), plan row,
@@ -1333,5 +1386,5 @@ saving is inferred from step 1's re-entry leg, not re-measured.
 
 ---
 
-**Last Updated:** 2026-10-11  
+**Last Updated:** 2026-11-06  
 **Next Review:** when the ES-29 report's 200 m/s observation is controlled (a build of ES-29's base), when ES-25's rendering baseline lands, or before any ES phase starts
