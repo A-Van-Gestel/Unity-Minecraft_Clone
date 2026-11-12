@@ -1,0 +1,66 @@
+# Run with `gate` (changed files since HEAD) or `gate --all`. The checks that need no Unity Editor: the Python tool
+# tests, the doc checkers, table alignment, American English and the reserialize guid audit. Compiling (`unity recompile`) and the validation
+# suites stay separate steps (AGENTS.md, Execution Protocol).
+
+[[gate]]
+name = "py-tests"
+cmd = "python Tools/Python/tests/run_tests.py"
+when = ["Tools/Python/*"]
+timeout = 600
+
+# whole scans: a moved, renamed or deleted doc breaks links and references in files that did not change
+[[gate]]
+name = "doc-links"
+cmd = "python Tools/Python/check_doc_links.py"
+when = ["*.md"]
+
+[[gate]]
+name = "doc-refs"
+cmd = "python Tools/Python/check_doc_refs.py"
+when = ["*.md"]
+
+[[gate]]
+name = "doc-status"
+cmd = "python Tools/Python/check_doc_status.py"
+when = ["*.md"]
+
+# takes directories only: a whole scan of its default roots (Documentation/, .agents/skills/)
+[[gate]]
+name = "md-breaks"
+cmd = "python Tools/Python/check_markdown_breaks.py"
+when = ["Documentation/*.md", ".agents/skills/*"]
+
+[[gate]]
+name = "tables"
+cmd = "python Tools/Python/align_md_tables.py {files}"
+all = "python Tools/Python/align_md_tables.py"
+files = ["Documentation/*.md"]
+
+[[gate]]
+name = "twin-files"
+cmd = "python Tools/Python/check_twin_files.py"
+when = ["CLAUDE.md", "AGENTS.md", ".agents/*"]
+
+# fails only on exit 2/3 (docs-sync Step 1 table unparsed or stale); its candidate-doc list is advisory.
+# Always runs: a moved or deleted file anywhere can leave a table row mapping nothing
+[[gate]]
+name = "doc-impact-map"
+cmd = "python Tools/Python/doc_impact_map.py"
+
+# the §4.9 coverage map against the PerfStore probes in Assets/Scripts
+[[gate]]
+name = "perf-coverage-map"
+cmd = "python Tools/Python/check_perf_coverage_map.py"
+when = ["Assets/Scripts/*.cs", "Documentation/Design/PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md"]
+
+# added lines only, also with --all: spellings that predate a change never block it
+[[gate]]
+name = "american-english"
+cmd = "python Tools/Python/check_american_english.py"
+when = ["*.cs", "*.py", "*.md", "*.json", "*.toml", "*.txt", "*.shader", "*.hlsl", "*.cginc", "*.compute", "*.uss", "*.uxml"]
+
+# pre-commit step 0's audit, HEAD vs working tree (also with --all): a lost guid is a nulled [SerializeField]
+[[gate]]
+name = "reserialize-guids"
+cmd = "python Tools/Python/audit_reserialize_guids.py"
+when = ["*.meta", "Assets/*", "ProjectSettings/*", "Packages/*"]
