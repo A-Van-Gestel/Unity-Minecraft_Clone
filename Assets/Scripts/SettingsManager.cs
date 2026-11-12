@@ -851,7 +851,7 @@ public class Settings
     /// </summary>
     [SettingField(SettingsTab.Dev, Label = "Gate Includes Diagonals", DebugOnly = true, Order = 21)]
     [Tooltip("With the merge gate on, also re-mesh diagonal neighbors whose shared corner changed.\n\n" +
-             "Off leaves corner seams as before the gate.\n\n" +
+             "Off re-meshes only the cardinal neighbors, so a changed shared corner can leave a seam.\n\n" +
              TooltipTags.DefaultColorStart + "On" + TooltipTags.DefaultColorEnd)]
     public bool gateMergeIncludeDiagonals = true;
 

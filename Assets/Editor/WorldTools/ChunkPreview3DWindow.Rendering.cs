@@ -105,9 +105,8 @@ namespace Editor.WorldTools
                 mesh.SetSubMeshes(descriptors, 0, subMeshCount, flags);
                 descriptors.Dispose();
 
-                // These bounds are averaged into the preview's orbit center, so they must track the geometry:
-                // the constant section-cell box (the runtime's MR-4 shape) would bias that center into empty
-                // space, hence the tight per-section recalculation stays.
+                // These bounds are averaged into the preview's orbit center, so they must be tight: a constant
+                // section-cell box would pull that center into empty space.
                 mesh.RecalculateBounds();
 
                 float sectionY = s * ChunkMath.SECTION_SIZE;
