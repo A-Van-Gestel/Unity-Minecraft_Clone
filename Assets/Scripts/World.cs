@@ -3607,7 +3607,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// <param name="chunkCoord">The chunk to test.</param>
     /// <returns>True when <see cref="RequestChunkMeshRebuild"/> would enqueue it.</returns>
     public bool WouldQueueMeshRebuild(ChunkCoord chunkCoord) =>
-        worldData.TryGetChunkData(chunkCoord, out ChunkData data) && data.Chunk != null && data.Chunk.IsActive
+        worldData.TryGetChunkData(chunkCoord, out ChunkData data) && IsMeshQueueable(data.Chunk)
         && !_meshBuildQueue.Contains(chunkCoord);
 
     /// <summary>
@@ -4110,15 +4110,16 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     {
         CountMeshRequest(chunk); // MP-1/F8 (instrumented builds only)
 
-        // Validate chunk state before queuing.
-        // 1. Don't queue null chunks.
-        // 2. Don't queue inactive chunks (they are out of view or being destroyed).
-        if (chunk == null || !chunk.IsActive)
+        if (!IsMeshQueueable(chunk))
             return false;
 
         // TryEnqueue rejects duplicates by coordinate (O(1)); immediate links at the head, normal at the tail.
         return _meshBuildQueue.TryEnqueue(chunk, immediate);
     }
+
+    // The one chunk-state check before queuing a mesh: no null chunks, and no inactive ones (they are out of view or
+    // being destroyed).
+    private static bool IsMeshQueueable([CanBeNull] Chunk chunk) => chunk != null && chunk.IsActive;
 
     /// <summary>
     /// Returns the chunk coordinates for a given <b>voxel-space</b> cell.
