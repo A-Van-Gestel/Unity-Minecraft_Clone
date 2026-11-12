@@ -54,7 +54,7 @@ namespace Diagnostics
         /// <summary>ES-7.4 gate: cardinal rebuilds it skipped (gate on), or newly queued with current mesh inputs (gate off).</summary>
         public long GateSkippable;
 
-        /// <summary>ES-7.4 gate: diagonal rebuilds it newly queued (gate on), or would newly queue (gate off).</summary>
+        /// <summary>ES-7.4 gate: extra diagonal mesh jobs (no light work of their own) it newly queued (gate on), or would (gate off).</summary>
         public long GateDiagonals;
 
         /// <summary>Sections the apply walked that lie entirely outside the job's gathered band.</summary>

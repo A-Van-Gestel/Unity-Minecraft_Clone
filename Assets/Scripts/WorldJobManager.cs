@@ -2225,7 +2225,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                 _mergeTotals.NeighborRemeshes += neighborRemeshes;
                 if (gate)
                 {
-                    _mergeTotals.GateDiagonals += math.countbits(queuedNeighbors & ChunkBorderMask.Diagonals);
+                    CountQueuedGateDiagonals(chunkCoord, queuedNeighbors);
                 }
                 else
                 {
@@ -2414,7 +2414,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
 
     /// <summary>
     /// Shadow of the ES-7.4 gate: counts the stale diagonals whose request would cost an extra mesh job — newly queued,
-    /// not yet counted, and with no light work of their own (that work ends in their own merge's self request).
+    /// not yet counted, and with no light work of their own (see <see cref="CostsExtraDiagonalJob"/>).
     /// </summary>
     /// <param name="chunkCoord">The chunk whose merge is stable.</param>
     /// <param name="staleNeighbors">Its neighbors with stale mesh inputs, as <see cref="ChunkBorderMask"/> bits.</param>
@@ -2424,13 +2424,33 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         while (ChunkBorderMask.TryTakeNext(ref diagonals, out byte bit))
         {
             ChunkCoord diagonal = ChunkBorderMask.Neighbor(chunkCoord, bit);
-            if (!_world.worldData.TryGetChunkData(diagonal, out ChunkData data) || data == null
-                || data.NeedsInitialLighting || data.HasLightChangesToProcess || data.NeedsEdgeCheck)
-                continue;
+            if (!CostsExtraDiagonalJob(diagonal)) continue;
 
             if (_world.WouldQueueMeshRebuild(diagonal) && _gateShadowDiagonals.Add(diagonal)) _mergeTotals.GateDiagonals++;
         }
     }
+
+    /// <summary>The ES-7.4 gate on: counts the diagonals it newly queued that cost an extra mesh job.</summary>
+    /// <param name="chunkCoord">The chunk whose merge is stable.</param>
+    /// <param name="queuedNeighbors">The neighbors newly queued, as <see cref="ChunkBorderMask"/> bits.</param>
+    private void CountQueuedGateDiagonals(ChunkCoord chunkCoord, byte queuedNeighbors)
+    {
+        byte diagonals = (byte)(queuedNeighbors & ChunkBorderMask.Diagonals);
+        while (ChunkBorderMask.TryTakeNext(ref diagonals, out byte bit))
+        {
+            if (CostsExtraDiagonalJob(ChunkBorderMask.Neighbor(chunkCoord, bit))) _mergeTotals.GateDiagonals++;
+        }
+    }
+
+    /// <summary>
+    /// Whether re-meshing this diagonal is an extra mesh job: it has no light work of its own, which would end in its
+    /// own merge's self request anyway.
+    /// </summary>
+    /// <param name="diagonal">The diagonal neighbor.</param>
+    /// <returns>True when it has chunk data and no pending light work.</returns>
+    private bool CostsExtraDiagonalJob(ChunkCoord diagonal) =>
+        _world.worldData.TryGetChunkData(diagonal, out ChunkData data) && data != null
+        && !data.NeedsInitialLighting && !data.HasLightChangesToProcess && !data.NeedsEdgeCheck;
 
     /// <summary>
     /// Applies one cross-chunk light modification to a live, populated chunk: evaluates the shared

@@ -243,7 +243,7 @@ namespace Diagnostics
         /// <summary>Merge remesh gate: cardinal rebuilds it skipped (gate on), or that were needless (gate off).</summary>
         MergeGateSkippable,
 
-        /// <summary>Merge remesh gate: diagonal rebuilds it queued (gate on), or would queue (gate off).</summary>
+        /// <summary>Merge remesh gate: extra diagonal mesh jobs it queued (gate on), or would queue (gate off).</summary>
         MergeGateDiagonals,
 
         /// <summary>Number of counters; not a counter.</summary>
