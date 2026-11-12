@@ -19,6 +19,9 @@ reviewable — the entry only says the current shape is intended.
 | `PerformanceMonitor` samples every frame with the debug HUD closed           | The history ring buffer is what makes a hitch that happened with the HUD off visible when it opens (`DebugScreen.SyncGraphsWithHistory`); ~µs/frame, accepted by design. |
 | A serialized-field rename without `[FormerlySerializedAs]`                   | The project carries renames over with the `unity-file-ops` workflow instead — gate 9 checks the carry-over, not the attribute.                                             |
 | `MeshStalenessProbe.PositiveControl` leaves the center chunk stale with a pending east border bit | Documented in its remarks; it costs ~2 redundant re-meshes, never a stale mesh. A full restore would need a test-only setter on the pooled `ChunkData`, so it was declined. |
+| No test for diagnostics-only code (mesh-input audit record pruning, the gate's diagonal-count filter) | Gate 25 does not apply: nothing reads it for behavior, and a counter mapping is already pinned by Performance Monitor B40. Declined 2026-11-12. |
+| `World.ClearSyntheticChunks` does not clear `WorldJobManager`'s mesh diagnostics | Its only caller (`FluidTickBenchmark`) never schedules meshes or merges, so those tables stay empty; `OnDestroy` clears them through `Dispose`. |
+| On-demand chunk borders and the visualization-set pruning have no suite        | Debug visualization only; a new suite costs more than the overlay is worth. Declined 2026-11-12. |
 | Phase/ticket ids in code comments (`ES-7.4`, `MR-6`, `MP-4`)                 | House style across the engine: the id links a comment to its Design/Architecture doc. Not a "no ticket ids" violation here.                                                  |
 
 ## Project setup
