@@ -956,7 +956,7 @@ Batching all updates for a single neighbor chunk into one `AddPending()` call re
 1. **Generation:** ~2ms CPU, allocates ~20KB
 2. **Lighting:** ~3ms CPU, allocates ~10KB temporary buffers
 3. **Meshing:** ~5ms CPU, allocates mesh data
-4. **Active:** ~100KB total per chunk (data + mesh + chunk border visualization mesh)
+4. **Active:** ~100KB total per chunk (data + mesh; plus a border visualization mesh while chunk borders are shown)
 5. **Unload:** Mesh destroyed, Chunk GameObject destroyed, data saved
 6. **Disk:** ~50KB compressed
 

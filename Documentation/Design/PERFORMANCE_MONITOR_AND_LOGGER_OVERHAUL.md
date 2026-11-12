@@ -1,7 +1,7 @@
 # Performance Monitor & Logger Overhaul Design
 
 **Version:** 1.19  
-**Date:** 2026-11-06  
+**Date:** 2026-10-18  
 **Status:** In progress — PM-0 ✅ complete (2026-10-03, Master answers in §8); PM-1 ✅ complete (2026-10-03, §7.2;
 confirmed in an IL2CPP Master build); PM-2 ✅ complete (2026-10-04, §7.3; confirmed in an IL2CPP Master build); PM-3 ✅
 complete (2026-10-04, §7.4; confirmed in an IL2CPP Master build); PM-4 ✅ complete (2026-10-05, §7.5; confirmed in an
@@ -1364,5 +1364,5 @@ Answers 1–4 come from `EngineApiProbe_2026-10-03_13-52-20.log`: a `Windows - P
 
 ---
 
-**Last Updated:** 2026-11-06  
+**Last Updated:** 2026-10-10  
 **Next Review:** when PM-5 starts (PM-6 complete 2026-10-06)

@@ -140,7 +140,7 @@ attributed (see its report).
 2. Build A from that commit with a clean tree — `git stash -u` the uncommitted change (new files and their `.meta`
    go with it; the Editor must not be in Play mode), build, `git stash pop`. A's report must read
    `Git commit: <base>` with no `-dirty`. When the change is already committed, check the base out detached instead
-   (`git checkout <base>`), run `unity recompile` and confirm through `unity command eval` that the Editor loaded the
+   (`git checkout <base>`), run `unity recompile` and confirm through `unity command script eval` that the Editor loaded the
    base's code (a type or member the change added must be absent), build A, then `git checkout main` and recompile
    before building B. A second build of a commit already built reuses the IL2CPP cache and can finish in seconds —
    not a failed build; check its stamp rather than its build time.

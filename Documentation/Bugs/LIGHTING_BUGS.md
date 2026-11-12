@@ -154,7 +154,7 @@ work? The expected split tells the two candidate causes apart — unresolvable p
 for unloaded chunks, resolvable-and-flagged ones mean the ~1 s walk is somehow not reaching them.
 
 `LightWorkScheduler` exposes only `ReadyCount`/`WaitingCount`, but **no production accessor is
-required**: `unity command eval` (or a `run_script` file) has full reflection, so the probe can read the
+required**: `unity command script eval` (or a `script run` file) has full reflection, so the probe can read the
 scheduler's private state directly and return it.
 
 **Order matters, because this bug only exists in a dirtied live session.** Editing the scratch file
