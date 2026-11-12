@@ -954,7 +954,6 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
             // The snapshot above is the mesh's input; set only once the job is enrolled, so a throw leaves it stale.
             chunk.ChunkData.MarkMeshInputsCurrent();
             _gateShadowDiagonals.Remove(chunkCoord);
-            RecordMeshInputs(chunkCoord, chunk.ChunkData, in jobData);
         }
         catch
         {
@@ -967,6 +966,8 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
             throw;
         }
 
+        // Outside the try: the job is enrolled, so a throw here must not reach the catch's buffer release.
+        RecordMeshInputs(chunkCoord, chunk.ChunkData, in jobData);
         return true;
     }
 
