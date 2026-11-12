@@ -4386,7 +4386,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                 // Remove from mesh queue before returning to pool (O(1)).
                 // This prevents dead chunk references from lingering in the queue (Memory Leak / Logic Error).
                 _meshBuildQueue.Remove(chunkCoord);
-                JobManager?.ForgetGateShadow(chunkCoord);
+                JobManager?.ForgetMeshDiagnostics(chunkCoord);
 
                 // Return to pool
                 ChunkPool.Return(chunkObj);
@@ -4681,7 +4681,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
             {
                 // Remove from mesh queue to prevent processing deactivated chunks (O(1))
                 _meshBuildQueue.Remove(chunkCoord);
-                JobManager?.ForgetGateShadow(chunkCoord);
+                JobManager?.ForgetMeshDiagnostics(chunkCoord);
 
                 // POOLING: Return chunk to pool instead of just deactivating
                 ChunkPool.Return(chunk);
@@ -6320,7 +6320,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
 
         // 5. Clear mesh build queue
         _meshBuildQueue.Clear();
-        JobManager?.ClearGateShadow();
+        JobManager?.ClearMeshDiagnostics();
 
         // 6. Return all ChunkData to pool and clear world data
         foreach (ChunkData data in worldData.ChunkValues)

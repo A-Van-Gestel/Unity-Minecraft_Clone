@@ -607,15 +607,26 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
 
     // Shadow of the ES-7.4 gate: diagonals already counted as requested and not yet meshed, standing in for the mesh
     // queue's coordinate dedup (the shadow enqueues nothing). Diagnostics only; an entry leaves when its chunk is
-    // scheduled or leaves the mesh queue (ForgetGateShadow / ClearGateShadow), and all leave in Dispose.
+    // scheduled or leaves the mesh queue (ForgetMeshDiagnostics / ClearMeshDiagnostics), and all leave in Dispose.
     private readonly HashSet<ChunkCoord> _gateShadowDiagonals = new HashSet<ChunkCoord>();
 
-    /// <summary>Drops a chunk from the gate shadow's stand-in queue when it leaves the real mesh queue unmeshed.</summary>
+    /// <summary>
+    /// Drops a chunk whose visual was released from the gate shadow's stand-in queue and from the mesh-input audit
+    /// records, as it no longer has a visible mesh.
+    /// </summary>
     /// <param name="chunkCoord">The chunk whose visual was released.</param>
-    public void ForgetGateShadow(ChunkCoord chunkCoord) => _gateShadowDiagonals.Remove(chunkCoord);
+    public void ForgetMeshDiagnostics(ChunkCoord chunkCoord)
+    {
+        _gateShadowDiagonals.Remove(chunkCoord);
+        _meshInputRecords.Remove(chunkCoord);
+    }
 
-    /// <summary>Empties the gate shadow's stand-in queue when the real mesh queue is cleared.</summary>
-    public void ClearGateShadow() => _gateShadowDiagonals.Clear();
+    /// <summary>Empties the gate shadow's stand-in queue and the mesh-input audit records when every visual is released.</summary>
+    public void ClearMeshDiagnostics()
+    {
+        _gateShadowDiagonals.Clear();
+        _meshInputRecords.Clear();
+    }
 
     private readonly HashSet<ChunkCoord> _chunksToRebuildMesh = new HashSet<ChunkCoord>();
 
