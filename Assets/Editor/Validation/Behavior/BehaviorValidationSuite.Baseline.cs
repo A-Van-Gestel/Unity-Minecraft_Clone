@@ -205,6 +205,9 @@ T11
             // ES-31 registration screen + two-sided population wake — see BehaviorValidationSuite.Baseline.RegistrationScreen.cs.
             AddRegistrationScreenScenarios(scenarios);
 
+            // Edit-path mesh-input stale marking — see BehaviorValidationSuite.Baseline.MeshInputs.cs.
+            AddMeshInputScenarios(scenarios);
+
             // BH-D1 old-vs-new differential (comparator self-test + driver-pair fixtures) — see BehaviorValidationSuite.Differential.cs.
             AddDifferentialScenarios(scenarios);
         }
