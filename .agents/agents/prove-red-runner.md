@@ -24,8 +24,8 @@ whether to pass `--no-baseline` (only when the parent says so).
 
 1. Record `git status --short`.
 2. **State check.** `unity command editor status --result-only`. If it reports Play mode, STOP and
-   report "editor is in Play mode" — never press Play, Pause or Stop. Unreachable (exit 7 / network
-   error) → wait ~5 s and retry once; still unreachable → STOP and report.
+   report "editor is in Play mode" — never press Play, Pause or Stop. Unreachable or busy (exit 12 /
+   17 / network error) → wait ~5 s and retry once; still unreachable → STOP and report.
 3. Run once, with timeout 600000:
    `python -u Tools/Python/prove_red.py --batch <path> --budget 540; echo "EXIT=$?"`
    Each entry costs two recompiles and one suite run, plus one baseline run per distinct suite.

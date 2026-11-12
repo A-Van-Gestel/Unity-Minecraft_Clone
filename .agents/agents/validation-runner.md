@@ -22,8 +22,8 @@ context names, never `/tmp` (`TMPDIR` is unset on this machine).
 
 0. **Record `git status --short`** before anything else.
 1. **State check.** `unity command editor status --result-only`. If it reports Play mode, STOP and
-   report "editor is in Play mode" — never press Play, Pause or Stop. If it is unreachable
-   (exit 7 / network error), wait ~5 s and retry once; still unreachable → STOP and report.
+   report "editor is in Play mode" — never press Play, Pause or Stop. If it is unreachable or busy
+   (exit 12 / 17 / network error), wait ~5 s and retry once; still unreachable → STOP and report.
 2. **Compile current code.** `unity recompile --format json`. Exit 6 = compile errors: STOP and
    report the `error CS…` lines verbatim. Then wait for the reload:
    `until unity command editor status --result-only | grep -q '"status": "ready"'; do sleep 1; done`.

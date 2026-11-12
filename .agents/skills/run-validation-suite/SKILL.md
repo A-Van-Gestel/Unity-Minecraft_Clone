@@ -85,7 +85,7 @@ smaller set. Output order is registry order regardless of request order.
 
 **Runtime budget.** A full pass takes about **3.5 minutes** (last measured 2026-09-27: 3 min 28 s to
 3 min 37 s), and **Lighting alone is almost all of it** (3 min 24 s of that run); the other suites
-together take seconds. That is far past a command's 30 s default timeout, so run it detached:
+together take seconds. That is far past a blocking command's default timeout (30–60 s), so run it detached:
 
 | Want | Do |
 |---|---|

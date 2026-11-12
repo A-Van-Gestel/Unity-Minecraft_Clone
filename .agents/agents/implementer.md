@@ -63,7 +63,7 @@ prompt names, never `/tmp` or the repo (`TMPDIR` is unset on this machine).
 ## Procedure
 
 1. **State check.** `unity command editor status --result-only`. Play mode → STOP and report
-   "editor is in Play mode". Unreachable (exit 7 / network error) → wait ~5 s, retry once, then STOP.
+   "editor is in Play mode". Unreachable or busy (exit 12 / 17 / network error) → wait ~5 s, retry once, then STOP.
    `ls Tools/Python/output/prove_red/` lists any `.bak` → STOP and report the list (a killed earlier
    prove-red; only the parent restores or deletes backups).
 2. **Explore, then edit.** Follow the neighbors' idiom, docstrings included: a declaration you add
