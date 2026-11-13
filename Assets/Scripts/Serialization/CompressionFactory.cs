@@ -14,10 +14,8 @@ namespace Serialization
     public static class CompressionFactory
     {
         // The standard LZ4 Frame format magic number (little-endian on disk: 04 22 4D 18).
-        // Checked before decompression because NativeCompressions' LZ4Stream spins forever on
-        // non-frame input instead of throwing (see Documentation/Bugs/SERIALIZATION_BUGS.md #03);
-        // the check turns corrupt payloads into an InvalidDataException, which the chunk
-        // deserializer handles via its "corrupt chunk -> warn -> regenerate" path.
+        // Checked before decompression so non-frame data never reaches the native decoder and fails
+        // with a clear InvalidDataException; the chunk deserializer turns it into "warn -> regenerate".
         private const uint LZ4_FRAME_MAGIC = 0x184D2204;
 
         [NoAutoStaticsCleanup] // reset in DomainReset
@@ -110,9 +108,8 @@ namespace Serialization
 
         /// <summary>
         /// Verifies that a seekable stream positioned at an LZ4 payload starts with the LZ4 Frame
-        /// magic number, restoring the stream position afterwards. Keeps non-frame data away from
-        /// the native frame decompressor, which spins forever instead of throwing
-        /// (see <c>Documentation/Bugs/SERIALIZATION_BUGS.md</c> #03).
+        /// magic number, restoring the stream position afterwards, so non-frame data fails with a clear
+        /// <see cref="InvalidDataException"/> instead of reaching the native frame decoder.
         /// </summary>
         /// <param name="inputStream">The stream containing the compressed payload.</param>
         /// <exception cref="InvalidDataException">The payload does not start with the LZ4 frame magic.</exception>

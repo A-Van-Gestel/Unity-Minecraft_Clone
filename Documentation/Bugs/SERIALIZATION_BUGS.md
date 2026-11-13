@@ -5,9 +5,7 @@ This document outlines **open** bugs related to saving, loading, Region files, a
 > **Last reviewed:** August 2026
 >
 > **Numbering note:** `§02`, `§03`, `§06` and `§10` are **retired, not free** — all four are archived in
-> [`_FIXED_BUGS.md`](./_FIXED_BUGS.md), and `§03` is still cited by name from
-> `CompressionFactory.cs`, `LIBRARY_BUGS.md` and
-> `INFINITE_WORLD_STORAGE_AND_SERIALIZATION_ARCHITECTURE.md`. New entries continue from `§17`.
+> [`_FIXED_BUGS.md`](./_FIXED_BUGS.md). New entries continue from `§17`.
 
 ---
 
@@ -27,8 +25,8 @@ The `_fileLock` works correctly to prevent save data corruption but adds massive
 > [`_FIXED_BUGS.md`](./_FIXED_BUGS.md).
 
 > Bug 03 (NativeCompressions LZ4Stream asymmetric format hang, June 2026) has been fixed and
-> archived to [`_FIXED_BUGS.md`](./_FIXED_BUGS.md). The 0.6.0 version pin and library follow-ups
-> remain documented in [`LIBRARY_BUGS.md`](./LIBRARY_BUGS.md).
+> archived to [`_FIXED_BUGS.md`](./_FIXED_BUGS.md). The library's version history (0.6.0 pin, lifted
+> to 1.3.2) is in [`LIBRARY_BUGS.md`](./LIBRARY_BUGS.md).
 
 ---
 

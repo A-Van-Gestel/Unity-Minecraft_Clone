@@ -6,20 +6,71 @@ This document outlines **open** bugs and architectural improvements related to t
 
 ---
 
-## NativeCompressions (LZ4) — Version pinned to 0.6.0
+## NativeCompressions (LZ4) — Upgraded to 1.3.2 (0.6.0 pin lifted)
 
-**Severity:** Critical version constraint  
-**Status:** Pinned / monitoring upstream  
+**Severity:** Version constraint (resolved)  
+**Status:** Pin lifted 2026-11-13 — on 1.3.2, monitoring upstream  
 **Files:** `Assets/packages.config`, `Assets/Scripts/Serialization/CompressionFactory.cs`
 
-**Do NOT upgrade `NativeCompressions.LZ4.*` past 0.6.0.** Version 0.6.1's `LZ4Stream` is
-asymmetric: the compressor writes raw block format while the decompressor only parses LZ4 frame
-format — and it **hangs forever at 100% CPU** on non-frame input instead of throwing. This
-bricked every world saved/migrated under 0.6.1 and caused full-system hangs on load.
-Full analysis, standalone repro, and mitigation: `SERIALIZATION_BUGS.md` #03.
+`NativeCompressions.LZ4.*` was pinned to 0.6.0 because 0.6.1's `LZ4Stream` was asymmetric: the
+compressor wrote raw block format, the decompressor only parsed frame format, and it **hung forever
+at 100% CPU** on non-frame input. That bricked every world saved under 0.6.1 (full record:
+`_FIXED_BUGS.md`, Serialization & Storage #03). 1.x fixes both defects and the project now runs
+1.3.2. **Never install anything from the 0.6.1 line.**
 
-`CompressionFactory.ValidateLz4FrameMagic` now fail-fasts on non-frame payloads before they
-reach the native decompressor; keep that guard regardless of library version.
+Keep `CompressionFactory.ValidateLz4FrameMagic` regardless of version: it rejects non-frame payloads
+with a clear `InvalidDataException` before they reach the native decoder.
+
+### Verification of 1.3.2 (2026-11-13)
+
+Standalone, outside Unity: a net8 harness loading the exact `netstandard2.1` DLLs Unity loads
+(1.3.2 with Pipelines 10.0.15; 0.6.0 as control), Python `lz4.frame` as the oracle, and every LZ4
+record of five worlds written before the upgrade (39,663 payloads).
+
+| Check                    | Result                                                                                                                                                                                      |
+|--------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| A — output format        | 1.3.2 output starts with `04 22 4D 18` and decodes exactly with `lz4.frame` (empty, 1 byte, real chunk, 9 MB multi-block; bulk and small writes)                                            |
+| B — reads existing saves | 39,663 / 39,663 payloads decode byte-identical to the oracle, with both `CopyTo` and small-`Read` patterns                                                                                  |
+| C — rollback direction   | 0.6.0 decodes all 39,663 payloads re-encoded by 1.3.2; checksummed frames written by Python decode on both versions                                                                         |
+| D — corrupt input (10 s) | 1.3.2 throws `LZ4Exception` on all 5 cases and disposes cleanly. 0.6.0 **hung** on 3 (valid header + corrupt body, garbage after the magic, raw 0.6.1 block) and returned partial data on 2 |
+
+D shows 0.6.0 still had a hang the magic guard did not cover: a valid frame header over a corrupt
+body. `Validate Deserialization Robustness` B10–B12 reproduce it through `ChunkSerializer.Deserialize`
+and `LoadChunkAsync` (red by deadline under 0.6.0, green under 1.3.2).
+
+In Unity: Serialization Round-Trip 17/17, Deserialization Robustness 12/12 and Migration Chain 25/25
+green; native import settings unchanged (the Android `.so` now reports `Is16KbAligned: true`).
+`Es74Retire`, written under 0.6.0, was loaded, edited, saved and reloaded on 1.3.2: the edits came
+back, and all 5,354 of its records decode with `lz4.frame`. An IL2CPP Master Windows player
+(`-mc-run startup-new`) loaded the native plugin with no errors, and all 729 records it wrote
+decode with `lz4.frame`. The Android and Linux runtimes were checked for import settings only.
+
+### Package set
+
+- `Core` and the `android-arm64`, `linux-x64` and `win-x64` runtimes at 1.3.2;
+  `System.IO.Pipelines` 10.0.15. `CompressionFactory` only uses the
+  `LZ4Stream(stream, CompressionMode, leaveOpen)` constructor, which 1.x keeps (1.0.0 removed the
+  multithreading support and 1.3.0 moved `LZ4Encoder` to the `OperationStatus` API; neither is used
+  here). The hang was upstream issue `Cysharp/NativeCompressions#67`, closed for v1 on 2026-09-29.
+- `System.Diagnostics.DiagnosticSource` and `System.Threading.Channels` were 0.6.0-only
+  dependencies and are removed.
+- `System.Runtime.CompilerServices.Unsafe` (≥ 6.1.2) is not a package here: NuGetForUnity treats it
+  as provided by Unity, as it did for 0.6.0.
+- **System.\* stay on the 10.x line** (.NET 10 is LTS). 11.x changes nothing in the `netstandard2.0`
+  build Unity loads; revisit after the Unity 7 / CoreCLR Editor upgrade.
+- `ProjectSettings/Packages/com.github-glitchenzo.nugetforunity/NativeRuntimeSettings.json` is
+  upstream's `sandbox/UnityApp` copy, still required (NuGetForUnity's defaults lack several
+  runtimes). NuGetForUnity reads it once per Editor start.
+
+### Upgrading the library again
+
+1. `Assets/Packages/` is gitignored: back it up with its `.meta` files, and back up the save
+   folders. That backup is the only rollback.
+2. The Editor keeps `lz4.dll` loaded: close it, edit `packages.config`, move the old version folders
+   out, and start it again so NuGetForUnity restores the new versions.
+3. Compare each native library's import `.meta` with the backup.
+4. Redo checks A–D standalone. The suites alone are not enough: a single-version round trip stays
+   green for a library that writes and reads a non-standard format.
 
 ### Alternative library (for future research): K4os.Compression.LZ4
 

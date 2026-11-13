@@ -176,14 +176,14 @@ The file is divided into 4KB **sectors** (Anvil-style):
 * **Supported Algorithms:**
     * `None (0)`: Raw bytes. Useful for debugging size overhead.
     * `Deflate (1)`: High compression ratio, slower speed. Uses .NET `DeflateStream` (raw DEFLATE — no GZip header/CRC). Formerly named `GZip`; renamed for accuracy, on-disk value 1 is unchanged.
-    * `LZ4 (2)`: Low compression ratio, extreme speed. Uses `NativeCompressions` library (Native C++ bindings).
+    * `LZ4 (2)`: Low compression ratio, extreme speed. Uses the `NativeCompressions` library (native lz4 bindings, 1.3.2), which writes and reads the standard LZ4 frame format. Version history and the upgrade checks: `Documentation/Bugs/LIBRARY_BUGS.md`.
 
 **Implementation Details:**
 
 * Each chunk record stores its own algorithm byte (immediately after the length header), allowing mixed compression types within the same world (e.g., migrating from Deflate to LZ4 incrementally).
 * `ChunkSerializer` requests a stream from `CompressionFactory`, which handles the wrapping (and disposal) of the underlying compression stream.
 * **Safety:** `CompressionFactory` includes a robust `IsLZ4Available` check to fallback to Deflate if the native DLL is missing, preventing data loss. (Reading LZ4 data without the DLL cannot fall back and throws.)
-* **Safety:** Before decompressing LZ4, the factory validates the LZ4 Frame magic number (`04 22 4D 18`) — NativeCompressions' `LZ4Stream` spins forever on non-frame input instead of throwing (see `Documentation/Bugs/SERIALIZATION_BUGS.md` #03). Corrupt payloads become an `InvalidDataException`, which the deserializer turns into "warn → regenerate chunk".
+* **Safety:** Before decompressing LZ4, the factory validates the LZ4 Frame magic number (`04 22 4D 18`), so a non-frame payload fails with an `InvalidDataException` before it reaches the native decoder. A frame that passes the check but is corrupt makes the decoder throw `LZ4Exception`. `ChunkSerializer.Deserialize` turns both into "warn → regenerate chunk", and so does the migration's per-chunk catch; `Validate Deserialization Robustness` B10–B12 guard the decoder side with a hang deadline.
 * The per-world default algorithm comes from `World.settings.saveCompression`.
 
 **Performance Profile (LZ4):**

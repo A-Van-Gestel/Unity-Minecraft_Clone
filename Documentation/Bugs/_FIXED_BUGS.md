@@ -2307,7 +2307,7 @@ with §01.
    `Test Ocean_BROKEN_lz4block_20260611`; restored from the intact pre-migration backup
    `Test Ocean_Backup_v7_20260611_180526` (frame format verified). The v7 migration re-ran on next load using the fixed (0.6.0) compressor.
 
-**Follow-ups (tracked in `LIBRARY_BUGS.md` — "NativeCompressions (LZ4) — Version pinned to 0.6.0"):**
+**Follow-ups (tracked in `LIBRARY_BUGS.md` — "NativeCompressions (LZ4)"; the pin was lifted to 1.3.2 on 2026-11-13):**
 do not upgrade past 0.6.0 until fixed upstream; consider the explicit `LZ4Encoder`/`LZ4Decoder`
 frame API or switching to `K4os.Compression.LZ4`; any world saved while 0.6.1 was installed (2026-06-10 → 2026-06-11) contains unreadable chunks that now regenerate instead of hanging.
 
