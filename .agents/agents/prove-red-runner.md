@@ -30,7 +30,9 @@ whether to pass `--no-baseline` (only when the parent says so).
    `python -u Tools/Python/prove_red.py --batch <path> --budget 540; echo "EXIT=$?"`
    Each entry costs two recompiles and one suite run, plus one baseline run per distinct suite.
    `--budget 540` keeps the run under the tool's 600 s limit: entries that no longer fit are not
-   started and show as `NOT RUN`. The script owns every mutation, restore, checksum and recompile;
+   started and show as `NOT RUN`. A Lighting Engine suite run takes ~3 min, so a batch mixing it with
+   other suites usually leaves those `NOT RUN`: expected, not a failure; the parent re-runs them as their own batch.
+   The script owns every mutation, restore, checksum and recompile;
    do not touch the files it names. Never start it twice. If the tool moves it to the background,
    wait for it. Before declaring a backgrounded run dead, check its PID (`tasklist //FI "PID eq <pid>"`)
    and the log's last line: a live python process means it is still running — keep waiting.
