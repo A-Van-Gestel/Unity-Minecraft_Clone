@@ -45,16 +45,16 @@ namespace Diagnostics
         /// <summary>Mesh rebuilds a stable merge added to the queue for its own chunk; re-requests of a queued chunk are not counted.</summary>
         public long SelfRemeshes;
 
-        /// <summary>Mesh rebuilds a stable merge added to the queue for its cardinal neighbors.</summary>
+        /// <summary>Mesh rebuilds a stable merge added to the queue for its neighbors, diagonals included.</summary>
         public long NeighborRemeshes;
 
         /// <summary>The <see cref="SelfRemeshes"/> and <see cref="NeighborRemeshes"/> requested by unchanged stable merges.</summary>
         public long UnchangedRemeshes;
 
-        /// <summary>ES-7.4 gate: cardinal rebuilds it skipped (gate on), or newly queued with current mesh inputs (gate off).</summary>
+        /// <summary>ES-7.4 gate: cardinal rebuilds it skipped that requesting all four would have newly queued.</summary>
         public long GateSkippable;
 
-        /// <summary>ES-7.4 gate: extra diagonal mesh jobs (no light work of their own) it newly queued (gate on), or would (gate off).</summary>
+        /// <summary>ES-7.4 gate: extra diagonal mesh jobs (no light work of their own) it newly queued.</summary>
         public long GateDiagonals;
 
         /// <summary>Sections the apply walked that lie entirely outside the job's gathered band.</summary>

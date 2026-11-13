@@ -605,28 +605,12 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     // any logic built on it would silently take the "no entry" branch in shipping builds.
     private readonly Dictionary<ChunkCoord, ChunkData> _meshJobTargets = new Dictionary<ChunkCoord, ChunkData>();
 
-    // Shadow of the ES-7.4 gate: diagonals already counted as requested and not yet meshed, standing in for the mesh
-    // queue's coordinate dedup (the shadow enqueues nothing). Diagnostics only; an entry leaves when its chunk is
-    // scheduled or leaves the mesh queue (ForgetMeshDiagnostics / ClearMeshDiagnostics), and all leave in Dispose.
-    private readonly HashSet<ChunkCoord> _gateShadowDiagonals = new HashSet<ChunkCoord>();
-
-    /// <summary>
-    /// Drops a chunk whose visual was released from the gate shadow's stand-in queue and from the mesh-input audit
-    /// records, as it no longer has a visible mesh.
-    /// </summary>
+    /// <summary>Drops a chunk whose visual was released from the mesh-input audit records, as it no longer has a visible mesh.</summary>
     /// <param name="chunkCoord">The chunk whose visual was released.</param>
-    public void ForgetMeshDiagnostics(ChunkCoord chunkCoord)
-    {
-        _gateShadowDiagonals.Remove(chunkCoord);
-        _meshInputRecords.Remove(chunkCoord);
-    }
+    public void ForgetMeshDiagnostics(ChunkCoord chunkCoord) => _meshInputRecords.Remove(chunkCoord);
 
-    /// <summary>Empties the gate shadow's stand-in queue and the mesh-input audit records when every visual is released.</summary>
-    public void ClearMeshDiagnostics()
-    {
-        _gateShadowDiagonals.Clear();
-        _meshInputRecords.Clear();
-    }
+    /// <summary>Empties the mesh-input audit records when every visual is released.</summary>
+    public void ClearMeshDiagnostics() => _meshInputRecords.Clear();
 
     private readonly HashSet<ChunkCoord> _chunksToRebuildMesh = new HashSet<ChunkCoord>();
 
@@ -964,7 +948,6 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
 
             // The snapshot above is the mesh's input; set only once the job is enrolled, so a throw leaves it stale.
             chunk.ChunkData.MarkMeshInputsCurrent();
-            _gateShadowDiagonals.Remove(chunkCoord);
         }
         catch
         {
@@ -2208,31 +2191,17 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         {
             _chunksToRebuildMesh.Add(chunkCoord);
 
-            // ES-7.4: gated, only neighbors whose mesh inputs changed since their last mesh are asked to re-mesh.
-            bool gate = _world.settings.gateMergeNeighborRemeshes;
-            byte staleNeighbors = gate || counting
-                ? MeshInputPropagation.StaleNeighbors(chunkCoord, _world.worldData)
-                : (byte)0;
-            byte requested = MergeRemeshDecision.NeighborRequests(gate, _world.settings.gateMergeIncludeDiagonals,
-                staleNeighbors);
-            if (counting && gate) CountGatedSkips(chunkCoord, requested);
+            // Only the neighbors (diagonals included) whose mesh inputs changed since their last mesh re-mesh.
+            byte staleNeighbors = MeshInputPropagation.StaleNeighbors(chunkCoord, _world.worldData);
+            if (counting) CountGatedSkips(chunkCoord, staleNeighbors);
 
-            byte queuedNeighbors = _world.RequestNeighborMeshRebuilds(chunkCoord, requested);
+            byte queuedNeighbors = _world.RequestNeighborMeshRebuilds(chunkCoord, staleNeighbors);
             int neighborRemeshes = math.countbits((int)queuedNeighbors);
             if (counting)
             {
                 _mergeTotals.StableMerges++;
                 _mergeTotals.NeighborRemeshes += neighborRemeshes;
-                if (gate)
-                {
-                    CountQueuedGateDiagonals(chunkCoord, queuedNeighbors);
-                }
-                else
-                {
-                    _mergeTotals.GateSkippable +=
-                        math.countbits(queuedNeighbors & ~staleNeighbors & ChunkBorderMask.Cardinals);
-                    CountGateDiagonals(chunkCoord, staleNeighbors);
-                }
+                CountQueuedGateDiagonals(chunkCoord, queuedNeighbors);
 
                 if (!lightChanged)
                 {
@@ -2400,9 +2369,9 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         }
     }
 
-    /// <summary>The ES-7.4 gate on: counts the cardinals it did not request that an ungated merge would have newly queued.</summary>
+    /// <summary>Counts the cardinals a stable merge did not request that requesting all four would have newly queued.</summary>
     /// <param name="chunkCoord">The chunk whose merge is stable.</param>
-    /// <param name="requested">The neighbors the gate requests, as <see cref="ChunkBorderMask"/> bits.</param>
+    /// <param name="requested">The neighbors it requests, as <see cref="ChunkBorderMask"/> bits.</param>
     private void CountGatedSkips(ChunkCoord chunkCoord, byte requested)
     {
         byte skipped = (byte)(ChunkBorderMask.Cardinals & ~requested);
@@ -2412,25 +2381,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         }
     }
 
-    /// <summary>
-    /// Shadow of the ES-7.4 gate: counts the stale diagonals whose request would cost an extra mesh job — newly queued,
-    /// not yet counted, and with no light work of their own (see <see cref="CostsExtraDiagonalJob"/>).
-    /// </summary>
-    /// <param name="chunkCoord">The chunk whose merge is stable.</param>
-    /// <param name="staleNeighbors">Its neighbors with stale mesh inputs, as <see cref="ChunkBorderMask"/> bits.</param>
-    private void CountGateDiagonals(ChunkCoord chunkCoord, byte staleNeighbors)
-    {
-        byte diagonals = (byte)(staleNeighbors & ChunkBorderMask.Diagonals);
-        while (ChunkBorderMask.TryTakeNext(ref diagonals, out byte bit))
-        {
-            ChunkCoord diagonal = ChunkBorderMask.Neighbor(chunkCoord, bit);
-            if (!CostsExtraDiagonalJob(diagonal)) continue;
-
-            if (_world.WouldQueueMeshRebuild(diagonal) && _gateShadowDiagonals.Add(diagonal)) _mergeTotals.GateDiagonals++;
-        }
-    }
-
-    /// <summary>The ES-7.4 gate on: counts the diagonals it newly queued that cost an extra mesh job.</summary>
+    /// <summary>Counts the diagonals a stable merge newly queued that cost an extra mesh job.</summary>
     /// <param name="chunkCoord">The chunk whose merge is stable.</param>
     /// <param name="queuedNeighbors">The neighbors newly queued, as <see cref="ChunkBorderMask"/> bits.</param>
     private void CountQueuedGateDiagonals(ChunkCoord chunkCoord, byte queuedNeighbors)
@@ -2700,7 +2651,6 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         GenerationJobs.Clear();
         MeshJobs.Clear();
         _meshJobTargets.Clear(); // MP-4 probe: never outlive the job entries it describes.
-        _gateShadowDiagonals.Clear();
         _meshInputRecords.Clear();
         LightingJobs.Clear();
 

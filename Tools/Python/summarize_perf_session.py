@@ -362,7 +362,7 @@ def merge_table(phases):
                   "of Apply: counts", "Merges/frame", "Apply ms/merge", "Stable", "Stable unchanged",
                   "Self remeshes", "Neighbor remeshes", "By unchanged", "Out-of-band sections/merge",
                   "Churned/merge", "Unloads with sky pending", "Their nodes", "Count checks",
-                  "Count drifts", "Gate skippable", "Gate stale diagonals"], rows)
+                  "Count drifts", "Gate skipped", "Gate diagonals"], rows)
 
 
 def pool_table(phases):

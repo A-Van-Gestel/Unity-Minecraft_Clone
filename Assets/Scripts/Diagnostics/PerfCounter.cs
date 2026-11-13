@@ -240,10 +240,10 @@ namespace Diagnostics
         /// <summary>Those whose stored counts disagreed with their voxels.</summary>
         MergeCountDrifts,
 
-        /// <summary>Merge remesh gate: cardinal rebuilds it skipped (gate on), or that were needless (gate off).</summary>
+        /// <summary>Merge remesh gate: cardinal rebuilds it skipped that requesting all four would have newly queued.</summary>
         MergeGateSkippable,
 
-        /// <summary>Merge remesh gate: extra diagonal mesh jobs it queued (gate on), or would queue (gate off).</summary>
+        /// <summary>Merge remesh gate: extra diagonal mesh jobs (no light work of their own) it newly queued.</summary>
         MergeGateDiagonals,
 
         /// <summary>Number of counters; not a counter.</summary>

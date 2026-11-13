@@ -66,9 +66,6 @@ namespace Editor.Validation.Lighting
         private const int B136_POCKET_Z = B136_CENTER * VoxelData.ChunkWidth + VoxelData.ChunkWidth / 2;
         private const byte B136_STAMP_SKY = 15;
 
-        // B137: stop collecting once the detail would only repeat the same broken rule.
-        private const int B137_MAX_FAILURES = 16;
-
         /// <summary>Registers the ES-7.4 mesh-input baselines (called from <c>AddBaselineScenarios</c>).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
         static partial void AddEs74MeshInputBaselineScenarios(List<Scenario> scenarios)
@@ -88,43 +85,6 @@ namespace Editor.Validation.Lighting
             scenarios.Add(new Scenario(
                 "B136: in the harness, one chunk's lighting pass leaves stale exactly the neighbors whose facing border light changed — nothing for a pass that changes no light, the east neighbor for a write on the east border column, and every other neighbor's state explained (ES-7.4)",
                 Baseline_LightingPassTellsOnlyNeighborsWhoseFacingBorderChanged));
-            scenarios.Add(new Scenario(
-                "B137: MergeRemeshDecision over every stale-neighbor mask — ungated always the four cardinals, gated exactly the stale ones, diagonals only when included (ES-7.4)",
-                Baseline_MergeRemeshDecisionTruthTable));
-        }
-
-        /// <summary>
-        /// B137: for all 256 stale masks and both diagonal settings, the requested neighbors match a per-bit expectation.
-        /// <para><b>Prove-red:</b> returning the stale mask when the gate is off; never admitting diagonals when gated.</para>
-        /// </summary>
-        private static bool Baseline_MergeRemeshDecisionTruthTable()
-        {
-            List<string> failures = new List<string>();
-            for (int stale = 0; stale <= byte.MaxValue; stale++)
-            {
-                foreach (bool includeDiagonals in new[] { false, true })
-                {
-                    byte off = MergeRemeshDecision.NeighborRequests(false, includeDiagonals, (byte)stale);
-                    if (off != ChunkBorderMask.Cardinals)
-                        failures.Add($"off, diagonals {includeDiagonals}, stale {DescribeMask((byte)stale)}: {DescribeMask(off)}, expected the four cardinals");
-
-                    byte on = MergeRemeshDecision.NeighborRequests(true, includeDiagonals, (byte)stale);
-                    for (int i = 0; i < ChunkBorderMask.DirectionCount; i++)
-                    {
-                        byte bit = (byte)(1 << i);
-                        bool isDiagonal = (ChunkBorderMask.Diagonals & bit) != 0;
-                        bool expected = (stale & bit) != 0 && (!isDiagonal || includeDiagonals);
-                        if (((on & bit) != 0) != expected)
-                            failures.Add($"on, diagonals {includeDiagonals}, stale {DescribeMask((byte)stale)}: {DirectionName(bit)} requested {(on & bit) != 0}, expected {expected}");
-                    }
-
-                    if (failures.Count > B137_MAX_FAILURES) break;
-                }
-            }
-
-            return LightingAssert.IsTrue(failures.Count == 0,
-                "B137: the requested neighbors match the gate, the diagonal setting and the stale mask for every input",
-                failures.Count == 0 ? null : string.Join("\n", failures));
         }
 
         /// <summary>

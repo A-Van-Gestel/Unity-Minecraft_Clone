@@ -107,8 +107,6 @@ MonoBehaviour:
     enableDiagnosticLogs: 0
     enableWaterDiagnosticLogs: 0
     enableSaveSystemDiagnosticLogs: 0
-    gateMergeNeighborRemeshes: 1
-    gateMergeIncludeDiagonals: 1
     debugHudShowFps: 1
     debugHudShowGraphicsApi: 1
     debugHudShowWorldInfo: 1

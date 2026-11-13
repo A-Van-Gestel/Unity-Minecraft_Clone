@@ -12,7 +12,7 @@ probe added `ES-31`); `ES-31` ✅ shipped (2026-10-11: registration screen + two
 −99 %, Tick-led hitches 1–3 → 0 per vd-10 run); `ES-7a` ✅ shipped (2026-10-18: slab fill, no merge recount,
 band-clamped merge — merge −48 % per job, 200 m/s generation p50 27.0 → 6.6 ms; `ES-7.4` split off and priced);
 `ES-7.4` ✅ shipped (2026-11-13: stable merges re-mesh only neighbors whose mesh inputs changed — generation
-mesh jobs −22 % at 200 m/s, −36 % at vd 32; default-ON behind two rollback flags);
+mesh jobs −22 % at 200 m/s, −36 % at vd 32; both rollback flags retired 2026-11-13);
 `ES-30` ✅ shipped (2026-11-06: `Helpers/ChunkColumnSets.Rent` pre-sizes the lighting merge's pooled column sets
 to 256 — the deferred-mod list left as warm-up); `ES-4`'s **lazy borders** sub-item ✅ shipped (2026-11-06:
 chunk borders exist only while `ShowChunkBorders` is on — pool prewarm and the `LoadSceneAsync` loading screen
@@ -239,7 +239,7 @@ evidence exists yet.*
 | Lighting job, worker      | ~110–456 µs (banded no-op/edge check up to full-height edge check) — **cheaper than its main-thread bookkeeping**                                                                                                                                                                                                                                                                                                         | LI-2 screening                                                                                                                          | measured                       |
 | Schedule internals        | 9 voxel + 9 light maps = **1.73 MB managed→native per job**; uniform-sky sections filled by a **per-element loop** (~180 k writes/job)                                                                                                                                                                                                                                                                                    | `NeighborMapAssembler.cs:54–75` (fill), `LightingHelper.cs:46–51` (loop)                                                                | verified                       |
 | Merge internals           | `ApplyJobLightMap` walks **all 8 sections regardless of the LI-2 band**; each uniform-sky air section is rented, written 4 096×, classified, re-compacted and returned only to rediscover it is uniform; `RecalculateCounts` runs per section although the lighting job never changes voxels. *Addressed by ES-7a (2026-10-18).*                                                                                          | `ChunkData.cs:1244–1338`, `ChunkSection.cs:176`                                                                                         | verified (redundancy inferred) |
-| Remesh requests           | Every *stable* merge requests self; since ES-7.4 its neighbors only when their mesh inputs changed since their last mesh (cardinals + diagonals, flag-gated) — before, all 4 cardinals on every stable merge, 88 % of them from merges that changed no light                                                                                                                                                              | `WorldJobManager.cs:2209–2220`                                                                                                          | verified                       |
+| Remesh requests           | Every *stable* merge requests self; since ES-7.4 its neighbors only when their mesh inputs changed since their last mesh (cardinals + diagonals) — before, all 4 cardinals on every stable merge, 88 % of them from merges that changed no light                                                                                                                                                                          | `WorldJobManager.cs:2192–2198`                                                                                                          | verified                       |
 | Mesh job                  | Same 1.73 MB fill per job; ≥1 per chunk; plus re-mesh on every view re-entry (visual pooled, mesh dropped)                                                                                                                                                                                                                                                                                                                | `WorldJobManager.cs:579–582`, `World.cs:4137–4156`                                                                                      | verified                       |
 | Generation                | 1.54–1.60 ms wall per chunk at saturation (~650 chunks/s); `StandardWormCarverJob` is a **single-threaded `IJob` re-simulating worms from up to 33×33 cells per chunk**, ahead of the parallel terrain `IJobFor`; full-resolution 3D noise (no coarse lattice); ~228 KB of unpooled `Persistent` buffers per chunk (`WG-1`)                                                                                               | ChunkGenerationBenchmark 2026-06-27; `StandardWormCarverJob.cs:155–163`; `StandardChunkGenerator.cs:352`                                | measured / verified            |
 | Renderer                  | One pooled parent + 8 section GameObjects (MeshFilter + MeshRenderer) per chunk; up to 3 draws per visible section; 32 B/vertex, 4 verts + 6 indices per quad; no occlusion culling. vd 10: 441 × 8 = **3 528** section renderers; vd 32: **33 800**; at 384 height **~101 000**                                                                                                                                          | `Chunk.cs:67–91`, `SectionRenderer.cs:123–143`; derived                                                                                 | verified / derived             |
@@ -493,10 +493,10 @@ pass runs 3.1× the frames, wall p50 27.0 → 6.6 ms, p99 68.5 → 39.2 ms, hitc
   the band, so the clamp alone would not have removed it). A compact section promoted by a mid-flight edit outside the
   band stays promoted until an in-band merge — same light, a possibly wider band summary (accepted, pinned by B127).
 
-*ES-7.4 (merge remesh gating) shipped 2026-11-13* default-ON behind two rollback flags, measured in
+*ES-7.4 (merge remesh gating) shipped 2026-11-13* default-ON behind two rollback flags, both retired the same day
+after the in-game seam and corner check (the gated path with diagonals is the only one), measured in
 [`ENGINE_SCALING_ES7_4_REMESH_GATING_IL2CPP_2026-11-13_BENCHMARK.md`](../Performance/ENGINE_SCALING_ES7_4_REMESH_GATING_IL2CPP_2026-11-13_BENCHMARK.md)
-(Master, one build, three flag legs alternated — 3 vd-10 and 2 vd-32 runs per leg). **GO (provisional, pending the
-in-game seam check):** in the generation pass the gate removes 81 % (vd 10) and 96 % (vd 32) of the neighbor
+(Master, one build, three flag legs alternated — 3 vd-10 and 2 vd-32 runs per leg). **GO:** in the generation pass the gate removes 81 % (vd 10) and 96 % (vd 32) of the neighbor
 re-meshes stable merges queued; mesh jobs completed 14 399 → 11 196 (−22 %) at 200 m/s and 15 092 → 9 692 (−36 %) at
 vd 32 for the same light work; `MeshSchedule` −35 % / −50 %; vd 32 wall p50 18.4 → 11.5 ms, p99 49.7 → 45.7 ms. What
 landed:
@@ -504,8 +504,8 @@ landed:
   light or voxel write the mesher reads: its own, or one in a neighbor's facing border column or corner
   (`ChunkBorderMask`, `MeshInputPropagation` at every merge, `NotifyChunkModified`, a mesh merge fault).
 - **Gate.** A stable merge re-meshes itself unconditionally and only the neighbors whose flag is clear
-  (`MergeRemeshDecision`); `gateMergeNeighborRemeshes` off restores the four cardinals,
-  `gateMergeIncludeDiagonals` admits the four diagonals, which no merge re-meshed before (stale corner light).
+  (`MeshInputPropagation.StaleNeighbors`), the four diagonals included, which no merge re-meshed before (stale corner
+  light).
 - **Audit.** `Tools/UnityCli/PlayMode/MeshStalenessProbe.cs` compares every visible mesh's input digest with the live
   maps at a drained moment (Editor/instrumented only): 0 stale meshes over a flight, edit scenarios, an unload round
   trip and an inactive-neighbor scenario with diagonals on; diagonal corners only (5 of 441) with them off.
@@ -1304,6 +1304,9 @@ saving is inferred from step 1's re-entry leg, not re-measured.
 
 ## Document History
 
+* **v1.25** - **ES-7.4 shipped, flags retired** (2026-11-13): Master A/B GO, diagonals kept on, in-game seam and corner
+  check passed; `gateMergeNeighborRemeshes` / `gateMergeIncludeDiagonals` and `MergeRemeshDecision` (B137) deleted.
+  Status line, ES-7 entry, §2.3 "Remesh requests" row and anchor.
 * **v1.24** - **ES quick-win batch shipped** (2026-11-06): ES-30 (`ChunkColumnSets.Rent` pre-sizes the lighting merge's
   pooled column sets; Lighting suite B131), ES-4's lazy-borders sub-item, and three ES-9 slices (gated `[LIGHTING RESCUE]`
   log, `static` unload-save fault continuation, `ExpandStructure` into a reused list; Biome Selection B18/B19). ES-5 notes
@@ -1399,5 +1402,5 @@ saving is inferred from step 1's re-entry leg, not re-measured.
 
 ---
 
-**Last Updated:** 2026-11-06  
+**Last Updated:** 2026-11-13  
 **Next Review:** when the ES-29 report's 200 m/s observation is controlled (a build of ES-29's base), when ES-25's rendering baseline lands, or before any ES phase starts
