@@ -24,9 +24,12 @@ namespace Editor.Validation.DeserializationRobustness
     /// <c>World.Instance</c> + a volatile-path <see cref="ChunkStorageManager"/>.
     /// <para>All scenarios are <b>baselines</b> (must stay green); a failure is a regression of the F1
     /// load-boundary contract (leaked pooled shells or a fault masquerading as "not on disk").</para>
+    /// <para>B10–B12 feed the LZ4 decoder frames that pass the frame-magic check but are structurally
+    /// broken; the decoder must throw (not spin), so each <c>Deserialize</c> runs under a deadline.</para>
     /// <para><b>Prove-red:</b> removing the shell-return in <c>ChunkSerializer.ReadChunkInternal</c>'s
     /// catch reds exactly B2/B5 (pool balance — the leak this suite guards); routing
-    /// <c>LoadChunkAsync</c> faults to a null return instead of a faulted task reds B6.</para>
+    /// <c>LoadChunkAsync</c> faults to a null return instead of a faulted task reds B6; letting
+    /// <c>LZ4Exception</c> escape <c>Deserialize</c>'s catch reds exactly B10–B12.</para>
     /// </summary>
     public static class DeserializationRobustnessValidationSuite
     {
@@ -55,6 +58,9 @@ namespace Editor.Validation.DeserializationRobustness
                 new Scenario("B7: corrupt payload on disk — LoadChunkAsync returns null (regenerate by design)", CorruptOnDiskLoadsNull),
                 new Scenario("B8: level.dat v13→v14 — the worldState.environment/wind section is injected at the historical default and every other field survives", LevelDatV13ToV14EnvironmentWind),
                 new Scenario("B9: level.dat v14→v15 — timeOfDay is retired for a noon-seeded world clock, the document's own wind carries through, and a current document passes through untouched", LevelDatV14ToV15TimeOfDay),
+                new Scenario("B10: LZ4 frame with a valid header and a corrupt block — null within the deadline, no throw, pools balanced", Lz4CorruptBlockIsNull),
+                new Scenario("B11: LZ4 frame cut off mid-block — null within the deadline, no throw, pools balanced", Lz4TruncatedFrameIsNull),
+                new Scenario("B12: LZ4 record on disk with a valid header and a corrupt block — LoadChunkAsync returns null (regenerate)", Lz4CorruptOnDiskLoadsNull),
             };
             return ValidationSuiteRunner.Execute("Deserialization Robustness", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }
@@ -72,6 +78,28 @@ namespace Editor.Validation.DeserializationRobustness
 
         /// <summary>Truncation point inside the 512-byte heightmap block (well past the header).</summary>
         private const int TRUNCATE_AT = HEADER_BYTES + 100;
+
+        /// <summary>How long one corrupt-payload <c>Deserialize</c> may run before it counts as a hang.</summary>
+        private const int DESERIALIZE_DEADLINE_MS = 10_000;
+
+        /// <summary>LZ4 frame magic number as it appears on disk (little-endian 0x184D2204).</summary>
+        private static readonly byte[] s_lz4FrameMagic = { 0x04, 0x22, 0x4D, 0x18 };
+
+        /// <summary>LZ4 frame header: magic (4) + FLG + BD + header checksum, before optional fields.</summary>
+        private const int LZ4_MIN_FRAME_HEADER_BYTES = 7;
+
+        /// <summary>FLG bit: an 8-byte content size follows BD.</summary>
+        private const byte LZ4_FLG_CONTENT_SIZE = 0x08;
+
+        /// <summary>FLG bit: a 4-byte dictionary ID follows BD (and the content size, if present).</summary>
+        private const byte LZ4_FLG_DICT_ID = 0x01;
+
+        /// <summary>A compressed-block size far beyond any LZ4 maximum block size (4 MB), high bit clear.</summary>
+        private const int LZ4_IMPOSSIBLE_BLOCK_SIZE = 0x7FFFFFF0;
+
+        /// <summary>Region record layout used by the on-disk scenarios: slot 0 of region (0,0) sits at
+        /// sector 2, and its payload follows the 4-byte length + 1-byte algorithm header.</summary>
+        private const int RECORD_PAYLOAD_OFFSET = 2 * 4096 + 5;
 
         /// <summary>Suite fixture: the shared <see cref="StorageValidationFixture"/> (stub
         /// <c>World.Instance</c> + volatile-path storage + all-seam disarm) under this suite's prefix.</summary>
@@ -93,17 +121,18 @@ namespace Editor.Validation.DeserializationRobustness
             return data;
         }
 
-        /// <summary>Serializes a fresh fixture chunk with <see cref="CompressionAlgorithm.None"/> (so byte
-        /// offsets are stable for surgical corruption) and returns the chunk to the pool.</summary>
+        /// <summary>Serializes a fresh fixture chunk and returns the chunk to the pool. The default
+        /// <see cref="CompressionAlgorithm.None"/> keeps byte offsets stable for surgical corruption.</summary>
         /// <param name="pos">The chunk position to serialize.</param>
+        /// <param name="algorithm">The compression to serialize with.</param>
         /// <returns>The exact serialized payload (defensive copy — safe to corrupt).</returns>
-        private static byte[] BuildValidPayload(Vector2Int pos)
+        private static byte[] BuildValidPayload(Vector2Int pos, CompressionAlgorithm algorithm = CompressionAlgorithm.None)
         {
             ChunkData data = MakeEditedChunk(pos, BlockIDs.Stone);
             byte[] buffer = SerializationBufferPool.Get();
             try
             {
-                int length = ChunkSerializer.Serialize(data, buffer, CompressionAlgorithm.None);
+                int length = ChunkSerializer.Serialize(data, buffer, algorithm);
                 byte[] payload = new byte[length];
                 Array.Copy(buffer, payload, length);
                 return payload;
@@ -121,19 +150,26 @@ namespace Editor.Validation.DeserializationRobustness
         /// <param name="payload">The (corrupted) payload bytes.</param>
         /// <param name="pos">The expected chunk position.</param>
         /// <param name="label">Scenario label prefix for the assertions.</param>
-        private static bool AssertCorruptPayloadContract(byte[] payload, Vector2Int pos, string label)
+        /// <param name="algorithm">The compression the payload was written with.</param>
+        private static bool AssertCorruptPayloadContract(byte[] payload, Vector2Int pos, string label,
+            CompressionAlgorithm algorithm = CompressionAlgorithm.None)
         {
             ChunkPoolBalance balance = ChunkPoolBalance.Capture();
             long failuresBefore = ChunkSerializer.DeserializeFailures;
 
+            // On the ThreadPool (where production calls it) so a decoder that spins instead of throwing
+            // fails the deadline rather than freezing the Editor.
+            Task<ChunkData> deserialize = Task.Run(() => ChunkSerializer.Deserialize(payload, algorithm, pos));
             ChunkData result;
             try
             {
-                result = ChunkSerializer.Deserialize(payload, CompressionAlgorithm.None, pos);
+                if (!deserialize.Wait(DESERIALIZE_DEADLINE_MS))
+                    return Check($"{label}: Deserialize returns within {DESERIALIZE_DEADLINE_MS.ToString()} ms (still running — decoder hang)", false);
+                result = deserialize.Result;
             }
-            catch (Exception e)
+            catch (AggregateException e)
             {
-                return Check($"{label}: Deserialize must not throw (threw {e.GetType().Name})", false);
+                return Check($"{label}: Deserialize must not throw (threw {e.InnerException?.GetType().Name})", false);
             }
 
             bool ok = Check($"{label}: returns null", result == null);
@@ -306,6 +342,107 @@ namespace Editor.Validation.DeserializationRobustness
                 ok &= Check("corrupt on-disk payload loads as null (regenerate arm)", result == null);
                 ok &= balance.AssertUnchanged("pools balanced after corrupt disk load");
                 if (result != null) World.Instance.ChunkPool.ReturnChunkData(result);
+            }
+            finally
+            {
+                second.Dispose();
+            }
+
+            return ok;
+        }
+
+        /// <summary>Length of the LZ4 frame header at the start of <paramref name="frame"/>, from its FLG byte.</summary>
+        private static int Lz4FrameHeaderLength(byte[] frame, int start = 0)
+        {
+            byte flg = frame[start + 4];
+            int length = LZ4_MIN_FRAME_HEADER_BYTES;
+            if ((flg & LZ4_FLG_CONTENT_SIZE) != 0) length += 8;
+            if ((flg & LZ4_FLG_DICT_ID) != 0) length += 4;
+            return length;
+        }
+
+        /// <summary>True when <paramref name="bytes"/> carries the LZ4 frame magic at <paramref name="start"/>.</summary>
+        private static bool StartsWithLz4Magic(byte[] bytes, int start = 0)
+        {
+            for (int i = 0; i < s_lz4FrameMagic.Length; i++)
+                if (bytes[start + i] != s_lz4FrameMagic[i]) return false;
+            return true;
+        }
+
+        /// <summary>Overwrites the first block-size field after the frame header with an impossible size.</summary>
+        private static void CorruptFirstLz4BlockSize(byte[] frame, int start = 0)
+        {
+            int blockSizeAt = start + Lz4FrameHeaderLength(frame, start);
+            BitConverter.TryWriteBytes(new Span<byte>(frame, blockSizeAt, sizeof(int)), LZ4_IMPOSSIBLE_BLOCK_SIZE);
+        }
+
+        /// <summary>B10. Red when: a frame that passes the magic check but has a broken block makes the
+        /// decoder spin (deadline) or its exception escapes <c>Deserialize</c> instead of warn → null.</summary>
+        private static bool Lz4CorruptBlockIsNull()
+        {
+            using Fixture fx = new Fixture();
+            Vector2Int pos = new Vector2Int(48, 0);
+            byte[] payload = BuildValidPayload(pos, CompressionAlgorithm.LZ4);
+
+            // Guards a vacuous pass: the corruption must land behind a frame header the magic check accepts.
+            if (!Check("payload is an LZ4 frame", StartsWithLz4Magic(payload))) return false;
+
+            CorruptFirstLz4BlockSize(payload);
+            return AssertCorruptPayloadContract(payload, pos, "LZ4 corrupt block", CompressionAlgorithm.LZ4);
+        }
+
+        /// <summary>B11. Red when: an LZ4 frame that ends mid-block hangs the decoder, throws out of
+        /// <c>Deserialize</c>, or is parsed as a chunk from whatever bytes were decoded before the cut.</summary>
+        private static bool Lz4TruncatedFrameIsNull()
+        {
+            using Fixture fx = new Fixture();
+            Vector2Int pos = new Vector2Int(48, 16);
+            byte[] payload = BuildValidPayload(pos, CompressionAlgorithm.LZ4);
+            if (!Check("payload is an LZ4 frame", StartsWithLz4Magic(payload))) return false;
+
+            byte[] truncated = new byte[payload.Length / 2];
+            Array.Copy(payload, truncated, truncated.Length);
+            return AssertCorruptPayloadContract(truncated, pos, "LZ4 truncated frame", CompressionAlgorithm.LZ4);
+        }
+
+        /// <summary>B12. Red when: an on-disk LZ4 record whose header survives but whose block is broken
+        /// no longer reaches the warn → null → regenerate arm through the full storage stack.</summary>
+        private static bool Lz4CorruptOnDiskLoadsNull()
+        {
+            using Fixture fx = new Fixture();
+            Vector2Int pos = new Vector2Int(0, 0); // region (0,0), local slot 0 → record at sector 2
+
+            ChunkData data = MakeEditedChunk(pos, BlockIDs.Grass);
+            bool ok = Check("seed save reports Written", RunSave(fx, data) == ChunkSaveResult.Written);
+            World.Instance.ChunkPool.ReturnChunkData(data);
+
+            fx.Storage.Dispose(); // release the region file handle
+            string regionPath = Path.Combine(SaveSystem.GetSavePath(fx.WorldName, useVolatilePath: true), "Region", "r.0.0.bin");
+            byte[] region = File.ReadAllBytes(regionPath);
+
+            // The fixture saves with the default setting; the scenario only means something for an LZ4 record.
+            ok &= Check("record is stored as LZ4", region[RECORD_PAYLOAD_OFFSET - 1] == (byte)CompressionAlgorithm.LZ4);
+            if (!Check("record payload is an LZ4 frame", StartsWithLz4Magic(region, RECORD_PAYLOAD_OFFSET))) return false;
+
+            CorruptFirstLz4BlockSize(region, RECORD_PAYLOAD_OFFSET);
+            File.WriteAllBytes(regionPath, region);
+
+            ChunkStorageManager second = new ChunkStorageManager(fx.WorldName, useVolatilePath: true, SaveSystem.CURRENT_VERSION);
+            try
+            {
+                ChunkPoolBalance balance = ChunkPoolBalance.Capture();
+                Task<ChunkData> load = Task.Run(() => second.LoadChunkAsync(pos));
+                if (!load.Wait(DESERIALIZE_DEADLINE_MS))
+                    return Check($"corrupt LZ4 record loads within {DESERIALIZE_DEADLINE_MS.ToString()} ms (still running — decoder hang)", false);
+
+                ChunkData result = load.Result;
+                ok &= Check("corrupt LZ4 record loads as null (regenerate arm)", result == null);
+                ok &= balance.AssertUnchanged("pools balanced after corrupt LZ4 disk load");
+                if (result != null) World.Instance.ChunkPool.ReturnChunkData(result);
+            }
+            catch (AggregateException e)
+            {
+                ok &= Check($"corrupt LZ4 record load must not fault (threw {e.InnerException?.GetType().Name})", false);
             }
             finally
             {
