@@ -35,11 +35,11 @@ machine path into any file.
    leave it exactly like this).
 2. **Record the active build profile** with `unity command script eval` (player-capture §1). Note the
    exact asset path, including its case, or that it was null. Record `PlayerSettings.bundleVersion` too.
-3. **Build** with `unity command build --profileName … --outputPath "$OUT" --confirm true --result-only`
+3. **Build** with `unity command build run --profile-name … --output-path "$OUT" --confirm true --result-only`
    (add `--options '["Development"]'` for a Development build), where `$OUT` is absolute:
    `OUT="$(cd .. && pwd -W)/<folder>/Minecraft Clone.exe"` — never a relative path, whose base the
-   Editor decides. Poll `unity command build_status --result-only` until it shows **your** `buildId`
-   with a final status; poll from a background shell or in bounded calls (a Master build takes
+   Editor decides. It returns `queued`; poll `unity command build status --result-only` until
+   `"status": "completed"`; poll from a background shell or in bounded calls (a Master build takes
    ~9 minutes), never one unbounded wait. A result other than `Succeeded`: quote the errors, then do step 5 and STOP.
 4. **Run** each session through the runner, one at a time:
    `python Tools/Python/run_player.py --exe "<exe>" --tag <tag> --timeout <minutes> -- <args>`.

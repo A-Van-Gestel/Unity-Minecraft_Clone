@@ -20,19 +20,19 @@ profile means the classic platform settings were active; record that too.
 ```bash
 OUT="<parent of the repo>/<YYYY-MM-DD> - <purpose> [IL2CPP]/Minecraft Clone.exe"
 # Flow A
-unity command build --profileName "Windows - Production" --outputPath "$OUT" --confirm true --result-only
+unity command build run --profile-name "Windows - Production" --output-path "$OUT" --confirm true --result-only
 # Flow B — the Development flag must be passed explicitly (see below)
-unity command build --profileName "Windows - Development" --outputPath "$OUT" --options '["Development"]' --confirm true --result-only
+unity command build run --profile-name "Windows - Development" --output-path "$OUT" --options '["Development"]' --confirm true --result-only
 ```
 
-- Give `--outputPath` as a Windows path (`K:/…`). A Git-Bash path (`/k/…`, what `$(pwd)` prints) is taken as rooted
+- Give `--output-path` as a Windows path (`K:/…`). A Git-Bash path (`/k/…`, what `$(pwd)` prints) is taken as rooted
   on the current drive, so the build lands in `K:\k\…`.
-- The call returns `queued` and a `buildId`; poll `unity command build_status --result-only` until it reports
-  that `buildId` with `"status": "completed"` (an IL2CPP build takes several minutes — poll from a background
-  shell). An earlier build's `completed` status lingers, so match the id.
-- **`--profileName` activates the profile but builds from `EditorUserBuildSettings`**, ignoring the profile's
-  Development flag: without `--options '["Development"]'` Flow B produces a non-development player the
-  Profiler cannot attach to. Confirm a development build by its `UnityPlayer.dll` being far larger than a
+- The call returns `queued`; poll `unity command build status --result-only` until `"status": "completed"` (an
+  IL2CPP build takes several minutes — poll from a background shell). `build status` reports the most recent
+  build only, so poll after `build run` has returned `queued`, never before.
+- **Pass the Development flag explicitly.** The pre-1.0 CLI's profile switch built from `EditorUserBuildSettings`
+  and ignored the profile's Development flag; `build run --profile-name` has not been re-checked for this, and
+  without `--options '["Development"]'` Flow B may produce a non-development player the Profiler cannot attach to. Confirm a development build by its `UnityPlayer.dll` being far larger than a
   production build's, or by the running player listening on a TCP port in the 55000s.
 - Do not build from `Windows - Profiler` for GC or timing work: it includes deep-profiling support. GC.Alloc
   call stacks need only a development build. (The exception is `SKILL.md` Step 2's render-pass captures, which
