@@ -1,6 +1,6 @@
 # Unity CLI Editor Bridge
 
-**Version:** 1.7  
+**Version:** 1.8  
 **Date:** 2026-09-27  
 **Status:** Implemented (Stable)  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production) — agent tooling, Editor only
@@ -21,7 +21,7 @@ Verified this session against the files, not the design prose: `Packages/manifes
 6000.6.3f1 Editor at that commit (CLI `1.0.0-beta.11`, Pipeline `0.8.0-exp.1`), with these
 exceptions. The `Validate All` timing (§4), the modal dialog (§4), the `OverallGc`
 cross-check (§6), the player-assembly compile (§7) and the §10 measurements were taken earlier
-the same day during the migration. Exit code `7` comes from the CLI's release notes.
+the same day during the migration.
 
 **Relationship to other documents:**
 
@@ -59,7 +59,7 @@ The `UC-*` IDs were issued by the design this document was promoted from
 | Component            | Where                                                          | Role                                                                                                 |
 |----------------------|----------------------------------------------------------------|------------------------------------------------------------------------------------------------------|
 | Unity CLI            | `unity` on `PATH` (`%LOCALAPPDATA%\Unity\bin`), machine-global | Shell entry point: `unity command`, `unity recompile`, `unity job`, `unity status`.                  |
-| `com.unity.pipeline` | `Packages/manifest.json`, pinned `0.8.0-exp.1`                 | Runs inside the Editor, serves the CLI on localhost. Preview on purpose.                             |
+| `com.unity.pipeline` | `Packages/manifest.json`, pinned `1.0.0`                       | Runs inside the Editor, serves the CLI on localhost.                                                 |
 | Agent environment    | `.claude/settings.json` → `env`                                | `UNITY_PROJECT_PATH=.`, `UNITY_NO_BANNER`, `UNITY_NO_UPDATE_CHECK`; read-only CLI calls pre-allowed. |
 | `unity-editor` skill | `.agents/skills/unity-editor/`                                 | The agent-facing reference card, recipes and gotcha list.                                            |
 | Profiler queries     | `Tools/UnityCli/Profiler/ProfilerQueries.cs`                   | Profiler analysis entry points (§6).                                                                 |
@@ -81,8 +81,9 @@ each command's JSON schema from the live Editor, so no parameter list is transcr
 `--format` flag and is rejected before it reaches the Editor. `script eval` takes its code positionally.
 
 **Output.** `--result-only` returns the payload; `--format json` returns an envelope with
-`success` and `errors[].code`. Exit codes: `0` success, `2` bad arguments, `6` the operation
-failed; per the CLI's release notes, `7` when no Editor responds.
+`success` and `errors[].code`, except `script eval`, which prints only its return value. Exit codes:
+`0` success, `2` bad arguments, `6` the operation failed (a failed eval included), `12` when no
+Editor responds.
 
 **Project path.** Without it, every call scans for running Editors, which dominates latency (a
 trivial `script eval` measured ~2.2 s cold without a path vs ~0.36 s with one). `UNITY_PROJECT_PATH=.`
@@ -163,7 +164,7 @@ A relative path resolves from the **project root** and an absolute one is accept
 always names the full **`Assets/AgentCaptures~/<name>.png`**: Unity skips folders ending in `~`, so it
 gets no import or `.meta`, and `.gitignore` excludes it. Any other folder under `Assets/` is imported.
 `width`/`height` size a saved file; `max-resolution` applies only to an image returned inline.
-`capture screenshot` is deprecated in favor of the two view captures.
+There is no `capture screenshot`; use the view captures.
 
 ---
 
@@ -199,14 +200,17 @@ total matched an independent sum of root-level GC exactly (58033.8 KB over 2,000
 
 ## 7. Build footprint
 
-`Unity.Pipeline` (runtime) is constrained to `UNITY_EDITOR || ENABLE_PROFILER ||
-ENABLE_RUNTIME_PIPELINE`, and its player server is off (`enableInBuilds: false`). Compiling the
-StandaloneWindows64 player scripts on 2026-09-27:
+Scripting defines decide what reaches a player. `Unity.Pipeline` (runtime) and
+`Unity.Pipeline.IlInterpreter` compile into a player only when `ENABLE_RUNTIME_PIPELINE` or
+`ENABLE_RUNTIME_PIPELINE_DEV` is defined, and `Unity.Pipeline.ScenePreview` only with
+`ENABLE_PIPELINE_SCENE_PREVIEW`; this project defines none of them. `Unity.Pipeline.Attributes` is
+unconstrained. Expected for StandaloneWindows64, from the 1.0.0 `.asmdef` constraints (not yet
+re-measured on a 1.0.0 build):
 
-| Player build | Pipeline assemblies compiled in                    |
-|--------------|----------------------------------------------------|
-| Release      | `Unity.Pipeline.Attributes` only                   |
-| Development  | + `Unity.Pipeline`, `Unity.Pipeline.IlInterpreter` |
+| Player build | Pipeline assemblies compiled in  |
+|--------------|----------------------------------|
+| Release      | `Unity.Pipeline.Attributes` only |
+| Development  | `Unity.Pipeline.Attributes` only |
 
 The package also bundles five precompiled Roslyn plugin DLLs (~9.1 MB; the `CodeAnalysis` ones
 are enabled for the Win64/Linux64/macOS players and auto-referenced). Nothing references them in
@@ -271,6 +275,9 @@ bridge installed is `61480be4`.
 
 ## Document History
 
+* **v1.8** - CLI 1.0.0 + `com.unity.pipeline` 1.0.0 (first stable): `script eval` prints only its value
+  and fails by exit `6`; no Editor is exit `12`; `capture screenshot` and `script eval_file` removed; §7: runtime
+  assemblies gated on the `ENABLE_RUNTIME_PIPELINE*` defines, so Development builds no longer compile them (2026-11-13).
 * **v1.7** - `com.unity.pipeline` 0.10.0-exp.1: every `unity command` name is now `<group> <name>`
   (`editor status`, `script eval`, `editor invoke_menu`, …); §5: capture paths resolve from the project root,
   `capture editor_window` added, `capture screenshot` deprecated (2026-11-06).
@@ -292,5 +299,5 @@ bridge installed is `61480be4`.
 
 ---
 
-**Last Updated:** 2026-11-06  
+**Last Updated:** 2026-11-13  
 **Next Review:** on a Unity CLI or `com.unity.pipeline` version bump (re-check §7 on the next release build after one)

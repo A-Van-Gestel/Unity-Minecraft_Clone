@@ -1,6 +1,6 @@
 # Project Auditor Findings Report
 
-**Version:** 1.4  
+**Version:** 1.5  
 **Date:** 2026-09-17  
 **Status:** **Open backlog.** Items are removed (archived) when implemented and verified.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
@@ -20,8 +20,7 @@ against current code, assets and the live editor** — import settings via `Audi
 settings via `PlayerSettings`/`EditorSettings` over Unity MCP, font wiring by resolving `.meta`
 GUIDs, and the two flagged `Update` call sites by reading them. Where the auditor's own claim did
 not survive that check, it is recorded in §3 as a non-finding rather than silently dropped.  
-**Amended:** 2026-09-27 — §3.4: `com.unity.ai.assistant` was removed (the Unity CLI replaced its MCP
-bridge), so its advisories are moot; `com.unity.pipeline` will be flagged as preview instead.
+**Amended:** 2026-11-13 — §3.4 states which package advisories to ignore for the current package set.
 
 ⚠️ **The counts here are a local point-in-time snapshot.** `_REFERENCES/` is git-excluded
 (`.git/info/exclude`), so the `.projectauditor` file every number derives from does **not** travel
@@ -491,14 +490,10 @@ the sound engine's own listening passes raise something.
 
 ### 3.4 Package advisories that contradict deliberate pins
 
-`PAP0002`/`PAP0001` flagged `com.unity.ai.assistant` 2.6.0-pre.1 as preview and updatable to
-2.9.0-pre.2. That pin was load-bearing at the time of this run (the patched build kept the old
-`unity-mcp` bridge working). **Since 2026-09-27 the package is removed**: the Unity CLI replaced
-the bridge (see [`UNITY_CLI_EDITOR_BRIDGE.md`](../Architecture/UNITY_CLI_EDITOR_BRIDGE.md)), so these two
-advisories no longer appear. `PAP0002` instead flags `com.unity.pipeline` (an `-exp` version) as
-preview. That is deliberate too: it is the package the CLI talks to, so ignore it. The `PAP0003`
-advice to *downgrade* `com.unity.ide.rider` and `com.unity.project-auditor-rules` to Unity's older
-"recommended" versions is gone since the rules package moved to 3.2.0 (2026-11-13 run).
+The current run raises no package advisory (`PAP0001`/`PAP0002`/`PAP0003`), so a new one is a real
+finding with one exception: a `PAP0003` advising a *downgrade* to Unity's "recommended" version of a
+package installed newer on purpose, such as `com.unity.ide.rider` or `com.unity.project-auditor-rules`.
+Ignore those.
 
 ### 3.5 The 64 MB block atlas is deliberate
 
@@ -544,6 +539,8 @@ tightly-packed atlas would bleed between tiles. Not a finding.
 
 ## Document History
 
+* **v1.5** - §3.4 (2026-11-13): `com.unity.pipeline` 1.0.0 is stable, so its `PAP0002` preview advisory is gone;
+  the section now states only which advisories to ignore.
 * **v1.4** - §3.4 (2026-11-13): `com.unity.project-auditor-rules` updated 2.0.0 → 3.2.0; that run
   raises no `PAP0003` downgrade advisories, only the expected `com.unity.pipeline` `PAP0002`.
 * **v1.3** - §3.4 (2026-09-27): `com.unity.ai.assistant` removed by the MCP → CLI migration; its

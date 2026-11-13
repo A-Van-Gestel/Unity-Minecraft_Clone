@@ -3,7 +3,7 @@ name: unity-editor
 description: Reference card and recipes for driving the live Unity Editor from the shell with the Unity CLI (`unity command`, `unity recompile`, `unity job`) — running C# in the Editor (eval/script run), compile checks, console reads, menu items and code generation, long operations as detached jobs, scene/GameObject/serialized-field inspection, asset queries, captures, and profiler analysis. Use when you need to interact with the running Editor rather than just read/write files, when the user says "check it compiles in Unity", "run the menu item", "read the console", "capture the view", "profile this", "update the Unity CLI", or mentions unity-mcp / Unity_RunCommand (the old MCP bridge this replaces). For running validation suites use run-validation-suite; for debugging workflows use voxel-debugging.
 metadata:
   unity-cli-authored-against: Unity CLI 1.0.0-beta.11 + com.unity.pipeline 0.8.0-exp.1
-  unity-cli-last-verified: "2026-11-12 (Unity CLI 1.0.0-beta.17 + com.unity.pipeline 0.10.0-exp.1)"
+  unity-cli-last-verified: "2026-11-13 (Unity CLI 1.0.0 + com.unity.pipeline 1.0.0)"
 ---
 
 # Unity Editor via the Unity CLI
@@ -20,8 +20,9 @@ domain skills (`voxel-debugging`, `burst-optimization`, `run-validation-suite`, 
 agent environment sets `UNITY_PROJECT_PATH`; if it is missing, add `--project-path "<repo root>"`.
 
 **Output.** Add `--result-only` for the pretty-printed payload. `unity command --format json`
-prints the bare result as compact JSON (`"status":"ready"`, no envelope); other commands
-(`recompile`, `job`) keep the `success`/`errors[].code` envelope. Exit codes: `0` ok, `2` bad
+prints the bare result as compact JSON (`"status":"ready"`, no envelope); `script eval` prints
+only its return value (`"pong"`), so a failed eval is detected by exit `6`, never a `success` field.
+Other commands (`recompile`, `job`) keep the `success`/`errors[].code` envelope. Exit codes: `0` ok, `2` bad
 arguments, `6` the operation failed (also `job wait --timeout` running out: the job keeps running),
 `11` not a project, `12` no Editor reachable (retryable), `13` no such Editor command, `17` Editor
 busy loading/compiling/reloading (retry once `ready`), `18` a modal dialog blocks it.

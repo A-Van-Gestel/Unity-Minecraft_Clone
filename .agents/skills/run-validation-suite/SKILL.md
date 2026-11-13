@@ -80,8 +80,8 @@ smaller set. Output order is registry order regardless of request order.
   `unity command console get --tail <n> --result-only`.
 - `unity command script eval` calling `Editor.Validation.Framework.ValidationSuiteCI.RunSelected("…", true)`
   and returning the counts from the `AggregateRunResult` (`SuiteCount`, `BaselinePassed`,
-  `BaselineFailed`, `BugsReproduced`, …). `script eval`'s `success` reflects compile + execution only;
-  suite warnings (known-bug repros, `B7 INCONCLUSIVE`) do not flip it.
+  `BaselineFailed`, `BugsReproduced`, …). `script eval`'s exit code reflects compile + execution only;
+  suite warnings (known-bug repros, `B7 INCONCLUSIVE`) do not make it fail.
 
 **Runtime budget.** A full pass takes about **3.5 minutes** (last measured 2026-09-27: 3 min 28 s to
 3 min 37 s), and **Lighting alone is almost all of it** (3 min 24 s of that run); the other suites
@@ -99,8 +99,8 @@ returns the result (each bounded one that runs out exits `6` with *"The job keep
 `unity-editor` recipes), then read the combined summary with `unity command console get --tail 400
 --result-only`. A detached job neither blocks the shell nor re-runs.
 
-**Do not schedule long work from `script eval` via `EditorApplication.delayCall`.** The call returns
-`success: true`, and the queued delegate then does not run on any predictable schedule. Observed
+**Do not schedule long work from `script eval` via `EditorApplication.delayCall`.** The call succeeds
+(exit `0`), and the queued delegate then does not run on any predictable schedule. Observed
 2026-08-25: no output for **70 minutes** on an idle editor, and it then fired unprompted when an
 unrelated `RequestScriptCompilation` pumped the editor, **executing the pre-edit assembly** and
 interleaving with a menu-item run issued in the meantime. You cannot tell "queued" from "finished",
