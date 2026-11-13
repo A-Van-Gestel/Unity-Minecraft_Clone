@@ -331,7 +331,7 @@ pass is a recurring task class, and the flags are easy to lose track of across a
 retired 2026-07-23) and LI-2 (1 flag, retired 2026-07-24) are the worked precedents. Retire in one
 atomic pass per family, not one flag at a time.
 
-**The census is currently empty — every shipped rollback flag has been retired.**
+**Open: the two ES-7.4 merge remesh gate flags** (rows at the end of the table).
 
 | Flag (`Settings`)                  | Family              | Shipped    | Evidence                                                                                                                | Retired                                                                                        |
 |------------------------------------|---------------------|------------|-------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------------------------------|
@@ -339,6 +339,8 @@ atomic pass per family, not one flag at a time.
 | `scaleBudgetCeilingsWithFpsCap`    | P-4 §3.4 refinement | 2026-07-23 | [ceiling-scaling A/B](../Performance/CHUNK_PIPELINE_P4_CEILING_SCALING_IL2CPP_2026-07-23_BENCHMARK.md) — **GO (final)** | 2026-09-06                                                                                     |
 | `enableGenerationPanicGate`        | P-4 §3.5            | 2026-07-23 | same P-4 A/B                                                                                                            | 2026-09-06                                                                                     |
 | `enableConvergentEdgeCheckCascade` | P9-2                | 2026-08-02 | [P9-2 capture](../Performance/CHUNK_PIPELINE_P9_2_CASCADE_IL2CPP_2026-08-02_BENCHMARK.md) — **GO**                      | 2026-09-06 — it was also a Performance-tab toggle, so its retirement removed a settings option |
+| `gateMergeNeighborRemeshes`        | ES-7.4              | 2026-11-13 | [IL2CPP A/B](../Performance/ENGINE_SCALING_ES7_4_REMESH_GATING_IL2CPP_2026-11-13_BENCHMARK.md) — **GO (provisional)**   | awaiting the in-game seam check                                                                |
+| `gateMergeIncludeDiagonals`        | ES-7.4              | 2026-11-13 | same ES-7.4 A/B (third leg); default ON (decided 2026-11-13)                                                            | awaiting the in-game seam check                                                                |
 
 **Not a retirement candidate — listed here so it is not mistaken for one:**
 `scalePanicGateThresholdsWithResidency` (P-8, `4ea1a38e`) is **default-OFF** after its capture returned

@@ -525,7 +525,10 @@ non-chunk files (`level.dat`, pending modifications, pending lighting) are not c
   `MergeRouteUs` (outbound mods and their support scans), `MergeCascadeUs` (stability, the edge-check cascade and the
   merge's mesh requests) — plus `MergeCountsUs` inside the apply (the instrumented-build block-count verifier; 0 in a
   release player). Counts: `MergeJobs`, `MergeStable`, `MergeStableUnchanged`, `MergeSelfRemeshes`,
-  `MergeNeighborRemeshes`, `MergeUnchangedRemeshes` (newly queued rebuilds only), `MergeOutOfBandSections`,
+  `MergeNeighborRemeshes` (diagonals included when the ES-7.4 gate admits them), `MergeUnchangedRemeshes` (newly
+  queued rebuilds only), `MergeGateSkippable` and `MergeGateDiagonals` (gate on: cardinal rebuilds skipped and
+  diagonal rebuilds queued; gate off: the cardinal rebuilds that were needless and the diagonals it would queue),
+  `MergeOutOfBandSections`,
   `MergeChurnedSections`, `UnloadPendingSkyChunks` and `UnloadPendingSkyNodes` (the unload pass), and the verifier's
   `MergeCountChecks` / `MergeCountDrifts`, which count at every tier in instrumented builds. `MergeChurnedSections`
   reads 0 by construction since ES-7.3 compacts those sections without a rent; it stays as a tripwire for that path. `/perf stats` prints a

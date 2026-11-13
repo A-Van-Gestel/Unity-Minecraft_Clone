@@ -216,7 +216,7 @@ namespace Diagnostics
         /// <summary>Mesh rebuilds stable merges newly queued for their own chunks.</summary>
         MergeSelfRemeshes,
 
-        /// <summary>Mesh rebuilds stable merges newly queued for their cardinal neighbors.</summary>
+        /// <summary>Mesh rebuilds stable merges newly queued for their neighbors (diagonals only when the gate admits them).</summary>
         MergeNeighborRemeshes,
 
         /// <summary>The newly queued self and neighbor mesh rebuilds that came from unchanged stable merges.</summary>
