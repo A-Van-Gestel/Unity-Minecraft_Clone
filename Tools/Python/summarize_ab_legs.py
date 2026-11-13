@@ -4,7 +4,8 @@ WHAT THIS DOES
     Reads, for every run tag, the Markdown that `summarize_perf_session.py` wrote (`<tag>_summary.md`) and the
     benchmark report it was cut from (`<tag>_report.log`), both in one folder. For the chosen phase it prints one
     Markdown table: a row per metric, a column per run, then each leg's mean and B's change against A. Metrics:
-      - frame level: frames, wall p50 / p99 / worst (summary overview), hitch frames (the report's Frame Health row);
+      - frame level: frames, wall p50 / p99 / worst and frames over 33 / 50 ms (summary overview), hitch frames (the
+        report's Frame Health row, whose threshold scales with each run's median);
       - the `LightMerge`, `LightSchedule` and `MeshSchedule` slots (mean ms per frame);
       - per job: merge and apply ms per merged job, schedule ms per completed light and mesh job;
       - the lighting merge's parts and counts (ES-7 Step 0 counters), and the jobs completed.
@@ -100,6 +101,8 @@ def run_metrics(folder, tag, phase, group):
         "Wall p99": num(overview.get("Wall p99")),
         "Worst": num(overview.get("Worst")),
         "Hitch frames": frame_health_hitches(report, group),
+        "Frames > 33 ms": num(overview.get("> 33 ms")),
+        "Frames > 50 ms": num(overview.get("> 50 ms")),
         "LightMerge": light_merge,
         "LightSchedule": light_schedule,
         "MeshSchedule": mesh_schedule,

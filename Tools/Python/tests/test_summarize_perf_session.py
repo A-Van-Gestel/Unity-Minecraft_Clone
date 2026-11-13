@@ -5,6 +5,7 @@ import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 from helpers import run_script
 import summarize_perf_session as summary
@@ -89,6 +90,15 @@ class FixtureTests(unittest.TestCase):
         self.assertIn("| Loading Pass / 50 m/s | 3 | 0 | 0.500 |", markdown)
         self.assertIn("| Tick | 2.000 |", markdown)
         self.assertIn("| Generation Pass / 10 m/s | 1 | 14.0 | 0 | Tick 1 |", markdown)
+
+    def test_overview_counts_frames_over_the_fixed_bars(self):
+        # Strictly over each bar: 33.0 counts for neither, 33.5 and 50.0 only for 33, 50.5 for both.
+        phase = SimpleNamespace(label="P", rows=5, collections=0,
+                                values={"wall_ms": [10.0, 33.0, 33.5, 50.0, 50.5], "cpu_ms": [1.0] * 5})
+        lines = summary.phase_overview([phase]).splitlines()
+        cells = dict(zip((c.strip() for c in lines[0].strip("|").split("|")),
+                         (c.strip() for c in lines[2].strip("|").split("|"))))
+        self.assertEqual((cells["> 33 ms"], cells["> 50 ms"]), ("3", "1"))
 
     def test_a_frame_count_mismatch_fails(self):
         _, problems = summary.summarize(report_text(frames_a="6"), self.folder)

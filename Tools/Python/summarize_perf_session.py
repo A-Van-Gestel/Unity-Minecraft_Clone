@@ -6,7 +6,8 @@ WHAT THIS DOES
     PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md §4.7). The report's "Frame Health (every frame)" tables give each
     phase's frame range [first, end); every session row in a range belongs to that phase. Per phase it prints, as
     Markdown tables:
-      - frames, wall / CPU / GPU / present-wait percentiles, managed allocation and collections;
+      - frames, wall / CPU / GPU / present-wait percentiles, frames over fixed 33 / 50 ms bars, managed allocation and
+        collections;
       - every slot that recorded time: mean ms per frame, p99 and worst;
       - the gauges (queues, jobs in flight, residency, pools): mean, p99 and max;
       - per job type: jobs completed, mean latency, mean worker busy time per job, busy ms per wall second;
@@ -78,6 +79,9 @@ HIGH = 99
 US_PER_MS = 1000.0
 BYTES_PER_MB = 1024.0 * 1024.0
 MS_PER_SECOND = 1000.0
+# Fixed slow-frame bars: the report's hitch threshold scales with the median, so legs with different medians are
+# judged against different bars; these stay comparable across legs.
+SLOW_FRAME_MS = (33.0, 50.0)
 
 
 class Phase:
@@ -250,10 +254,12 @@ def phase_overview(phases):
         alloc = p.values.get("gc_alloc_bytes", [])
         seconds = sum(wall) / MS_PER_SECOND
         rows.append([p.label, p.rows, fmt(seconds, 1), fmt(nearest_rank(wall, MEDIAN)), fmt(nearest_rank(wall, HIGH)),
-                     fmt(max(wall) if wall else math.nan), fmt(nearest_rank(cpu, MEDIAN)), fmt(nearest_rank(cpu, HIGH)),
+                     fmt(max(wall) if wall else math.nan), *(sum(1 for w in wall if w > bar) for bar in SLOW_FRAME_MS),
+                     fmt(nearest_rank(cpu, MEDIAN)), fmt(nearest_rank(cpu, HIGH)),
                      fmt(mean(alloc) / 1024.0 if alloc else math.nan, 1), p.collections,
                      fmt(nearest_rank(gpu, MEDIAN)), fmt(nearest_rank(gpu, HIGH)), fmt(nearest_rank(present, MEDIAN))])
-    return table(["Phase", "Frames", "Wall s", "Wall p50", "Wall p99", "Worst", "CPU p50", "CPU p99", "GC KB/frame",
+    return table(["Phase", "Frames", "Wall s", "Wall p50", "Wall p99", "Worst",
+                  *(f"> {bar:g} ms" for bar in SLOW_FRAME_MS), "CPU p50", "CPU p99", "GC KB/frame",
                   "GCs", "GPU p50", "GPU p99", "Present p50"], rows)
 
 
