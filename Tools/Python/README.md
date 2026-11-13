@@ -60,6 +60,7 @@ A known gap is recorded as an `expectedFailure` test that names it, so a fix sho
 | `summarize_ab_legs.py`          | Per-run and per-leg table of a player A/B for one phase, from `summarize_perf_session` outputs   |
 | `run_player.py`                 | Runs one `-mc-run` session in a built player: timeout + kill, saved Player.log, report path      |
 | `inspect_save_chunks.py`        | Decodes region files and identifies each chunk payload's historical layout                       |
+| `lz4_upgrade_check.py`          | NativeCompressions upgrade checks A–D against real saves and `lz4.frame`, via `Tools/Lz4Check/`  |
 | `verify_floordiv_parity.py`     | Exhaustive parity proof for the structure cell-election floor-div fix                            |
 | `verify_liquid_noise_period.py` | Float32 model of `LiquidCore.hlsl`'s noise (the FLUID #20 evidence)                              |
 

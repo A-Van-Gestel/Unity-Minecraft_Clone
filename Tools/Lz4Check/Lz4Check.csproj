@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Standalone harness for NativeCompressions LZ4 upgrades; driven by Tools/Python/lz4_upgrade_check.py.
+    Build once per library version, pointing at the exact DLLs Unity loads (the netstandard2.1 Core
+    assembly, the win-x64 native lz4.dll, and the System.* package DLLs beside them):
+
+      dotnet build Tools/Lz4Check -c Release -o Tools/Python/output/lz4check/new
+        -p:LzCoreDll=<...>/lib/netstandard2.1/NativeCompressions.LZ4.Core.dll
+        -p:LzNative=<...>/runtimes/win-x64/native/lz4.dll
+        -p:LzExtra=<...>/System.IO.Pipelines.dll   [-p:LzExtra2=... -p:LzExtra3=...]
+        -p:BaseIntermediateOutputPath=Tools/Python/output/lz4check/obj-new/
+
+    A separate intermediate path per build keeps two versions from sharing one obj folder.
+  -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <AssemblyName>lz4check</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="NativeCompressions.LZ4.Core">
+      <HintPath>$(LzCoreDll)</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="$(LzExtra)" Private="true" Condition="'$(LzExtra)' != ''" />
+    <Reference Include="$(LzExtra2)" Private="true" Condition="'$(LzExtra2)' != ''" />
+    <Reference Include="$(LzExtra3)" Private="true" Condition="'$(LzExtra3)' != ''" />
+    <None Include="$(LzNative)" CopyToOutputDirectory="PreserveNewest" Link="lz4.dll" />
+  </ItemGroup>
+</Project>

@@ -109,6 +109,9 @@ crashlytics-build.properties
 # Python tooling (see Tools/Python/, python-scripting skill)
 /Tools/Python/.venv/
 /Tools/Python/output/
+/Tools/Lz4Check/bin/
+/Tools/Lz4Check/obj/
+!/Tools/Lz4Check/Lz4Check.csproj
 __pycache__/
 *.pyc
 

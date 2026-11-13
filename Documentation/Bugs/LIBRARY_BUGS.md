@@ -69,8 +69,10 @@ decode with `lz4.frame`. The Android and Linux runtimes were checked for import 
 2. The Editor keeps `lz4.dll` loaded: close it, edit `packages.config`, move the old version folders
    out, and start it again so NuGetForUnity restores the new versions.
 3. Compare each native library's import `.meta` with the backup.
-4. Redo checks A–D standalone. The suites alone are not enough: a single-version round trip stays
-   green for a library that writes and reads a non-standard format.
+4. Redo checks A–D standalone: build `Tools/Lz4Check` against the old and the new DLLs (its `.csproj`
+   header has the command), then `python Tools/Python/lz4_upgrade_check.py run` (usage in its
+   docstring). The suites alone are not enough: a single-version round trip stays green for a library
+   that writes and reads a non-standard format.
 
 ### Alternative library (for future research): K4os.Compression.LZ4
 

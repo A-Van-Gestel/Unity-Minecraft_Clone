@@ -14,5 +14,6 @@ numpy>=1.24
 
 # lz4 — decodes LZ4-frame chunk payloads straight out of region files.
 #   Needed by: inspect_save_chunks.py (optional — Deflate and None saves read on the stdlib alone,
-#   which covers the oldest worlds; without this package LZ4 saves report "undecodable").
+#   which covers the oldest worlds; without this package LZ4 saves report "undecodable"), and
+#   lz4_upgrade_check.py (required: lz4.frame is its reference decoder).
 lz4>=4.0
