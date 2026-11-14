@@ -65,6 +65,31 @@ database grows; it does not affect the save format.
 
 ---
 
+## 07. A new world's voxels differ run to run for the same seed and build
+
+**Severity:** Bug (seed-visible: the same seed does not always generate the same terrain)  
+**Confidence:** High for the symptom; the cause is a hypothesis, not investigated  
+**Files:** suspected `WorldJobManager.ProcessGenerationJobs` / `World.ApplyModifications` (structure-mod application)
+
+Four Master `startup-new` runs of one build (2026-11-14, `d80f7ce2-dirty`, seed 0, vd 10, `-mc-set
+startupWorldDigest=true`) logged four different **voxel** digests over the same 441 waited-for chunks, with both ES-3
+startup flags on and with both off:
+
+| Leg                                         | Voxels             | Light              |
+|---------------------------------------------|--------------------|--------------------|
+| defaults, run 1                             | `8AAB274725532153` | `41156CA3A0494B59` |
+| defaults, run 2                             | `2DC881F7C18BD04D` | `829973674CE834BB` |
+| `startupLiftStructureQuota` + shared off, 1 | `558B7F9AE4B4118A` | `A9028D1B10CA372C` |
+| `startupLiftStructureQuota` + shared off, 2 | `ED1243A7F8E1CAE9` | `4E52F0B961E62FCA` |
+
+The digest runs in the handoff frame, before any `Update`, tick or fluid step, so only startup generation and lighting
+can have written those voxels. **Hypothesis:** structure mods (trees, other cross-chunk flora) are applied in
+job-completion order, and where two mods overlap the later one wins, so the terrain depends on worker scheduling.
+Lighting differences follow from the voxel differences and are not evidence on their own. Equivalence gates must stay
+in-process (the shared-snapshot stale count pattern), never cross-run digests. Roadmap §8 question 8.
+
+---
+
 ## TODO: Noise Evaluation Duplication — Worm Carver Seek Is a 4th Unsynchronized Path
 
 **Severity:** Technical Debt / Latent Bug  
