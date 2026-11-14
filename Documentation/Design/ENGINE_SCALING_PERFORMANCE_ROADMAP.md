@@ -1,6 +1,6 @@
 # Engine Scaling Performance Roadmap
 
-**Version:** 1.26  
+**Version:** 1.27  
 **Date:** 2026-10-02  
 **Status:** In progress — `ES-0` ✅ complete (2026-10-10: drain stamp shipped, every-layer re-measurement in §2.6 — added
 `ES-29`), `ES-1`, `ES-2` and `ES-6.1` shipped (2026-10-02); ES-0's GC.Alloc attribution captured (2026-10-03, §2.2.1 —
@@ -13,6 +13,8 @@ probe added `ES-31`); `ES-31` ✅ shipped (2026-10-11: registration screen + two
 band-clamped merge — merge −48 % per job, 200 m/s generation p50 27.0 → 6.6 ms; `ES-7.4` split off and priced);
 `ES-7.4` ✅ shipped (2026-11-13: stable merges re-mesh only neighbors whose mesh inputs changed — generation
 mesh jobs −22 % at 200 m/s, −36 % at vd 32; both rollback flags retired 2026-11-13);
+`ES-3`'s **startup coroutine** sub-parts ✅ shipped (2026-11-14: phase-1 structure-mods quota lift + shared per-sweep
+snapshots — new-world handoff 3 458 → 2 150 ms, −37.8 %; loading overlay, banding, `SU-2` admission cap stay open);
 `ES-30` ✅ shipped (2026-11-06: `Helpers/ChunkColumnSets.Rent` pre-sizes the lighting merge's pooled column sets
 to 256 — the deferred-mod list left as warm-up); `ES-4`'s **lazy borders** sub-item ✅ shipped (2026-11-06:
 chunk borders exist only while `ShowChunkBorders` is on — pool prewarm and the `LoadSceneAsync` loading screen
@@ -132,6 +134,9 @@ frame rate inflating phase 2's frame-paced waits, asynchronous Burst compilation
 ES-0's drain stamp splits it; until then the ranking in §4 is by verified mechanism, not attributed time.
 *Split 2026-10-10 (§2.6):* in Master at vd 10 the pipeline is drained 4.9–5.6 s after the scene load request on a new
 world and 1.7 s on an existing one; the 30 s was the Editor and pre-ES-1/ES-2 code.
+*Split 2026-11-14 (ES-3's startup phase report):* phase 1 is ≈ 85 frames (≈ 1.4 s, 83–84 stopped by the 5 000-per-frame
+structure-mods quota), not one ~1.0 s frame; the ≈ 1.0 s frame is lighting sweep 1 (its merge's cross-chunk route ≈ 517 ms).
+Phases 3 and 4 above describe the pre-ES-3 coroutine; the lift and the shared sweep snapshots are in the ES-3 entry.
 
 No shader warmup exists (`GraphicsSettings.asset:41–45` `m_PreloadedShaders: []`, no
 `GraphicsStateCollection`/`ShaderVariantCollection`).
@@ -285,7 +290,7 @@ IL2CPP Master, vd 10, Capture tier, every frame of every phase read per slot and
 | Finding                                                                                                                                                                                                                                         | Owner                                                               |
 |-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------|
 | **Time to stable (vd 10):** handoff 3.5–3.7 s / drained 4.9–5.6 s / stable 11.0–15.4 s on a new world; 0.64 s / 1.7 s / 4.4–10.3 s on an existing one. Goal 1's drained pipeline is met; settling is not                                        | —                                                                   |
-| The new-world startup coroutine is four frozen frames: one **~1.05 s** generation-processing frame with **4–5 collections**, then three 0.34–0.41 s lighting sweeps                                                                             | ES-3                                                                |
+| The new-world startup coroutine, before ES-3: phase 1 is ≈ 85 quota-bound frames (≈ 1.4 s), then three frozen lighting sweeps — sweep 1 is the **~1.0 s** frame (merge route ≈ 517 ms)                                                          | ES-3                                                                |
 | Drained → stable is held back only by the **fluid tick's prepare** (34–43 fluid chunks, ≈ 4 ms per tick) while the spawn's fluids settle                                                                                                        | **ES-29**                                                           |
 | **200 m/s is lighting-merge-bound:** `LightMerge` 16.3 + `LightSchedule` 5.6 ms of a ~40 ms frame at ≈ 40 lighting jobs per frame — ≈ 0.41 ms merge per job (P9-1: 0.18); merge leads 7 of 8 hitch records                                      | ES-7, ES-12                                                         |
 | Loading-pass and ensure-sweep hitches are the **behavior tick**: fluid prepare + wait at 100–278 fluid chunks (193–312 MB copied), or the managed grass tick at 51–75 k voxels (21–29 ms)                                                       | **ES-29**                                                           |
@@ -430,6 +435,22 @@ square has drained** (not merely `_isWorldLoaded`):
 - after handoff, scale quotas/ceilings ×4–8 (OM-1-bounded, memory in-flight caps kept).
 Panic-gate thresholds stay untouched (P-8). Longer-term: pipeline the coroutine (light/mesh a ring as
 soon as its neighbors are ready) instead of gen → light → mesh barriers — 🔴, `chunk-lifecycle`.
+*Shipped 2026-11-14 — two sub-parts, default-ON behind rollback flags:* the **phase-1 structure-mods quota lift**
+(`Settings.startupLiftStructureQuota`; gameplay keeps `maxStructureModsPerFrame`; which of two overlapping structure
+mods wins can change, seed-visible, accepted) and **one shared snapshot per chunk per startup lighting sweep**
+(`Helpers/StartupSweepSnapshots`, `Settings.startupSharedSweepSnapshots`; the center light map stays per job), with a
+startup phase report (`Diagnostics/StartupPhaseTotals`, Performance Monitor B41; Chunk Pipeline B8 guards the
+snapshots) and an opt-in `startupWorldDigest`. Measured in
+[`ENGINE_SCALING_ES3_LOADING_MODE_IL2CPP_2026-11-14_BENCHMARK.md`](../Performance/ENGINE_SCALING_ES3_LOADING_MODE_IL2CPP_2026-11-14_BENCHMARK.md) (Master IL2CPP, vd 10, alternated legs): **GO** — new-world handoff 3 458 → 2 150 ms
+(−37.8 %), drained 4 555 → 3 303 ms, existing world −52 ms; the lift takes phase 1 from 1 445 to 807 ms, the snapshots take
+the sweeps from 1 644 to 1 015 ms (acquire 690 → 111). A fresh new-world startup is not bit-reproducible run to run
+(two unchanged runs gave different world digests), so equivalence rests on the in-process stale-snapshot count (0) and B8.
+*Open follow-ups from the capture (no IDs filed):* sweep 1's merge routes ≈ 1.06 M cross-chunk light mods in ≈ 517 ms,
+now the largest startup cost; `clouds.Initialize()` costs ≈ 190 ms and 14–15 gen-0 collections in the frozen tail.
+*Not built:* scaling the in-flight mesh cap (the post-handoff mesh tail drains at `maxMeshRebuildsPerFrame`, so it would
+not help); *not done:* banding the startup sweeps (pooled/banded buffers), the nearest-first admission cap (`SU-2`),
+the wait radius `LoadDistance + 1`, post-handoff quota ×4–8, the pipelined coroutine. ES-4 owns any loading screen;
+nothing in ES-3 assumes pre-handoff frames are visible.
 
 **ES-4 — De-burst the first `Update`.** 🟢 / 🟢. Prewarm the `Chunk` pool during the coroutine's idle
 frames; create chunk borders only while `ShowChunkBorders` is on (build on toggle); load the world scene
@@ -919,7 +940,7 @@ constants + migration change. Prerequisites: ES-13, ES-18, ES-19.
 | **ES-0 — Measure**               | Spike-visible capture, drain stamp, crossing slots, GC.Alloc capture                                                 |   🟢   | —                   | GC.Alloc capture ✅ 2026-10-03 (§2.2.1); PM-1 store ✅ 2026-10-03; PM-2 frame tier ✅ 2026-10-04 (Master-confirmed); PM-3 crossing slots + remainder + counters ✅ 2026-10-04 (Master-confirmed); PM-4 job/I-O counters ✅ 2026-10-05 (Master-confirmed); PM-8 tick breakdown ✅ 2026-10-05 (Master-confirmed); PM-6 per-phase frame stats + Capture export ✅ 2026-10-06 (Master-confirmed); drain stamp + every-layer re-measurement ✅ 2026-10-10 (§2.6) — **complete** |
 | **ES-1 — No frame-paced load**   | Completion counter at `World.cs:1064` — execution packet §7.1                                                        |   🟢   | —                   | ✅ 2026-10-02 (in-game)                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | **ES-2 — Calibration**           | Robust OM-1 lighting probe — execution packet §7.1                                                                   |   🟢   | —                   | ✅ 2026-10-02 (in-game)                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| **ES-3 — Loading mode**          | SU-1 + SU-2, pooled/banded/shared startup snapshots                                                                  |   🟡   | ES-0                | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| **ES-3 — Loading mode**          | SU-1 + SU-2, pooled/banded/shared startup snapshots                                                                  |   🟡   | ES-0                | quota lift + shared sweep snapshots ✅ 2026-11-14 (handoff −37.8 %, [report](../Performance/ENGINE_SCALING_ES3_LOADING_MODE_IL2CPP_2026-11-14_BENCHMARK.md)); banding, `SU-2` cap, overlay open                                                                                                                                                                                                                                                                            |
 | **ES-4 — First-Update burst**    | Pool prewarm, lazy borders, async scene load                                                                         |   🟢   | —                   | lazy borders ✅ 2026-11-06; pool prewarm and loading screen open                                                                                                                                                                                                                                                                                                                                                                                                           |
 | **ES-5 — PSO warmup**            | Shader state prewarm                                                                                                 |   🟢   | —                   | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | **ES-6 — Crossing frame**        | `OnDataPopulated` skip (price first — packet §7.1), spread activations, DT-3                                         |   🟡   | ES-0                | ES-6.1 ✅ 2026-10-02 (in-game); rest open                                                                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -1328,6 +1349,10 @@ saving is inferred from step 1's re-entry leg, not re-measured.
 
 ## Document History
 
+* **v1.27** - **ES-3 startup sub-parts shipped** (2026-11-14): phase-1 structure-mods quota lift and shared per-sweep
+  snapshots, default-ON behind two rollback flags; Master A/B GO (new-world handoff −37.8 %). ES-3 entry (shipped note,
+  open follow-ups), §2.1 and §2.6 corrected (phase 1 is ≈ 85 frames; the ~1.0 s frame is sweep 1), plan table row, status
+  line. Banding, `SU-2` and the loading overlay stay open.
 * **v1.26** - **ES-32 / ES-33 filed** (2026-11-14) from the two candidates §2.6 left unfiled: slow disk reads during
   fast generation, and `ChunkJobArrayPool` churn past its retention cap at 200 m/s. Both measure-first. Status line,
   §2.6 row, §7 table; the header version, stuck at 1.24, now matches.
