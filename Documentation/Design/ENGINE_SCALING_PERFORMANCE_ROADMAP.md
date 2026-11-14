@@ -1,6 +1,6 @@
 # Engine Scaling Performance Roadmap
 
-**Version:** 1.29  
+**Version:** 1.30  
 **Date:** 2026-10-02  
 **Status:** In progress — `ES-0` ✅ complete (2026-10-10: drain stamp shipped, every-layer re-measurement in §2.6 — added
 `ES-29`), `ES-1`, `ES-2` and `ES-6.1` shipped (2026-10-02); ES-0's GC.Alloc attribution captured (2026-10-03, §2.2.1 —
@@ -25,8 +25,8 @@ offset-table probe, pooled read payloads, the dedicated I/O worker and the secti
 `ES-34` / `ES-35` / `ES-36` and §8 question 8 filed (2026-11-14) from ES-3's startup capture — the startup merge's
 cross-chunk route, `clouds.Initialize()`, the post-handoff mesh tail, and a new-world startup that is not reproducible;
 `ES-35` ✅ shipped (2026-11-14: the cloud pattern and tile meshes are prebuilt by Burst jobs before the initial chunk
-load — tail clouds 146 → 12 ms, handoff −65 ms new world / −41 ms existing); `ES-36` built, **NO-GO as a default**
-(kept as the opt-in `startupMeshWave`, default off); §8 question 8 answered (World Generation Bug 07);
+load — tail clouds 146 → 12 ms, handoff −65 ms new world / −41 ms existing); `ES-36` built: **default on for loaded worlds only**
+(`startupMeshWave`; NO-GO on new worlds, where it only made frames heavier); §8 question 8 answered (World Generation Bug 07);
 §8 question 6 (the Unity API checks) answered — `GraphicsStateCollection` and the `SetData(NativeArray,
 int, int, int)` order confirmed, the two `Graphics` questions deferred to ES-20's prototype, and ES-5's PSO
 warmup is variant-only on today's D3D11 players; the rest is a near-to-far horizon, not scheduled. Tier 1
@@ -846,13 +846,13 @@ handoff −65 ms, existing −41 ms.
 outside the coverage radius at small view distances; creating each prebuilt mesh on first use in `GetTileMesh` would
 trim that, at the cost of keeping the prebuild's buffers past startup.
 
-**ES-36 — Shorten the post-handoff mesh tail.** NO-GO as a default (2026-11-14); opt-in. 🟢 / 🟡. Added 2026-11-14 from ES-3's capture (replaces its dropped
+**ES-36 — Shorten the post-handoff mesh tail.** ✅ 2026-11-14 for loaded worlds; NO-GO on new worlds. 🟢 / 🟡. Added 2026-11-14 from ES-3's capture (replaces its dropped
 Step 3). After the handoff the mesh queue drains at **`maxMeshRebuildsPerFrame` (10/frame, OM-1-calibrated)** for
 ≈ 0.4 s, at the ~15 ms frame floor; the in-flight mesh cap (20) is not the limit, so raising it would not help. Lever:
 scale the per-frame mesh rebuild quota until the first drain after the handoff (a flag set at the handoff and cleared
 by `PipelineDrainPredicate`, never read from `StartupTimeline`), OM-1-bounded and behind a rollback flag. Gate: the
 Master Drained mark.
-*Built and measured 2026-11-14 — kept opt-in, `Settings.startupMeshWave` default **off**.* The post-handoff burst is
+*Built and measured 2026-11-14 — default-ON for loaded worlds behind the rollback flag `Settings.startupMeshWave`.* The post-handoff burst is
 ≈ 1.1 s on a new world (≈ 497 chunks), not ≈ 0.4 s as written above. `PipelinePassBudget.MeshRebuildCap` lifts the
 mesh pass's cap to the in-flight cap (20) from the handoff until the first drain, and `Helpers/StartupMeshWave` ends it
 on drain (its own `PipelineDrainPredicate` call), on leaving the handoff chunk, or after 10 s; Pipeline Backpressure B34
@@ -860,7 +860,10 @@ guards it. Measured in the
 [ES-35 / ES-36 report](../Performance/ENGINE_SCALING_ES35_ES36_STARTUP_TAIL_IL2CPP_2026-11-14_BENCHMARK.md):
 **NO-GO as a default** — new world: no Drained gain (3 097 → 3 086 ms) and heavier frames (p95 38.7 → 49.7 ms), so the
 post-handoff tail is main-thread-bound, not quota-bound; existing world: Drained −177 ms, frames not captured. The
-"×4–8" quota idea in ES-3 cannot be reached under the in-flight cap of 20.
+"×4–8" quota idea in ES-3 cannot be reached under the in-flight cap of 20. Decided 2026-11-14 (user): the wave
+begins only after a startup that generated no terrain (`StartupMeshWave.ShouldBegin`, B34), so loaded worlds keep the
+−177 ms and new worlds run the gameplay rate. Scored in a third Master build (report addendum): loaded-world Drained
+1 222 → 1 026 ms, burst-frame p95 +0.9 ms and worst −2.4 ms — **GO for loaded worlds**.
 
 ### Tier 2 — pipeline work on today's data model
 
@@ -1014,7 +1017,7 @@ constants + migration change. Prerequisites: ES-13, ES-18, ES-19.
 | **ES-33 — Job-array pool churn**   | Price the ≈ 27 buffer allocs/frees per frame past the retention cap at 200 m/s; speed-scaled cap or idle trim        |   🟢   | —                   | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | **ES-34 — Startup merge route**    | Price the ≈ 517 ms routing ≈ 1.06 M cross-chunk mods in startup sweep 1; coalesce or skip redundant routes           |   🟡   | —                   | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | **ES-35 — Startup clouds init**    | `clouds.Initialize()` ≈ 190 ms + 14–15 collections in the last frozen frame; job it or move it earlier               |   🟢   | —                   | ✅ 2026-11-14 (tail clouds 146 → 12 ms, handoff −65 ms, [report](../Performance/ENGINE_SCALING_ES35_ES36_STARTUP_TAIL_IL2CPP_2026-11-14_BENCHMARK.md))                                                                                                                                                                                                                                                                                                                     |
-| **ES-36 — Post-handoff mesh tail** | Scale `maxMeshRebuildsPerFrame` until the first drain after handoff (≈ 0.4 s tail at 10/frame)                       |   🟢   | —                   | NO-GO as a default 2026-11-14; opt-in `startupMeshWave`, default off ([report](../Performance/ENGINE_SCALING_ES35_ES36_STARTUP_TAIL_IL2CPP_2026-11-14_BENCHMARK.md))                                                                                                                                                                                                                                                                                                       |
+| **ES-36 — Post-handoff mesh tail** | Scale `maxMeshRebuildsPerFrame` until the first drain after handoff (≈ 0.4 s tail at 10/frame)                       |   🟢   | —                   | ✅ 2026-11-14 for loaded worlds (Drained −177 ms); NO-GO on new worlds; `startupMeshWave` ([report](../Performance/ENGINE_SCALING_ES35_ES36_STARTUP_TAIL_IL2CPP_2026-11-14_BENCHMARK.md))                                                                                                                                                                                                                                                                                  |
 | **ES-12 — Jobified merge**         | P-3                                                                                                                  |   🟡   | ES-7                | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | **ES-13 — Sky from heightmap**     | Frontier-seeded initial lighting                                                                                     |   🟡   | ES-12               | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | **ES-14 — Gen critical path**      | Worm cache, WG-1, WG-2                                                                                               |   🟡   | ES-0                | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
@@ -1413,6 +1416,9 @@ saving is inferred from step 1's re-entry leg, not re-measured.
 
 ## Document History
 
+* **v1.30** - **ES-36 on for loaded worlds** (2026-11-14, user decision): `startupMeshWave` defaults on,
+  and the wave begins only after a startup that generated no terrain (Pipeline Backpressure B34); new worlds keep the
+  gameplay mesh rate. Status line, ES-36 entry, §7 table.
 * **v1.29** - **ES-35 shipped, ES-36 built and NO-GO as a default** (2026-11-14), scored in the
   [ES-35 / ES-36 report](../Performance/ENGINE_SCALING_ES35_ES36_STARTUP_TAIL_IL2CPP_2026-11-14_BENCHMARK.md): the cloud
   pattern and tile meshes are prebuilt by Burst jobs (`startupPrebuildClouds`, default on; tail clouds 146 → 12 ms,

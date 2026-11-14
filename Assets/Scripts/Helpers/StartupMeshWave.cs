@@ -34,6 +34,15 @@ namespace Helpers
         /// <summary>Whether the wave is running.</summary>
         public bool IsActive { get; private set; }
 
+        /// <summary>
+        /// Whether a startup gets the wave: only one that generated no terrain. On a new world the post-handoff burst is
+        /// main-thread-bound, so a higher cap only makes those frames heavier without draining sooner.
+        /// </summary>
+        /// <param name="enabled">The <c>startupMeshWave</c> setting.</param>
+        /// <param name="generatedTerrain">Whether this startup's generation phase ran.</param>
+        /// <returns>True when the wave should begin at the handoff.</returns>
+        public static bool ShouldBegin(bool enabled, bool generatedTerrain) => enabled && !generatedTerrain;
+
         /// <summary>Starts the wave at the handoff.</summary>
         /// <param name="nowSeconds">The handoff time, in seconds.</param>
         /// <param name="handoffChunk">The player's chunk at the handoff.</param>

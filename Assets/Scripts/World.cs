@@ -1211,7 +1211,8 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         // Enable world loading logic
         _isWorldLoaded = true;
         _startupTimeline.MarkHandoff(Time.realtimeSinceStartupAsDouble, PlayerChunkCoord);
-        if (settings.startupMeshWave) _startupMeshWave.Begin(Time.realtimeSinceStartupAsDouble, PlayerChunkCoord);
+        if (StartupMeshWave.ShouldBegin(settings.startupMeshWave, _startupPhaseTotals.GenerationIterations > 0))
+            _startupMeshWave.Begin(Time.realtimeSinceStartupAsDouble, PlayerChunkCoord);
 
         StringBuilder phaseReport = new StringBuilder(capacity: 2048);
         _startupPhaseTotals.AppendReport(phaseReport);

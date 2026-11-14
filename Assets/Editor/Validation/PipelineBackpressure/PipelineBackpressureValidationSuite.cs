@@ -95,7 +95,7 @@ namespace Editor.Validation.PipelineBackpressure
                 new Scenario("B31 Tour chunk bounds: the footprint fills the pre-generated rectangle edge to edge (CMD-6)", RunB31TourChunkBounds),
                 new Scenario("B32 Station-walk trace capacity: scales with stations and LoadDistance, clamps both ways (CMD-6)", RunB32StationWalkCapacity),
                 new Scenario("B33 Structure-mods quota: the gameplay cap unchanged, the startup lift unbounded by any cap (ES-3)", RunB33StructureModsQuota),
-                new Scenario("B34 Startup mesh wave: the cap rises only while the wave runs, never past the in-flight cap; it ends on drain, on leaving the chunk, or on timeout (ES-36)", RunB34StartupMeshWave),
+                new Scenario("B34 Startup mesh wave: begins only after a startup that generated no terrain; the cap rises only while it runs, never past the in-flight cap; it ends on drain, on leaving the chunk, or on timeout (ES-36)", RunB34StartupMeshWave),
             };
             return ValidationSuiteRunner.Execute("Pipeline Backpressure", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }
@@ -147,6 +147,10 @@ namespace Editor.Validation.PipelineBackpressure
                 PipelinePassBudget.MeshRebuildCap(true, B34_REBUILDS, B34_IN_FLIGHT) == B34_IN_FLIGHT);
             ok &= Check("inside the wave a low in-flight cap never lowers the gameplay cap (10 with in-flight 4)",
                 PipelinePassBudget.MeshRebuildCap(true, B34_REBUILDS, B34_LOW_IN_FLIGHT) == B34_REBUILDS);
+
+            ok &= Check("the wave begins only for a startup that generated no terrain, and only when enabled",
+                StartupMeshWave.ShouldBegin(true, false) && !StartupMeshWave.ShouldBegin(true, true)
+                && !StartupMeshWave.ShouldBegin(false, false) && !StartupMeshWave.ShouldBegin(false, true));
 
             ChunkCoord handoff = new ChunkCoord(B34_CHUNK, B34_CHUNK);
             StartupMeshWave idle = default;

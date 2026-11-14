@@ -103,3 +103,23 @@ halved the main-thread clouds time (L0 75 ms against step 0's 146 ms; different 
 **ES-35 GO, default on behind `startupPrebuildClouds`.** **ES-36 kept as an opt-in (`startupMeshWave`, default off)**:
 NO-GO as a default on the new-world evidence; the existing-world gain is unproven on frame cost. All 40 runs of the two
 builds exited with a report; none logged an exception or a native leak.
+
+## Addendum 2026-11-14 — ES-36 default on for loaded worlds
+
+After this report, the user chose to keep the existing-world gain: `startupMeshWave` defaults on and the wave begins
+only after a startup that generated no terrain (`StartupMeshWave.ShouldBegin`, Pipeline Backpressure B34). New worlds
+keep the gameplay mesh rate (the L1 numbers above).
+
+**Scored the same day** in a third Master build of that change (`StartupRun_2026-11-14_23-22-57` … `23-40-16`, pins as
+above, legs alternated): W0 = `startupMeshWave=false`, W1 = default.
+
+| Loaded world                              | W0 (wave off)          | W1 (wave on)           |
+|-------------------------------------------|------------------------|------------------------|
+| Drained, median (n=5)                     | 1 222 ms (1 207–1 406) | 1 026 ms (1 013–1 254) |
+| Handoff → Drained, median (n=5)           | 868 ms                 | 668 ms                 |
+| Mesh burst, median of 3 Capture runs      | 749 ms, 70–73 frames   | 640 ms, 46–48 frames   |
+| Burst frames pooled: median / p95 / worst | 9.0 / 24.8 / 76.4 ms   | 11.3 / 25.7 / 74.0 ms  |
+
+Drained −196 ms; p95 +0.9 ms and worst −2.4 ms, within the plan's 2 ms criterion (the median frame rises 2.3 ms). Both
+`startup-new` runs at defaults logged no `Mesh wave ended` line: the wave does not start on a new world. **GO for loaded
+worlds.**
