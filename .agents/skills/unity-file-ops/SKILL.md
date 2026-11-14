@@ -58,6 +58,10 @@ Before deleting a prefab, ScriptableObject, or scene:
    untouched (recipe: the `unity-editor` skill's `references/editor-writes.md`).
 4. **Verify in the YAML, not through the runtime accessor.** Grep each asset for both the old and the new key as whole words (`grep -nw`): the old must be gone — from field lines and `propertyPath:` overrides alike — and the new present. An accessor read-back can report the expected value while the asset still carries the old key — an absent key leaves the C# initializer in place, which matches whenever the authored value was the default.
 
+### Changing a new serialized field's default
+
+A field initializer only seeds a value the asset does not have yet. Once the Editor has serialized a new field (any domain reload with the prefab or scene loaded, or the pre-commit reserialize), changing its `= true` to `= false` leaves the **old** value in the YAML, and the asset wins at runtime — the ES-36 `startupMeshWave` flag landed in `World.prefab` as `1` after its default became `false`. After changing a default, set the asset value through the Editor (`PrefabUtility.LoadPrefabContents` → assign → `SaveAsPrefabAsset`, recipe in the `unity-editor` skill's `references/editor-writes.md`) and grep the asset diff for the field before committing.
+
 ### Scene and prefab merge conflicts
 
 `.unity` and `.prefab` files are YAML but order-sensitive and GUID-heavy. Do not hand-edit them in a text editor to resolve conflicts unless you understand Unity's YAML serialization format.
