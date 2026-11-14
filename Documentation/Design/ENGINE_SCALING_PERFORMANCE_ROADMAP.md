@@ -1,6 +1,6 @@
 # Engine Scaling Performance Roadmap
 
-**Version:** 1.24  
+**Version:** 1.26  
 **Date:** 2026-10-02  
 **Status:** In progress — `ES-0` ✅ complete (2026-10-10: drain stamp shipped, every-layer re-measurement in §2.6 — added
 `ES-29`), `ES-1`, `ES-2` and `ES-6.1` shipped (2026-10-02); ES-0's GC.Alloc attribution captured (2026-10-03, §2.2.1 —
@@ -19,6 +19,7 @@ chunk borders exist only while `ShowChunkBorders` is on — pool prewarm and the
 stay open); `ES-9`'s first three slices shipped (2026-11-06: the unload log gated on `enableDiagnosticLogs`, the save's
 fault continuation `static` with `OnlyOnFaulted`, and `ExpandStructure` filling a caller's reused list; the
 offset-table probe, pooled read payloads, the dedicated I/O worker and the section-ownership save stay open);
+`ES-32` / `ES-33` filed (2026-11-14) from §2.6's two unfiled candidates — slow disk reads, job-array pool churn;
 §8 question 6 (the Unity API checks) answered — `GraphicsStateCollection` and the `SetData(NativeArray,
 int, int, int)` order confirmed, the two `Graphics` questions deferred to ES-20's prototype, and ES-5's PSO
 warmup is variant-only on today's D3D11 players; the rest is a near-to-far horizon, not scheduled. Tier 1
@@ -290,7 +291,7 @@ IL2CPP Master, vd 10, Capture tier, every frame of every phase read per slot and
 | Loading-pass and ensure-sweep hitches are the **behavior tick**: fluid prepare + wait at 100–278 fluid chunks (193–312 MB copied), or the managed grass tick at 51–75 k voxels (21–29 ms)                                                       | **ES-29**                                                           |
 | Garbage unchanged: **127.4 KB per generated chunk, 76.9 % `WriteSection`**; ES-28's UI passes **0.78 KB per frame in a player**                                                                                                                 | ES-26, ES-27, ES-28                                                 |
 | **vd 32 saturates from 50 m/s** (p50 41–47 ms, the same merge-bound profile); memory peaks at **7.0 GB** (goal 3: ≈ 5.7 GB); the tick reaches 704 fluid chunks / 780 MB per tick; one of two vd-32 runs livelocked lighting in the ensure sweep | ES-7, ES-29, Lighting Bug 23 (fixed, `_FIXED_BUGS.md` Lighting #27) |
-| Candidates, not filed: disk reads 7.7–7.9 ms per hit during fast generation (save-stream contention, *inferred*); `ChunkJobArrayPool` frees and reallocates ≈ 27 buffers per frame at 200 m/s past its retention cap                            | ES-9 / —                                                            |
+| Disk reads 7.7–7.9 ms per hit during fast generation (save-stream contention, *inferred*); `ChunkJobArrayPool` frees and reallocates ≈ 27 buffers per frame at 200 m/s past its retention cap (both filed 2026-11-14)                           | ES-32 / ES-33                                                       |
 | Every system outside `World.Update` (audio, clouds, environment, UI, physics, player) stays under 0.03 ms per frame in every phase                                                                                                              | —                                                                   |
 
 ---
@@ -765,6 +766,27 @@ What landed:
   leaves that the tick never converts: their Dirt mod is refused by `ApplyModifications`' placement mask (a Live mod
   may not replace Grass) — present on HEAD, not ES-31's.
 
+**ES-32 — Price the slow disk reads during fast generation.** 🟢 / 🟡. Added 2026-11-14 from the ES-0 re-measure
+(§2.6, [B1 disk I/O table](../Performance/ENGINE_SCALING_ES0_REMEASURE_IL2CPP_2026-10-10_BENCHMARK.md)). A disk hit
+reads in **7.7 ms at 50 m/s and 7.9 ms at 200 m/s**, against 0.24–0.41 ms in every other phase (100 m/s included).
+Those two phases have few hits (12 and 180) and save 2 500–9 600 chunks in the same window, so contention with the
+save stream is the likely cause *(inferred)*. Measure first, then pick the lever:
+- re-capture on HEAD — ES-9's three slices and ES-7.4 shipped after this capture, and 12 hits is a thin sample;
+- split the hit's read time into queueing (waiting behind saves) and file access, and confirm whether it delays a
+  frame at all, since reads run off the main thread;
+- if it is contention, the lever is ES-9's dedicated I/O worker with bounded queues: give reads priority over saves.
+  Re-score after that worker ships rather than adding a separate scheduler.
+
+**ES-33 — Stop the job-array pool's alloc/free churn at speed.** 🟢 / 🟡. Added 2026-11-14 from the ES-0 re-measure
+(§2.6). `ChunkJobArrayPool.Return` disposes a buffer returned while its type already holds the device-calibrated
+retention cap (OM-1, `Settings.chunkJobArrayPoolRetention`), and a rent allocates when none is retained. At 200 m/s
+the number in flight swings past the cap, so both happen in the same window: `JobArrayMisses` is **22 796 in 30 s (≈ 27 native `Persistent` allocations of 64–128 KB per frame)**,
+against 456–1 754 at 50–100 m/s. Cost unpriced. Measure first: count the disposes past the cap separately from the
+misses, and time the native allocations and frees per frame. Levers, if it pays:
+- a higher cap only during fast traversal — bounded by goal 3's memory figure and the ~246 MB retention trade-off
+  in `JOB_SYSTEM_BUGS.md` #02;
+- an idle soft-trim, so the cap can be higher without pinning the peak.
+
 ### Tier 2 — pipeline work on today's data model
 
 **ES-12 — Jobified lighting merge.** → `P-3`. 🟡 / 🟡. After ES-7 shrinks it, measure the internal split
@@ -913,6 +935,8 @@ constants + migration change. Prerequisites: ES-13, ES-18, ES-19.
 | **ES-29 — Behavior tick spikes** | Banded / deduplicated fluid snapshots, the fluid-job wait, Grass-Burst                                               |   🟡   | —                   | ✅ 2026-10-11 (snapshot arena + Burst grass; wait → ES-31; 5+3+1 Master runs per leg)                                                                                                                                                                                                                                                                                                                                                                                      |
 | **ES-30 — Pooled set pre-size**  | Pre-size the lighting merge's pooled column sets (256); deferred-mod list left as warm-up — 0.54 KB/chunk            |   🟢   | —                   | ✅ 2026-11-06 (suite B131; IL2CPP re-capture pending)                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | **ES-31 — Screen registration**  | Register only voxels that can act, instead of every water/grass voxel of a new chunk                                 |   🟡   | —                   | ✅ 2026-10-11 (fluid voxels ticked −99 %; 2+1+2 Master runs per leg)                                                                                                                                                                                                                                                                                                                                                                                                       |
+| **ES-32 — Slow disk reads**      | Price the 7.7–7.9 ms reads during fast generation; re-score after ES-9's I/O worker                                  |   🟢   | —                   | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| **ES-33 — Job-array pool churn** | Price the ≈ 27 buffer allocs/frees per frame past the retention cap at 200 m/s; speed-scaled cap or idle trim        |   🟢   | —                   | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | **ES-12 — Jobified merge**       | P-3                                                                                                                  |   🟡   | ES-7                | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | **ES-13 — Sky from heightmap**   | Frontier-seeded initial lighting                                                                                     |   🟡   | ES-12               | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | **ES-14 — Gen critical path**    | Worm cache, WG-1, WG-2                                                                                               |   🟡   | ES-0                | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
@@ -1304,6 +1328,9 @@ saving is inferred from step 1's re-entry leg, not re-measured.
 
 ## Document History
 
+* **v1.26** - **ES-32 / ES-33 filed** (2026-11-14) from the two candidates §2.6 left unfiled: slow disk reads during
+  fast generation, and `ChunkJobArrayPool` churn past its retention cap at 200 m/s. Both measure-first. Status line,
+  §2.6 row, §7 table; the header version, stuck at 1.24, now matches.
 * **v1.25** - **ES-7.4 shipped, flags retired** (2026-11-13): Master A/B GO, diagonals kept on, in-game seam and corner
   check passed; `gateMergeNeighborRemeshes` / `gateMergeIncludeDiagonals` and `MergeRemeshDecision` (B137) deleted.
   Status line, ES-7 entry, §2.3 "Remesh requests" row and anchor.
