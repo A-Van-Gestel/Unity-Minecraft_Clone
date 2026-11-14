@@ -585,6 +585,17 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     /// <summary>This launch's time-to-stable stamp (ES-0); logged once when it gets its outcome.</summary>
     public StartupTimeline StartupTimeline => _startupTimeline;
 
+    private readonly StartupPhaseTotals _startupPhaseTotals = new StartupPhaseTotals();
+
+    // Shared startup snapshots found stale by the opt-in check (startupWorldDigest); 0 is the only correct value.
+    private int _startupStaleSnapshots;
+
+    // Whether that check ran in at least one sweep (it needs shared snapshots on).
+    private bool _startupStaleSnapshotsChecked;
+
+    /// <summary>This launch's startup-coroutine split (ES-3); logged once at the handoff.</summary>
+    public StartupPhaseTotals StartupPhaseTotals => _startupPhaseTotals;
+
     /// <summary>
     /// Public accessor for world load state. True once <see cref="StartWorld"/> has fully completed.
     /// </summary>
@@ -1137,6 +1148,8 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         //    The code will PAUSE here and will not continue until ForceCompleteDataJobsCoroutine is finished.
         yield return StartCoroutine(ForceCompleteDataJobsCoroutine(chunksToWaitFor));
 
+        int tailCollectionsAtStart = GC.CollectionCount(0);
+        long tailLap = Stopwatch.GetTimestamp();
         stopwatch.Stop();
         long totalMilliseconds = stopwatch.ElapsedMilliseconds;
         float avgTime = (float)totalMilliseconds / Mathf.Max(1, loadedChunks);
@@ -1155,6 +1168,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         // 4. NOW it's safe to get the spawn height, as the data AND mesh colliders exist.
         Debug.Log("--- Finalizing startup ---");
         Debug.Log("Getting spawn position...");
+        tailLap = LapStartupPart(ref _startupPhaseTotals.TailReportTicks, tailLap);
 
         // The chunk data the height probe needs now exists, so the same decision unit finishes the placement: it
         // aims ResolveSpawnHeight at whichever position this source actually needs resolved (for a resumed save that
@@ -1167,12 +1181,16 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
 
         if (placement.ShouldCanonicalizeSpawn)
             SetSpawnPoint(placement.CanonicalSpawn);
+        tailLap = LapStartupPart(ref _startupPhaseTotals.TailSpawnTicks, tailLap);
 
         Debug.Log("Initializing clouds...");
         clouds?.Initialize();
+        tailLap = LapStartupPart(ref _startupPhaseTotals.TailCloudsTicks, tailLap);
 
         // Border wall follows the same post-load init as clouds; it self-hides when BorderRadius is 0.
         _borderWall?.Initialize();
+        LapStartupPart(ref _startupPhaseTotals.TailBorderWallTicks, tailLap);
+        _startupPhaseTotals.TailCollections = GC.CollectionCount(0) - tailCollectionsAtStart;
 
         Debug.Log("Starting world tick...");
         _tickTimer = 0f;
@@ -1184,6 +1202,68 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         // Enable world loading logic
         _isWorldLoaded = true;
         _startupTimeline.MarkHandoff(Time.realtimeSinceStartupAsDouble, PlayerChunkCoord);
+
+        StringBuilder phaseReport = new StringBuilder(capacity: 2048);
+        _startupPhaseTotals.AppendReport(phaseReport);
+        Debug.Log($"[Startup] {phaseReport}");
+
+        if (settings.startupWorldDigest)
+        {
+            ComputeStartupWorldDigest(chunksToWaitFor, out ulong voxelDigest, out ulong lightDigest);
+            string staleCheck = _startupStaleSnapshotsChecked
+                ? $"{_startupStaleSnapshots} stale shared snapshots"
+                : "shared snapshots not checked (off)";
+            Debug.Log($"[Startup] World digest: voxels {voxelDigest:X16}, light {lightDigest:X16} over {chunksToWaitFor.Count} chunks; {staleCheck}");
+        }
+    }
+
+    /// <summary>
+    /// FNV-1a over every listed chunk's job voxel and light maps, in list order: equal digests mean two startups
+    /// left the same terrain and light. Diagnostic only; allocates two temporary maps.
+    /// </summary>
+    /// <param name="chunks">The chunks to hash.</param>
+    /// <param name="voxelDigest">Receives the voxels' 64-bit digest.</param>
+    /// <param name="lightDigest">Receives the light's 64-bit digest.</param>
+    private void ComputeStartupWorldDigest(List<ChunkCoord> chunks, out ulong voxelDigest, out ulong lightDigest)
+    {
+        ulong voxelHash = MeshInputDigest.FnvOffset;
+        ulong lightHash = MeshInputDigest.FnvOffset;
+        const int volume = ChunkMath.CHUNK_VOLUME;
+        NativeArray<uint> voxels = new NativeArray<uint>(volume, Allocator.Temp, NativeArrayOptions.UninitializedMemory);
+        NativeArray<ushort> light = new NativeArray<ushort>(volume, Allocator.Temp, NativeArrayOptions.UninitializedMemory);
+        try
+        {
+            foreach (ChunkCoord chunkCoord in chunks)
+            {
+                Vector2Int origin = chunkCoord.ToVoxelOrigin();
+                worldData.FillChunkMapForJob(origin, voxels);
+                worldData.FillChunkLightMapForJob(origin, light);
+                for (int i = 0; i < volume; i++)
+                {
+                    voxelHash = (voxelHash ^ voxels[i]) * MeshInputDigest.FnvPrime;
+                    lightHash = (lightHash ^ light[i]) * MeshInputDigest.FnvPrime;
+                }
+            }
+        }
+        finally
+        {
+            voxels.Dispose();
+            light.Dispose();
+        }
+
+        voxelDigest = voxelHash;
+        lightDigest = lightHash;
+    }
+
+    /// <summary>Adds the time since <paramref name="start"/> to a startup part's total and returns the lap's end.</summary>
+    /// <param name="total">The part's total, in <see cref="Stopwatch"/> ticks.</param>
+    /// <param name="start">The part's start timestamp.</param>
+    /// <returns>The end timestamp.</returns>
+    private static long LapStartupPart(ref long total, long start)
+    {
+        long now = Stopwatch.GetTimestamp();
+        total += now - start;
+        return now;
     }
 
     /// <summary>
@@ -1663,11 +1743,22 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         // --- PHASE 1: Complete all terrain generation first ---
         // This is fast and linear, but we profile it for completeness.
         generationProcessingWatch.Start();
+        StartupPhaseTotals phaseTotals = _startupPhaseTotals;
+        long phase1Start = Stopwatch.GetTimestamp();
+        int phase1Collections = GC.CollectionCount(0);
         while (JobManager.GenerationJobs.Count > 0)
         {
             // Complete any finished generation jobs. This may flag chunks for initial lighting.
-            JobManager.ProcessGenerationJobs();
+            long passStart = Stopwatch.GetTimestamp();
+            JobManager.ProcessGenerationJobs(liftModsQuota: settings.startupLiftStructureQuota);
+            long applyStart = Stopwatch.GetTimestamp();
             ApplyModifications();
+            phaseTotals.GenerationApplyTicks += Stopwatch.GetTimestamp() - applyStart;
+            phaseTotals.GenerationPassTicks += applyStart - passStart;
+            phaseTotals.GenerationIterations++;
+            phaseTotals.GenerationJobs += JobManager.LastGenJobsProcessed;
+            phaseTotals.GenerationStructureMods += JobManager.LastGenStructureMods;
+            if (JobManager.LastGenModsQuotaSpent) phaseTotals.GenerationQuotaStops++;
 
             safetyBreak++;
             if (safetyBreak > maxIterations)
@@ -1680,6 +1771,8 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         }
 
         generationProcessingWatch.Stop();
+        phaseTotals.GenerationWallTicks = Stopwatch.GetTimestamp() - phase1Start;
+        phaseTotals.GenerationCollections = GC.CollectionCount(0) - phase1Collections;
 
         // --- PHASE 2: Complete all lighting calculations ---
         // Optimization: Convert Coord list to Data list once
@@ -1709,6 +1802,11 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
             {
                 lightingLoopIterations++;
                 int jobsScheduledThisSweep = 0;
+                StartupPhaseTotals.Sweep sweep = default;
+                int sweepCollections = GC.CollectionCount(0);
+                long acquireAtStart = JobManager.TempJobAcquireTicks;
+                PerfMergeTotals mergeAtStart = JobManager.MergeTotals;
+                long sweepLap = Stopwatch.GetTimestamp();
 
                 // --- Step 2a: Trigger Initial Lighting Requests ---
                 lightingSchedulingWatch.Start();
@@ -1739,59 +1837,97 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                     // the arm keeps iteration order from deciding which chunks reach 2b's edge arm.
                     chunkData.RecalculateSkylight();
                     chunkData.ClearInitialLighting();
+                    sweep.Recalcs++;
                 }
+
+                sweepLap = LapStartupPart(ref sweep.RecalcTicks, sweepLap);
 
                 // --- Step 2b: Schedule Lighting Jobs (including edge checks) ---
                 // Now that the initial light requests have been processed, the regular lighting scheduler can pick them up in the same coroutine iteration.
-                foreach (ChunkData chunkData in chunksInLoadArea)
+                // Nothing writes voxels or light until 2c's merge, so the sweep's jobs can share one snapshot per chunk.
+                bool sharedSnapshots = settings.startupSharedSweepSnapshots && JobManager.BeginStartupSweepSnapshots();
+                // A sweep cut short by an exception still closes its set, so its last job frees the shared maps.
+                try
                 {
-                    // Cheap pre-filter: an unflagged chunk resolves to Remove, and this coroutine keeps no
-                    // scheduler sets to remove it from.
-                    if (!chunkData.IsPopulated || !chunkData.HasAnyLightingWork) continue;
-
-                    ChunkCoord chunkCoord = ChunkCoord.FromVoxelOrigin(chunkData.Position);
-
-                    // The same shared decision World.Update's ready-set scan runs, so the startup and
-                    // steady-state paths cannot disagree on which arm a chunk takes. In-flight chunks
-                    // resolve to Park and fall through the switch unscheduled.
-                    LightingScanDecision.ScanAction action = LightingScanDecision.EvaluateReadyChunk(
-                        JobManager.LightingJobs.ContainsKey(chunkCoord),
-                        chunkData.NeedsInitialLighting,
-                        chunkData.NeedsEdgeCheck,
-                        chunkData.HasLightChangesToProcess,
-                        this,
-                        chunkCoord);
-
-                    bool scheduled = false;
-
-                    switch (action)
+                    foreach (ChunkData chunkData in chunksInLoadArea)
                     {
-                        case LightingScanDecision.ScanAction.ScheduleEdge:
-                            // Pre-set so the schedule guard passes; the job's PerformEdgeCheck rides the schedule.
-                            chunkData.FlagLightWork();
-                            scheduled = JobManager.ScheduleLightingUpdate(chunkData, Allocator.TempJob);
-                            break;
+                        // Cheap pre-filter: an unflagged chunk resolves to Remove, and this coroutine keeps no
+                        // scheduler sets to remove it from.
+                        if (!chunkData.IsPopulated || !chunkData.HasAnyLightingWork) continue;
 
-                        case LightingScanDecision.ScanAction.ScheduleRegular:
-                            // OPTIMIZATION: Use TempJob allocator.
-                            // This is safe because we call CompleteAndProcessLightingJobs() immediately below, ensuring these allocations live for less than 1 frame.
-                            scheduled = JobManager.ScheduleLightingUpdate(chunkData, Allocator.TempJob);
-                            break;
+                        ChunkCoord chunkCoord = ChunkCoord.FromVoxelOrigin(chunkData.Position);
 
-                        // ScheduleInitial is step 2a's arm. Remove/Park are steady-state bookkeeping for
-                        // scheduler sets this coroutine does not keep — it re-visits every chunk each sweep
-                        // and stops when nothing is actionable, so there is nothing to park or forget.
+                        // The same shared decision World.Update's ready-set scan runs, so the startup and
+                        // steady-state paths cannot disagree on which arm a chunk takes. In-flight chunks
+                        // resolve to Park and fall through the switch unscheduled.
+                        LightingScanDecision.ScanAction action = LightingScanDecision.EvaluateReadyChunk(
+                            JobManager.LightingJobs.ContainsKey(chunkCoord),
+                            chunkData.NeedsInitialLighting,
+                            chunkData.NeedsEdgeCheck,
+                            chunkData.HasLightChangesToProcess,
+                            this,
+                            chunkCoord);
+
+                        bool scheduled = false;
+
+                        switch (action)
+                        {
+                            case LightingScanDecision.ScanAction.ScheduleEdge:
+                                // Pre-set so the schedule guard passes; the job's PerformEdgeCheck rides the schedule.
+                                chunkData.FlagLightWork();
+                                scheduled = JobManager.ScheduleLightingUpdate(chunkData, Allocator.TempJob);
+                                break;
+
+                            case LightingScanDecision.ScanAction.ScheduleRegular:
+                                // OPTIMIZATION: Use TempJob allocator.
+                                // This is safe because we call CompleteAndProcessLightingJobs() immediately below, ensuring these allocations live for less than 1 frame.
+                                scheduled = JobManager.ScheduleLightingUpdate(chunkData, Allocator.TempJob);
+                                break;
+
+                            // ScheduleInitial is step 2a's arm. Remove/Park are steady-state bookkeeping for
+                            // scheduler sets this coroutine does not keep — it re-visits every chunk each sweep
+                            // and stops when nothing is actionable, so there is nothing to park or forget.
+                        }
+
+                        if (scheduled) jobsScheduledThisSweep++;
                     }
 
-                    if (scheduled) jobsScheduledThisSweep++;
+                    lightingSchedulingWatch.Stop();
+                    sweepLap = LapStartupPart(ref sweep.ScheduleTicks, sweepLap);
+
+                    // Diagnostic: every shared snapshot must still match its chunk once the last job is scheduled.
+                    if (sharedSnapshots && settings.startupWorldDigest)
+                    {
+                        _startupStaleSnapshots += JobManager.CountStaleStartupSnapshots();
+                        _startupStaleSnapshotsChecked = true;
+                        sweepLap = Stopwatch.GetTimestamp();
+                    }
+                }
+                finally
+                {
+                    // Closed before the merge writes light: a later acquire throws instead of reading stale maps.
+                    if (sharedSnapshots) sweep.SharedSnapshots = JobManager.CloseStartupSweepSnapshots();
                 }
 
-                lightingSchedulingWatch.Stop();
+                // Closing (and any free it triggers) belongs to the snapshot work, not the job wait.
+                sweepLap = LapStartupPart(ref sweep.ScheduleTicks, sweepLap);
 
                 // --- Step 2c: Force-complete and process all scheduled jobs ---
                 lightingCompletionWatch.Start();
-                CompleteAndProcessLightingJobs();
+                CompleteAndProcessLightingJobs(ref sweep.CompleteTicks, ref sweep.MergeTicks, sweepLap);
                 lightingCompletionWatch.Stop();
+
+                PerfMergeTotals mergeAtEnd = JobManager.MergeTotals;
+                sweep.AcquireTicks = JobManager.TempJobAcquireTicks - acquireAtStart;
+                sweep.MergeApplyTicks = mergeAtEnd.ApplyTicks - mergeAtStart.ApplyTicks;
+                sweep.MergeDrainTicks = mergeAtEnd.DrainTicks - mergeAtStart.DrainTicks;
+                sweep.MergeRouteTicks = mergeAtEnd.RouteTicks - mergeAtStart.RouteTicks;
+                sweep.MergeCascadeTicks = mergeAtEnd.CascadeTicks - mergeAtStart.CascadeTicks;
+                sweep.Jobs = jobsScheduledThisSweep;
+                sweep.CrossRouted = JobManager.LastCrossChunkModsApplyRouted;
+                sweep.CrossEffective = JobManager.LastCrossChunkModsEffective;
+                sweep.Collections = GC.CollectionCount(0) - sweepCollections;
+                phaseTotals.AddSweep(sweep);
 
                 // --- Step 2d: Convergence diagnostics (gated) ---
                 if (logLightingDiagnostics)
@@ -1833,6 +1969,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         }
 
         totalStopwatch.Stop();
+        phaseTotals.Recorded = true;
         Debug.Log("All generation and lighting jobs are complete!");
 
         // --- Generate and Print Profiling Report ---
@@ -2025,7 +2162,11 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         return false;
     }
 
-    private void CompleteAndProcessLightingJobs()
+    /// <summary>Completes every scheduled lighting job, then merges them, timing the wait and the merge apart.</summary>
+    /// <param name="completeTicks">Receives the wait, in <see cref="Stopwatch"/> ticks.</param>
+    /// <param name="mergeTicks">Receives the merge, in ticks.</param>
+    /// <param name="start">The wait's start timestamp.</param>
+    private void CompleteAndProcessLightingJobs(ref long completeTicks, ref long mergeTicks, long start)
     {
         // Force complete all scheduled lighting jobs immediately.
         foreach (LightingJobData job in JobManager.LightingJobs.Values)
@@ -2035,8 +2176,11 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
             handle.Complete();
         }
 
+        long lap = LapStartupPart(ref completeTicks, start);
+
         // Process their results.
         JobManager.ProcessLightingJobs();
+        LapStartupPart(ref mergeTicks, lap);
     }
 
     /// <summary>

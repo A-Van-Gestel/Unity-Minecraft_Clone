@@ -134,6 +134,12 @@ namespace Benchmarks
                           $"{StorageIoStats.LoadMisses - _loadMissesAtStart} not on disk (generated)");
             sb.AppendLine();
 
+            if (world != null)
+            {
+                world.StartupPhaseTotals.AppendReport(sb);
+                sb.AppendLine();
+            }
+
             sb.AppendLine("=== Configuration ===");
             if (world != null && world.settings != null)
             {

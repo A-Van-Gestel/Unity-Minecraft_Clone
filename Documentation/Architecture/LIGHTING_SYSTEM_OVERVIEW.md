@@ -127,7 +127,7 @@ On the main thread each frame, `World.Update()` iterates the **ready set** of th
 1. **Drain staging queue:** Background threads (e.g., deserialization) enqueue positions into a `ConcurrentQueue<Vector2Int>`. The main thread drains this into the ready set at the start of each frame.
 2. **Iterate ready set:** For each chunk in the set, check flags (`NeedsInitialLighting`, `HasLightChangesToProcess`, `NeedsEdgeCheck`).
 3. Check that all 8 neighbors have finished terrain generation (`AreNeighborsDataReady`).
-4. Create snapshot copies of the center chunk map (writable) and all 8 neighbor maps (read-only).
+4. Create snapshot copies of the center chunk map (writable) and all 8 neighbor maps (read-only). (The startup coroutine's `TempJob` sweeps instead read the 8 neighbor maps and the center voxels from one shared per-chunk snapshot per sweep, `StartupSweepSnapshots`; the center light map stays per job — `CHUNK_LIFECYCLE_PIPELINE.md`, ES-3.)
 5. Transfer the managed light queues to `NativeQueue`s for the job.
 6. Check `SkylightRecalculationQueue` for pending column recalculations (from unloaded neighbor recovery).
 7. Schedule the `NeighborhoodLightingJob`.

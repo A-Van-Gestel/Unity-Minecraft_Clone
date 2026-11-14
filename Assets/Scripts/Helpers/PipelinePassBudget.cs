@@ -180,6 +180,16 @@ namespace Helpers
         }
 
         /// <summary>
+        /// The generation pass's structure-mods quota: the per-frame cap, or no limit while the startup coroutine lifts
+        /// it (nothing renders or ticks between its passes).
+        /// </summary>
+        /// <param name="liftForStartup">Whether the startup coroutine lifts the quota.</param>
+        /// <param name="perFrameCap">The gameplay cap, <c>maxStructureModsPerFrame</c>.</param>
+        /// <returns>The mods one pass may queue before it defers the next completed job.</returns>
+        public static int StructureModsQuota(bool liftForStartup, int perFrameCap) =>
+            liftForStartup ? int.MaxValue : perFrameCap;
+
+        /// <summary>
         /// Classifies why a budgeted pass stopped (FP-2). One implementation for every pass that reports a
         /// stop reason, so no two can disagree about what a stop <i>means</i> and a single suite baseline
         /// pins them all.

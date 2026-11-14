@@ -3,6 +3,9 @@ using System.Text;
 using Data;
 using Editor.Validation.ChunkPipeline.Framework;
 using Helpers;
+using Jobs.BurstData;
+using LightingJobData = global::Jobs.Data.LightingJobData;
+using LightingJobInputData = global::Jobs.Data.LightingJobInputData;
 using UnityEngine;
 using Scenario = Editor.Validation.Framework.Scenario;
 
@@ -33,6 +36,9 @@ namespace Editor.Validation.ChunkPipeline
     public static partial class ChunkPipelineValidationSuite
     {
         private const int FRAME_BUDGET = 64;
+        private const byte B8_BLOCKLIGHT = 5;
+        private const byte B8_BLOCKLIGHT_CHANGED = 6;
+        private const int B9_HEIGHTMAP_LENGTH = 256;
 
         /// <summary>Registers the baseline scenarios (called from <c>Execute</c>).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>
@@ -52,6 +58,186 @@ namespace Editor.Validation.ChunkPipeline
                 "B6 Flag pairing: a converged neighbourhood leaves no chunk holding an unclearable lighting flag", B6FlagsPaired));
             scenarios.Add(new Scenario(
                 "B7 NeighborReadinessDecision census — all 3 gates × 2⁶ fact combinations match the gate contract (LP-2)", B7NeighborReadinessCensus));
+            scenarios.Add(new Scenario(
+                "B8 Startup sweep snapshots: one shared map per chunk, a live write is caught as stale, freed only after close and the last holder, no reuse after close", B8StartupSweepSnapshots));
+            scenarios.Add(new Scenario(
+                "B9 Startup sweep registry: one open set, every job's reference released before it is freed, a teardown frees what is left; a shared job's Dispose frees only what it owns", B9StartupSweepRegistry));
+        }
+
+        /// <summary>
+        /// B9 — the job-side bookkeeping of the shared startup snapshots, world-free: the
+        /// <see cref="StartupSweepSnapshotRegistry"/> the lighting scheduler takes sets from and releases them to, and
+        /// <see cref="LightingJobData.Dispose"/> on a job that holds shared maps.
+        /// </summary>
+        private static bool B9StartupSweepRegistry()
+        {
+            StringBuilder log = new StringBuilder();
+            bool ok = true;
+
+            void Check(string label, bool condition)
+            {
+                log.AppendLine($"  [{(condition ? "PASS" : "FAIL")}] {label}");
+                ok &= condition;
+            }
+
+            WorldData worldData = new WorldData("B9StartupSweepRegistry", 0);
+            StartupSweepSnapshotRegistry registry = new StartupSweepSnapshotRegistry();
+            Unity.Collections.NativeArray<ushort> ownedHeightmap = default;
+            Unity.Collections.NativeArray<ushort> ownedLight = default;
+            try
+            {
+                Check("Nothing to take before a sweep opens",
+                    registry.TakeForJob(out int noId) == null && noId == 0);
+                Check("One set opens; a second open is refused",
+                    registry.Begin(worldData, Unity.Collections.Allocator.TempJob)
+                    && !registry.Begin(worldData, Unity.Collections.Allocator.TempJob));
+
+                StartupSweepSnapshots first = registry.TakeForJob(out int firstId);
+                StartupSweepSnapshots second = registry.TakeForJob(out int secondId);
+                Check("Two jobs take the same open set under one non-zero id",
+                    first != null && ReferenceEquals(first, second) && firstId != 0 && firstId == secondId);
+
+                // A job holding shared maps: its Dispose frees what it owns and leaves the shared maps to the set.
+                ChunkCoord center = new ChunkCoord(0, 0);
+                ownedHeightmap = new Unity.Collections.NativeArray<ushort>(B9_HEIGHTMAP_LENGTH, Unity.Collections.Allocator.TempJob);
+                ownedLight = new Unity.Collections.NativeArray<ushort>(ChunkMath.CHUNK_VOLUME, Unity.Collections.Allocator.TempJob);
+                LightingJobData job = new LightingJobData
+                {
+                    SharedSnapshotSet = firstId,
+                    Input = new LightingJobInputData
+                    {
+                        Heightmap = ownedHeightmap,
+                        Neighbors = NeighborMapAssembler.Build(center, first, false, Unity.Collections.Allocator.TempJob),
+                    },
+                    Map = first.AcquireVoxelMap(center, false, Unity.Collections.Allocator.TempJob),
+                    LightMap = ownedLight,
+                };
+                Unity.Collections.NativeArray<uint> sharedNeighbor = job.Input.Neighbors.NeighborN;
+                Unity.Collections.NativeArray<uint> sharedCenter = job.Map;
+                job.Dispose();
+                Check("A shared job's Dispose leaves the shared neighbor and center maps alive",
+                    IsReadable(sharedNeighbor) && IsReadable(sharedCenter));
+                Check("It frees the heightmap and light map it owns",
+                    !IsReadable(ownedHeightmap) && !IsReadable(ownedLight));
+
+                registry.Close();
+                Check("A closed set lives while jobs hold it, and is not handed out",
+                    registry.LiveSetCount == 1 && registry.TakeForJob(out int closedId) == null && closedId == 0);
+                registry.Release(firstId);
+                Check("It survives all but the last job's release", registry.LiveSetCount == 1 && !first.IsDisposed);
+                registry.Release(secondId);
+                Check("The last release frees it", registry.LiveSetCount == 0 && first.IsDisposed);
+                registry.Release(firstId);
+                Check("A release for a freed set is ignored", registry.LiveSetCount == 0);
+
+                registry.Begin(worldData, Unity.Collections.Allocator.TempJob);
+                StartupSweepSnapshots stranded = registry.TakeForJob(out int strandedId);
+                Check("A later sweep gets a new id", strandedId != 0 && strandedId != firstId);
+                registry.Dispose();
+                Check("Teardown frees an open set still held by a job",
+                    registry.LiveSetCount == 0 && stranded.IsDisposed);
+            }
+            finally
+            {
+                registry.Dispose();
+                if (IsReadable(ownedHeightmap)) ownedHeightmap.Dispose();
+                if (IsReadable(ownedLight)) ownedLight.Dispose();
+            }
+
+            Debug.Log(log.ToString().TrimEnd());
+            return ok;
+        }
+
+        /// <summary>Whether a native array is still allocated: reading a freed one throws under the safety checks.</summary>
+        private static bool IsReadable<T>(Unity.Collections.NativeArray<T> array) where T : struct
+        {
+            if (!array.IsCreated) return false;
+
+            try
+            {
+                _ = array[0];
+                return true;
+            }
+            catch (System.ObjectDisposedException)
+            {
+                return false;
+            }
+            catch (System.InvalidOperationException)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// B8 — <see cref="StartupSweepSnapshots"/> on a scratch <see cref="WorldData"/>: every reader of a chunk gets the
+        /// same buffer filled from the live chunk, the stale check sees a write made after the fill, and the set outlives
+        /// its close and every holder but the last. Writes blocklight, which a lighting-off fill's skylight stamp keeps.
+        /// </summary>
+        private static bool B8StartupSweepSnapshots()
+        {
+            StringBuilder log = new StringBuilder();
+            bool ok = true;
+
+            void Check(string label, bool condition)
+            {
+                log.AppendLine($"  [{(condition ? "PASS" : "FAIL")}] {label}");
+                ok &= condition;
+            }
+
+            ChunkCoord lit = new ChunkCoord(0, 0);
+            ChunkCoord missing = new ChunkCoord(5, 5);
+            WorldData worldData = new WorldData("B8StartupSweepSnapshots", 0);
+            ChunkData chunk = new ChunkData(lit.ToVoxelOrigin());
+            chunk.SetLightData(1, 10, 1, LightBitMapping.SetBlocklightR(0, B8_BLOCKLIGHT));
+            worldData.SetChunk(lit.ToVoxelOrigin(), chunk);
+            int litIndex = ChunkMath.GetFlattenedIndexInChunk(1, 10, 1);
+
+            StartupSweepSnapshots set = new StartupSweepSnapshots(worldData, Unity.Collections.Allocator.TempJob);
+            StartupSweepSnapshots unheld = new StartupSweepSnapshots(worldData, Unity.Collections.Allocator.TempJob);
+            try
+            {
+                Unity.Collections.NativeArray<ushort> first = set.AcquireLightMap(lit, false, Unity.Collections.Allocator.TempJob);
+                Unity.Collections.NativeArray<ushort> second = set.AcquireLightMap(lit, true, Unity.Collections.Allocator.Persistent);
+                set.AcquireVoxelMap(missing, false, Unity.Collections.Allocator.TempJob);
+                Check("Two readers of one chunk share one light buffer", first.Equals(second));
+                Check("The shared map holds the live light, an absent chunk an empty map",
+                    LightBitMapping.GetBlocklightR(first[litIndex]) == B8_BLOCKLIGHT && set.SnapshotCount == 2);
+                Check("An untouched set has no stale map", set.CountStaleSnapshots() == 0);
+
+                chunk.SetLightData(1, 10, 1, LightBitMapping.SetBlocklightR(0, B8_BLOCKLIGHT_CHANGED));
+                Check("A light write after the fill is caught as one stale map", set.CountStaleSnapshots() == 1);
+
+                set.Retain();
+                set.Retain();
+                set.Close();
+                Check("A closed set stays alive while jobs hold it", !set.IsDisposed);
+                bool threw = false;
+                try
+                {
+                    set.AcquireVoxelMap(lit, false, Unity.Collections.Allocator.TempJob);
+                }
+                catch (System.InvalidOperationException)
+                {
+                    threw = true;
+                }
+
+                Check("No map is handed out after the close", threw);
+                set.Release();
+                Check("It survives all but the last holder", !set.IsDisposed);
+                set.Release();
+                Check("The last holder frees it", set.IsDisposed);
+
+                unheld.Close();
+                Check("A set closed with no holder is freed at once", unheld.IsDisposed);
+            }
+            finally
+            {
+                set.Dispose();
+                unheld.Dispose();
+            }
+
+            Debug.Log(log.ToString().TrimEnd());
+            return ok;
         }
 
         /// <summary>

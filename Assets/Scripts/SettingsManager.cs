@@ -834,6 +834,34 @@ public class Settings
              TooltipTags.Warning + "High log spam during chunk loading. Will severely impact performance.")]
     public bool enableSaveSystemDiagnosticLogs = false;
 
+    /// <summary>
+    /// If true, the startup coroutine's generation phase applies every completed job's structure mods in one pass
+    /// instead of stopping at <see cref="maxStructureModsPerFrame"/>. Rollback flag (ES-3).
+    /// </summary>
+    [Header("Startup")]
+    [SettingField(SettingsTab.Dev, Label = "Startup: Lift Structure Quota", DebugOnly = true, Order = 20)]
+    [Tooltip("Startup's generation phase ignores the per-frame structure-mods quota, so it needs far fewer frames.\n\n" +
+             TooltipTags.Performance + "Rollback flag: turn off only to compare against the quota-bound startup.")]
+    public bool startupLiftStructureQuota = true;
+
+    /// <summary>
+    /// If true, each startup lighting sweep snapshots every chunk once and shares those maps across the jobs that
+    /// read them, instead of copying nine neighborhoods per job. Rollback flag (ES-3).
+    /// </summary>
+    [SettingField(SettingsTab.Dev, Label = "Startup: Shared Sweep Snapshots", DebugOnly = true, Order = 21)]
+    [Tooltip("Startup lighting sweeps copy each chunk once and share it between the jobs that read it.\n\n" +
+             TooltipTags.Performance + "Rollback flag: turn off only to compare against per-job copies.")]
+    public bool startupSharedSweepSnapshots = true;
+
+    /// <summary>
+    /// If true, logs a checksum of every waited-for chunk's voxels and light at the handoff, to compare startups, and
+    /// checks each startup sweep's shared snapshots against their chunks once its last job is scheduled.
+    /// </summary>
+    [SettingField(SettingsTab.Dev, Label = "Startup: World Digest", DebugOnly = true, Order = 22)]
+    [Tooltip("Logs a checksum of the loaded area's voxels and light when startup hands off, and checks the shared sweep snapshots.\n\n" +
+             TooltipTags.Warning + "Adds a few hundred milliseconds to startup.")]
+    public bool startupWorldDigest = false;
+
     #endregion
 
     #region Debug Screen Tab

@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text;
 using Data;
 using Diagnostics;
 using Editor.Validation.Framework;
@@ -7,7 +9,8 @@ namespace Editor.Validation.PerfMonitoring
     /// <summary>
     /// The startup half of the suite: <see cref="StartupTimeline"/> driven by injected clock, frame times and drain
     /// results — the drain run and its stamp, the settled-window rule with its slack, interruption, timeout, the anchor
-    /// fallback and <see cref="WorldLaunchState"/>'s one-shot scene request. Every value is exact.
+    /// fallback and <see cref="WorldLaunchState"/>'s one-shot scene request — and the <see cref="StartupPhaseTotals"/> report.
+    /// Every value is exact.
     /// </summary>
     public static partial class PerfMonitorValidationSuite
     {
@@ -144,6 +147,85 @@ namespace Editor.Validation.PerfMonitoring
                 WorldLaunchState.WorldSceneRequestedAt = saved;
             }
 
+            return ok;
+        }
+
+        private static bool RunB41StartupPhaseReport()
+        {
+            StartupPhaseTotals unfinished = new StartupPhaseTotals();
+            StringBuilder unfinishedReport = new StringBuilder();
+            unfinished.AppendReport(unfinishedReport);
+            bool ok = Check("An unfinished coroutine reports that it was not recorded",
+                unfinishedReport.ToString().Contains("not recorded (the coroutine did not reach its report)"));
+
+            StartupPhaseTotals totals = new StartupPhaseTotals
+            {
+                Recorded = true,
+                GenerationWallTicks = StartupPhaseTotals.MsToTicks(1400.0),
+                GenerationIterations = 83,
+                GenerationQuotaStops = 80,
+                GenerationPassTicks = StartupPhaseTotals.MsToTicks(500.0),
+                GenerationApplyTicks = StartupPhaseTotals.MsToTicks(100.0),
+                GenerationJobs = 529,
+                GenerationStructureMods = 400000,
+                GenerationCollections = 27,
+                TailReportTicks = StartupPhaseTotals.MsToTicks(10.0),
+                TailSpawnTicks = StartupPhaseTotals.MsToTicks(20.0),
+                TailCloudsTicks = StartupPhaseTotals.MsToTicks(30.0),
+                TailBorderWallTicks = StartupPhaseTotals.MsToTicks(40.0),
+                TailCollections = 14,
+            };
+
+            // Two sweeps past the cap, so the overflow row folds exactly sweeps 17 and 18.
+            for (int i = 0; i < StartupPhaseTotals.MaxRecordedSweeps + 2; i++)
+            {
+                totals.AddSweep(new StartupPhaseTotals.Sweep
+                {
+                    RecalcTicks = StartupPhaseTotals.MsToTicks(i + 1),
+                    ScheduleTicks = StartupPhaseTotals.MsToTicks(10.0),
+                    AcquireTicks = StartupPhaseTotals.MsToTicks(5.0),
+                    CompleteTicks = StartupPhaseTotals.MsToTicks(20.0),
+                    MergeTicks = StartupPhaseTotals.MsToTicks(30.0),
+                    MergeApplyTicks = StartupPhaseTotals.MsToTicks(1.0),
+                    MergeDrainTicks = StartupPhaseTotals.MsToTicks(2.0),
+                    MergeRouteTicks = StartupPhaseTotals.MsToTicks(3.0),
+                    MergeCascadeTicks = StartupPhaseTotals.MsToTicks(4.0),
+                    Recalcs = 2,
+                    Jobs = i + 1,
+                    CrossRouted = 3,
+                    CrossEffective = 1,
+                    Collections = 1,
+                    SharedSnapshots = 7,
+                });
+            }
+
+            // A comma-decimal culture: the report must still read the same on every machine.
+            CultureInfo savedCulture = CultureInfo.CurrentCulture;
+            string report;
+            try
+            {
+                CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("de-DE");
+                StringBuilder sb = new StringBuilder();
+                totals.AppendReport(sb);
+                report = sb.ToString();
+            }
+            finally
+            {
+                CultureInfo.CurrentCulture = savedCulture;
+            }
+
+            string[] lines = report.Replace("\r", "").Split('\n');
+            ok &= Check("Header, phase 1, 16 sweep rows, the overflow row, the total, the tail, in order",
+                lines.Length >= 21 && lines[0] == "=== Startup Coroutine ==="
+                && lines[1] == "Phase 1:          1400.0 ms wall over 83 iterations, 80 quota-stopped; main thread pass 500.0 ms + apply mods 100.0 ms; 529 jobs, 400000 structure mods; 27 collections"
+                && lines[2] == "Sweep 1           61.0 ms: recalc 1.0 (2), schedule 10.0 (acquire 5.0; 1 jobs, 7 shared maps), wait 20.0, merge 30.0 (apply 1.0, drain 2.0, route 3.0, cascade 4.0); cross-chunk 3 routed / 1 effective; 1 collections"
+                && lines[17] == "Sweep 16          76.0 ms: recalc 16.0 (2), schedule 10.0 (acquire 5.0; 16 jobs, 7 shared maps), wait 20.0, merge 30.0 (apply 1.0, drain 2.0, route 3.0, cascade 4.0); cross-chunk 3 routed / 1 effective; 1 collections"
+                && lines[18] == "Sweeps 17+        155.0 ms: recalc 35.0 (4), schedule 20.0 (acquire 10.0; 35 jobs, 14 shared maps), wait 40.0, merge 60.0 (apply 2.0, drain 4.0, route 6.0, cascade 8.0); cross-chunk 6 routed / 2 effective; 2 collections"
+                && lines[19] == "Sweeps total      1251.0 ms: recalc 171.0 (36), schedule 180.0 (acquire 90.0; 171 jobs, 126 shared maps), wait 360.0, merge 540.0 (apply 18.0, drain 36.0, route 54.0, cascade 72.0); cross-chunk 54 routed / 18 effective; 18 collections"
+                && lines[20] == "Tail:             report 10.0 ms, spawn 20.0 ms, clouds 30.0 ms, border wall 40.0 ms; 14 collections");
+            ok &= Check("Every sweep is counted, the overflow row is readable by index",
+                totals.SweepCount == StartupPhaseTotals.MaxRecordedSweeps + 2
+                && totals.GetSweep(StartupPhaseTotals.MaxRecordedSweeps).Jobs == 35);
             return ok;
         }
 

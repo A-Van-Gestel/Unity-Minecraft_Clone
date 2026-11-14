@@ -94,6 +94,7 @@ namespace Editor.Validation.PipelineBackpressure
                 new Scenario("B30 Pre-generation start validation: refusals and their precedence (CMD-6)", RunB30PregenValidateStart),
                 new Scenario("B31 Tour chunk bounds: the footprint fills the pre-generated rectangle edge to edge (CMD-6)", RunB31TourChunkBounds),
                 new Scenario("B32 Station-walk trace capacity: scales with stations and LoadDistance, clamps both ways (CMD-6)", RunB32StationWalkCapacity),
+                new Scenario("B33 Structure-mods quota: the gameplay cap unchanged, the startup lift unbounded by any cap (ES-3)", RunB33StructureModsQuota),
             };
             return ValidationSuiteRunner.Execute("Pipeline Backpressure", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }
@@ -108,6 +109,30 @@ namespace Editor.Validation.PipelineBackpressure
             else Debug.LogError($"  [FAIL] {label}");
             return condition;
         }
+
+        /// <summary>
+        /// ES-3: the generation pass's structure-mods quota. Gameplay keeps its per-frame cap exactly; the startup lift
+        /// ignores the cap and covers far more mods than a whole startup queues (≈ 424 k measured at vd 10).
+        /// </summary>
+        private static bool RunB33StructureModsQuota()
+        {
+            bool ok = Check("gameplay keeps the configured cap (100, 5 000, 50 000)",
+                PipelinePassBudget.StructureModsQuota(false, B33_LOW_CAP) == B33_LOW_CAP
+                && PipelinePassBudget.StructureModsQuota(false, B33_DEFAULT_CAP) == B33_DEFAULT_CAP
+                && PipelinePassBudget.StructureModsQuota(false, B33_HIGH_CAP) == B33_HIGH_CAP);
+            ok &= Check("the startup lift does not depend on the cap",
+                PipelinePassBudget.StructureModsQuota(true, B33_LOW_CAP)
+                == PipelinePassBudget.StructureModsQuota(true, B33_HIGH_CAP));
+            ok &= Check("the startup lift outlasts a whole startup's mods many times over",
+                PipelinePassBudget.StructureModsQuota(true, B33_DEFAULT_CAP) / B33_STARTUP_MODS >= B33_MIN_HEADROOM);
+            return ok;
+        }
+
+        private const int B33_LOW_CAP = 100;
+        private const int B33_DEFAULT_CAP = 5000;
+        private const int B33_HIGH_CAP = 50000;
+        private const int B33_STARTUP_MODS = 424000;
+        private const int B33_MIN_HEADROOM = 1000;
 
         /// <summary>
         /// FP-2: the shared stop-reason classifier both scheduling loops route through. Two things are

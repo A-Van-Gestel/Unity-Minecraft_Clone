@@ -241,6 +241,21 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     /// <summary>Number of lighting job results processed in the most recent <see cref="ProcessLightingJobs"/> call.</summary>
     public int LastProcessedJobCount { get; private set; }
 
+    /// <summary>Whether the most recent <see cref="ProcessGenerationJobs"/> stopped on the structure-mods quota.</summary>
+    public bool LastGenModsQuotaSpent { get; private set; }
+
+    /// <summary>Generation jobs the most recent <see cref="ProcessGenerationJobs"/> processed.</summary>
+    public int LastGenJobsProcessed { get; private set; }
+
+    /// <summary>Structure mods the most recent <see cref="ProcessGenerationJobs"/> queued.</summary>
+    public int LastGenStructureMods { get; private set; }
+
+    /// <summary>
+    /// Running main-thread time spent allocating and filling the snapshot maps and padded volumes of
+    /// non-pooled (startup <c>TempJob</c>) lighting schedules, in <see cref="Stopwatch"/> ticks.
+    /// </summary>
+    public long TempJobAcquireTicks { get; private set; }
+
     /// <summary>Of the most recently processed jobs, how many reported not-stable and re-flagged
     /// <c>HasLightChangesToProcess</c> for another pass (the §4.2 stability-bug signature).</summary>
     public int LastUnstableJobCount { get; private set; }
@@ -613,6 +628,24 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     public void ClearMeshDiagnostics() => _meshInputRecords.Clear();
 
     private readonly HashSet<ChunkCoord> _chunksToRebuildMesh = new HashSet<ChunkCoord>();
+
+    // ES-3: startup sweep snapshot sets, by the id a job keeps in LightingJobData.SharedSnapshotSet.
+    private readonly StartupSweepSnapshotRegistry _sweepSnapshots = new StartupSweepSnapshotRegistry();
+
+    /// <summary>
+    /// Opens a shared snapshot set for one startup lighting sweep: until <see cref="CloseStartupSweepSnapshots"/>,
+    /// non-pooled lighting schedules read their neighbor maps and center voxels from it instead of copying them.
+    /// </summary>
+    /// <returns>False when a set is already open.</returns>
+    public bool BeginStartupSweepSnapshots() => _sweepSnapshots.Begin(_world.worldData, Allocator.TempJob);
+
+    /// <summary>Closes the open sweep set; it is freed with the last job still reading it.</summary>
+    /// <returns>The maps the set filled, or 0 when none was open.</returns>
+    public int CloseStartupSweepSnapshots() => _sweepSnapshots.Close();
+
+    /// <summary>Counts the open sweep set's maps that no longer match their live chunk (diagnostic).</summary>
+    /// <returns>The stale maps, or 0 when no set is open.</returns>
+    public int CountStaleStartupSnapshots() => _sweepSnapshots.CountStaleInOpenSet();
 
     // The pass's stable merges that changed no light, so the deferred self re-mesh loop can attribute its requests.
     // Filled only while the monitor's slots are active.
@@ -1151,14 +1184,25 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         // (Return/Dispose skip uncreated entries), so the pool never leaks.
         LightingJobData jobData = new LightingJobData { UsesPooledBuffers = usePooledBuffers };
         jobData.TimingRecord = BeginJobTiming(out JobBusyTimer timer, out jobData.ScheduleTimestamp);
+        long acquireStart = Stopwatch.GetTimestamp();
+
+        // ES-3: a startup sweep's jobs share one snapshot per chunk. The center light map stays per job — the
+        // merge extracts the job's result into it. Retained before any acquire, so the catch's release balances.
+        StartupSweepSnapshots shared = null;
+        if (!usePooledBuffers) shared = _sweepSnapshots.TakeForJob(out jobData.SharedSnapshotSet);
+
         try
         {
             jobData.Input = new LightingJobInputData
             {
                 Heightmap = new NativeArray<ushort>(chunkData.heightMap, allocator),
-                Neighbors = AcquireNeighborMaps(chunkCoord, usePooledBuffers, allocator),
+                Neighbors = shared != null
+                    ? NeighborMapAssembler.Build(chunkCoord, shared, false, allocator)
+                    : AcquireNeighborMaps(chunkCoord, usePooledBuffers, allocator),
             };
-            jobData.Map = AcquireVoxelMap(chunkData.Position, usePooledBuffers, allocator);
+            jobData.Map = shared != null
+                ? shared.AcquireVoxelMap(chunkCoord, false, allocator)
+                : AcquireVoxelMap(chunkData.Position, usePooledBuffers, allocator);
             jobData.LightMap = AcquireLightMap(chunkData.Position, usePooledBuffers, allocator);
 
             // P-2 Layer 1: rent the halo-padded volumes the job reads/writes, but leave them UNFILLED —
@@ -1167,6 +1211,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
             NeighborMapSet neighbors = jobData.Input.Neighbors;
             jobData.PaddedVoxels = AcquirePaddedVoxels(usePooledBuffers, allocator);
             jobData.PaddedLight = AcquirePaddedLight(usePooledBuffers, allocator);
+            if (!usePooledBuffers) TempJobAcquireTicks += Stopwatch.GetTimestamp() - acquireStart;
 
             jobData.Mods = new NativeList<LightModification>(allocator);
             jobData.PullBackClaims = new NativeList<PullBackClaim>(allocator);
@@ -1344,10 +1389,13 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     /// <param name="window">Optional time ceiling (P-4 §3.4): when it expires the pass breaks before
     /// starting the next job, leaving the remaining completed jobs enrolled for next frame — the same
     /// retry contract as the structure-mods budget. <c>default</c> (startup coroutine) is unbudgeted.</param>
-    public void ProcessGenerationJobs(PipelinePassBudget.Window window = default)
+    /// <param name="liftModsQuota">True to apply every completed job's structure mods regardless of
+    /// <c>maxStructureModsPerFrame</c> (startup only: nothing renders or ticks while it runs).</param>
+    public void ProcessGenerationJobs(PipelinePassBudget.Window window = default, bool liftModsQuota = false)
     {
         _completedGenJobs.Clear();
-        int modsBudget = _world.settings.maxStructureModsPerFrame;
+        int modsQuota = PipelinePassBudget.StructureModsQuota(liftModsQuota, _world.settings.maxStructureModsPerFrame);
+        int modsBudget = modsQuota;
 
         // Rotating-start snapshot iteration (see _genScanKeys) so a budget break cannot systematically
         // starve the same high-index entry every frame (probabilistic fairness). The pass never adds
@@ -1639,6 +1687,9 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         // attribution never lets an admission stall hide behind a hitch guard.
         PipelineTelemetry.RecordPassStop(PipelinePass.GenerationProcess, PipelinePassBudget.ClassifyStop(
             genJobsProcessed, genCandidatesSeen, genModsQuotaSpent, genCeilingExpired, false));
+        LastGenModsQuotaSpent = genModsQuotaSpent;
+        LastGenJobsProcessed = genJobsProcessed;
+        LastGenStructureMods = modsQuota - modsBudget;
 
         foreach (ChunkCoord chunkCoord in _completedGenJobs)
         {
@@ -1829,10 +1880,11 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     /// <param name="jobData">The completed lighting job data.</param>
     private void ReleaseLightingJobData(LightingJobData jobData)
     {
-        // Non-pooled jobs (startup coroutine's TempJob path) own all their buffers — dispose them.
+        // Non-pooled jobs (startup coroutine's TempJob path) own their buffers, except a sweep set's shared maps.
         if (!jobData.UsesPooledBuffers)
         {
             jobData.Dispose();
+            if (jobData.SharedSnapshotSet != 0) _sweepSnapshots.Release(jobData.SharedSnapshotSet);
             return;
         }
 
@@ -2647,6 +2699,9 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
             handle.Complete();
             ReleaseLightingJobData(job);
         }
+
+        // Every job above has released its sweep set reference; a set left open (startup cut short) goes here.
+        _sweepSnapshots.Dispose();
 
         GenerationJobs.Clear();
         MeshJobs.Clear();

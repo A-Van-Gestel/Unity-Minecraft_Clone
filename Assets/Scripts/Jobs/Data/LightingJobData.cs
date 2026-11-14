@@ -16,11 +16,12 @@ namespace Jobs.Data
         public NativeArray<ushort> Heightmap;
         public NeighborMapSet Neighbors;
 
-        /// A helper to dispose all the containers at once
-        public void Dispose()
+        /// <summary>Disposes the containers this job owns.</summary>
+        /// <param name="neighborsShared">True when <see cref="Neighbors"/> belong to a shared snapshot set, which frees them.</param>
+        public void Dispose(bool neighborsShared = false)
         {
             if (Heightmap.IsCreated) Heightmap.Dispose();
-            Neighbors.Dispose();
+            if (!neighborsShared) Neighbors.Dispose();
         }
     }
 
@@ -49,6 +50,13 @@ namespace Jobs.Data
         /// </summary>
         [MarshalAs(UnmanagedType.U1)]
         public bool UsesPooledBuffers;
+
+        /// <summary>
+        /// Non-zero when <see cref="Map"/> and <see cref="Input"/>'s neighbor maps are a startup sweep's shared
+        /// snapshots (the id of that set in <c>WorldJobManager</c>): the set owns them, so <see cref="Dispose"/> skips
+        /// them. Not read by any Burst job.
+        /// </summary>
+        public int SharedSnapshotSet;
 
         // --- Input data ---
         public LightingJobInputData Input;
@@ -111,14 +119,14 @@ namespace Jobs.Data
         public void Dispose()
         {
             // --- Input data ---
-            Input.Dispose();
+            Input.Dispose(neighborsShared: SharedSnapshotSet != 0);
 
             // --- LI-1 padded volumes ---
             if (PaddedVoxels.IsCreated) PaddedVoxels.Dispose();
             if (PaddedLight.IsCreated) PaddedLight.Dispose();
 
             // --- Output data ---
-            if (Map.IsCreated) Map.Dispose();
+            if (SharedSnapshotSet == 0 && Map.IsCreated) Map.Dispose();
             if (LightMap.IsCreated) LightMap.Dispose();
             if (SkylightQueue.IsCreated) SkylightQueue.Dispose();
             if (BlocklightQueue.IsCreated) BlocklightQueue.Dispose();

@@ -107,6 +107,9 @@ MonoBehaviour:
     enableDiagnosticLogs: 0
     enableWaterDiagnosticLogs: 0
     enableSaveSystemDiagnosticLogs: 0
+    startupLiftStructureQuota: 1
+    startupSharedSweepSnapshots: 1
+    startupWorldDigest: 0
     debugHudShowFps: 1
     debugHudShowGraphicsApi: 1
     debugHudShowWorldInfo: 1

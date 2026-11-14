@@ -270,7 +270,7 @@ flowchart TD
 All three completed-job sweeps (`ProcessGenerationJobs`, `ProcessLightingJobs`, `ProcessMeshJobs`)
 release each job's containers *inside* the loop and remove the dictionary entries only *after* it.
 `ProcessGenerationJobs` and `ProcessMeshJobs` additionally take an optional
-`PipelinePassBudget.Window` ms ceiling (P-4 §3.4, checked between jobs): on expiry the sweep breaks and the remaining completed jobs stay enrolled for next frame — the same retry contract as the generation pass's structure-mods budget. `default` = unbudgeted (the startup coroutine's path);
+`PipelinePassBudget.Window` ms ceiling (P-4 §3.4, checked between jobs): on expiry the sweep breaks and the remaining completed jobs stay enrolled for next frame — the same retry contract as the generation pass's structure-mods budget. `default` = unbudgeted (the startup coroutine's path, which also lifts `maxStructureModsPerFrame` while `startupLiftStructureQuota` is on, ES-3);
 `ProcessLightingJobs` is deliberately not budgeted (its merge cost is §2/P-3 territory). Before HF-2, one exception mid-pass aborted the sweep and stranded already-released jobs in the dictionary — every later frame re-touched their disposed containers, spamming
 `ObjectDisposedException` and burying the original thrower. Each pass now isolates faults per job:
 
@@ -292,6 +292,25 @@ The skeleton carries the P-4 §3.4 budget knobs as optional parameters (`window`
 gates the advance on `window.HasBudget` so the flag-off legs keep legacy order).
 
 This is the completion-pass twin of the scheduling-side `LightingScanDecision` (§ shared arm decision) — HF-4. The skeleton's ordering contract is pinned world-free by the meshing suite's **B27** (recording fake driver: stage-1 carries over without releasing, stage-2 still releases + enrolls, remove strictly after the merge loop, window break, rotating start).
+
+### Startup coroutine: quota lift and shared sweep snapshots (ES-3)
+
+The startup coroutine (`World.ForceCompleteDataJobsCoroutine`, run by `StartWorld`) runs outside the budgets above, in two phases whose per-launch split
+`StartupPhaseTotals` records (the `=== Startup Coroutine ===` section of `StartupRun_*.log`; Performance Monitor B41):
+
+- **Phase 1 (generation)** loops `ProcessGenerationJobs(liftModsQuota: settings.startupLiftStructureQuota)`. With the
+  flag on (default) the pass applies every completed job's structure mods instead of stopping at `maxStructureModsPerFrame`,
+  so phase 1 needs far fewer frames; which of two overlapping structure mods wins can change (seed-visible). Gameplay passes
+  keep the quota.
+- **Phase 2 (lighting sweeps)** schedules every actionable chunk on the `TempJob` path, completes all jobs, then merges.
+  With `startupSharedSweepSnapshots` on (default) the schedule loop opens one `StartupSweepSnapshots` set
+  (`WorldJobManager.BeginStartupSweepSnapshots`): each job reads its 8 neighbor maps and its own center voxels from one
+  shared voxel and light map per chunk, filled on first request. The center light map stays per job because the merge
+  extracts into it. The set is closed after the schedule loop, before the merge writes light, and freed with the last
+  job's release. `StartupSweepSnapshotRegistry` keeps the sets by id (`LightingJobData.SharedSnapshotSet` marks the jobs;
+  their `Dispose` skips the shared maps), and `WorldJobManager.Dispose` frees a set left open. Sound only because nothing writes voxels or light between the first fill
+  and the sweep's last schedule; Chunk Pipeline B8 guards the set's sharing and lifetime and B9 the registry and a shared job's `Dispose`, and the opt-in `startupWorldDigest` counts snapshots gone stale (must be 0).
+  The pooled, banded streaming path never shares snapshots.
 
 ### Step 5: Lighting Ready-Set Scan (The Critical Section)
 

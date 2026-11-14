@@ -20,8 +20,11 @@ namespace Helpers
         /// <summary>Part index of the center chunk's light map.</summary>
         public const int CenterLight = 1;
 
-        private const ulong FNV_OFFSET = 14695981039346656037UL;
-        private const ulong FNV_PRIME = 1099511628211UL;
+        /// <summary>The 64-bit FNV-1a offset basis.</summary>
+        public const ulong FnvOffset = 14695981039346656037UL;
+
+        /// <summary>The 64-bit FNV-1a prime.</summary>
+        public const ulong FnvPrime = 1099511628211UL;
         private const int LAST = VoxelData.ChunkWidth - 1;
         private const int CENTER_PARTS = 2;
         private const int PARTS_PER_NEIGHBOR = 2;
@@ -89,14 +92,14 @@ namespace Helpers
 
         private static ulong HashAll(NativeArray<uint> values)
         {
-            ulong h = FNV_OFFSET;
+            ulong h = FnvOffset;
             for (int i = 0; i < values.Length; i++) h = Mix(h, values[i]);
             return h;
         }
 
         private static ulong HashAll(NativeArray<ushort> values)
         {
-            ulong h = FNV_OFFSET;
+            ulong h = FnvOffset;
             for (int i = 0; i < values.Length; i++) h = Mix(h, values[i]);
             return h;
         }
@@ -105,7 +108,7 @@ namespace Helpers
         // touching it (a diagonal). The neighbor north of the center faces it with its z = 0 slab, and so on.
         private static ulong HashFacing(NativeArray<uint> values, byte bit)
         {
-            ulong h = FNV_OFFSET;
+            ulong h = FnvOffset;
             if (!values.IsCreated) return h;
 
             Facing(bit, out int minX, out int maxX, out int minZ, out int maxZ);
@@ -118,7 +121,7 @@ namespace Helpers
 
         private static ulong HashFacing(NativeArray<ushort> values, byte bit)
         {
-            ulong h = FNV_OFFSET;
+            ulong h = FnvOffset;
             if (!values.IsCreated) return h;
 
             Facing(bit, out int minX, out int maxX, out int minZ, out int maxZ);
@@ -142,8 +145,8 @@ namespace Helpers
 
         private static ulong Mix(ulong h, uint value)
         {
-            h = (h ^ (value & LOW_HALF_MASK)) * FNV_PRIME;
-            return (h ^ (value >> HALF_SHIFT)) * FNV_PRIME;
+            h = (h ^ (value & LOW_HALF_MASK)) * FnvPrime;
+            return (h ^ (value >> HALF_SHIFT)) * FnvPrime;
         }
     }
 }
