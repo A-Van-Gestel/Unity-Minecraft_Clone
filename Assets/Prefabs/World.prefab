@@ -110,6 +110,7 @@ MonoBehaviour:
     startupLiftStructureQuota: 1
     startupSharedSweepSnapshots: 1
     startupWorldDigest: 0
+    startupPrebuildClouds: 1
     debugHudShowFps: 1
     debugHudShowGraphicsApi: 1
     debugHudShowWorldInfo: 1

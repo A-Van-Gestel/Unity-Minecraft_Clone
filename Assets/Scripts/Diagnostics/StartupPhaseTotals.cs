@@ -76,6 +76,25 @@ namespace Diagnostics
             }
         }
 
+        /// <summary>The tail's clouds initialization split by part, each part with its gen-0 collections.</summary>
+        public struct CloudsSplit
+        {
+            /// <summary>
+            /// Pattern noise job (or the wait for a prebuild), coverage threshold + grid fill, tile meshing (or creating
+            /// the prebuilt meshes), tile placement, in ticks.
+            /// </summary>
+            public long PatternTicks, ThresholdTicks, MeshTicks, TileTicks;
+
+            /// <summary>Tile meshes built, and tile GameObjects created (pool misses).</summary>
+            public int MeshesBuilt, TilesCreated;
+
+            /// <summary>Gen-0 collections per part.</summary>
+            public int PatternCollections, ThresholdCollections, MeshCollections, TileCollections;
+
+            /// <summary>Gen-0 collections over the whole initialization.</summary>
+            public int Collections;
+        }
+
         private readonly Sweep[] _sweeps = new Sweep[MaxRecordedSweeps];
         private Sweep _overflow;
 
@@ -108,6 +127,9 @@ namespace Diagnostics
 
         /// <summary>Gen-0 collections in the tail.</summary>
         public int TailCollections;
+
+        /// <summary>The clouds part of the tail, split; "other" in the report is the rest of <see cref="TailCloudsTicks"/>.</summary>
+        public CloudsSplit TailClouds;
 
         /// <summary>Records one finished sweep.</summary>
         /// <param name="sweep">The sweep's totals.</param>
@@ -167,6 +189,13 @@ namespace Diagnostics
             sb.AppendLine(Inv($"Tail:             report {TicksToMs(TailReportTicks):F1} ms, spawn {TicksToMs(TailSpawnTicks):F1} ms, ") +
                               Inv($"clouds {TicksToMs(TailCloudsTicks):F1} ms, border wall {TicksToMs(TailBorderWallTicks):F1} ms; ") +
                               Inv($"{TailCollections} collections"));
+
+            CloudsSplit c = TailClouds;
+            long otherTicks = Math.Max(0L, TailCloudsTicks - c.PatternTicks - c.ThresholdTicks - c.MeshTicks - c.TileTicks);
+            sb.AppendLine(Inv($"Clouds:           pattern {TicksToMs(c.PatternTicks):F1} ms, threshold {TicksToMs(c.ThresholdTicks):F1} ms, ") +
+                              Inv($"meshes {TicksToMs(c.MeshTicks):F1} ms ({c.MeshesBuilt} built), tiles {TicksToMs(c.TileTicks):F1} ms ") +
+                              Inv($"({c.TilesCreated} created), other {TicksToMs(otherTicks):F1} ms; {c.Collections} collections ") +
+                              Inv($"(pattern {c.PatternCollections}, threshold {c.ThresholdCollections}, meshes {c.MeshCollections}, tiles {c.TileCollections})"));
         }
 
         private static void AppendSweep(StringBuilder sb, string label, in Sweep s)

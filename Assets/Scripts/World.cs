@@ -839,7 +839,9 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         // 4. Dispose of FastNoiseLite unmanaged lookup tables.
         FastNoiseLite.ShutdownLookupTables();
 
-        // 5. On player quit, free the shared meshing lookup tables — only now that step 1 has completed every mesh job.
+        // 5. On player quit, free the shared meshing lookup tables — only now that step 1 has completed every mesh job
+        //    and a cloud prebuild still running (its tile jobs read the same tables) has been completed and freed.
+        clouds?.DisposePrebuilds();
         BurstVoxelData.ReleaseAfterQuit();
 
         // --- Save system ---
@@ -1085,6 +1087,9 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
 
         PlayerChunkCoord = WorldOrigin.UnityToChunk(_playerTransform.position);
 
+        // The seed is final here: the clouds build on the workers while the chunks load, not in the last frame.
+        if (settings.startupPrebuildClouds) clouds?.BeginPrebuild();
+
         // --- STEP 2: LOAD INITIAL CHUNKS (Async -> Sync Wait) ---
         Debug.Log("--- Loading/Generating initial chunks ---");
 
@@ -1186,6 +1191,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         Debug.Log("Initializing clouds...");
         clouds?.Initialize();
         tailLap = LapStartupPart(ref _startupPhaseTotals.TailCloudsTicks, tailLap);
+        if (clouds != null) _startupPhaseTotals.TailClouds = clouds.InitSplit;
 
         // Border wall follows the same post-load init as clouds; it self-hides when BorderRadius is 0.
         _borderWall?.Initialize();

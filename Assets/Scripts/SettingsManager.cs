@@ -862,6 +862,15 @@ public class Settings
              TooltipTags.Warning + "Adds a few hundred milliseconds to startup.")]
     public bool startupWorldDigest = false;
 
+    /// <summary>
+    /// If true, the cloud pattern and tile meshes build on the job workers while the world loads, instead of on the
+    /// main thread in startup's last frame. Rollback flag (ES-35).
+    /// </summary>
+    [SettingField(SettingsTab.Dev, Label = "Startup: Prebuild Clouds", DebugOnly = true, Order = 23)]
+    [Tooltip("Builds the clouds on worker threads while the world loads, so startup's last frame does not.\n\n" +
+             TooltipTags.Performance + "Rollback flag: turn off only to compare against building them in that frame.")]
+    public bool startupPrebuildClouds = true;
+
     #endregion
 
     #region Debug Screen Tab

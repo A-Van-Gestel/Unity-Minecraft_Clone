@@ -28,8 +28,12 @@ namespace Editor.Validation.CloudRender
     /// That needs a live camera rendering a real frame, so it is confirmed in game and recorded in the
     /// design doc, never here. A green run means the pipeline is still arranged the way the fix requires.
     /// </para>
+    /// <para>
+    /// B7 and B8 (ES-35) compare the job-built cloud pattern and tile meshes against the same geometry built on the
+    /// main thread, in process; B9 pins that main-thread geometry to golden digests. None needs a graphics device.
+    /// </para>
     /// </remarks>
-    public static class CloudRenderValidationSuite
+    public static partial class CloudRenderValidationSuite
     {
         /// <summary>The renderer asset whose feature list carries the cloud pass.</summary>
         private const string RENDERER_ASSET_PATH = "Assets/settings/Rendering/VoxelEngine-URP-Renderer.asset";
@@ -79,6 +83,12 @@ namespace Editor.Validation.CloudRender
                     RunB5TransparentQueueRetained),
                 new Scenario("B6 The renderer's feature map still describes the feature list it belongs to",
                     RunB6FeatureMapConsistent),
+                new Scenario("B7 A prebuilt cloud pattern equals the main-thread pattern (ES-35)",
+                    RunB7PrebuiltPatternMatches),
+                new Scenario("B8 Prebuilt cloud tile meshes equal the main-thread meshes, Fast and Fancy (ES-35)",
+                    RunB8PrebuiltMeshesMatch),
+                new Scenario("B9 The cloud pattern and tile meshes match the golden digests of the shipped cloud geometry (ES-35)",
+                    RunB9MesherMatchesGolden),
             };
 
             return ValidationSuiteRunner.Execute("Cloud Render", scenarios, KnownBugChannel.Bug,

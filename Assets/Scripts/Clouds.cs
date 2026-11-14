@@ -3,8 +3,10 @@ using System.Collections.Generic;
 using Diagnostics;
 using Helpers;
 using Jobs;
+using Jobs.Helpers;
 using Unity.Collections;
 using Unity.Jobs;
+using Unity.Mathematics;
 using UnityEngine;
 using UnityEngine.Pool;
 
@@ -65,7 +67,7 @@ public class Clouds : MonoBehaviour
         public Transform Root;
         public Material Material;
         public CloudStyle EffectiveStyle;
-        public bool[,] CloudData; // Array of bools representing where cloud is.
+        public NativeArray<bool> CloudData; // Flat bools (index z * PatternWidth + x) marking where cloud is; persistent, disposed in TearDownLayer.
         public int PatternWidth;
         public int TileSize;
 
@@ -126,10 +128,11 @@ public class Clouds : MonoBehaviour
     private float _depthOffset = 0.0035f;
 
 
-    // Cloud tiles are deliberately larger than terrain chunks: coverage scales with render distance,
-    // so fewer, bigger tiles keep the GameObject count bounded (identical pattern tiles share one mesh).
-    // Must divide the pattern width.
-    private const int CLOUD_TILE_SIZE = 64;
+    /// <summary>
+    /// Cloud tile edge in blocks; must divide the pattern width. Deliberately larger than terrain chunks: coverage
+    /// scales with render distance, so fewer, bigger tiles keep the GameObject count bounded.
+    /// </summary>
+    public const int CloudTileSize = 64;
 
     // Coverage radius in chunks = viewDistance * this. Clouds sit high above the terrain, so extending
     // them past the render distance keeps the sky filled to the horizon instead of ending mid-view.
@@ -145,9 +148,6 @@ public class Clouds : MonoBehaviour
     // visible repeat — is periodic at this width.
     private const int PROCEDURAL_PATTERN_WIDTH = 512;
 
-    // Histogram resolution for the coverage-percentile threshold; 256 bins ≈ 0.4% density granularity.
-    private const int THRESHOLD_HISTOGRAM_BINS = 256;
-
     // Per-MATERIAL property since CL-6: layers clamp styles independently (Fancy main + Fast upper),
     // so a global would shade the flat layer's bottom-only faces wrongly.
     private static readonly int s_shaderCloudFaceShading = Shader.PropertyToID("_CloudFaceShading");
@@ -162,6 +162,16 @@ public class Clouds : MonoBehaviour
 
     // A flag to ensure we don't try to update before we're ready.
     private bool _isInitialized = false;
+
+    // Per-part timing of the last Initialize; the sweep records into it only while Initialize runs.
+    private StartupPhaseTotals.CloudsSplit _initSplit;
+    private bool _recordInitSplit;
+
+    // Per-layer patterns and tile meshes building on the workers; null entries build on the main thread.
+    private CloudLayerPrebuild[] _prebuilds;
+
+    /// <summary>The last <see cref="Initialize"/>'s time and gen-0 collections, split by part.</summary>
+    public StartupPhaseTotals.CloudsSplit InitSplit => _initSplit;
 
     // Awake() for dependencies that don't rely on other scripts' Start()
     private void Awake()
@@ -194,27 +204,62 @@ public class Clouds : MonoBehaviour
         transform.rotation = Quaternion.identity;
         transform.localScale = Vector3.one;
 
-        _layerStates = new CloudLayerState[_layers.Length];
-        for (int i = 0; i < _layers.Length; i++)
+        _initSplit = default;
+        _recordInitSplit = true;
+        int collectionsAtStart = GC.CollectionCount(0);
+        try
         {
-            CloudLayerState state = BuildLayerState(_layers[i], i);
-            if (state == null) return; // Pattern source failed — the builder already disabled us.
-            _layerStates[i] = state;
-        }
+            _layerStates = new CloudLayerState[_layers.Length];
+            for (int i = 0; i < _layers.Length; i++)
+            {
+                CloudLayerState state = BuildLayerState(_layers[i], i, ref _initSplit);
+                if (state == null)
+                {
+                    // Pattern source failed — the builder already disabled us. Drop the layers built so far.
+                    foreach (CloudLayerState built in _layerStates)
+                        TearDownLayer(built);
+                    _layerStates = null;
+                    return;
+                }
 
-        // Restore drift captured by Reinitialize so a settings change doesn't teleport the sky.
-        if (_savedDrift != null)
+                _layerStates[i] = state;
+            }
+
+            // Restore drift captured by Reinitialize so a settings change doesn't teleport the sky.
+            if (_savedDrift != null)
+            {
+                for (int i = 0; i < _layerStates.Length && i < _savedDrift.Length; i++)
+                    _layerStates[i].DriftBlocks = _savedDrift[i];
+                _savedDrift = null;
+            }
+
+            // Initialization is done.
+            _isInitialized = true;
+
+            // Update clouds to set initial positions.
+            UpdateClouds();
+        }
+        finally
         {
-            for (int i = 0; i < _layerStates.Length && i < _savedDrift.Length; i++)
-                _layerStates[i].DriftBlocks = _savedDrift[i];
-            _savedDrift = null;
+            DisposePrebuilds();
+            _recordInitSplit = false;
+            _initSplit.Collections = GC.CollectionCount(0) - collectionsAtStart;
         }
+    }
 
-        // Initialization is done.
-        _isInitialized = true;
-
-        // Update clouds to set initial positions.
-        UpdateClouds();
+    /// <summary>Adds the time and gen-0 collections since the given marks to a part, then moves the marks to now.</summary>
+    /// <param name="ticks">The part's tick total.</param>
+    /// <param name="collections">The part's collection total.</param>
+    /// <param name="lap">The start timestamp; set to now.</param>
+    /// <param name="collectionsAtLap">The gen-0 count at the start; set to now.</param>
+    private static void LapInitPart(ref long ticks, ref int collections, ref long lap, ref int collectionsAtLap)
+    {
+        long now = System.Diagnostics.Stopwatch.GetTimestamp();
+        int collectionsNow = GC.CollectionCount(0);
+        ticks += now - lap;
+        collections += collectionsNow - collectionsAtLap;
+        lap = now;
+        collectionsAtLap = collectionsNow;
     }
 
     /// <summary>
@@ -223,13 +268,14 @@ public class Clouds : MonoBehaviour
     /// </summary>
     /// <param name="config">The layer's inspector configuration.</param>
     /// <param name="layerIndex">Index into <see cref="_layers"/>, used for the root name and log line.</param>
+    /// <param name="split">Receives the procedural pattern's time per part.</param>
     /// <returns>The built state, or null when the pattern source failed.</returns>
-    private CloudLayerState BuildLayerState(CloudLayerConfig config, int layerIndex)
+    private CloudLayerState BuildLayerState(CloudLayerConfig config, int layerIndex, ref StartupPhaseTotals.CloudsSplit split)
     {
         var state = new CloudLayerState
         {
             Config = config,
-            EffectiveStyle = (CloudStyle)Mathf.Min((int)_world.settings.clouds, (int)config.maxStyle),
+            EffectiveStyle = EffectiveStyleOf(config),
         };
 
         var rootGo = new GameObject($"CloudLayer{layerIndex}");
@@ -245,26 +291,154 @@ public class Clouds : MonoBehaviour
         state.Material.SetColor(s_shaderColor, color);
         state.Material.SetFloat(s_shaderCloudFaceShading, state.EffectiveStyle == CloudStyle.Fancy ? 1f : 0f);
 
-        // Pattern source: an authored texture only ever describes the first layer.
-        if (_useClassicPattern && layerIndex == 0)
+        CloudLayerPrebuild prebuild = TakeMatchingPrebuild(layerIndex, config, state.EffectiveStyle);
+        try
         {
-            if (!LoadClassicCloudData(state)) return null;
-        }
-        else
-        {
-            GenerateCloudData(state, layerIndex);
-        }
+            // Pattern source: an authored texture only ever describes the first layer.
+            if (_useClassicPattern && layerIndex == 0)
+            {
+                if (!LoadClassicCloudData(state))
+                {
+                    TearDownLayer(state);
+                    return null;
+                }
+            }
+            else if (prebuild != null)
+            {
+                AdoptPrebuiltPattern(state, prebuild, layerIndex, ref split);
+            }
+            else
+            {
+                GenerateCloudData(state, layerIndex, ref split);
+            }
 
-        state.TileSize = Mathf.Min(CLOUD_TILE_SIZE, state.PatternWidth);
-        if (state.PatternWidth % state.TileSize != 0)
-        {
-            Debug.LogError($"Cloud pattern width ({state.PatternWidth}) must be divisible by the cloud tile size ({state.TileSize}).");
-            enabled = false;
-            return null;
-        }
+            state.TileSize = Mathf.Min(CloudTileSize, state.PatternWidth);
+            if (state.PatternWidth % state.TileSize != 0)
+            {
+                Debug.LogError($"Cloud pattern width ({state.PatternWidth}) must be divisible by the cloud tile size ({state.TileSize}).");
+                enabled = false;
+                TearDownLayer(state);
+                return null;
+            }
 
-        return state;
+            if (prebuild != null && prebuild.TileSize == state.TileSize)
+                AdoptPrebuiltMeshes(state, prebuild, ref split);
+
+            return state;
+        }
+        finally
+        {
+            prebuild?.Dispose();
+        }
     }
+
+    /// <summary>
+    /// Starts building every procedural layer's pattern and tile meshes on the job workers, to be adopted by
+    /// <see cref="Initialize"/> instead of built there. Call once the world seed and settings are final.
+    /// </summary>
+    public void BeginPrebuild()
+    {
+        DisposePrebuilds();
+        if (_isInitialized || _layers == null || _layers.Length == 0) return;
+
+        _prebuilds = new CloudLayerPrebuild[_layers.Length];
+        for (int i = 0; i < _layers.Length; i++)
+        {
+            if (_useClassicPattern && i == 0) continue;
+
+            CloudStyle style = EffectiveStyleOf(_layers[i]);
+            if (style == CloudStyle.Off) continue;
+
+            _prebuilds[i] = CloudLayerPrebuild.Schedule(
+                PatternSettingsOf(_layers[i]), style == CloudStyle.Fancy,
+                Mathf.Min(CloudTileSize, PROCEDURAL_PATTERN_WIDTH), _depthOffset);
+        }
+    }
+
+    /// <summary>Completes and frees every prebuild not yet adopted; safe to call at any time.</summary>
+    public void DisposePrebuilds()
+    {
+        if (_prebuilds == null) return;
+
+        foreach (CloudLayerPrebuild prebuild in _prebuilds)
+            prebuild?.Dispose();
+
+        _prebuilds = null;
+    }
+
+    /// <summary>Removes a layer's prebuild from the set; disposes it and returns null when its inputs went stale.</summary>
+    /// <param name="layerIndex">The layer.</param>
+    /// <param name="config">The layer's configuration now.</param>
+    /// <param name="style">The layer's effective style now.</param>
+    /// <returns>A prebuild the caller now owns, or null.</returns>
+    private CloudLayerPrebuild TakeMatchingPrebuild(int layerIndex, CloudLayerConfig config, CloudStyle style)
+    {
+        if (_prebuilds == null || layerIndex >= _prebuilds.Length) return null;
+
+        CloudLayerPrebuild prebuild = _prebuilds[layerIndex];
+        _prebuilds[layerIndex] = null;
+        if (prebuild == null) return null;
+
+        // The seed, the settings or the inspector may have changed since the prebuild was scheduled.
+        bool matches = prebuild.Settings.Equals(PatternSettingsOf(config)) && prebuild.Fancy == (style == CloudStyle.Fancy)
+                       && prebuild.DepthOffset.Equals(_depthOffset);
+        if (matches) return prebuild;
+
+        prebuild.Dispose();
+        return null;
+    }
+
+    /// <summary>Takes over a finished prebuild's pattern as the layer's pattern.</summary>
+    /// <param name="state">The layer receiving the pattern.</param>
+    /// <param name="prebuild">The matching prebuild.</param>
+    /// <param name="layerIndex">Index used only for the log line.</param>
+    /// <param name="split">Receives the wait for the prebuild, as the pattern part.</param>
+    private static void AdoptPrebuiltPattern(CloudLayerState state, CloudLayerPrebuild prebuild, int layerIndex,
+        ref StartupPhaseTotals.CloudsSplit split)
+    {
+        long lap = System.Diagnostics.Stopwatch.GetTimestamp();
+        int collectionsAtLap = GC.CollectionCount(0);
+        prebuild.Complete();
+        LapInitPart(ref split.PatternTicks, ref split.PatternCollections, ref lap, ref collectionsAtLap);
+
+        state.PatternWidth = prebuild.Settings.Width;
+        state.CloudData = prebuild.TakePattern();
+        LogPattern(state.Config, layerIndex, prebuild.SetCount, state.CloudData.Length);
+    }
+
+    /// <summary>Creates the layer's tile meshes from a finished prebuild, so the first sweep finds them cached.</summary>
+    /// <param name="state">The layer receiving the meshes.</param>
+    /// <param name="prebuild">The matching prebuild.</param>
+    /// <param name="split">Receives the mesh creation time and count.</param>
+    private static void AdoptPrebuiltMeshes(CloudLayerState state, CloudLayerPrebuild prebuild, ref StartupPhaseTotals.CloudsSplit split)
+    {
+        long lap = System.Diagnostics.Stopwatch.GetTimestamp();
+        int collectionsAtLap = GC.CollectionCount(0);
+        for (int i = 0; i < prebuild.TileCount; i++)
+        {
+            prebuild.GetTile(i, out int originX, out int originZ,
+                out NativeArray<float3> vertices, out NativeArray<float3> normals, out NativeArray<int> triangles);
+            state.TileMeshes.Add(new Vector2Int(originX, originZ), CreateTileMesh(vertices, normals, triangles));
+        }
+
+        LapInitPart(ref split.MeshTicks, ref split.MeshCollections, ref lap, ref collectionsAtLap);
+        split.MeshesBuilt += prebuild.TileCount;
+    }
+
+    /// <summary>The layer's style: the settings style, clamped by the layer's own cap.</summary>
+    private CloudStyle EffectiveStyleOf(CloudLayerConfig config) =>
+        (CloudStyle)Mathf.Min((int)_world.settings.clouds, (int)config.maxStyle);
+
+    /// <summary>The procedural pattern inputs of a layer under the current world seed.</summary>
+    private static CloudPatternSettings PatternSettingsOf(CloudLayerConfig config) => new CloudPatternSettings
+    {
+        Width = PROCEDURAL_PATTERN_WIDTH,
+        BasePeriodCells = config.noiseBasePeriodCells,
+        Octaves = config.noiseOctaves,
+        Persistence = config.noisePersistence,
+        Seed = (uint)VoxelData.Seed ^ config.seedSalt,
+        Coverage = config.cloudCoverage,
+    };
 
     /// <summary>
     /// Re-anchors the cloudscape after a floating-origin shift (WS-4b). The sweep re-derives every
@@ -336,6 +510,7 @@ public class Clouds : MonoBehaviour
     /// </summary>
     public void Reinitialize()
     {
+        DisposePrebuilds();
         if (_layerStates != null)
         {
             _savedDrift = new Vector2[_layerStates.Length];
@@ -356,6 +531,7 @@ public class Clouds : MonoBehaviour
     {
         // Meshes and material instances are runtime-owned assets — without this they leak on scene
         // unload (the tile GameObjects themselves die with the scene).
+        DisposePrebuilds();
         if (_layerStates == null) return;
 
         foreach (CloudLayerState state in _layerStates)
@@ -386,6 +562,8 @@ public class Clouds : MonoBehaviour
             if (tile != null) Destroy(tile.gameObject);
         }
 
+        if (state.CloudData.IsCreated) state.CloudData.Dispose();
+
         // The meshes are shared assets owned by the layer, not by the tiles — destroy them explicitly.
         foreach (Mesh mesh in state.TileMeshes.Values)
         {
@@ -414,18 +592,23 @@ public class Clouds : MonoBehaviour
             return false;
         }
 
+        // The pattern is square: one width serves both axes of the lookup and the wrap.
         int width = _cloudPattern.width;
+        if (_cloudPattern.height != width)
+        {
+            Debug.LogError($"Cloud Pattern texture must be square (is {width}x{_cloudPattern.height}). Cannot load cloud data.");
+            enabled = false;
+            return false;
+        }
+
         state.PatternWidth = width;
-        state.CloudData = new bool[width, width];
+        state.CloudData = new NativeArray<bool>(width * width, Allocator.Persistent);
         Color[] cloudTex = _cloudPattern.GetPixels();
 
         // Loop through color array and set bools depending on opacity of color.
-        for (int x = 0; x < width; x++)
+        for (int i = 0; i < cloudTex.Length; i++)
         {
-            for (int y = 0; y < width; y++)
-            {
-                state.CloudData[x, y] = cloudTex[y * width + x].a > 0;
-            }
+            state.CloudData[i] = cloudTex[i].a > 0;
         }
 
         return true;
@@ -439,42 +622,31 @@ public class Clouds : MonoBehaviour
     /// </summary>
     /// <param name="state">The layer receiving the pattern.</param>
     /// <param name="layerIndex">Index used only for the log line.</param>
-    private static void GenerateCloudData(CloudLayerState state, int layerIndex)
+    /// <param name="split">Receives the noise job's and the threshold + fill's time.</param>
+    private static void GenerateCloudData(CloudLayerState state, int layerIndex, ref StartupPhaseTotals.CloudsSplit split)
     {
         CloudLayerConfig config = state.Config;
-        state.PatternWidth = PROCEDURAL_PATTERN_WIDTH;
+        CloudPatternSettings settings = PatternSettingsOf(config);
+        state.PatternWidth = settings.Width;
 
+        long lap = System.Diagnostics.Stopwatch.GetTimestamp();
+        int collectionsAtLap = GC.CollectionCount(0);
         NativeArray<float> density = new NativeArray<float>(
             state.PatternWidth * state.PatternWidth, Allocator.TempJob, NativeArrayOptions.UninitializedMemory);
 
         try
         {
-            new CloudPatternJob
-            {
-                PatternWidth = state.PatternWidth,
-                BasePeriodCells = config.noiseBasePeriodCells,
-                Octaves = config.noiseOctaves,
-                Persistence = config.noisePersistence,
-                Seed = (uint)VoxelData.Seed ^ config.seedSalt,
-                Density = density,
-            }.Schedule(density.Length, PROCEDURAL_PATTERN_WIDTH).Complete();
+            settings.ToNoiseJob(density).Schedule(density.Length, PROCEDURAL_PATTERN_WIDTH).Complete();
+            LapInitPart(ref split.PatternTicks, ref split.PatternCollections, ref lap, ref collectionsAtLap);
 
-            float threshold = FindCoverageThreshold(density, config.cloudCoverage);
+            float threshold = CloudTileMesher.ComputeCoverageThreshold(density, settings.Coverage);
 
-            state.CloudData = new bool[state.PatternWidth, state.PatternWidth];
-            int set = 0;
-            for (int y = 0; y < state.PatternWidth; y++)
-            {
-                for (int x = 0; x < state.PatternWidth; x++)
-                {
-                    bool cloud = density[y * state.PatternWidth + x] > threshold;
-                    state.CloudData[x, y] = cloud;
-                    if (cloud) set++;
-                }
-            }
+            NativeArray<bool> pattern = new NativeArray<bool>(density.Length, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            int set = CloudTileMesher.FillPattern(density, threshold, pattern);
+            state.CloudData = pattern;
+            LapInitPart(ref split.ThresholdTicks, ref split.ThresholdCollections, ref lap, ref collectionsAtLap);
 
-            Debug.Log($"Generated procedural cloud pattern (layer {layerIndex}): seed {VoxelData.Seed} salt {config.seedSalt}, " +
-                      $"coverage {(float)set / density.Length:P1} (target {config.cloudCoverage:P1}).");
+            LogPattern(config, layerIndex, set, density.Length);
         }
         finally
         {
@@ -482,33 +654,11 @@ public class Clouds : MonoBehaviour
         }
     }
 
-    /// <summary>
-    /// Finds the density threshold above which exactly the requested fraction of cells lies, via a
-    /// fixed-bin histogram — an exact-coverage percentile, independent of the noise value distribution.
-    /// </summary>
-    /// <param name="density">The generated density field (values in [0, 1]).</param>
-    /// <param name="coverage">Requested fraction of cells above the threshold.</param>
-    /// <returns>The threshold density.</returns>
-    private static float FindCoverageThreshold(NativeArray<float> density, float coverage)
+    /// <summary>Logs a generated pattern's seed and its actual coverage against the target.</summary>
+    private static void LogPattern(CloudLayerConfig config, int layerIndex, int set, int cells)
     {
-        int[] bins = new int[THRESHOLD_HISTOGRAM_BINS];
-        foreach (float t in density)
-        {
-            int bin = Mathf.Clamp((int)(t * THRESHOLD_HISTOGRAM_BINS), 0, THRESHOLD_HISTOGRAM_BINS - 1);
-            bins[bin]++;
-        }
-
-        // Walk down from the densest bin until the requested fraction of cells sits above the cut.
-        int target = Mathf.RoundToInt(coverage * density.Length);
-        int above = 0;
-        for (int bin = THRESHOLD_HISTOGRAM_BINS - 1; bin >= 0; bin--)
-        {
-            above += bins[bin];
-            if (above >= target)
-                return (float)bin / THRESHOLD_HISTOGRAM_BINS;
-        }
-
-        return 0f;
+        Debug.Log($"Generated procedural cloud pattern (layer {layerIndex}): seed {VoxelData.Seed} salt {config.seedSalt}, " +
+                  $"coverage {(float)set / cells:P1} (target {config.cloudCoverage:P1}).");
     }
 
     /// <summary>
@@ -523,7 +673,7 @@ public class Clouds : MonoBehaviour
 
         // The shader fades the cloudscape's outer edge instead of ending in a hard line. Every layer
         // shares the coverage radius, so one global serves them all.
-        float fadeEnd = Mathf.CeilToInt(CoverageRadiusInBlocks() / (float)CLOUD_TILE_SIZE) * CLOUD_TILE_SIZE;
+        float fadeEnd = Mathf.CeilToInt(CoverageRadiusInBlocks() / (float)CloudTileSize) * CloudTileSize;
         float fadeStart = fadeEnd * (1f - EDGE_FADE_FRACTION);
         Shader.SetGlobalVector(s_shaderCloudFadeParams, new Vector4(fadeStart, 1f / (fadeEnd - fadeStart), 0f, 0f));
 
@@ -585,7 +735,15 @@ public class Clouds : MonoBehaviour
                 Mesh mesh = GetTileMesh(state, cloudTile);
                 if (mesh == null) continue; // Pattern leaves this tile empty — nothing to render.
 
+                long lap = System.Diagnostics.Stopwatch.GetTimestamp();
+                int collectionsAtLap = GC.CollectionCount(0);
+                bool createsTile = state.TilePool.Count == 0;
                 state.Tiles.Add(cloudTile, AcquireTile(state, mesh, localPos, cloudTile));
+                if (_recordInitSplit)
+                {
+                    LapInitPart(ref _initSplit.TileTicks, ref _initSplit.TileCollections, ref lap, ref collectionsAtLap);
+                    if (createsTile) _initSplit.TilesCreated++;
+                }
             }
         }
     }
@@ -676,13 +834,13 @@ public class Clouds : MonoBehaviour
         if (state.TileMeshes.TryGetValue(patternKey, out Mesh mesh))
             return mesh;
 
+        long lap = System.Diagnostics.Stopwatch.GetTimestamp();
+        int collectionsAtLap = GC.CollectionCount(0);
         switch (state.EffectiveStyle)
         {
             case CloudStyle.Fast:
-                mesh = CreateFastCloudMesh(state, patternKey.x, patternKey.y);
-                break;
             case CloudStyle.Fancy:
-                mesh = CreateFancyCloudMesh(state, patternKey.x, patternKey.y);
+                mesh = BuildTileMesh(state, patternKey.x, patternKey.y);
                 break;
             case CloudStyle.Off:
                 mesh = null;
@@ -693,173 +851,76 @@ public class Clouds : MonoBehaviour
                 break;
         }
 
-        // Cache empty tiles as null so neither the mesh build nor the GameObject is repeated for them.
-        if (mesh != null && mesh.vertexCount == 0)
-        {
-            Destroy(mesh);
-            mesh = null;
-        }
-
+        // An empty tile comes back null and is cached as such, so neither the mesh build nor the GameObject repeats.
         state.TileMeshes.Add(patternKey, mesh);
+        if (_recordInitSplit)
+        {
+            LapInitPart(ref _initSplit.MeshTicks, ref _initSplit.MeshCollections, ref lap, ref collectionsAtLap);
+            _initSplit.MeshesBuilt++;
+        }
+
         return mesh;
     }
 
-    private Mesh CreateFastCloudMesh(CloudLayerState state, int x, int z)
+    /// <summary>
+    /// Meshes one pattern tile in the layer's effective style (Fast or Fancy) through <see cref="CloudTileMesher"/>.
+    /// </summary>
+    /// <param name="state">The layer owning the pattern.</param>
+    /// <param name="originX">Pattern-space X of the tile's first cell.</param>
+    /// <param name="originZ">Pattern-space Z of the tile's first cell.</param>
+    /// <returns>The tile mesh, or null when the tile has no geometry.</returns>
+    private Mesh BuildTileMesh(CloudLayerState state, int originX, int originZ)
     {
-        List<Vector3> vertices = new List<Vector3>();
-        List<int> triangles = new List<int>();
-        List<Vector3> normals = new List<Vector3>();
-        int vertCount = 0;
+        NativeList<float3> vertices = new NativeList<float3>(Allocator.Temp);
+        NativeList<float3> normals = new NativeList<float3>(Allocator.Temp);
+        NativeList<int> triangles = new NativeList<int>(Allocator.Temp);
 
-        for (int xIncrement = 0; xIncrement < state.TileSize; xIncrement++)
+        try
         {
-            for (int zIncrement = 0; zIncrement < state.TileSize; zIncrement++)
+            if (state.EffectiveStyle == CloudStyle.Fancy)
             {
-                int xVal = x + xIncrement;
-                int zVal = z + zIncrement;
-
-                if (state.CloudData[xVal, zVal])
-                {
-                    // Push the single down-facing quad outward (below the plane) along its normal, off the
-                    // voxel grid, to avoid Z-fighting. Fast tiles have no side faces, so no seams to worry about.
-                    Vector3 o = Vector3.down * _depthOffset;
-
-                    // Add 4 vertices for cloud face.
-                    vertices.Add(new Vector3(xIncrement, 0, zIncrement) + o);
-                    vertices.Add(new Vector3(xIncrement, 0, zIncrement + 1) + o);
-                    vertices.Add(new Vector3(xIncrement + 1, 0, zIncrement + 1) + o);
-                    vertices.Add(new Vector3(xIncrement + 1, 0, zIncrement) + o);
-
-                    // We know what direction our faces are facing, so we just add them directly.
-                    for (int i = 0; i < 4; i++)
-                        normals.Add(Vector3.down);
-
-                    // As we are looking at them from the bottom, we need to add our triangles anti-clockwise.
-                    // Add first triangle.
-                    triangles.Add(vertCount + 1);
-                    triangles.Add(vertCount);
-                    triangles.Add(vertCount + 2);
-                    // Add second triangle.
-                    triangles.Add(vertCount + 2);
-                    triangles.Add(vertCount);
-                    triangles.Add(vertCount + 3);
-                    // Increment vertCount
-                    vertCount += 4;
-                }
+                NativeArray<float3> cornerNormals = new NativeArray<float3>(
+                    CloudTileMesher.FancyCornerScratchLength(state.TileSize), Allocator.Temp, NativeArrayOptions.UninitializedMemory);
+                NativeList<int3> faces = new NativeList<int3>(Allocator.Temp);
+                CloudTileMesher.BuildFancyTile(
+                    state.CloudData, state.PatternWidth, originX, originZ, state.TileSize, _depthOffset,
+                    cornerNormals, faces, vertices, normals, triangles);
+                cornerNormals.Dispose();
+                faces.Dispose();
             }
+            else
+            {
+                CloudTileMesher.BuildFastTile(
+                    state.CloudData, state.PatternWidth, originX, originZ, state.TileSize, _depthOffset,
+                    vertices, normals, triangles);
+            }
+
+            return CreateTileMesh(vertices.AsArray(), normals.AsArray(), triangles.AsArray());
         }
+        finally
+        {
+            vertices.Dispose();
+            normals.Dispose();
+            triangles.Dispose();
+        }
+    }
+
+    /// <summary>Creates a tile mesh from built geometry.</summary>
+    /// <param name="vertices">Tile-local vertices.</param>
+    /// <param name="normals">One normal per vertex.</param>
+    /// <param name="triangles">Triangle indices.</param>
+    /// <returns>The mesh, or null when the tile has no geometry.</returns>
+    private static Mesh CreateTileMesh(NativeArray<float3> vertices, NativeArray<float3> normals, NativeArray<int> triangles)
+    {
+        if (vertices.Length == 0)
+            return null;
 
         Mesh mesh = new Mesh();
+        // Vertices before triangles: triangles index into the vertex buffer and Unity validates on assignment.
         mesh.SetVertices(vertices);
-        mesh.SetTriangles(triangles, 0);
+        mesh.SetIndices(triangles, MeshTopology.Triangles, 0, true, 0);
         mesh.SetNormals(normals);
-
         return mesh;
-    }
-
-    private Mesh CreateFancyCloudMesh(CloudLayerState state, int x, int z)
-    {
-        List<Vector3> vertices = new List<Vector3>();
-        List<int> triangles = new List<int>();
-        List<Vector3> normals = new List<Vector3>();
-        int vertCount = 0;
-
-        // Integer cube corner of face p's i-th vertex, in local tile coordinates (VoxelVerts are 0/1).
-        Vector3Int CornerOf(int xi, int zi, int p, int i)
-        {
-            Vector3 vv = VoxelData.VoxelVerts[VoxelData.VoxelTris[p * 4 + i]];
-            return new Vector3Int(xi + Mathf.RoundToInt(vv.x), Mathf.RoundToInt(vv.y), zi + Mathf.RoundToInt(vv.z));
-        }
-
-        // Pass 1: collect the exposed hull faces and, per shared corner, accumulate the summed normal of
-        // every face meeting there. Displacing each corner along that summed normal inflates the whole hull
-        // outward as one watertight shell — every face (top, bottom, sides) lifts off the voxel grid to avoid
-        // Z-fighting, while faces sharing an edge move together so no seams open between cells or tiles.
-        List<(int xi, int zi, int p)> faces = new List<(int xi, int zi, int p)>();
-        Dictionary<Vector3Int, Vector3> cornerNormals = new Dictionary<Vector3Int, Vector3>();
-
-        for (int xIncrement = 0; xIncrement < state.TileSize; xIncrement++)
-        {
-            for (int zIncrement = 0; zIncrement < state.TileSize; zIncrement++)
-            {
-                int xVal = x + xIncrement;
-                int zVal = z + zIncrement;
-
-                if (!state.CloudData[xVal, zVal])
-                    continue;
-
-                // Loop though neighbor points using faceCheck array.
-                for (int p = 0; p < 6; p++)
-                {
-                    // Only faces whose neighbor has no cloud are on the hull; internal faces are skipped
-                    // (and so carry no offset).
-                    if (CheckCloudData(state, new Vector3Int(xVal, 0, zVal) + VoxelData.FaceChecks[p]))
-                        continue;
-
-                    faces.Add((xIncrement, zIncrement, p));
-
-                    Vector3 faceNormal = VoxelData.FaceChecks[p];
-                    for (int i = 0; i < 4; i++)
-                    {
-                        Vector3Int corner = CornerOf(xIncrement, zIncrement, p, i);
-                        cornerNormals[corner] = (cornerNormals.TryGetValue(corner, out Vector3 acc) ? acc : Vector3.zero) + faceNormal;
-                    }
-                }
-            }
-        }
-
-        // Pass 2: emit each hull face with its corners displaced along the (normalized) accumulated normal.
-        foreach ((int xi, int zi, int p) in faces)
-        {
-            for (int i = 0; i < 4; i++)
-            {
-                Vector3Int corner = CornerOf(xi, zi, p, i);
-                Vector3 dir = cornerNormals[corner];
-                if (dir != Vector3.zero) dir.Normalize();
-                vertices.Add(corner + dir * _depthOffset);
-            }
-
-            for (int i = 0; i < 4; i++)
-                normals.Add(VoxelData.FaceChecks[p]);
-
-            triangles.Add(vertCount);
-            triangles.Add(vertCount + 1);
-            triangles.Add(vertCount + 2);
-            triangles.Add(vertCount + 2);
-            triangles.Add(vertCount + 1);
-            triangles.Add(vertCount + 3);
-
-            vertCount += 4;
-        }
-
-        Mesh mesh = new Mesh();
-        // Assign via the List-accepting mesh API (vertices before triangles, since triangles
-        // index into the vertex buffer and Unity validates on assignment). Avoids the three
-        // temporary managed arrays that .ToArray() would allocate per tile (MR-9).
-        mesh.SetVertices(vertices);
-        mesh.SetTriangles(triangles, 0);
-        mesh.SetNormals(normals);
-
-        return mesh;
-    }
-
-    // Returns true or false depending on if there is cloud at the given point in a layer's pattern.
-    private static bool CheckCloudData(CloudLayerState state, Vector3Int point)
-    {
-        // Because clouds are 2D, if y is above or below 0, return false.
-        if (point.y != 0)
-            return false;
-
-        int x = point.x;
-        int z = point.z;
-
-        // If the x or z value is outside the cloudData range, wrap it around.
-        if (point.x < 0) x = state.PatternWidth - 1;
-        if (point.x > state.PatternWidth - 1) x = 0;
-        if (point.z < 0) z = state.PatternWidth - 1;
-        if (point.z > state.PatternWidth - 1) z = 0;
-
-        return state.CloudData[x, z];
     }
 
     /// <summary>

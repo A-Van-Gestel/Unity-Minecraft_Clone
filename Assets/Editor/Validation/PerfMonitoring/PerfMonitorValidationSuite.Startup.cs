@@ -174,6 +174,20 @@ namespace Editor.Validation.PerfMonitoring
                 TailCloudsTicks = StartupPhaseTotals.MsToTicks(30.0),
                 TailBorderWallTicks = StartupPhaseTotals.MsToTicks(40.0),
                 TailCollections = 14,
+                TailClouds = new StartupPhaseTotals.CloudsSplit
+                {
+                    PatternTicks = StartupPhaseTotals.MsToTicks(2.0),
+                    ThresholdTicks = StartupPhaseTotals.MsToTicks(3.0),
+                    MeshTicks = StartupPhaseTotals.MsToTicks(15.0),
+                    TileTicks = StartupPhaseTotals.MsToTicks(6.0),
+                    MeshesBuilt = 128,
+                    TilesCreated = 242,
+                    PatternCollections = 1,
+                    ThresholdCollections = 2,
+                    MeshCollections = 5,
+                    TileCollections = 3,
+                    Collections = 12,
+                },
             };
 
             // Two sweeps past the cap, so the overflow row folds exactly sweeps 17 and 18.
@@ -215,14 +229,15 @@ namespace Editor.Validation.PerfMonitoring
             }
 
             string[] lines = report.Replace("\r", "").Split('\n');
-            ok &= Check("Header, phase 1, 16 sweep rows, the overflow row, the total, the tail, in order",
-                lines.Length >= 21 && lines[0] == "=== Startup Coroutine ==="
+            ok &= Check("Header, phase 1, 16 sweep rows, the overflow row, the total, the tail, the clouds split, in order",
+                lines.Length >= 22 && lines[0] == "=== Startup Coroutine ==="
                 && lines[1] == "Phase 1:          1400.0 ms wall over 83 iterations, 80 quota-stopped; main thread pass 500.0 ms + apply mods 100.0 ms; 529 jobs, 400000 structure mods; 27 collections"
                 && lines[2] == "Sweep 1           61.0 ms: recalc 1.0 (2), schedule 10.0 (acquire 5.0; 1 jobs, 7 shared maps), wait 20.0, merge 30.0 (apply 1.0, drain 2.0, route 3.0, cascade 4.0); cross-chunk 3 routed / 1 effective; 1 collections"
                 && lines[17] == "Sweep 16          76.0 ms: recalc 16.0 (2), schedule 10.0 (acquire 5.0; 16 jobs, 7 shared maps), wait 20.0, merge 30.0 (apply 1.0, drain 2.0, route 3.0, cascade 4.0); cross-chunk 3 routed / 1 effective; 1 collections"
                 && lines[18] == "Sweeps 17+        155.0 ms: recalc 35.0 (4), schedule 20.0 (acquire 10.0; 35 jobs, 14 shared maps), wait 40.0, merge 60.0 (apply 2.0, drain 4.0, route 6.0, cascade 8.0); cross-chunk 6 routed / 2 effective; 2 collections"
                 && lines[19] == "Sweeps total      1251.0 ms: recalc 171.0 (36), schedule 180.0 (acquire 90.0; 171 jobs, 126 shared maps), wait 360.0, merge 540.0 (apply 18.0, drain 36.0, route 54.0, cascade 72.0); cross-chunk 54 routed / 18 effective; 18 collections"
-                && lines[20] == "Tail:             report 10.0 ms, spawn 20.0 ms, clouds 30.0 ms, border wall 40.0 ms; 14 collections");
+                && lines[20] == "Tail:             report 10.0 ms, spawn 20.0 ms, clouds 30.0 ms, border wall 40.0 ms; 14 collections"
+                && lines[21] == "Clouds:           pattern 2.0 ms, threshold 3.0 ms, meshes 15.0 ms (128 built), tiles 6.0 ms (242 created), other 4.0 ms; 12 collections (pattern 1, threshold 2, meshes 5, tiles 3)");
             ok &= Check("Every sweep is counted, the overflow row is readable by index",
                 totals.SweepCount == StartupPhaseTotals.MaxRecordedSweeps + 2
                 && totals.GetSweep(StartupPhaseTotals.MaxRecordedSweeps).Jobs == 35);
