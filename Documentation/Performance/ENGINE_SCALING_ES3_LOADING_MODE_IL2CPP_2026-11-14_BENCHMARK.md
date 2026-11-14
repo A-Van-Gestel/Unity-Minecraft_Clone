@@ -95,7 +95,7 @@ Two L0 runs (behavior unchanged from the base) produced different world digests 
 bit-reproducible run to run even before this change, so digests cannot compare legs. The shared snapshots' equivalence
 rests on the in-process stale-snapshot count (0) and on B8, not on cross-run digests.
 
-## Open findings (follow-ups; none filed as IDs)
+## Open findings (filed in the roadmap as `ES-34`–`ES-36` and §8 question 8)
 
 - Sweep 1's merge spends ≈ 517 ms routing ≈ 1.06 M cross-chunk light mods: now the largest single startup cost.
 - `clouds.Initialize()` costs ≈ 190 ms and 14–15 gen-0 collections in the frozen tail (≈ 145 ms on an existing world).
