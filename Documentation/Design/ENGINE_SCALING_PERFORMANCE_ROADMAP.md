@@ -1,6 +1,6 @@
 # Engine Scaling Performance Roadmap
 
-**Version:** 1.28  
+**Version:** 1.29  
 **Date:** 2026-10-02  
 **Status:** In progress — `ES-0` ✅ complete (2026-10-10: drain stamp shipped, every-layer re-measurement in §2.6 — added
 `ES-29`), `ES-1`, `ES-2` and `ES-6.1` shipped (2026-10-02); ES-0's GC.Alloc attribution captured (2026-10-03, §2.2.1 —
@@ -24,6 +24,9 @@ offset-table probe, pooled read payloads, the dedicated I/O worker and the secti
 `ES-32` / `ES-33` filed (2026-11-14) from §2.6's two unfiled candidates — slow disk reads, job-array pool churn;
 `ES-34` / `ES-35` / `ES-36` and §8 question 8 filed (2026-11-14) from ES-3's startup capture — the startup merge's
 cross-chunk route, `clouds.Initialize()`, the post-handoff mesh tail, and a new-world startup that is not reproducible;
+`ES-35` ✅ shipped (2026-11-14: the cloud pattern and tile meshes are prebuilt by Burst jobs before the initial chunk
+load — tail clouds 146 → 12 ms, handoff −65 ms new world / −41 ms existing); `ES-36` built, **NO-GO as a default**
+(kept as the opt-in `startupMeshWave`, default off); §8 question 8 answered (World Generation Bug 07);
 §8 question 6 (the Unity API checks) answered — `GraphicsStateCollection` and the `SetData(NativeArray,
 int, int, int)` order confirmed, the two `Graphics` questions deferred to ES-20's prototype, and ES-5's PSO
 warmup is variant-only on today's D3D11 players; the rest is a near-to-far horizon, not scheduled. Tier 1
@@ -820,20 +823,44 @@ its support scans and its applies, and count mods per target voxel (how many are
   anyway — **digest-gated** (needs the in-process check, since a new-world startup is not reproducible, §8 Q8);
 - move the support scans into the job (Burst) so the main-thread route only applies.
 
-**ES-35 — Take `clouds.Initialize()` off the frozen startup frame.** 🟢 / 🟢. Added 2026-11-14 from ES-3's startup
+**ES-35 — Take `clouds.Initialize()` off the frozen startup frame.** ✅ 2026-11-14. 🟢 / 🟢. Added 2026-11-14 from ES-3's startup
 phase report. The last frame before the handoff spends **≈ 190–205 ms in `clouds.Initialize()` with 14–15 gen-0
 collections** on a new world, and ≈ 145–150 ms with ~20 collections on an existing one — about 30 % of the
 existing-world handoff (495 ms). The Player.log shows it generating two procedural cloud pattern layers. Measure the
 split (pattern generation vs texture upload vs allocation), then move the pattern work to a job or to the coroutine's
 earlier frames, and drop its per-call allocations. Respect the CL-* cloud backlog's decisions (the pattern stays
 procedural).
+*Shipped 2026-11-14 — default-ON behind the rollback flag `Settings.startupPrebuildClouds`.* The measured split
+corrected the entry above: there is no texture upload, and the pattern was already a Burst job — the cost was the
+**managed tile meshing** (128 meshes, ≈ 133–139 ms) and the collections inside it. The mesher now lives in the shared
+Burst-compatible `Jobs/Helpers/CloudTileMesher` (output bit-identical to the managed code it replaced), the layer pattern
+is a `NativeArray<bool>`, and `Clouds.BeginPrebuild` schedules per layer the noise job, `CloudThresholdJob` and one
+`CloudTileMeshJob` per tile (`Helpers/CloudLayerPrebuild`) on the workers from before the initial chunk load;
+`Clouds.Initialize` in the `StartWorld` tail only adopts the buffers and creates the meshes. Cloud Render B7/B8 guard
+equivalence with the main-thread build, and B9 pins that build to golden digests of the managed mesher it replaced; the
+startup report gained a `Clouds:` line (Performance Monitor B41). Measured in
+[`ENGINE_SCALING_ES35_ES36_STARTUP_TAIL_IL2CPP_2026-11-14_BENCHMARK.md`](../Performance/ENGINE_SCALING_ES35_ES36_STARTUP_TAIL_IL2CPP_2026-11-14_BENCHMARK.md)
+(Master IL2CPP, vd 10, legs alternated): **GO** — tail clouds 146 → 12 ms, tail collections 14–21 → 0, new-world
+handoff −65 ms, existing −41 ms.
+*Possible future improvement (not filed):* the tail still creates all 64 meshes per layer (≈ 10 ms), including tiles
+outside the coverage radius at small view distances; creating each prebuilt mesh on first use in `GetTileMesh` would
+trim that, at the cost of keeping the prebuild's buffers past startup.
 
-**ES-36 — Shorten the post-handoff mesh tail.** 🟢 / 🟡. Added 2026-11-14 from ES-3's capture (replaces its dropped
+**ES-36 — Shorten the post-handoff mesh tail.** NO-GO as a default (2026-11-14); opt-in. 🟢 / 🟡. Added 2026-11-14 from ES-3's capture (replaces its dropped
 Step 3). After the handoff the mesh queue drains at **`maxMeshRebuildsPerFrame` (10/frame, OM-1-calibrated)** for
 ≈ 0.4 s, at the ~15 ms frame floor; the in-flight mesh cap (20) is not the limit, so raising it would not help. Lever:
 scale the per-frame mesh rebuild quota until the first drain after the handoff (a flag set at the handoff and cleared
 by `PipelineDrainPredicate`, never read from `StartupTimeline`), OM-1-bounded and behind a rollback flag. Gate: the
 Master Drained mark.
+*Built and measured 2026-11-14 — kept opt-in, `Settings.startupMeshWave` default **off**.* The post-handoff burst is
+≈ 1.1 s on a new world (≈ 497 chunks), not ≈ 0.4 s as written above. `PipelinePassBudget.MeshRebuildCap` lifts the
+mesh pass's cap to the in-flight cap (20) from the handoff until the first drain, and `Helpers/StartupMeshWave` ends it
+on drain (its own `PipelineDrainPredicate` call), on leaving the handoff chunk, or after 10 s; Pipeline Backpressure B34
+guards it. Measured in the
+[ES-35 / ES-36 report](../Performance/ENGINE_SCALING_ES35_ES36_STARTUP_TAIL_IL2CPP_2026-11-14_BENCHMARK.md):
+**NO-GO as a default** — new world: no Drained gain (3 097 → 3 086 ms) and heavier frames (p95 38.7 → 49.7 ms), so the
+post-handoff tail is main-thread-bound, not quota-bound; existing world: Drained −177 ms, frames not captured. The
+"×4–8" quota idea in ES-3 cannot be reached under the in-flight cap of 20.
 
 ### Tier 2 — pipeline work on today's data model
 
@@ -986,8 +1013,8 @@ constants + migration change. Prerequisites: ES-13, ES-18, ES-19.
 | **ES-32 — Slow disk reads**        | Price the 7.7–7.9 ms reads during fast generation; re-score after ES-9's I/O worker                                  |   🟢   | —                   | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | **ES-33 — Job-array pool churn**   | Price the ≈ 27 buffer allocs/frees per frame past the retention cap at 200 m/s; speed-scaled cap or idle trim        |   🟢   | —                   | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | **ES-34 — Startup merge route**    | Price the ≈ 517 ms routing ≈ 1.06 M cross-chunk mods in startup sweep 1; coalesce or skip redundant routes           |   🟡   | —                   | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| **ES-35 — Startup clouds init**    | `clouds.Initialize()` ≈ 190 ms + 14–15 collections in the last frozen frame; job it or move it earlier               |   🟢   | —                   | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| **ES-36 — Post-handoff mesh tail** | Scale `maxMeshRebuildsPerFrame` until the first drain after handoff (≈ 0.4 s tail at 10/frame)                       |   🟢   | —                   | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| **ES-35 — Startup clouds init**    | `clouds.Initialize()` ≈ 190 ms + 14–15 collections in the last frozen frame; job it or move it earlier               |   🟢   | —                   | ✅ 2026-11-14 (tail clouds 146 → 12 ms, handoff −65 ms, [report](../Performance/ENGINE_SCALING_ES35_ES36_STARTUP_TAIL_IL2CPP_2026-11-14_BENCHMARK.md))                                                                                                                                                                                                                                                                                                                     |
+| **ES-36 — Post-handoff mesh tail** | Scale `maxMeshRebuildsPerFrame` until the first drain after handoff (≈ 0.4 s tail at 10/frame)                       |   🟢   | —                   | NO-GO as a default 2026-11-14; opt-in `startupMeshWave`, default off ([report](../Performance/ENGINE_SCALING_ES35_ES36_STARTUP_TAIL_IL2CPP_2026-11-14_BENCHMARK.md))                                                                                                                                                                                                                                                                                                       |
 | **ES-12 — Jobified merge**         | P-3                                                                                                                  |   🟡   | ES-7                | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | **ES-13 — Sky from heightmap**     | Frontier-seeded initial lighting                                                                                     |   🟡   | ES-12               | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | **ES-14 — Gen critical path**      | Worm cache, WG-1, WG-2                                                                                               |   🟡   | ES-0                | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
@@ -1356,11 +1383,10 @@ saving is inferred from step 1's re-entry leg, not re-measured.
 8. **A new-world startup is not reproducible run to run** (found 2026-11-14 by ES-3's opt-in `startupWorldDigest`).
    Two Master `startup-new` runs of the unchanged startup (both ES-3 flags off, same seed and build) logged different
    digests of the waited-for chunks (`8C7E7F58E6CBABCD` vs `1D57C9DD1C8FE8AC`), and the cross-chunk mods routed per
-   sweep vary run to run. Open: whether the **voxels** differ (structure mods applied in job-completion order —
-   a seed-visible bug, file it in `Documentation/Bugs/`) or only the **light** (a fixpoint reached by different routes —
-   a lighting-determinism question). The digest now logs voxels and light separately; two `startup-new` runs with
-   `-mc-set startupWorldDigest=true` answer it. Until then, equivalence gates use the in-process stale-snapshot check,
-   never cross-run digests.
+   sweep vary run to run. **Answered 2026-11-14: the voxels differ** — four Master runs of one build, two per flag leg
+   (ES-3 flags on and off), logged four different voxel digests. Filed as
+   [World Generation Bug 07](../Bugs/WORLD_GENERATION_BUGS.md) (hypothesis: structure mods applied in job-completion
+   order), not investigated. Equivalence gates use the in-process stale-snapshot check, never cross-run digests.
 
 ---
 
@@ -1387,6 +1413,13 @@ saving is inferred from step 1's re-entry leg, not re-measured.
 
 ## Document History
 
+* **v1.29** - **ES-35 shipped, ES-36 built and NO-GO as a default** (2026-11-14), scored in the
+  [ES-35 / ES-36 report](../Performance/ENGINE_SCALING_ES35_ES36_STARTUP_TAIL_IL2CPP_2026-11-14_BENCHMARK.md): the cloud
+  pattern and tile meshes are prebuilt by Burst jobs (`startupPrebuildClouds`, default on; tail clouds 146 → 12 ms,
+  handoff −65 ms new world, −41 ms existing; the entry's texture-upload guess was wrong — the cost was managed tile
+  meshing), and the post-handoff mesh wave stays opt-in (`startupMeshWave`, default off; no new-world Drained gain,
+  heavier frames). §8 question 8 was already answered (World Generation Bug 07). Status line, ES-35 / ES-36 entries,
+  §7 table.
 * **v1.28** - **ES-34 / ES-35 / ES-36 and §8 question 8 filed** (2026-11-14) from ES-3's startup capture: the startup
   merge's ≈ 517 ms cross-chunk route, `clouds.Initialize()` in the last frozen frame, the post-handoff mesh tail bound
   by `maxMeshRebuildsPerFrame`, and a new-world startup that is not reproducible run to run. Status line, ES-3 entry,

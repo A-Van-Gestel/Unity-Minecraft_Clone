@@ -488,18 +488,19 @@ Outside `World.Update` (a slot here may contain world work it triggers, e.g. a c
 
 **Worker jobs (Systems tier).**
 
-| Job                                                                                                                | Type           | Timed                                                                              |
-|--------------------------------------------------------------------------------------------------------------------|----------------|------------------------------------------------------------------------------------|
-| `StandardWormCarverJob`, `StandardChunkGenerationJob` (per column), `CaveIsolationFilterJob`, `ActiveVoxelScanJob` | Generation     | ✅ one record per chain                                                            |
-| `LegacyChunkGenerationJob`                                                                                         | Generation     | latency only — the job is frozen                                                   |
-| `NeighborhoodLightingJob`                                                                                          | Lighting       | ✅                                                                                 |
-| `MeshGenerationJob`, `MeshPostProcessJob`                                                                          | Meshing        | ✅ one record per chain                                                            |
-| `FluidTickJob`                                                                                                     | Fluids         | ✅ one record per chunk                                                            |
-| `GrassTickJob`                                                                                                     | —              | ❌ no record of its own: the behavior tick's grass jobs run inside `TickWaitUs`    |
-| `FluidEmitterScanJob`                                                                                              | FluidSoundScan | ✅ the scanner's own one-record pool                                               |
-| `CloudPatternJob`                                                                                                  | —              | ❌ rare rebuild, completed where it is scheduled, inside `Clouds` / `ViewDistance` |
-| `VoxelVisualizerJob`                                                                                               | —              | ❌ debug visualizer                                                                |
-| `TimestampProbeJob`                                                                                                | —              | n/a — the engine API probe's own measurement                                       |
+| Job                                                                                                                | Type           | Timed                                                                                                                     |
+|--------------------------------------------------------------------------------------------------------------------|----------------|---------------------------------------------------------------------------------------------------------------------------|
+| `StandardWormCarverJob`, `StandardChunkGenerationJob` (per column), `CaveIsolationFilterJob`, `ActiveVoxelScanJob` | Generation     | ✅ one record per chain                                                                                                   |
+| `LegacyChunkGenerationJob`                                                                                         | Generation     | latency only — the job is frozen                                                                                          |
+| `NeighborhoodLightingJob`                                                                                          | Lighting       | ✅                                                                                                                        |
+| `MeshGenerationJob`, `MeshPostProcessJob`                                                                          | Meshing        | ✅ one record per chain                                                                                                   |
+| `FluidTickJob`                                                                                                     | Fluids         | ✅ one record per chunk                                                                                                   |
+| `GrassTickJob`                                                                                                     | —              | ❌ no record of its own: the behavior tick's grass jobs run inside `TickWaitUs`                                           |
+| `FluidEmitterScanJob`                                                                                              | FluidSoundScan | ✅ the scanner's own one-record pool                                                                                      |
+| `CloudPatternJob`                                                                                                  | —              | ❌ rare rebuild, completed where it is scheduled, inside `Clouds` / `ViewDistance`                                        |
+| `CloudThresholdJob`, `CloudTileMeshJob`                                                                            | —              | ❌ the startup cloud prebuild (ES-35): runs on the workers during the load and is waited for in the tail's `Clouds:` line |
+| `VoxelVisualizerJob`                                                                                               | —              | ❌ debug visualizer                                                                                                       |
+| `TimestampProbeJob`                                                                                                | —              | n/a — the engine API probe's own measurement                                                                              |
 
 Unity's own jobs (rendering, animation, uGUI) are invisible, so utilization is the engine's share of the workers.
 

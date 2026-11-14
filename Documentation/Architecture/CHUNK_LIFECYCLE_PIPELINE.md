@@ -311,6 +311,14 @@ The startup coroutine (`World.ForceCompleteDataJobsCoroutine`, run by `StartWorl
   their `Dispose` skips the shared maps), and `WorldJobManager.Dispose` frees a set left open. Sound only because nothing writes voxels or light between the first fill
   and the sweep's last schedule; Chunk Pipeline B8 guards the set's sharing and lifetime and B9 the registry and a shared job's `Dispose`, and the opt-in `startupWorldDigest` counts snapshots gone stale (must be 0).
   The pooled, banded streaming path never shares snapshots.
+- **Cloud prebuild (ES-35, `startupPrebuildClouds`, default on):** `Clouds.BeginPrebuild` runs before STEP 2 and schedules
+  the cloud pattern, threshold and per-tile mesh jobs on the workers while chunks generate; `Clouds.Initialize` in the
+  `StartWorld` tail adopts the finished buffers instead of meshing on the frozen frame. Stale inputs fall back to the
+  main-thread build; Cloud Render B7/B8 guard that the jobs build what the shared mesher builds on the main thread, B9 pins that mesher to golden digests, and the `Clouds:` line of the startup report (B41) times it.
+- **Post-handoff mesh wave (ES-36, opt-in `startupMeshWave`, default off):** from the handoff, `PipelinePassBudget.MeshRebuildCap`
+  returns the in-flight cap instead of `maxMeshRebuildsPerFrame` until the first drain, leaving the handoff chunk, or 10 s.
+  `StartupMeshWave` ends it through its own `PipelineDrainPredicate.IsDrained` call; `StartupTimeline` stays observe-only.
+  Pipeline Backpressure B34 guards it. It is off because it gave no new-world Drained gain and heavier frames.
 
 ### Step 5: Lighting Ready-Set Scan (The Critical Section)
 
