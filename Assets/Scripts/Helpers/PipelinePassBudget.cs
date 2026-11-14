@@ -190,6 +190,17 @@ namespace Helpers
             liftForStartup ? int.MaxValue : perFrameCap;
 
         /// <summary>
+        /// The mesh pass's per-frame rebuild cap: the gameplay cap, or during the startup mesh wave the in-flight cap
+        /// when that is higher. The in-flight cap is the OM-1 memory bound, so the wave never schedules past it.
+        /// </summary>
+        /// <param name="startupWave">Whether the post-handoff mesh wave is running.</param>
+        /// <param name="perFrameCap">The gameplay cap, <c>maxMeshRebuildsPerFrame</c>.</param>
+        /// <param name="inFlightCap">The in-flight mesh job cap, <c>maxInFlightMeshJobs</c>.</param>
+        /// <returns>The cap to scale into this frame's quota.</returns>
+        public static int MeshRebuildCap(bool startupWave, int perFrameCap, int inFlightCap) =>
+            startupWave && inFlightCap > perFrameCap ? inFlightCap : perFrameCap;
+
+        /// <summary>
         /// Classifies why a budgeted pass stopped (FP-2). One implementation for every pass that reports a
         /// stop reason, so no two can disagree about what a stop <i>means</i> and a single suite baseline
         /// pins them all.

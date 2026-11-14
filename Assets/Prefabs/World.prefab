@@ -111,6 +111,7 @@ MonoBehaviour:
     startupSharedSweepSnapshots: 1
     startupWorldDigest: 0
     startupPrebuildClouds: 1
+    startupMeshWave: 0
     debugHudShowFps: 1
     debugHudShowGraphicsApi: 1
     debugHudShowWorldInfo: 1

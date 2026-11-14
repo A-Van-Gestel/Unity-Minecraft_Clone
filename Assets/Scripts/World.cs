@@ -580,6 +580,9 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
 
     private readonly StartupTimeline _startupTimeline = new StartupTimeline();
 
+    // Raises the mesh rebuild cap from the handoff until the first drain (ES-36).
+    private StartupMeshWave _startupMeshWave;
+
     private const float MILLISECONDS_PER_SECOND = 1000f;
 
     /// <summary>This launch's time-to-stable stamp (ES-0); logged once when it gets its outcome.</summary>
@@ -1208,6 +1211,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         // Enable world loading logic
         _isWorldLoaded = true;
         _startupTimeline.MarkHandoff(Time.realtimeSinceStartupAsDouble, PlayerChunkCoord);
+        if (settings.startupMeshWave) _startupMeshWave.Begin(Time.realtimeSinceStartupAsDouble, PlayerChunkCoord);
 
         StringBuilder phaseReport = new StringBuilder(capacity: 2048);
         _startupPhaseTotals.AppendReport(phaseReport);
@@ -3442,7 +3446,9 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         // the drain arm only because P9-0's utilization needs the granted quota on every frame that had work
         // — including the in-flight-cap arm, where work existed and none of it was served. Pure arithmetic
         // with no side effect (unlike StartWindow, which timestamps and therefore stays in the drain arm).
-        int meshQuota = PipelinePassBudget.ComputeQuota(settings.maxMeshRebuildsPerFrame, Time.unscaledDeltaTime);
+        int meshQuota = PipelinePassBudget.ComputeQuota(
+            PipelinePassBudget.MeshRebuildCap(_startupMeshWave.IsActive, settings.maxMeshRebuildsPerFrame, inFlightMeshCap),
+            Time.unscaledDeltaTime);
 
         if (_meshBuildQueue.Count == 0)
         {
@@ -3525,16 +3531,34 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         // After the bracket, so the monitor's own sampling is not reported as unattributed engine work.
         if (PerfStore.SlotsActive) SamplePerfCounters();
 
-        if (_startupTimeline.IsPending) TickStartupTimeline();
+        // One drain test per frame, shared by the mesh wave and the time-to-stable stamp.
+        bool needsDrain = _startupMeshWave.IsActive || (_startupTimeline.IsPending && _startupTimeline.NeedsDrainCheck);
+        bool drained = needsDrain && PipelineDrainPredicate.IsDrained(this);
+        if (_startupMeshWave.IsActive) TickStartupMeshWave(drained);
+        if (_startupTimeline.IsPending) TickStartupTimeline(drained);
+    }
+
+    /// <summary>
+    /// Ends the post-handoff mesh wave on the first drain (World's own drain test: the timeline only observes), on
+    /// leaving the handoff chunk, or on its timeout, and logs why.
+    /// </summary>
+    /// <param name="drained">Whether the pipeline is drained this frame.</param>
+    private void TickStartupMeshWave(bool drained)
+    {
+        double now = Time.realtimeSinceStartupAsDouble;
+        StartupMeshWaveEnd end = _startupMeshWave.TryEnd(drained, PlayerChunkCoord, now);
+        if (end != StartupMeshWaveEnd.None)
+            Debug.Log($"[Startup] Mesh wave ended: {end} at +{_startupMeshWave.ElapsedSeconds(now) * MILLISECONDS_PER_SECOND:F0} ms");
     }
 
     /// <summary>
     /// Advances the time-to-stable stamp by one frame and logs it once it has an outcome. The drain test walks the load
     /// square only while the stamp still waits for the drain and every stage is empty.
     /// </summary>
-    private void TickStartupTimeline()
+    /// <param name="drained">Whether the pipeline is drained this frame; only read while the stamp waits for it.</param>
+    private void TickStartupTimeline(bool drained)
     {
-        bool drained = _startupTimeline.NeedsDrainCheck && PipelineDrainPredicate.IsDrained(this);
+        drained &= _startupTimeline.NeedsDrainCheck;
         if (_startupTimeline.Tick(Time.realtimeSinceStartupAsDouble, Time.unscaledDeltaTime * MILLISECONDS_PER_SECOND, drained, PlayerChunkCoord))
             Debug.Log($"[Startup] Time to stable: {_startupTimeline.Describe()}");
     }

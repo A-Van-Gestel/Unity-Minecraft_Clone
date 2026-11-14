@@ -95,6 +95,7 @@ namespace Editor.Validation.PipelineBackpressure
                 new Scenario("B31 Tour chunk bounds: the footprint fills the pre-generated rectangle edge to edge (CMD-6)", RunB31TourChunkBounds),
                 new Scenario("B32 Station-walk trace capacity: scales with stations and LoadDistance, clamps both ways (CMD-6)", RunB32StationWalkCapacity),
                 new Scenario("B33 Structure-mods quota: the gameplay cap unchanged, the startup lift unbounded by any cap (ES-3)", RunB33StructureModsQuota),
+                new Scenario("B34 Startup mesh wave: the cap rises only while the wave runs, never past the in-flight cap; it ends on drain, on leaving the chunk, or on timeout (ES-36)", RunB34StartupMeshWave),
             };
             return ValidationSuiteRunner.Execute("Pipeline Backpressure", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }
@@ -133,6 +134,55 @@ namespace Editor.Validation.PipelineBackpressure
         private const int B33_HIGH_CAP = 50000;
         private const int B33_STARTUP_MODS = 424000;
         private const int B33_MIN_HEADROOM = 1000;
+
+        /// <summary>
+        /// ES-36: the post-handoff mesh wave. The cap is the gameplay cap outside the wave and the in-flight cap inside
+        /// it (never above, never below the gameplay cap); the wave ends exactly once, for the first condition that holds.
+        /// </summary>
+        private static bool RunB34StartupMeshWave()
+        {
+            bool ok = Check("outside the wave the gameplay cap holds (10 with in-flight 20)",
+                PipelinePassBudget.MeshRebuildCap(false, B34_REBUILDS, B34_IN_FLIGHT) == B34_REBUILDS);
+            ok &= Check("inside the wave the cap rises to the in-flight cap (20)",
+                PipelinePassBudget.MeshRebuildCap(true, B34_REBUILDS, B34_IN_FLIGHT) == B34_IN_FLIGHT);
+            ok &= Check("inside the wave a low in-flight cap never lowers the gameplay cap (10 with in-flight 4)",
+                PipelinePassBudget.MeshRebuildCap(true, B34_REBUILDS, B34_LOW_IN_FLIGHT) == B34_REBUILDS);
+
+            ChunkCoord handoff = new ChunkCoord(B34_CHUNK, B34_CHUNK);
+            StartupMeshWave idle = default;
+            ok &= Check("a wave never begun is inactive and does not end",
+                !idle.IsActive && idle.TryEnd(true, handoff, B34_START) == StartupMeshWaveEnd.None);
+
+            StartupMeshWave wave = default;
+            wave.Begin(B34_START, handoff);
+            ok &= Check("a begun wave runs while undrained, in the handoff chunk, before the timeout",
+                wave.IsActive && wave.TryEnd(false, handoff, B34_START + StartupMeshWave.TimeoutSeconds - B34_EPSILON) == StartupMeshWaveEnd.None
+                && wave.IsActive);
+            ok &= Check("the first drain ends it, once",
+                wave.TryEnd(true, handoff, B34_START + 1.0) == StartupMeshWaveEnd.Drained && !wave.IsActive
+                && wave.TryEnd(true, handoff, B34_START + 2.0) == StartupMeshWaveEnd.None);
+
+            wave.Begin(B34_START, handoff);
+            ok &= Check("leaving the handoff chunk ends it",
+                wave.TryEnd(false, new ChunkCoord(B34_CHUNK + 1, B34_CHUNK), B34_START + 1.0) == StartupMeshWaveEnd.LeftHandoffChunk
+                && !wave.IsActive);
+
+            wave.Begin(B34_START, handoff);
+            ok &= Check("the timeout ends a wave that never drains",
+                wave.TryEnd(false, handoff, B34_START + StartupMeshWave.TimeoutSeconds) == StartupMeshWaveEnd.Timeout && !wave.IsActive);
+
+            wave.Begin(B34_START, handoff);
+            ok &= Check("a drain wins over the other end conditions in the same frame",
+                wave.TryEnd(true, new ChunkCoord(B34_CHUNK + 1, B34_CHUNK), B34_START + StartupMeshWave.TimeoutSeconds) == StartupMeshWaveEnd.Drained);
+            return ok;
+        }
+
+        private const int B34_REBUILDS = 10;
+        private const int B34_IN_FLIGHT = 20;
+        private const int B34_LOW_IN_FLIGHT = 4;
+        private const int B34_CHUNK = 7;
+        private const double B34_START = 100.0;
+        private const double B34_EPSILON = 1e-3;
 
         /// <summary>
         /// FP-2: the shared stop-reason classifier both scheduling loops route through. Two things are

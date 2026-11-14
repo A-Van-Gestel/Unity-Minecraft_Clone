@@ -871,6 +871,16 @@ public class Settings
              TooltipTags.Performance + "Rollback flag: turn off only to compare against building them in that frame.")]
     public bool startupPrebuildClouds = true;
 
+    /// <summary>
+    /// If true, from the handoff until the pipeline first drains, the mesh pass may schedule up to
+    /// <see cref="maxInFlightMeshJobs"/> rebuilds per 60 Hz frame instead of <see cref="maxMeshRebuildsPerFrame"/>.
+    /// Opt-in experiment (ES-36): no gain on new worlds, where the main thread is the limit.
+    /// </summary>
+    [SettingField(SettingsTab.Dev, Label = "Startup: Mesh Wave", DebugOnly = true, Order = 24)]
+    [Tooltip("Right after loading, meshes the initial area faster until it is done, bounded by the in-flight mesh cap.\n\n" +
+             TooltipTags.Warning + "Experimental: heavier frames right after a new world loads, for no gain there; drains loaded worlds faster.")]
+    public bool startupMeshWave = false;
+
     #endregion
 
     #region Debug Screen Tab
