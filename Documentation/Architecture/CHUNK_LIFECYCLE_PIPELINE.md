@@ -271,7 +271,7 @@ All three completed-job sweeps (`ProcessGenerationJobs`, `ProcessLightingJobs`, 
 release each job's containers *inside* the loop and remove the dictionary entries only *after* it.
 `ProcessGenerationJobs` and `ProcessMeshJobs` additionally take an optional
 `PipelinePassBudget.Window` ms ceiling (P-4 §3.4, checked between jobs): on expiry the sweep breaks and the remaining completed jobs stay enrolled for next frame — the same retry contract as the generation pass's structure-mods budget. `default` = unbudgeted (the startup coroutine's path, which also lifts `maxStructureModsPerFrame` while `startupLiftStructureQuota` is on, ES-3);
-`ProcessLightingJobs` is deliberately not budgeted (its merge cost is §2/P-3 territory). Before HF-2, one exception mid-pass aborted the sweep and stranded already-released jobs in the dictionary — every later frame re-touched their disposed containers, spamming
+`ProcessLightingJobs` takes a `lightMergeBudgetMs` window in the gameplay merge (default 8 ms, 0 = off, ES-8): on a break the completed jobs stay registered for a later frame, holding their buffers and counting against the in-flight cap, and are visited from a rotating start. The startup coroutine's merge is unbudgeted. Before HF-2, one exception mid-pass aborted the sweep and stranded already-released jobs in the dictionary — every later frame re-touched their disposed containers, spamming
 `ObjectDisposedException` and burying the original thrower. Each pass now isolates faults per job:
 
 - **`Handle.Complete()` throws** → the job may still own its buffers, so nothing is released; the entry stays enrolled and is retried (isolated again) next pass.

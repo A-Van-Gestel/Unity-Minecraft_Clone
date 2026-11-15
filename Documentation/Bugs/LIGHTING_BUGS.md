@@ -31,6 +31,11 @@ rounds that run out.
 voxels also differ, World Generation Bug 07, so it cannot be separated), and which chunks differ (the digest is one hash
 over all chunks). n = 2.
 
+**Evidence added 2026-11-15 (Master digest pairs):** in both pairs of that day, one on a new world and one on an existing world, the
+per-sweep merge-order hashes were identical within the pair while the voxel and light digests differed. So the startup merge order is
+reproducible, and the existing-world pair loaded different saves (each run re-saves). Unverified: Editor plays also re-save
+`Editor_Temp_Saves`, so two Editor plays may not load the same save.
+
 **Repro and next step:** with `"startupWorldDigest": true` in `Assets/settings.json` and persistence on, press Play twice
 on an existing volatile world and compare the light hashes. The next step is a per-chunk light hash (the opt-in
 `StartupGenerationDiagnostics` report covers voxels only), to see whether the differing chunks cluster at load-area

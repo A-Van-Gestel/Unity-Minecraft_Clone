@@ -531,10 +531,10 @@ Main Thread                         Background Thread
 2. Request async load           →  3. Open region file
                                     4. Read chunk blob
                                     5. Decompress
-   [Continue frame, no blocking]    6. Deserialize
+   [Continue frame, no blocking]    6. Deserialize (+ recount section block counts)
                                     7. Return ChunkData
 8. Receive callback
-9. data.PopulateFromSave(loaded)
+9. data.PopulateFromSave(loaded, countsReady)
 10. Apply pending mods
 11. Restore lighting queues     ←  12. All lighting state restored
 12. Schedule lighting job (if needed)
@@ -547,7 +547,7 @@ Main Thread                         Background Thread
 
 ```csharp
 // In ChunkData.cs
-public void PopulateFromSave(ChunkData loadedData)
+public void PopulateFromSave(ChunkData loadedData, bool countsReady = false)
 {
     Array.Copy(loadedData.heightMap, heightMap, heightMap.Length);
 
@@ -574,9 +574,11 @@ public void PopulateFromSave(ChunkData loadedData)
     if (loadedData.HasLightChangesToProcess) FlagLightWork();
     if (loadedData.NeedsInitialLighting) FlagInitialLighting();
 
-    // Active blocks (fluids/grass) recalculated via RecalculateCounts, not saved
-    foreach (ChunkSection section in sections)
-        section?.RecalculateCounts(World.Instance.BlockTypes);
+    // Block counts are derived, not saved: the load worker already recounted them when it was handed the
+    // opacity table (countsReady, loadRecountOnWorker); otherwise recount here
+    if (!countsReady)
+        foreach (ChunkSection section in sections)
+            section?.RecalculateCounts(World.Instance.IsOpaqueById);
 
     IsPopulated = true;
 }
@@ -723,11 +725,12 @@ if (worldData.ModifiedChunks.Contains(data))
 **In World.LoadOrGenerateChunk ():**
 
 ```csharp
-ChunkData loaded = await StorageManager.LoadChunkAsync(pos);
+bool[] workerRecount = settings.loadRecountOnWorker ? IsOpaqueById : null;
+ChunkData loaded = await StorageManager.LoadChunkAsync(pos, workerRecount);
 if (loaded != null)
 {
     // 1. Transfer all data including lighting queues and flags
-    data.PopulateFromSave(loaded);
+    data.PopulateFromSave(loaded, countsReady: workerRecount != null);
     
     // 2. Restore global queue columns
     if (LightingStateManager.TryGetAndRemove(coord, out var localCols))

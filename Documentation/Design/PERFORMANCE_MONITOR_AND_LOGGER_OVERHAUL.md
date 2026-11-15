@@ -534,7 +534,15 @@ non-chunk files (`level.dat`, pending modifications, pending lighting) are not c
   `MergeCountChecks` / `MergeCountDrifts`, which count at every tier in instrumented builds. `MergeChurnedSections`
   reads 0 by construction since ES-7.3 compacts those sections without a rent; it stays as a tripwire for that path. `/perf stats` prints a
   "Merge split" block and `/perf hitches` names the largest part ("LightMerge led by …"); the job pass's own
-  bookkeeping (completion, release, promotion) is the "Other".
+  bookkeeping (completion, release, promotion) is the "Other". Since ES-8 the per-frame counter `MergeCeilingDeferred` counts the
+  completed jobs the `lightMergeBudgetMs` window left for a later frame; it is in `/perf stats` and in the summarizer's merge table
+  ("Ceiling deferred" column).
+- *The startup report's route lines (ES-34, `PerfRouteTotals` owned by `WorldJobManager`, not part of `PerfMergeTotals`):* two `Route` lines after
+  `Clouds:` in the `Startup Coroutine` section, one for sweep 1 and one for the total. Each gives the mods emitted and their arms (drop / persist /
+  defer / direct, with a reconciliation flag), the drained applies, the effective applies by source (direct / drained / pull-back), the removal
+  support scans and their time, the same-target-chunk share, and a 1-in-64 sampled split of per-mod time into target resolution and arm work (an
+  estimate). Under `startupWorldDigest` the report adds a per-job census (`CrossChunkModCensus`) and a `[Startup] Merge order` line with the
+  merge-order hash.
 
 **Known gaps.**
 
