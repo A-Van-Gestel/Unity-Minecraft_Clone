@@ -27,6 +27,7 @@ output, baseline vs known-bug semantics).
 | **MeshQueue**      | `MeshQueue/`                             | `Validate Mesh Build Queue`            | MT-1 `MeshBuildQueue` contract (dedup, ordering, immediate-promotion)                   |
 | **LightScheduler** | `LightScheduler/`                        | `Validate Light Work Scheduler`        | MT-2 `LightWorkScheduler` ready/waiting split, promotion events, `PromoteAll` fail-safe |
 | **Sound Engine**   | `SoundEngine/`                           | `Validate Sound Engine`                | Block-sound resolution: material lookup, clip pick, pitch envelope, place-to-break fallback, two-cell footstep sampling, authored-content census |
+| **Biome Selection** | `Generation/` | `Validate Biome Selection` | World generation: biome selection and terrain-height goldens, structure expansion golden (B18) and allocation (B19), canonical structure-marker order (B20, World Generation Bug 07) |
 
 The three storage-boundary suites split one system by contract, so route a save/load fix by which
 contract it breaks — they share `Framework/StorageValidationFixture` (stub `World.Instance` +
