@@ -24,7 +24,9 @@ machine path into any file.
   as `<YYYY-MM-DD> - <purpose> [IL2CPP]/Minecraft Clone.exe` — or the path of an existing build,
   in which case skip steps 2–3.
 - **Runs:** for each, a tag, the player arguments (`-mc-run …`, `-mc-set …`) and a timeout in
-  minutes. Run them in the order given.
+  minutes. Run them in the order given. Pass one `-mc-set` per field even when the prompt lists several
+  after one flag (`-mc-set a=1 b=2` applies only `a`), and confirm each `Player.log` overrides line.
+  A `startup-*` run can end on the 300 s Stable timeout; its report is still written.
 - **What to quote** from each run's report (a section header, e.g. `=== Settings (differing from
   defaults) ===`, or "the whole report").
 

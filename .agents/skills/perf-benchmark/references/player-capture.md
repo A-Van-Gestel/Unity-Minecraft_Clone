@@ -48,6 +48,10 @@ any `Settings` field for the session and never reaches the file (syntax and exit
 -mc-set benchmarkGenerationSpeeds=200 -mc-set benchmarkLoadingSpeeds=50
 ```
 
+One `-mc-set` per field: `-mc-set a=1 b=2` applies only `a`. Check each run's `Player.log`
+`Session settings overrides` line lists every field before trusting a leg. Free the GPU before timing runs: a
+resident local model server holding VRAM skews the frames.
+
 The player otherwise inherits its settings file — `persistentDataPath/settings.json` when one exists, else
 `<build>_Data/settings.json`, created with calibrated defaults on first launch.
 
