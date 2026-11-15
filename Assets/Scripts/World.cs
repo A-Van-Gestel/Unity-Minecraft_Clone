@@ -3833,9 +3833,9 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
 
     /// <summary>
     /// Applies the modifications other chunks left for a chunk while it held no data (structures that spilled across
-    /// its border), waking each modified cell's six neighbors. The replay bypasses <see cref="ApplyModifications"/>,
-    /// so without the wake a voxel the registration screen left asleep beside a replayed cell would never
-    /// re-evaluate against it.
+    /// its border), under the same replacement rule as <see cref="ApplyModifications"/>, and wakes each modified
+    /// cell's six neighbors. The replay bypasses <see cref="ApplyModifications"/>, so without the wake a voxel the
+    /// registration screen left asleep beside a replayed cell would never re-evaluate against it.
     /// </summary>
     /// <param name="chunkData">The chunk that just became populated — the target of every mod.</param>
     /// <param name="pendingMods">The mods <see cref="ModificationManager"/> held for it.</param>
@@ -3843,6 +3843,14 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     {
         foreach (VoxelMod mod in pendingMods)
         {
+            // The rule keeps a parked mod's outcome equal to the direct path's, whichever chunk generated first.
+            // A position with no voxel to read has nothing to protect, so the mod goes through.
+            bool refused = worldData.TryGetVoxel(mod.GlobalPosition.x, mod.GlobalPosition.y, mod.GlobalPosition.z,
+                               out VoxelState existing) &&
+                           !BlockTagUtility.CanApplyMod(in mod, existing.ID, BlockTypes);
+
+            if (refused) continue;
+
             // Applied directly to the data; ModifyVoxel handles the lighting queues and the bucket of the cell itself.
             chunkData.ModifyVoxel(worldData.GetLocalVoxelPositionInChunk(mod.GlobalPosition), mod);
             WakeActiveNeighbors(mod.GlobalPosition);

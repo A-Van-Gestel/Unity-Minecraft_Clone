@@ -1567,8 +1567,29 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                 // 2B: Process Data-Driven StructureSpawns queue
                 if (jobEntry.Value.StructureSpawns.IsCreated)
                 {
+                    // Overlapping structures resolve by application order, so expand in a canonical order rather
+                    // than the parallel job's scheduling order. A quota-deferred remainder re-sorts to the same order.
+                    StructureSpawnOrder.SortQueue(jobEntry.Value.StructureSpawns);
+#if UNITY_EDITOR
+                    // A lost or broken sort would only surface as run-to-run terrain drift, so fail loudly instead.
+                    StructureSpawnMarker previousMarker = default;
+                    bool hasPreviousMarker = false;
+                    bool orderViolationLogged = false;
+#endif
                     while (jobEntry.Value.StructureSpawns.TryDequeue(out StructureSpawnMarker marker))
                     {
+#if UNITY_EDITOR
+                        if (hasPreviousMarker && !orderViolationLogged &&
+                            default(StructureSpawnOrder.Comparer).Compare(previousMarker, marker) > 0)
+                        {
+                            Debug.LogError($"[Structure order] Chunk {jobEntry.Key}: marker {marker.Position} dequeued after " +
+                                           $"{previousMarker.Position}; stage 2B must expand markers in StructureSpawnOrder's order.");
+                            orderViolationLogged = true;
+                        }
+
+                        previousMarker = marker;
+                        hasPreviousMarker = true;
+#endif
                         _structureMods.Clear();
                         _chunkGenerator.ExpandStructure(marker, _structureMods);
 

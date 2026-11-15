@@ -21,11 +21,13 @@ namespace Editor.Validation.Behavior
     /// <item><b>BH-B18</b> — the population wake covers both sides of a seam and spares a source facing a source.</item>
     /// <item><b>BH-B19</b> — the pending-modification replay, which bypasses <c>ApplyModifications</c>, still wakes the
     /// six neighbors of each cell it changes.</item>
+    /// <item><b>BH-B21</b> — that replay applies the same replacement rule as <c>ApplyModifications</c>.</item>
     /// </list>
     /// <para><b>Prove-red:</b> drop the <c>REPLACEABLE</c> term from <see cref="ActiveVoxelScreen.CanSourceFlowInto"/>
     /// (reds BH-B16 on BH-S-RANDOM's blades), or the second <c>WakeSeamSlab</c> call in
     /// <c>World.WakeSeamBehaviorNeighborhood</c> (reds BH-B16 on the seam pocket and BH-B18's own-side legs), or the
-    /// <c>WakeActiveNeighbors</c> call in <c>World.ReplayPendingMods</c> (reds BH-B19).</para>
+    /// <c>WakeActiveNeighbors</c> call in <c>World.ReplayPendingMods</c> (reds BH-B19), or its <c>if (refused) continue;</c>
+    /// (reds BH-B21).</para>
     /// </summary>
     public static partial class BehaviorValidationSuite
     {
@@ -54,6 +56,9 @@ namespace Editor.Validation.Behavior
         private const int BH18_FLOOR_Y = 10;
         private const int BH18_LANE_Z = 8;
 
+        // BH-B21: the row of three replayed cells.
+        private const int BH21_Y = 70;
+
         /// <summary>The ES-31 screen fixtures, run alongside <see cref="DifferentialFixtures"/>.</summary>
         private static List<DiffFixture> ScreenFixtures() => new List<DiffFixture>
         {
@@ -72,6 +77,8 @@ namespace Editor.Validation.Behavior
                 Bh18_TwoSidedSeamWake));
             scenarios.Add(new Scenario("BH-B19: the pending-modification replay wakes a screened neighbor",
                 Bh19_PendingReplayWakes));
+            scenarios.Add(new Scenario("BH-B21: the pending-modification replay applies the replacement rule",
+                Bh21_ReplayAppliesReplacementRule));
         }
 
         private static List<DiffFixture> AllScreenFixtures()
@@ -272,6 +279,49 @@ namespace Editor.Validation.Behavior
                 Debug.Log("[PASS] BH-B19: the pending-modification replay woke the screened source beside the cell it changed.");
             return passed;
         }
+
+        /// <summary>
+        /// BH-B21 — replays three world-gen mods: <c>OnlyReplaceAir</c> over stone (refused), <c>OnlyReplaceAir</c> over air
+        /// and <c>ForcePlace</c> over stone (both applied), so the replay neither skips nor over-applies the replacement
+        /// rule. The rules used read no block tags, which the test palette leaves empty.
+        /// <para>Promoted from BH-K07 (WORLD_GENERATION_BUGS §07) after in-game confirmation, 2026-11-15.</para>
+        /// </summary>
+        private static bool Bh21_ReplayAppliesReplacementRule()
+        {
+            using BehaviorTestWorld world = new BehaviorTestWorld(s_bh4CenterOrigin);
+            world.EnableModifyVoxel();
+
+            Vector3Int stoneKept = new Vector3Int(4, BH21_Y, 4);
+            Vector3Int airFilled = new Vector3Int(5, BH21_Y, 4);
+            Vector3Int stoneForced = new Vector3Int(6, BH21_Y, 4);
+            world.SetBlock(stoneKept.x, stoneKept.y, stoneKept.z, BlockIDs.Stone);
+            world.SetBlock(stoneForced.x, stoneForced.y, stoneForced.z, BlockIDs.Stone);
+
+            List<VoxelMod> pending = new List<VoxelMod>
+            {
+                WorldGenDirt(stoneKept, ReplacementRule.OnlyReplaceAir),
+                WorldGenDirt(airFilled, ReplacementRule.OnlyReplaceAir),
+                WorldGenDirt(stoneForced, ReplacementRule.ForcePlace),
+            };
+            world.ReplayPendingMods(pending);
+
+            bool passed = Check("BH-B21 an only-replace-air mod leaves stone in place", IdAt(world, stoneKept) == BlockIDs.Stone,
+                $"stone became id {IdAt(world, stoneKept).ToString()}; the replay skipped the replacement rule");
+            passed &= Check("BH-B21 an only-replace-air mod fills air", IdAt(world, airFilled) == BlockIDs.Dirt,
+                $"air became id {IdAt(world, airFilled).ToString()}; the replay refused a mod the rule allows");
+            passed &= Check("BH-B21 a force-place mod replaces stone", IdAt(world, stoneForced) == BlockIDs.Dirt,
+                $"stone became id {IdAt(world, stoneForced).ToString()}; the replay refused a mod the rule allows");
+            return passed;
+        }
+
+        private static VoxelMod WorldGenDirt(Vector3Int localPos, ReplacementRule rule)
+        {
+            Vector3Int voxelPos = new Vector3Int(s_bh4CenterOrigin.x + localPos.x, localPos.y, s_bh4CenterOrigin.y + localPos.z);
+            return new VoxelMod(voxelPos, BlockIDs.Dirt) { Rule = rule, Source = VoxelModSource.WorldGen };
+        }
+
+        private static ushort IdAt(BehaviorTestWorld world, Vector3Int localPos) =>
+            BurstVoxelDataBitMapping.GetId(world.ChunkData.GetVoxel(localPos.x, localPos.y, localPos.z));
 
         /// <summary>
         /// BH-S-RANDOM: seeded random seabed in the center and its −X/+X/−Z neighbors (+Z absent): water sources to a sea

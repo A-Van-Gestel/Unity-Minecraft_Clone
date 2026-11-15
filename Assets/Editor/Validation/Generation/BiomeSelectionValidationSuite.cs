@@ -9,6 +9,7 @@ using Editor.DataGeneration;
 using Editor.WorldTools.Libraries;
 using Editor.Dev;
 using Editor.Validation.Framework;
+using Helpers;
 using Jobs.Data;
 using Jobs.Generators;
 using Jobs.Helpers;
@@ -16,6 +17,7 @@ using Libraries;
 using Unity.Burst;
 using Unity.Collections;
 using Unity.Jobs;
+using Unity.Mathematics;
 using UnityEditor;
 using UnityEngine;
 
@@ -97,6 +99,8 @@ namespace Editor.Validation.Generation
                     B17_BearingPointsAtTheBiome),
                 new Scenario("B18 structure expansion is bit-identical to the golden", B18_StructureExpansionGolden),
                 new Scenario("B19 structure expansion into a warm list allocates nothing", B19_StructureExpansionAllocatesNothing),
+                new Scenario("B20 structure markers expand in one canonical order, whatever the worker scheduling",
+                    B20_MarkersCanonicalOrder),
             };
             return ValidationSuiteRunner.Execute("Biome Selection", scenarios, KnownBugChannel.Bug, logToConsole, showProgress);
         }
@@ -417,6 +421,136 @@ namespace Editor.Validation.Generation
             }
 
             return passed;
+        }
+
+        /// <summary>Regenerations per chunk B20 compares; the queue order varies on most of them.</summary>
+        private const int B20_REPEATS = 3;
+
+        /// <summary>
+        /// The generation job enqueues structure markers from parallel workers, so the raw queue order follows
+        /// worker scheduling. After <see cref="StructureSpawnOrder.SortQueue"/>, a chunk's markers must dequeue in
+        /// (x, z, y, pool) order, identically on every regeneration.
+        /// <para>Promoted from K07 (WORLD_GENERATION_BUGS §07) after in-game confirmation, 2026-11-15.</para>
+        /// <para><b>Prove-red:</b> empty the body of <see cref="StructureSpawnOrder.SortQueue"/>.</para>
+        /// </summary>
+        private static bool B20_MarkersCanonicalOrder()
+        {
+            bool passed = true;
+
+            // A fixed shuffle first: red without the sort whatever the scheduling did.
+            NativeQueue<StructureSpawnMarker> shuffled = new NativeQueue<StructureSpawnMarker>(Allocator.Temp);
+            try
+            {
+                int3[] positions =
+                {
+                    new int3(5, 70, 2), new int3(1, 64, 9), new int3(5, 70, 1),
+                    new int3(1, 64, 9), new int3(-3, 80, 0), new int3(5, 60, 2),
+                };
+                int[] pools = { 0, 2, 0, 1, 3, 0 };
+                for (int i = 0; i < positions.Length; i++)
+                    shuffled.Enqueue(new StructureSpawnMarker { Position = positions[i], PoolEntryIndex = pools[i] });
+
+                StructureSpawnOrder.SortQueue(shuffled);
+                List<StructureSpawnMarker> drained = DrainMarkers(shuffled);
+                passed &= Expect(drained.Count == positions.Length,
+                    $"B20: sorting a {positions.Length}-marker queue left {drained.Count} markers");
+                passed &= Expect(IsCanonicalMarkerOrder(drained),
+                    $"B20: a shuffled queue did not come out in (x, z, y, pool) order: {FormatMarkers(drained)}");
+            }
+            finally
+            {
+                shuffled.Dispose();
+            }
+
+            EditorChunkPipelineRunner runner = StructureExpansionGoldenCapture.CreateRunner(StructureExpansionGoldenCapture.Seeds[0]);
+            try
+            {
+                int multiMarkerChunks = 0;
+                for (int cx = 0; cx < StructureExpansionGoldenCapture.ChunkBlockSize; cx++)
+                {
+                    for (int cz = 0; cz < StructureExpansionGoldenCapture.ChunkBlockSize; cz++)
+                    {
+                        List<StructureSpawnMarker> first = null;
+                        for (int repeat = 0; repeat < B20_REPEATS; repeat++)
+                        {
+                            GenerationJobData data = runner.ScheduleGeneration(new ChunkCoord(cx, cz));
+                            data.Handle.Complete();
+                            List<StructureSpawnMarker> sequence = new List<StructureSpawnMarker>();
+                            if (data.StructureSpawns.IsCreated)
+                            {
+                                StructureSpawnOrder.SortQueue(data.StructureSpawns);
+                                sequence = DrainMarkers(data.StructureSpawns);
+                            }
+
+                            data.Dispose();
+
+                            if (first == null)
+                            {
+                                first = sequence;
+                                if (sequence.Count >= 2) multiMarkerChunks++;
+                                passed &= Expect(IsCanonicalMarkerOrder(sequence),
+                                    $"B20: chunk ({cx},{cz}) dequeued its markers out of (x, z, y, pool) order");
+                            }
+                            else if (!SameMarkerSequence(first, sequence))
+                            {
+                                passed &= Expect(false,
+                                    $"B20: chunk ({cx},{cz}) regeneration {repeat} dequeued its markers in a different order");
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                passed &= Expect(multiMarkerChunks > 0, "B20: no chunk in the block had two markers, so order could not vary");
+            }
+            finally
+            {
+                runner.Dispose();
+            }
+
+            return passed;
+        }
+
+        private static List<StructureSpawnMarker> DrainMarkers(NativeQueue<StructureSpawnMarker> queue)
+        {
+            List<StructureSpawnMarker> markers = new List<StructureSpawnMarker>(queue.Count);
+            while (queue.TryDequeue(out StructureSpawnMarker marker)) markers.Add(marker);
+            return markers;
+        }
+
+        // The spec, written out rather than reusing the production comparer.
+        private static bool IsCanonicalMarkerOrder(List<StructureSpawnMarker> markers)
+        {
+            for (int i = 1; i < markers.Count; i++)
+            {
+                StructureSpawnMarker a = markers[i - 1], b = markers[i];
+                if (a.Position.x != b.Position.x) { if (a.Position.x > b.Position.x) return false; continue; }
+                if (a.Position.z != b.Position.z) { if (a.Position.z > b.Position.z) return false; continue; }
+                if (a.Position.y != b.Position.y) { if (a.Position.y > b.Position.y) return false; continue; }
+                if (a.PoolEntryIndex > b.PoolEntryIndex) return false;
+            }
+
+            return true;
+        }
+
+        private static bool SameMarkerSequence(List<StructureSpawnMarker> a, List<StructureSpawnMarker> b)
+        {
+            if (a.Count != b.Count) return false;
+            for (int i = 0; i < a.Count; i++)
+            {
+                if (!a[i].Position.Equals(b[i].Position) || a[i].PoolEntryIndex != b[i].PoolEntryIndex) return false;
+            }
+
+            return true;
+        }
+
+        private static string FormatMarkers(List<StructureSpawnMarker> markers)
+        {
+            StringBuilder sb = new StringBuilder();
+            foreach (StructureSpawnMarker m in markers)
+                sb.Append('(').Append(m.Position.x).Append(',').Append(m.Position.y).Append(',').Append(m.Position.z)
+                    .Append(" #").Append(m.PoolEntryIndex).Append(") ");
+            return sb.ToString();
         }
 
         /// <summary>
