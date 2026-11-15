@@ -86,7 +86,8 @@ startup flags on and with both off:
 The digest runs in the handoff frame, before any `Update`, tick or fluid step, so only startup generation and lighting
 can have written those voxels. **Hypothesis:** structure mods (trees, other cross-chunk flora) are applied in
 job-completion order, and where two mods overlap the later one wins, so the terrain depends on worker scheduling.
-Lighting differences follow from the voxel differences and are not evidence on their own. Equivalence gates must stay
+The light digests differ too, but are not evidence for this bug: light also varies when the voxels are identical
+(see the *Side finding* below and `LIGHTING_BUGS.md` Bug 28). Equivalence gates must stay
 in-process (the shared-snapshot stale count pattern), never cross-run digests. Roadmap §8 question 8.
 
 ### Analysis (2026-11-15)
@@ -162,7 +163,8 @@ position with the seed, and `UnityEngine.Random` is only `InitState`-ed (`World.
 
 **Side finding (not investigated).** Two Play runs that loaded the same saved world logged the same voxel digest
 (`8EF8FF1FC2E57C17`) but different light digests (`9FE8D39FFE612E9C` vs `36FA15B9DB50CA3E`). So the light digest
-varies even with identical voxels, and is not only a consequence of the voxel variance above.
+varies even with identical voxels, and is not only a consequence of the voxel variance above. Filed as
+`LIGHTING_BUGS.md` Bug 28.
 
 **Fix options** (all change trees for newly generated chunks. Saved chunks keep their voxels, so this is a new-chunk
 change, not a migration):

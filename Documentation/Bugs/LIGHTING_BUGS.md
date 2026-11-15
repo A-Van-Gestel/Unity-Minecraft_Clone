@@ -13,6 +13,34 @@ This document outlines **open** bugs related to the current lighting implementat
 
 > All previously listed lighting bugs (01–08, 10–21, 23) have been fixed. See [`_FIXED_BUGS.md`](./_FIXED_BUGS.md) for details.
 
+## Bug 28: Startup Light Differs Run to Run Even When the Voxels Are Identical
+
+**Severity:** Unknown (no visual sighting; the evidence is a digest)  
+**Status:** Open — found 2026-11-15 during the World Generation Bug 07 analysis; not investigated  
+**Files:** suspected the startup lighting phase in `World.ForceCompleteDataJobsCoroutine` (phase 2) and its edge-check rounds
+
+**Description:**
+Two Editor Play runs of one build that *loaded* the same saved world (`Editor_Temp_Saves/New World`, phase 1: 0 generation
+jobs) logged the same `[Startup] World digest` voxel hash (`8EF8FF1FC2E57C17`) but different light hashes
+(`9FE8D39FFE612E9C` vs `36FA15B9DB50CA3E`) over the same 729 chunks. The digest runs in the handoff frame, before any
+tick, so only startup loading and lighting wrote that light. Identical voxels with different light means the startup
+light result depends on something other than the voxels: job completion order, how many sweeps converge, or edge-check
+rounds that run out.
+
+**Not established:** whether the difference is visible in game, whether the same happens on fresh worlds (there the
+voxels also differ, World Generation Bug 07, so it cannot be separated), and which chunks differ (the digest is one hash
+over all chunks). n = 2.
+
+**Repro and next step:** with `"startupWorldDigest": true` in `Assets/settings.json` and persistence on, press Play twice
+on an existing volatile world and compare the light hashes. The next step is a per-chunk light hash (the opt-in
+`StartupGenerationDiagnostics` report covers voxels only), to see whether the differing chunks cluster at load-area
+edges or chunk borders.
+
+**Numbering:** 25–27 are skipped because those numbers are already cited as `Lighting #25`–`#27` in code and in
+`_FIXED_BUGS.md`.
+
+---
+
 ## Bug 24: A Top-Row Voxel Never Regains Full Sky Once Its Light Is Cleared
 
 **Severity:** Low (no in-game sighting; the one known trigger is closed)  
