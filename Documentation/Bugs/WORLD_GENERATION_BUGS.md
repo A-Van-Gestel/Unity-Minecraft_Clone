@@ -68,8 +68,9 @@ database grows; it does not affect the save format.
 ## 07. A new world's voxels differ run to run for the same seed and build
 
 **Severity:** Bug (seed-visible: the same seed does not always generate the same terrain)  
-**Confidence:** High for the symptom; the cause is a hypothesis, not investigated  
-**Files:** suspected `WorldJobManager.ProcessGenerationJobs` / `World.ApplyModifications` (structure-mod application)
+**Status:** Open / partially fixed (November 2026, Option A, confirmed in-game; guarded by B20 and BH-B21). Cross-chunk order remains until `SD-*` (Option C)  
+**Confidence:** High: the symptom reproduces in the Editor, and the root cause is shown in-process (see *Analysis (2026-11-15)*)  
+**Files:** `StandardChunkGenerator.ScheduleGeneration` (marker queue `AsParallelWriter`), `WorldJobManager.ProcessGenerationJobs` (stage 2), `World.ApplyModifications`, `World.ReplayPendingMods`
 
 Four Master `startup-new` runs of one build (2026-11-14, `d80f7ce2-dirty`, seed 0, vd 10, `-mc-set
 startupWorldDigest=true`) logged four different **voxel** digests over the same 441 waited-for chunks, with both ES-3
@@ -87,6 +88,140 @@ can have written those voxels. **Hypothesis:** structure mods (trees, other cros
 job-completion order, and where two mods overlap the later one wins, so the terrain depends on worker scheduling.
 Lighting differences follow from the voxel differences and are not evidence on their own. Equivalence gates must stay
 in-process (the shared-snapshot stale count pattern), never cross-run digests. Roadmap §8 question 8.
+
+### Analysis (2026-11-15)
+
+**Root cause (confirmed).** The raw generation output is deterministic. Structure placement is not, for two reasons:
+the result of applying structure mods depends on the order they are applied in, and that order depends on worker
+scheduling. Three order sources feed it:
+
+1. **Marker order within a chunk.** The terrain job is an `IJobFor` scheduled in parallel
+   (`StandardChunkGenerator.cs:451`, batch 8). Structure markers go into a `NativeQueue` through `AsParallelWriter`
+   (`StandardChunkGenerator.cs:444`, enqueued at `StandardChunkGenerationJob.cs:591`). The dequeue order (stage 2B
+   of `WorldJobManager.ProcessGenerationJobs`, `StructureSpawns.TryDequeue`) follows which worker ran which batch.
+   Each marker is expanded and its mods are enqueued in that order (`ExpandStructure`, `EnqueueVoxelModification`).
+2. **Which pass a job completes in.** A pass handles only the jobs whose `Handle.IsCompleted` is set
+   (`WorldJobManager.cs:1438`), then `ApplyModifications` runs (startup `World.cs:1785`/`:1787`, gameplay
+   `:3166`/`:3186`). That ordering decides whose mods reach a shared target chunk first.
+3. **Mods routed to pending skip the replacement rule** (pre-fix code; Option A below closes it). A mod whose target
+   chunk is not populated when the mods are applied goes to `ModManager.AddPendingMod` (in
+   `World.ApplyModifications`). When the target chunk populated, `World.ReplayPendingMods` wrote it straight through
+   `ChunkData.ModifyVoxel`, with no `CanApplyMod`. The same mod goes through the rule
+   (`BlockTagUtility.CanApplyMod` in `ApplyModifications`) when the target was populated first. Leaves then
+   overwrote another tree's logs or the terrain's dirt only on runs where the timing went the pending way.
+
+The replacement rule is not commutative. Leaves may replace leaves (the last writer's meta wins), a log may replace
+leaves but not the other way round, and so on. So any change in order changes voxels. RNG is not involved: marker
+election (`StandardChunkGenerationJob.cs:560`) and `ExpandStructure` (`StandardChunkGenerator.cs:882`) hash the
+position with the seed, and `UnityEngine.Random` is only `InitState`-ed (`World.cs:1028`), never drawn on these paths.
+
+**Evidence.**
+
+- *Edit mode, in-process* (`Tools/UnityCli/WorldGen/Bug07Probe.cs`, seed 0):
+  - `Repeat [0,3,6]` generated 49 chunks 6 times each. Raw map and marker set never varied. Marker dequeue order
+    varied in 31 of 31 chunks with ≥ 2 markers.
+  - `Order [0,5]` (121 chunks, 13,980 markers, 116,103 mods, 11,734 of them cross-chunk), canonical against reversed
+    order: 12,856 voxels in 70 chunks differ, mostly `Oak Leaves`→`Oak Leaves` (meta), plus logs and grass blades.
+  - Same block, canonical against cross-chunk mods applied with no rule (the replay arm): 2,063 voxels in 70 chunks
+    differ, including `Oak Log`→`Oak Leaves` (246) and `Dirt`→`Oak Leaves`/`Oak Log` (96).
+- *Editor Play, two fresh worlds* (seed 0, view distance 10, 729 digest chunks):
+  - The opt-in per-chunk diagnostic (below) gave the same raw digest `1A95207914FA4A27` in both runs, but different
+    voxel digests (`62536E5E0F671B6B` vs `CA7FAF66000A01AF`).
+  - Per chunk: 155 finals differ; 0 raw, 0 marker-set and 0 marker-count differences. Marker order differs in
+    59 chunks; the pending/replay route differs in 118 (pended 4,091 vs 3,820; replays the rule would have refused:
+    241 vs 255).
+  - 141 of the 155 differing chunks have their own or a neighbor's marker order changed, or a changed pending
+    route. Of the other 14, 5 sit at x = -13, on the edge of the digest area, so their outside neighbors are not in the
+    report.
+  - Every differing chunk has markers in its 3×3 neighborhood. Differences sit in tree footprints, not caves or bare
+    terrain.
+
+**Deterministic repro.** The Editor reproduces it, so a player build is not needed:
+
+- *Quickest, edit mode:* `unity command script run --file Tools/UnityCli/WorldGen/Bug07Probe.cs --entry
+  UnityCli.Bug07Probe.Order --args '[0, 5]' --result-only`. This is deterministic: it proves order dependence and the
+  replay rule gap in-process, with no run-to-run comparison.
+- *Symptom in Play:* in the gitignored `Assets/settings.json` (back it up first), set `"startupWorldDigest": true`
+  and `"dev": { "keepChunksInMemory": true }`. The second setting turns persistence off, so Play starts a fresh world
+  instead of the editor re-play of `Editor_Temp_Saves/New World`. Play twice, then diff the
+  `[Startup] Generation digest` blocks in `Logs/Editor.log`.
+- *Trap:* with persistence on, Play re-loads the saved volatile world (Phase 1: 0 jobs). Two such runs gave the same
+  voxel digest and tell nothing about this bug.
+
+**Blast radius.**
+
+- *New worlds:* every startup, in the player and in the Editor.
+- *Gameplay generation:* same exposure. It runs the same `ProcessGenerationJobs` → `ApplyModifications` path
+  (`World.cs:3166`/`:3186`), and adds more order sources: the rotating scan start (`WorldJobManager.cs:1413`), the
+  ms ceiling and the mods quota.
+- *Saves:* a generated chunk is always saved (`ChunkData.Populate` marks it modified, `ChunkData.cs:506`), and a
+  reload reads it back. So a saved chunk does not change on reload: the variance is frozen in at first generation.
+- *Saved chunks receiving pending mods (code inspection, not reproduced):* `pending_mods.bin` mods are replayed
+  without the rule when their target loads from disk (`World.cs:1599`). Leaves from a neighbor generated while a
+  saved chunk was unloaded could overwrite that chunk's blocks, player edits included.
+
+**Side finding (not investigated).** Two Play runs that loaded the same saved world logged the same voxel digest
+(`8EF8FF1FC2E57C17`) but different light digests (`9FE8D39FFE612E9C` vs `36FA15B9DB50CA3E`). So the light digest
+varies even with identical voxels, and is not only a consequence of the voxel variance above.
+
+**Fix options** (all change trees for newly generated chunks. Saved chunks keep their voxels, so this is a new-chunk
+change, not a migration):
+
+| Option                                                                                                                                                                                                                                                                           | Cost                                                                      | Risk                                                                                                                                       | Determinism                                                                               |
+|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------|
+| **A. Canonical order + ruled replay.** Sort each chunk's markers (x, z, y, pool) after dequeue, and run `ReplayPendingMods` through `CanApplyMod`                                                                                                                                | Small (~30 lines, main thread)                                            | Low. Replay also serves live-edit pending mods, so the rule source must stay per mod                                                       | **Partial**: removes sources 1 and 3; source 2 (which neighbor's mods land first) remains |
+| **B. Order-independent merge rule.** Resolve a contested voxel by a total priority, so applying world-gen mods is commutative: terrain the mod may not replace stays; otherwise the higher (block priority, meta, marker hash) wins. Used by `ApplyModifications` and the replay | Medium. `CanApplyMod` gains a world-gen arm; editor tools inherit it      | Medium: tree shapes change where canopies meet; the priority table must be a strict total order (prove it); only world-gen mods may use it | **Full** for startup and gameplay, whatever the completion order                          |
+| **C. Per-chunk decoration pass.** A chunk applies the canonically sorted markers of its own and its neighbors' chunks (within structure reach) when it populates, keeping only mods inside itself. No world-gen pending mods                                                     | High. A marker store per coord plus a new "neighbors' markers known" gate | High: new readiness gate in the chunk lifecycle (deadlock history; `chunk-lifecycle` skill); more main-thread work                         | **Full**, and also closes the saved-chunk replay facet                                    |
+
+Recommendation: **B together with A's two cheap parts** (sorted markers, ruled replay). It is fully deterministic and
+adds no new pipeline gate. A alone is not enough (source 2 remains).
+
+**Decision (2026-11-15):** ship **A** now, and move to **C** as the long-term goal (B is not planned).
+
+**Option A, shipped (2026-11-15; confirmed in-game):**
+
+- *Canonical marker order:* `StructureSpawnOrder.SortQueue` (`Helpers/StructureSpawnOrder.cs`) sorts a completed
+  job's markers by (x, z, y, pool entry) before stage 2B expands them. This removes source 1 for the Standard
+  generator. The frozen Legacy generator still writes its stage-2A root mods from a parallel job
+  (`LegacyChunkGenerator.cs:101`), unsorted, so Legacy worlds keep source 1. Repro K07 was red before the fix
+  and green after it; it is now baseline **B20** (`Validate Biome Selection`).
+- *Ruled replay:* `World.ReplayPendingMods` now runs `BlockTagUtility.CanApplyMod`, as the direct path does. This
+  removes source 3. Repro BH-K07 went red → green; it is now baseline **BH-B21** (`Validate Behavior`).
+- *Accepted drift:* `pending_mods.bin` stores no `Rule` or `Source`, so a mod restored after a reload replays as
+  `Default`/`Live` (the placement mask; no `ForcePlace`). The proper fix, a format bump plus migration, is `SD-P`.
+- *Call-site guard:* in the Editor, stage 2B logs `[Structure order]` (once per job) when a marker dequeues out of
+  canonical order. It covers the production call that B20 cannot reach.
+- *Still open:* source 2 (which neighbor's mods reach a shared chunk first). Two fresh runs can still differ.
+
+**Play verification (2026-11-15)**, fresh in-memory Editor worlds (seed 0, view distance 10, 729 digest chunks, 71,232
+markers, 405 chunks with ≥ 2 markers):
+
+- *With the fix, two runs:* marker order identical in all 729 chunks and 0 `[Structure order]` errors. Final voxels
+  still differ in 119 chunks (155 before the fix): the pending route still varies (6,134 vs 5,233 parked mods), and
+  whether a neighbor's spill lands before or after the target chunk's own structures decides the result. That
+  remainder is source 2.
+- *Prove-red, sort call removed:* 462 `[Structure order]` errors. Marker order differed from the fixed run in 402 of
+  405 multi-marker chunks.
+- *Cost sanity check (single Editor runs, not a benchmark):* Phase-1 main-thread pass 1,006 / 1,129 ms with the sort,
+  1,102 ms without it. The sort's cost is inside the run-to-run noise.
+
+**How a fix is proven** (owned by `validation-driven-bugfix`):
+
+- A pure helper for applying world-gen mods, following the B33/B34 pattern.
+- An edit-mode scenario that runs one fixed chunk block through it in several orders (canonical, reversed, seeded
+  shuffles, and a cross-chunk subset deferred and then replayed), and asserts identical maps. Today it is red
+  (`Bug07Probe.Order`: 12,856 / 2,063 voxels).
+- In-process in Play: compare each digest chunk's final hash against that canonical oracle in the same process.
+  Never compare digests across runs.
+
+**Instrumentation (opt-in).** `startupWorldDigest` also logs `[Startup] Generation digest`: one line
+per chunk with the final hash, the raw job hash, the marker set and order hashes, and the
+applied/refused/pended/replayed/replay-refused counts. Code: `Diagnostics/StartupGenerationDiagnostics.cs`,
+hooked in `World.ApplyModifications`/`ReplayPendingMods`/`ComputeStartupWorldDigest` and
+`WorldJobManager.ProcessGenerationJobs`.
+
+**Long-term goal (Option C):** designed in [`DETERMINISTIC_STRUCTURE_DECORATION.md`](../Design/DETERMINISTIC_STRUCTURE_DECORATION.md) (`SD-*`),
+with the pre-C pending-mod provenance item `SD-P` (§4.8).
 
 ---
 

@@ -1390,6 +1390,8 @@ saving is inferred from step 1's re-entry leg, not re-measured.
    (ES-3 flags on and off), logged four different voxel digests. Filed as
    [World Generation Bug 07](../Bugs/WORLD_GENERATION_BUGS.md) (hypothesis: structure mods applied in job-completion
    order), not investigated. Equivalence gates use the in-process stale-snapshot check, never cross-run digests.
+   **Root cause found 2026-11-15** (structure placement is order-dependent, and the order varies by worker scheduling;
+   Editor-reproducible): see Bug 07's *Analysis (2026-11-15)*. Option A in code; Option C planned as `SD-*`.
 
 ---
 

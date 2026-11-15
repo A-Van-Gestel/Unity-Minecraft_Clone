@@ -898,7 +898,9 @@ There are two drain arms, both terminating in the same call:
   adapted into a `StructureSpawnMarker`, with the mod's `ID` reinterpreted as `PoolEntryIndex` and
   its `GlobalPosition` as the marker `Position`.
 - **2B — data-driven spawns.** `GenerationJobData.StructureSpawns` already carries
-  `StructureSpawnMarker` values written by the job, so they are dequeued and passed straight through.
+  `StructureSpawnMarker` values written by the job. The job enqueues them from parallel workers, so
+  `StructureSpawnOrder.SortQueue` first puts them in canonical (x, z, y, pool entry) order: overlapping
+  structures resolve by application order, and that order must not follow worker scheduling.
 
 ```csharp
 _structureMods.Clear();
