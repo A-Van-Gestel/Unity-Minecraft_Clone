@@ -192,8 +192,9 @@ namespace Serialization
         /// I/O operations and decompression are kept on background threads to prevent frame drops.
         /// </summary>
         /// <param name="chunkVoxelPos">The voxel-space world origin of the chunk.</param>
+        /// <param name="recountOpacity">When set, the worker also recounts every section's block counts with this flat opacity lookup.</param>
         /// <returns>The deserialized <see cref="ChunkData"/>, or null if the chunk does not exist on disk.</returns>
-        public async Task<ChunkData> LoadChunkAsync(Vector2Int chunkVoxelPos)
+        public async Task<ChunkData> LoadChunkAsync(Vector2Int chunkVoxelPos, bool[] recountOpacity = null)
         {
             // CP-6 reload guard: land any pending failed-save retry for this coord first, so the read
             // below never returns pre-edit bytes. Runs synchronously on the caller (main) thread.
@@ -239,6 +240,14 @@ namespace Serialization
                         Debug.LogWarning($"[LoadChunkAsync] Chunk at voxelPos {chunkVoxelPos} deserialization failed -> Will be (re-)generated");
 
                         return null;
+                    }
+
+                    // The sections belong to this worker until the main thread adopts the chunk, and the count
+                    // lookups are built before any load starts.
+                    if (recountOpacity != null)
+                    {
+                        foreach (ChunkSection section in chunk.sections)
+                            section?.RecalculateCounts(recountOpacity);
                     }
 
                     return chunk;

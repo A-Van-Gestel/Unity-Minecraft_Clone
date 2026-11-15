@@ -246,6 +246,9 @@ namespace Diagnostics
         /// <summary>Merge remesh gate: extra diagonal mesh jobs (no light work of their own) it newly queued.</summary>
         MergeGateDiagonals,
 
+        /// <summary>Completed lighting jobs the merge ceiling left for a later frame.</summary>
+        MergeCeilingDeferred,
+
         /// <summary>Number of counters; not a counter.</summary>
         Count,
     }

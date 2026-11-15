@@ -114,6 +114,24 @@ namespace Editor.Validation.Lighting.Framework
         // MergeJob to throw for chosen chunks, exercising the skeleton's stage-2 isolation from the sim.
         private Func<Vector2Int, bool> _injectMergeFault;
 
+        // Test-only merge-ceiling model: a wall-clock window cannot be driven deterministically, so the pass's ceiling
+        // break is expressed as a per-pass merge count; the cursor is the persistent one a budgeted pass rotates.
+        private int _mergesThisPass;
+        private int _mergeScanCursor;
+
+        /// <summary>
+        /// Test-only (default 0 = off): the most flights one completion pass merges; every later candidate stays in
+        /// flight for the next pass, as the unvisited jobs of a pass that broke on its time ceiling do. Counting merges
+        /// instead of reading a clock keeps the ceiling deterministic.
+        /// </summary>
+        public int MergesPerPassLimit { get; set; }
+
+        /// <summary>
+        /// Test-only (default false): visit the pass's candidates from <see cref="PipelinePassBudget.NextScanStart"/>
+        /// with a persistent cursor, as a budgeted production pass does; false keeps plain front-to-back order.
+        /// </summary>
+        public bool RotateMergeStart { get; set; }
+
         /// <summary>
         /// Scheduler mode only: when &gt; 0, the ~1 s <c>PromoteAll</c> fail-safe is simulated every N frames
         /// (a seed scan + <see cref="LightWorkScheduler.PromoteAll"/>). Default 0 = OFF — the load-bearing
@@ -233,8 +251,12 @@ namespace Editor.Validation.Lighting.Framework
                 BuildPassCandidates(order);
                 _currentPredicate = completionPredicate;
                 _chunksPromotedThisPass = 0;
+                _mergesThisPass = 0;
 
-                JobCompletionPass.RunMergeLoop(_passCandidates, this, _enrolledCoordsScratch);
+                int mergeStart = RotateMergeStart
+                    ? PipelinePassBudget.NextScanStart(ref _mergeScanCursor, _passCandidates.Count, true)
+                    : 0;
+                JobCompletionPass.RunMergeLoop(_passCandidates, this, _enrolledCoordsScratch, startIndex: mergeStart);
                 // No between-loop work for the sim (production batches dropped updates + mesh rebuilds here).
                 JobCompletionPass.RunRemoveAndPromote(_enrolledCoordsScratch, this);
 
@@ -367,6 +389,13 @@ namespace Editor.Validation.Lighting.Framework
                 return false;
             }
 
+            if (MergesPerPassLimit > 0 && _mergesThisPass >= MergesPerPassLimit)
+            {
+                _carriedOverScratch.Add(pf);
+                return false;
+            }
+
+            _mergesThisPass++;
             return true;
         }
 

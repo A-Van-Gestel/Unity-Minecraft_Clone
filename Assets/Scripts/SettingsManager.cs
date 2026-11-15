@@ -674,6 +674,18 @@ public class Settings
              TooltipTags.DefaultColorStart + "4" + TooltipTags.DefaultColorEnd)]
     public float meshApplyBudgetMs = 4f;
 
+    /// <summary>
+    /// Per-frame time ceiling for merging finished lighting jobs during gameplay, in ms; 0 merges every completed job.
+    /// A job left unmerged keeps its buffers one more frame and counts against the in-flight cap (ES-8).
+    /// </summary>
+    [SettingField(SettingsTab.Performance, Label = "Light Merge Budget (ms)", Format = "f1", Order = 9)]
+    [Range(0f, 20f)]
+    [Tooltip("Per-frame time ceiling for merging finished lighting results into the world (0 = no ceiling).\n" +
+             "Lower = smoother frames while chunks light; higher = lighting settles sooner.\n\n" +
+             TooltipTags.Performance + "Bounds the main-thread cost of lighting merges per frame.\n" +
+             TooltipTags.DefaultColorStart + "8" + TooltipTags.DefaultColorEnd)]
+    public float lightMergeBudgetMs = 8f;
+
     // NOTE: there is no draw budget. The old "Chunk Draw Budget (ms)" ceiling paced a queue whose only
     // job was triggering chunk load animations; MP-6 retired that stage and moved the trigger into the
     // mesh apply pass above, so the apply budget is now the whole mesh tail.
@@ -861,6 +873,25 @@ public class Settings
     [Tooltip("Logs a checksum of the loaded area's voxels and light when startup hands off, and checks the shared sweep snapshots.\n\n" +
              TooltipTags.Warning + "Adds a few hundred milliseconds to startup.")]
     public bool startupWorldDigest = false;
+
+    /// <summary>
+    /// If true, the lighting merge resolves a run of cross-chunk light mods into the same target chunk once instead of
+    /// once per mod, and tests whether a target already merged with a set lookup instead of a list scan. Rollback
+    /// flag (ES-34).
+    /// </summary>
+    [SettingField(SettingsTab.Dev, Label = "Lighting: Route Cache", DebugOnly = true, Order = 25)]
+    [Tooltip("The lighting merge looks up each neighbor chunk once per run of light changes into it, not once per change.\n\n" +
+             TooltipTags.Performance + "Rollback flag: turn off only to compare against per-change lookups.")]
+    public bool lightRouteCache = true;
+
+    /// <summary>
+    /// If true, a chunk loaded from disk has its section block counts recounted on the load worker instead of on the
+    /// main thread when it is adopted. Rollback flag (ES-8).
+    /// </summary>
+    [SettingField(SettingsTab.Dev, Label = "Loading: Recount On Worker", DebugOnly = true, Order = 26)]
+    [Tooltip("Chunks loaded from disk count their blocks on the loading thread, not the main thread.\n\n" +
+             TooltipTags.Performance + "Rollback flag: turn off only to compare against the main-thread recount.")]
+    public bool loadRecountOnWorker = true;
 
     /// <summary>
     /// If true, the cloud pattern and tile meshes build on the job workers while the world loads, instead of on the

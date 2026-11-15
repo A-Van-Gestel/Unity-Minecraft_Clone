@@ -7,8 +7,8 @@ namespace Helpers
     /// <summary>The budgeted per-frame pipeline passes a stop reason can be attributed to (FP-2).</summary>
     /// <remarks>
     /// Four, not five: MP-6 retired the draw budget along with the stage it bounded. The lighting
-    /// <i>merge</i> (<c>ProcessLightingJobs</c>) is deliberately absent — it takes no budget window, so it
-    /// has no stop reason to report.
+    /// <i>merge</i> (<c>ProcessLightingJobs</c>) is deliberately absent: its ceiling reports the jobs a break
+    /// leaves through the <c>MergeCeilingDeferred</c> counter instead of a stop reason.
     /// </remarks>
     public enum PipelinePass : byte
     {
@@ -235,6 +235,21 @@ namespace Helpers
             // Walked the queue to the end. Serving nothing despite having candidates is the readiness-bound
             // signal; having no candidates at all is a healthy idle pass.
             return candidatesSeen > 0 && scheduled == 0 ? PassStopReason.AllDeclined : PassStopReason.OutOfWork;
+        }
+
+        /// <summary>
+        /// The visit start of a budgeted completion pass: under a ceiling the cursor advances one slot per pass so a break
+        /// cannot starve the same candidate every frame; without one the pass keeps plain front-to-back order.
+        /// </summary>
+        /// <param name="cursor">The pass's persistent cursor, advanced (modulo <paramref name="count"/>) only under a ceiling.</param>
+        /// <param name="count">The candidates this pass visits.</param>
+        /// <param name="hasBudget">Whether the pass runs under a ceiling.</param>
+        /// <returns>The index to start visiting from.</returns>
+        public static int NextScanStart(ref int cursor, int count, bool hasBudget)
+        {
+            if (!hasBudget || count <= 0) return 0;
+            cursor = (cursor + 1) % count;
+            return cursor;
         }
 
         /// <summary>Starts a budget window ending <paramref name="budgetMs"/> from now (≤ 0 ms → an unbudgeted window; tiny positive budgets floored via <see cref="SanitizeBudgetMs"/>).</summary>

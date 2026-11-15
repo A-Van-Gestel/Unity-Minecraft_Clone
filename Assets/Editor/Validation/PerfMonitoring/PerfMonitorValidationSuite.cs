@@ -20,7 +20,7 @@ namespace Editor.Validation.PerfMonitoring
     /// scenarios (B11–B19: GC readings, frame-timing back-fill, hitch detection) live in the <c>.Frame</c> part, and the
     /// coverage scenarios (B20–B23: the unattributed remainder and the counters) in the <c>.Coverage</c> part, and the
     /// worker scenarios (B24–B30: job timing, per-job samples and storage I/O) in the <c>.Workers</c> part, the tick
-    /// breakdown (B31) in the <c>.Tick</c> part, the export scenarios (B32–B37: phase statistics, the tier floor and export) in the <c>.Export</c> part, the startup timeline (B38–B39) and phase report (B41) in the <c>.Startup</c> part, and the lighting-merge breakdown (B40) in the <c>.Merge</c> part.
+    /// breakdown (B31) in the <c>.Tick</c> part, the export scenarios (B32–B37: phase statistics, the tier floor and export) in the <c>.Export</c> part, the startup timeline (B38–B39) and phase report (B41) and the cross-chunk mod census (B42) in the <c>.Startup</c> part, and the lighting-merge breakdown (B40) in the <c>.Merge</c> part.
     /// <para>
     /// Timing <i>values</i> are not asserted beyond "zero" versus "positive" — wall-clock durations are not
     /// deterministic. Every scenario that touches the static store starts and ends from
@@ -107,6 +107,7 @@ namespace Editor.Validation.PerfMonitoring
                 new Scenario("B39 Startup timeline: leaving the start chunk interrupts, no settle times out, the anchor falls back to Awake, the request is taken once", RunB39StartupInterruptAndTimeout),
                 new Scenario("B40 Merge breakdown: every totals field maps to its counter, the band predicate is row-exact, a real merge compacts a uniform-lit absent section without churn and verifies its kept counts (a planted drift is caught and repaired); below Systems only the verifier counts", RunB40MergeBreakdown),
                 new Scenario("B41 Startup phase report: phase 1, one line per sweep in order, sweeps past the cap folded into one row, the total sums every sweep, the tail; an unfinished coroutine says so", RunB41StartupPhaseReport),
+                new Scenario("B42 Cross-chunk mod census: repeats per (voxel, channel) key, redundant placements per channel, a removal resets its key, the scratch map is cleared per call, a zeroed placement is not a removal", RunB42CrossChunkModCensus),
             };
             return ValidationSuiteRunner.Execute("Performance Monitor", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }

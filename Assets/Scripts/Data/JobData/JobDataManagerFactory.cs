@@ -18,6 +18,20 @@ namespace Data.JobData
     public static class JobDataManagerFactory
     {
         /// <summary>
+        /// Builds the flat <c>blockId → IsOpaque</c> lookup the section block counts read, so counting needs no
+        /// <see cref="BlockType"/> dereference and can run off the main thread.
+        /// </summary>
+        /// <param name="blockTypes">The block palette.</param>
+        /// <returns>One entry per block id.</returns>
+        public static bool[] BuildIsOpaqueById(BlockType[] blockTypes)
+        {
+            bool[] isOpaqueById = new bool[blockTypes.Length];
+            for (int i = 0; i < blockTypes.Length; i++)
+                isOpaqueById[i] = blockTypes[i] != null && blockTypes[i].IsOpaque;
+            return isOpaqueById;
+        }
+
+        /// <summary>
         /// Builds the native job data and the flat active-voxel lookup from the given block database.
         /// The caller owns the returned native containers and must dispose them
         /// (<see cref="JobDataManager.Dispose"/> + <see cref="FluidVertexTemplatesNativeData.Dispose"/>).

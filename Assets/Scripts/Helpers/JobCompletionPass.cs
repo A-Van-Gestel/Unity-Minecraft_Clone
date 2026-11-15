@@ -87,8 +87,8 @@ namespace Helpers
         /// the job registry's keys; the sim applies its completion-order strategy first).</param>
         /// <param name="driver">The side-effect provider.</param>
         /// <param name="enrolled">Reused buffer; cleared here, then filled with every job that reached the
-        /// merge <c>finally</c> (completed or stage-2-faulted). Also read by the driver's merge (production's
-        /// <c>_completedLightJobs.Contains</c> cross-chunk check), so enrollment happens progressively.</param>
+        /// merge <c>finally</c> (completed or stage-2-faulted). Enrollment happens progressively, so a later
+        /// merge in the same pass can ask whether a job already merged.</param>
         /// <param name="window">Optional P-4 §3.4 time ceiling, checked <i>between</i> jobs (never mid-job — one
         /// oversized merge can overshoot it once). On expiry the pass breaks and the un-visited remainder is
         /// simply not enrolled, so it stays in the registry and is retried next pass (its containers are held one
@@ -96,6 +96,7 @@ namespace Helpers
         /// <param name="startIndex">Optional rotating visit start (P-4 §3.4 fairness): candidates are visited
         /// from this index and wrap, so a budget break cannot systematically starve the same high-index job every
         /// frame. <c>0</c> is plain front-to-back order.</param>
+        /// <param name="enrolledSet">Optional set kept equal to <paramref name="enrolled"/> at every step, for O(1) membership.</param>
         /// <returns>
         /// <c>true</c> when the loop stopped because the <paramref name="window"/> expired, <c>false</c> when
         /// it walked every candidate (FP-2 stop-reason attribution). Returned rather than re-derived by the
@@ -108,9 +109,11 @@ namespace Helpers
             IJobCompletionDriver<TKey> driver,
             List<TKey> enrolled,
             PipelinePassBudget.Window window = default,
-            int startIndex = 0)
+            int startIndex = 0,
+            HashSet<TKey> enrolledSet = null)
         {
             enrolled.Clear();
+            enrolledSet?.Clear();
 
             int count = candidates.Count;
             if (count == 0) return false; // Also guards the modulo below against a divide-by-zero.
@@ -151,6 +154,7 @@ namespace Helpers
                 {
                     driver.ReleaseJob(candidate);
                     enrolled.Add(candidate);
+                    enrolledSet?.Add(candidate);
                 }
             }
 

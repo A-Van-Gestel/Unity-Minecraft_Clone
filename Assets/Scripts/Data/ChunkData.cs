@@ -555,7 +555,7 @@ namespace Data
                 else
                 {
                     // Recalculate counts so IsFullySolid works correctly for meshing
-                    sections[i].RecalculateCounts(World.Instance.BlockTypes);
+                    sections[i].RecalculateCounts(World.Instance.IsOpaqueById);
                 }
             }
         }
@@ -564,7 +564,8 @@ namespace Data
         /// Populates this ChunkData instance with data from a loaded save file.
         /// </summary>
         /// <param name="loadedData">The chunk data object loaded from disk.</param>
-        public void PopulateFromSave(ChunkData loadedData)
+        /// <param name="countsReady">True when the load worker already recounted every section's block counts.</param>
+        public void PopulateFromSave(ChunkData loadedData, bool countsReady = false)
         {
 #if UNITY_INCLUDE_INSTRUMENTATION
             if (World.Instance.settings.enableSaveSystemDiagnosticLogs)
@@ -611,11 +612,11 @@ namespace Data
             if (loadedData.NeedsInitialLighting) FlagInitialLighting();
 
 
-            // Recalculate counts
-            if (World.Instance != null)
+            // Recalculate counts, unless the load worker already did
+            if (!countsReady && World.Instance != null)
             {
                 foreach (ChunkSection section in sections)
-                    section?.RecalculateCounts(World.Instance.BlockTypes);
+                    section?.RecalculateCounts(World.Instance.IsOpaqueById);
             }
 
             NoteRepopulated();
@@ -1540,19 +1541,19 @@ namespace Data
         /// </para>
         /// </summary>
         /// <param name="jobLightMap">The job's computed light map (section-contiguous, full chunk).</param>
-        /// <param name="blockTypes">Block palette for the instrumented-build block-count verifier, or null to skip it
+        /// <param name="isOpaqueById">Flat opacity lookup for the instrumented-build block-count verifier, or null to skip it
         /// (the harness passes null — counts are meshing-only, light-irrelevant).</param>
         /// <returns>True if any voxel's effective light value differs from its pre-merge value. P9-2 uses
         /// this to re-arm the edge-check cascade on effect rather than on stability; a pass that returns
         /// false left every border byte-identical to what the neighbors already read.</returns>
-        public bool ApplyJobLightMap(NativeArray<ushort> jobLightMap, [CanBeNull] BlockType[] blockTypes)
+        public bool ApplyJobLightMap(NativeArray<ushort> jobLightMap, [CanBeNull] bool[] isOpaqueById)
         {
             PerfMergeTotals unused = default;
-            return ApplyJobLightMap(jobLightMap, blockTypes, 0, ChunkMath.CHUNK_HEIGHT, ref unused);
+            return ApplyJobLightMap(jobLightMap, isOpaqueById, 0, ChunkMath.CHUNK_HEIGHT, ref unused);
         }
 
         /// <summary>
-        /// <see cref="ApplyJobLightMap(NativeArray{ushort}, BlockType[])"/> clamped to the job's
+        /// <see cref="ApplyJobLightMap(NativeArray{ushort}, bool[])"/> clamped to the job's
         /// gathered band (LI-2): a section entirely outside <c>[bandMinY, bandHeight)</c> is left as it is — section,
         /// light and compact byte — because there the light map still holds the schedule-time copy of this chunk's own
         /// light. Charges the out-of-band and churned sections to <paramref name="totals"/> while the monitor's slots are
@@ -1565,12 +1566,12 @@ namespace Data
         /// </para>
         /// </summary>
         /// <param name="jobLightMap">The job's computed light map (section-contiguous, full chunk).</param>
-        /// <param name="blockTypes">Block palette for the instrumented-build block-count verifier, or null to skip it.</param>
+        /// <param name="isOpaqueById">Flat opacity lookup for the instrumented-build block-count verifier, or null to skip it.</param>
         /// <param name="bandMinY">The job's first gathered row (global Y); 0 merges from the bottom.</param>
         /// <param name="bandHeight">The row above the job's last gathered row (global Y, exclusive); <c>CHUNK_HEIGHT</c> merges to the top.</param>
         /// <param name="totals">The lighting merge's running totals.</param>
         /// <returns>True if any voxel's effective light value differs from its pre-merge value.</returns>
-        public bool ApplyJobLightMap(NativeArray<ushort> jobLightMap, [CanBeNull] BlockType[] blockTypes, int bandMinY,
+        public bool ApplyJobLightMap(NativeArray<ushort> jobLightMap, [CanBeNull] bool[] isOpaqueById, int bandMinY,
             int bandHeight, ref PerfMergeTotals totals)
         {
             const int sectionVolume = ChunkMath.SECTION_VOLUME;
@@ -1671,7 +1672,7 @@ namespace Data
                         // The merge writes light only, so the block counts SetVoxel maintains are still current.
                         if (!isNewSection && sections[s] != null)
                         {
-                            VerifySectionCounts(s, section, blockTypes, ref totals);
+                            VerifySectionCounts(s, section, isOpaqueById, ref totals);
                         }
                         else if (isNewSection && sections[s] == null && PerfStore.SlotsActive)
                         {
@@ -1693,16 +1694,16 @@ namespace Data
         /// </summary>
         /// <param name="sectionIndex">The section's index, for the log.</param>
         /// <param name="section">The kept section.</param>
-        /// <param name="blockTypes">The block palette, or null to skip the check.</param>
+        /// <param name="isOpaqueById">The flat opacity lookup, or null to skip the check.</param>
         /// <param name="totals">The lighting merge's running totals.</param>
         [Conditional("UNITY_INCLUDE_INSTRUMENTATION")]
-        private void VerifySectionCounts(int sectionIndex, ChunkSection section, [CanBeNull] BlockType[] blockTypes,
+        private void VerifySectionCounts(int sectionIndex, ChunkSection section, [CanBeNull] bool[] isOpaqueById,
             ref PerfMergeTotals totals)
         {
-            if (blockTypes == null) return;
+            if (isOpaqueById == null) return;
 
             long start = PerfStore.Begin();
-            section.CountVoxels(blockTypes, out int nonAir, out int opaque, out int emissive, out int emitterFluid);
+            section.CountVoxels(isOpaqueById, out int nonAir, out int opaque, out int emissive, out int emitterFluid);
             bool fluidComparable = section.emitterFluidGeneration == FluidBlockLookup.Generation;
             bool drifted = nonAir != section.nonAirCount || opaque != section.opaqueCount || emissive != section.emissiveCount
                            || (fluidComparable && emitterFluid != section.emitterFluidCount);
@@ -1719,7 +1720,7 @@ namespace Data
                                    "A voxel write bypassed the counts SetVoxel maintains; later drifts are only counted.");
                 }
 
-                section.RecalculateCounts(blockTypes);
+                section.RecalculateCounts(isOpaqueById);
             }
 
             PerfTickTotals.Lap(ref totals.CountsTicks, start);

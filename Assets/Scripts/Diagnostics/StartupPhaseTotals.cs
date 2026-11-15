@@ -54,6 +54,15 @@ namespace Diagnostics
             /// <summary>Shared snapshot maps the sweep filled (voxel + light); 0 when each job copied its own.</summary>
             public int SharedSnapshots;
 
+            /// <summary>The merge's cross-chunk route split (Systems tier and above; census only when enabled).</summary>
+            public PerfRouteTotals Route;
+
+            /// <summary>FNV-1a over the chunks the sweep merged, in merge order, and how many it merged; not folded by <see cref="Add"/>.</summary>
+            public ulong MergeOrderHash;
+
+            /// <inheritdoc cref="MergeOrderHash"/>
+            public int MergeOrderJobs;
+
             /// <summary>Adds another sweep's totals into this one.</summary>
             /// <param name="other">The sweep to fold in.</param>
             public void Add(in Sweep other)
@@ -73,6 +82,7 @@ namespace Diagnostics
                 CrossEffective += other.CrossEffective;
                 Collections += other.Collections;
                 SharedSnapshots += other.SharedSnapshots;
+                Route.Add(other.Route);
             }
         }
 
@@ -196,6 +206,38 @@ namespace Diagnostics
                               Inv($"meshes {TicksToMs(c.MeshTicks):F1} ms ({c.MeshesBuilt} built), tiles {TicksToMs(c.TileTicks):F1} ms ") +
                               Inv($"({c.TilesCreated} created), other {TicksToMs(otherTicks):F1} ms; {c.Collections} collections ") +
                               Inv($"(pattern {c.PatternCollections}, threshold {c.ThresholdCollections}, meshes {c.MeshCollections}, tiles {c.TileCollections})"));
+
+            if (SweepCount > 0) AppendRoute(sb, "Route sweep 1", _sweeps[0].Route);
+            AppendRoute(sb, "Route total", total.Route);
+        }
+
+        /// <summary>Appends each recorded sweep's merge-order hash and merge count, culture-invariant, on one line.</summary>
+        /// <param name="sb">The text to append to.</param>
+        public void AppendMergeOrder(StringBuilder sb)
+        {
+            int rows = SweepCount < MaxRecordedSweeps ? SweepCount : MaxRecordedSweeps;
+            for (int i = 0; i < rows; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                sb.Append(Inv($"s{i + 1} {_sweeps[i].MergeOrderHash:X16} ({_sweeps[i].MergeOrderJobs})"));
+            }
+        }
+
+        // The route split: where the emitted mods went, where effective applies came from, the removal scans, and the
+        // sampled share of per-mod time spent resolving the target (an estimate).
+        private static void AppendRoute(StringBuilder sb, string label, in PerfRouteTotals r)
+        {
+            double sameTarget = r.Emitted > 0 ? 100.0 * r.SameTargetMods / r.Emitted : 0.0;
+            long sampled = r.SampleResolveTicks + r.SampleArmTicks;
+            double resolveShare = sampled > 0 ? 100.0 * r.SampleResolveTicks / sampled : 0.0;
+            string census = r.CensusMods > 0
+                ? Inv($"census {r.CensusMods} mods, {r.CensusRepeats} repeats, {r.CensusRedundant} redundant, {r.CensusRemovals} removals")
+                : "census off";
+            sb.AppendLine(Inv($"{label,-17} emitted {r.Emitted} = drop {r.Drops} + persist {r.Persists} + defer {r.Defers} + direct {r.Direct} ") +
+                              Inv($"({(r.Reconciles ? "OK" : "MISMATCH")}); drained {r.Drained}; effective direct {r.EffectiveDirect} / ") +
+                              Inv($"drained {r.EffectiveDrained} / pull-back {r.EffectivePullBack}; support {r.SupportScans} scans ") +
+                              Inv($"{TicksToMs(r.SupportTicks):F1} ms (route {TicksToMs(r.SupportRouteTicks):F1}, drain {TicksToMs(r.SupportDrainTicks):F1}); ") +
+                              Inv($"same-target {sameTarget:F1} %; resolve {resolveShare:F1} % of {r.Samples} samples (est.); {census}"));
         }
 
         private static void AppendSweep(StringBuilder sb, string label, in Sweep s)

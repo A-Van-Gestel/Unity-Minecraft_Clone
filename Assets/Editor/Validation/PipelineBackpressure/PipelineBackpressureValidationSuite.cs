@@ -96,6 +96,7 @@ namespace Editor.Validation.PipelineBackpressure
                 new Scenario("B32 Station-walk trace capacity: scales with stations and LoadDistance, clamps both ways (CMD-6)", RunB32StationWalkCapacity),
                 new Scenario("B33 Structure-mods quota: the gameplay cap unchanged, the startup lift unbounded by any cap (ES-3)", RunB33StructureModsQuota),
                 new Scenario("B34 Startup mesh wave: begins only after a startup that generated no terrain; the cap rises only while it runs, never past the in-flight cap; it ends on drain, on leaving the chunk, or on timeout (ES-36)", RunB34StartupMeshWave),
+                new Scenario("B35 Budgeted merge scan start: unbudgeted stays 0, budgeted rotates one slot per pass and wraps, every index starts once, degenerate and shrunken counts stay in range", RunB35ScanStart),
             };
             return ValidationSuiteRunner.Execute("Pipeline Backpressure", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }

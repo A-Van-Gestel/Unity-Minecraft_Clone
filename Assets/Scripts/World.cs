@@ -159,6 +159,34 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     [NonSerialized]
     public bool[] IsSolidById;
 
+    /// <summary>Flat <c>blockId → IsOpaque</c> lookup for the section block counts, built on first use from <see cref="BlockTypes"/>.</summary>
+    /// <remarks>
+    /// A snapshot like <see cref="IsSolidById"/>: rebuilt only when the palette array is replaced, not when a block is
+    /// edited in place. Null while there is no palette (counts then fall back to non-air only).
+    /// </remarks>
+    public bool[] IsOpaqueById
+    {
+        get
+        {
+            BlockType[] blockTypes = BlockTypes;
+            if (!ReferenceEquals(blockTypes, _isOpaqueSource))
+            {
+                _isOpaqueSource = blockTypes;
+                _isOpaqueById = blockTypes != null ? JobDataManagerFactory.BuildIsOpaqueById(blockTypes) : null;
+            }
+
+            return _isOpaqueById;
+        }
+    }
+
+    // Not serialized, for the reason IsSolidById's remark gives.
+    [NonSerialized]
+    private bool[] _isOpaqueById;
+
+    // The palette array _isOpaqueById was built from.
+    [NonSerialized]
+    private BlockType[] _isOpaqueSource;
+
     public Material OpaqueMaterial => _blockDatabase.opaqueMaterial;
     public Material TransparentMaterial => _blockDatabase.transparentMaterial;
     public Material LiquidMaterial => _blockDatabase.liquidMaterial;
@@ -1228,7 +1256,14 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
             string staleCheck = _startupStaleSnapshotsChecked
                 ? $"{_startupStaleSnapshots} stale shared snapshots"
                 : "shared snapshots not checked (off)";
-            Debug.Log($"[Startup] World digest: voxels {voxelDigest:X16}, light {lightDigest:X16} over {chunksToWaitFor.Count} chunks; {staleCheck}");
+            string routeCacheCheck = settings.lightRouteCache
+                ? $"{JobManager.RouteCacheMismatches} route-cache mismatches"
+                : "route cache not checked (off)";
+            Debug.Log($"[Startup] World digest: voxels {voxelDigest:X16}, light {lightDigest:X16} over {chunksToWaitFor.Count} chunks; {staleCheck}; {routeCacheCheck}");
+
+            StringBuilder mergeOrder = new StringBuilder(capacity: 512);
+            _startupPhaseTotals.AppendMergeOrder(mergeOrder);
+            Debug.Log($"[Startup] Merge order: {mergeOrder}");
         }
     }
 
@@ -1541,7 +1576,8 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
             // 1. Try Load from Disk if allowed
             if (settings.EnablePersistence)
             {
-                ChunkData loaded = await StorageManager.LoadChunkAsync(chunkVoxelPos);
+                bool[] workerRecount = settings.loadRecountOnWorker ? IsOpaqueById : null;
+                ChunkData loaded = await StorageManager.LoadChunkAsync(chunkVoxelPos, workerRecount);
 
                 // A read that finished before its await resumes synchronously, inside the World.Update slot that started
                 // the load; that slot already counts the time, and a second slot over it would overlap.
@@ -1575,7 +1611,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     #endif
 
                     // Hydrate the placeholder
-                    data.PopulateFromSave(loaded);
+                    data.PopulateFromSave(loaded, countsReady: workerRecount != null);
                     ChunkPool.ReturnChunkData(
                         loaded); // Recycle the outer shell of the loaded data now that we've extracted its contents.
                     // Data-only loads stay unregistered (NeedsActiveVoxelRescan) and are scanned by Chunk.Reset on
@@ -1831,6 +1867,11 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
 
         if (settings.enableLighting)
         {
+            // The census adds time outside the merge laps, so it rides the diagnostic digest switch.
+            JobManager.RouteCensusEnabled = settings.startupWorldDigest;
+            JobManager.RouteSplitEnabled = true;
+            JobManager.RouteCacheMismatches = 0;
+
             // This logic is a synchronous version of what the Update() loop does asynchronously.
             while (HasActionableLightingWork(chunksInLoadArea) || JobManager.LightingJobs.Count > 0)
             {
@@ -1840,6 +1881,8 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                 int sweepCollections = GC.CollectionCount(0);
                 long acquireAtStart = JobManager.TempJobAcquireTicks;
                 PerfMergeTotals mergeAtStart = JobManager.MergeTotals;
+                PerfRouteTotals routeAtStart = JobManager.RouteTotals;
+                JobManager.ResetMergeOrder();
                 long sweepLap = Stopwatch.GetTimestamp();
 
                 // --- Step 2a: Trigger Initial Lighting Requests ---
@@ -1960,6 +2003,9 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                 sweep.Jobs = jobsScheduledThisSweep;
                 sweep.CrossRouted = JobManager.LastCrossChunkModsApplyRouted;
                 sweep.CrossEffective = JobManager.LastCrossChunkModsEffective;
+                sweep.Route = PerfRouteTotals.Delta(JobManager.RouteTotals, routeAtStart);
+                sweep.MergeOrderHash = JobManager.MergeOrderHash;
+                sweep.MergeOrderJobs = JobManager.MergeOrderCount;
                 sweep.Collections = GC.CollectionCount(0) - sweepCollections;
                 phaseTotals.AddSweep(sweep);
 
@@ -1986,11 +2032,16 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                     AppendEffectiveSample(tail);
                     tail.Append(logLightingDiagnostics ? " | See [LightingDiag] tail logs above for the recycling cluster." : " | Enable settings.enableDiagnosticLogs to capture the recycling cluster.");
                     Debug.LogError(tail.ToString());
+                    JobManager.RouteCensusEnabled = false;
+                    JobManager.RouteSplitEnabled = false;
                     yield break; // Exit the coroutine
                 }
 
                 yield return null; // Wait a frame
             }
+
+            JobManager.RouteCensusEnabled = false;
+            JobManager.RouteSplitEnabled = false;
         }
         else
         {
@@ -3189,11 +3240,15 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         PerfStore.End(PerfSlot.Apply, applyStart);
 
         // 3. Process completed lighting jobs from the PREVIOUS frame.
-        //    P9-0: timed in its own slot. This merge takes no budget window, so it reports no stop reason and
-        //    was invisible to every capture to date — the gap that forced the P9-0a analysis to attribute its
-        //    unexplained frame cost by a fitted model rather than a measurement.
+        //    P9-0: timed in its own slot. ES-8: bounded by the lightMergeBudgetMs ceiling (0 = unbudgeted); a break
+        //    leaves completed jobs registered for a later frame. It reports no pass stop reason: the jobs a break
+        //    leaves are counted in MergeCeilingDeferred instead.
         long lightMergeStart = PerfStore.Begin(PerfSlot.LightMerge);
-        JobManager.ProcessLightingJobs();
+        // Startup-only diagnostics end here even if the startup coroutine stopped early.
+        JobManager.RouteCensusEnabled = false;
+        JobManager.RouteSplitEnabled = false;
+        JobManager.ProcessLightingJobs(
+            PipelinePassBudget.StartWindow(PipelinePassBudget.ScaleCeilingMs(settings.lightMergeBudgetMs, ceilingScaleInterval)));
         PerfStore.End(PerfSlot.LightMerge, lightMergeStart);
 
         // 4. Schedule lighting jobs from the ready set (only chunks whose gates can plausibly pass —
@@ -3663,6 +3718,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         PerfStore.SampleTotal(PerfCounter.MergeCountDrifts, totals.CountDrifts);
         PerfStore.SampleTotal(PerfCounter.MergeGateSkippable, totals.GateSkippable);
         PerfStore.SampleTotal(PerfCounter.MergeGateDiagonals, totals.GateDiagonals);
+        PerfStore.SampleTotal(PerfCounter.MergeCeilingDeferred, totals.CeilingDeferredJobs);
     }
 
     /// <summary>Samples the behavior tick's running totals into the <c>Tick*</c> counters and the fluid ticker pool's misses.</summary>

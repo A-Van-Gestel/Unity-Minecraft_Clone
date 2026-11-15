@@ -21,7 +21,7 @@ namespace Editor.Validation.Meshing
     /// <list type="bullet">
     /// <item><b>B27</b> — skeleton-order replay: multi-job fault isolation (stage-1 carries over without
     /// releasing, stage-2 still releases + enrolls), remove-strictly-after-merge ordering, the P-4 window
-    /// break, and the rotating <c>startIndex</c> visit order.</item>
+    /// break, the rotating <c>startIndex</c> visit order, and the optional enrolled set mirroring the enrolled list.</item>
     /// <item><b>B31–B33</b> (MP-6 §8.1) — the production <see cref="MeshCompletionDriver"/> itself, driven
     /// through the real skeleton behind a recording <see cref="IMeshCompletionHost"/>: the MP-6 apply →
     /// load-animation mapping (B31), the merge-fault path (B32), and the <c>_curJob</c> scratch lifecycle
@@ -180,6 +180,25 @@ namespace Editor.Validation.Meshing
                     !threw && enrolled.Count == 0 && driver.OpLog.Length == 0
                         ? "no exception, enrolled cleared, driver untouched"
                         : $"threw={threw}, enrolled={enrolled.Count}, ops: {driver.OpLog}");
+            }
+
+            // Leg 5 — the optional enrolled set (the lighting route's O(1) "already merged" test) holds exactly
+            // the enrolled jobs, through both fault stages, and starts each pass empty.
+            {
+                RecordingCompletionDriver driver = new RecordingCompletionDriver(
+                    incomplete: new[] { 2 }, stage1FaultKey: 3, stage2FaultKey: 4);
+                List<int> enrolled = new List<int>();
+                HashSet<int> enrolledSet = new HashSet<int> { 99 }; // a stale entry from a previous pass
+
+                JobCompletionPass.RunMergeLoop(new[] { 1, 2, 3, 4 }, driver, enrolled, default, 0, enrolledSet);
+
+                bool same = enrolledSet.Count == enrolled.Count && enrolledSet.SetEquals(enrolled);
+                ok &= MeshAssert.IsTrue(
+                    "B27.6 the enrolled set mirrors enrollment (merged + stage-2-faulted, no stale entry)",
+                    same && enrolledSet.SetEquals(new[] { 1, 4 }),
+                    same && enrolledSet.SetEquals(new[] { 1, 4 })
+                        ? "set {1, 4} equals the enrolled list; the stale 99 was cleared"
+                        : $"set {{{string.Join(", ", enrolledSet)}}} vs enrolled [{string.Join(", ", enrolled)}], expected {{1, 4}}");
             }
 
             return ok;

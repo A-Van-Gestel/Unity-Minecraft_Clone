@@ -49,10 +49,9 @@ namespace Benchmarks
             Apply = 1,
 
             /// <summary>
-            /// The <b>unbudgeted</b> lighting merge (<c>WorldJobManager.ProcessLightingJobs</c>): completing
-            /// finished jobs and merging their light maps back into chunk data. Deliberately its own slot —
-            /// it is the one pipeline pass that takes no budget window, so it is invisible to the stop-reason
-            /// instrument and was the leading suspect for the cost P9-0a could not attribute.
+            /// The lighting merge (<c>WorldJobManager.ProcessLightingJobs</c>): completing finished jobs and
+            /// merging their light maps back into chunk data, under the <c>lightMergeBudgetMs</c> ceiling.
+            /// Deliberately its own slot: it reports no stop reason, so the stop-reason instrument cannot see it.
             /// </summary>
             LightMerge = 2,
 

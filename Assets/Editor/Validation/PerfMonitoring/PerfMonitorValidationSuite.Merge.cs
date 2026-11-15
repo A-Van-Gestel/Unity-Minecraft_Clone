@@ -1,5 +1,6 @@
 using System.Reflection;
 using Data;
+using Data.JobData;
 using Diagnostics;
 using Editor.Validation.Behavior.Framework;
 using Helpers;
@@ -57,6 +58,7 @@ namespace Editor.Validation.PerfMonitoring
             (nameof(PerfMergeTotals.CountDrifts), PerfCounter.MergeCountDrifts, false),
             (nameof(PerfMergeTotals.GateSkippable), PerfCounter.MergeGateSkippable, false),
             (nameof(PerfMergeTotals.GateDiagonals), PerfCounter.MergeGateDiagonals, false),
+            (nameof(PerfMergeTotals.CeilingDeferredJobs), PerfCounter.MergeCeilingDeferred, false),
         };
 
         /// <summary>The kept section's non-air count after its one stone voxel.</summary>
@@ -203,7 +205,7 @@ namespace Editor.Validation.PerfMonitoring
                 for (int i = 0; i < ChunkMath.SECTION_VOLUME; i++)
                     light[churnOffset + i] = LightBitMapping.PackLightData(FULL_SKY, 0, 0, 0);
 
-                return chunk.ApplyJobLightMap(light, palette, bandMinY, bandHeight, ref totals);
+                return chunk.ApplyJobLightMap(light, palette != null ? JobDataManagerFactory.BuildIsOpaqueById(palette) : null, bandMinY, bandHeight, ref totals);
             }
             finally
             {

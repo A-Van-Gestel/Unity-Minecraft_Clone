@@ -96,6 +96,7 @@ MonoBehaviour:
     lightScheduleBudgetMs: 8
     meshScheduleBudgetMs: 6
     meshApplyBudgetMs: 4
+    lightMergeBudgetMs: 8
     scalePanicGateThresholdsWithResidency: 0
     panicGateCloseThreshold: 256
     panicGateReopenThreshold: 128
@@ -110,6 +111,8 @@ MonoBehaviour:
     startupLiftStructureQuota: 1
     startupSharedSweepSnapshots: 1
     startupWorldDigest: 0
+    lightRouteCache: 1
+    loadRecountOnWorker: 1
     startupPrebuildClouds: 1
     startupMeshWave: 1
     debugHudShowFps: 1

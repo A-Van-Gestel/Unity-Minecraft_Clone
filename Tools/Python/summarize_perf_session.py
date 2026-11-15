@@ -357,12 +357,13 @@ def merge_table(phases):
                      p.sums["MergeNeighborRemeshes"], p.sums["MergeUnchangedRemeshes"]] + per_merge +
                     [p.sums["UnloadPendingSkyChunks"], p.sums["UnloadPendingSkyNodes"],
                      p.sums["MergeCountChecks"], p.sums["MergeCountDrifts"],
-                     p.sums["MergeGateSkippable"], p.sums["MergeGateDiagonals"]])
+                     p.sums["MergeGateSkippable"], p.sums["MergeGateDiagonals"],
+                     p.sums.get("MergeCeilingDeferred", 0)])
     return table(["Phase", "LightMerge ms", "Apply", "Drain", "PullBack", "Route", "Cascade", "Other",
                   "of Apply: counts", "Merges/frame", "Apply ms/merge", "Stable", "Stable unchanged",
                   "Self remeshes", "Neighbor remeshes", "By unchanged", "Out-of-band sections/merge",
                   "Churned/merge", "Unloads with sky pending", "Their nodes", "Count checks",
-                  "Count drifts", "Gate skipped", "Gate diagonals"], rows)
+                  "Count drifts", "Gate skipped", "Gate diagonals", "Ceiling deferred"], rows)
 
 
 def pool_table(phases):

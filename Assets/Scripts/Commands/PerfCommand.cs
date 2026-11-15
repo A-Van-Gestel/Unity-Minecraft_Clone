@@ -320,7 +320,8 @@ namespace Commands
                 $"({PerfStore.SumCounter(PerfCounter.UnloadPendingSkyNodes)} nodes)"));
             lines.Add(new ConsoleLine(ConsoleLineSeverity.Info,
                 $"  Remesh gate: {PerfStore.SumCounter(PerfCounter.MergeGateSkippable)} cardinal rebuilds skipped, " +
-                $"{PerfStore.SumCounter(PerfCounter.MergeGateDiagonals)} diagonal rebuilds"));
+                $"{PerfStore.SumCounter(PerfCounter.MergeGateDiagonals)} diagonal rebuilds; " +
+                $"merge ceiling left {PerfStore.SumCounter(PerfCounter.MergeCeilingDeferred)} completed jobs for later frames"));
 
             long checks = PerfStore.SumCounter(PerfCounter.MergeCountChecks);
             if (checks == 0) return;

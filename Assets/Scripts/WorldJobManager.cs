@@ -110,6 +110,9 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     /// <summary>The lighting merge's running totals; the unload pass adds its pending-skylight counts here too.</summary>
     public ref PerfMergeTotals MergeTotals => ref _mergeTotals;
 
+    /// <summary>Running totals of the lighting merge's cross-chunk route split; counted with <see cref="MergeTotals"/>.</summary>
+    public ref PerfRouteTotals RouteTotals => ref _routeTotals;
+
     /// <summary>The full-chunk job buffer pool, for main-thread work outside this manager that needs a voxel map.</summary>
     public ChunkJobArrayPool JobArrayPool => _jobArrayPool;
 
@@ -578,6 +581,10 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     private readonly List<ChunkCoord> _completedMeshJobs = new List<ChunkCoord>();
     private readonly List<ChunkCoord> _completedLightJobs = new List<ChunkCoord>();
 
+    // The same jobs as _completedLightJobs as a set, filled alongside it by RunMergeLoop, so the route's
+    // "already merged" test is O(1) instead of a list scan per mod.
+    private readonly HashSet<ChunkCoord> _completedLightJobSet = new HashSet<ChunkCoord>();
+
     // One structure's mods at a time, refilled per marker: expansion allocates nothing once it has grown.
     private readonly List<VoxelMod> _structureMods = new List<VoxelMod>();
 
@@ -592,6 +599,12 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     private int _genScanCursor;
     private readonly List<ChunkCoord> _meshScanKeys = new List<ChunkCoord>();
     private int _meshScanCursor;
+
+    // Rotating visit start of the lighting merge under a ceiling (same fairness rule as the mesh pass).
+    private int _lightMergeCursor;
+
+    // Jobs whose completion faulted this pass: visited but not enrolled, so not deferred by the ceiling.
+    private readonly HashSet<ChunkCoord> _lightCompleteFaults = new HashSet<ChunkCoord>();
 
     // Reused snapshot of LightingJobs.Keys for one completion pass — the shared JobCompletionPass
     // iterates a stable candidate list rather than the live dictionary (removal is after-loop anyway).
@@ -647,11 +660,40 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     /// <returns>The stale maps, or 0 when no set is open.</returns>
     public int CountStaleStartupSnapshots() => _sweepSnapshots.CountStaleInOpenSet();
 
+    /// <summary>Whether each merge runs the cross-chunk mod census (diagnostic; adds time outside the merge laps).</summary>
+    public bool RouteCensusEnabled { get; set; }
+
+    /// <summary>Whether merges count the route split and the merge-order hash, which only the startup report reads.</summary>
+    public bool RouteSplitEnabled { get; set; }
+
+    /// <summary>FNV-1a over the chunk coords merged since <see cref="ResetMergeOrder"/>, in merge order.</summary>
+    public ulong MergeOrderHash { get; private set; } = MeshInputDigest.FnvOffset;
+
+    /// <summary>Routed mods whose reference resolve disagreed with the cached one, counted while the census runs; must stay 0.</summary>
+    public int RouteCacheMismatches { get; set; }
+
+    /// <summary>Merges folded into <see cref="MergeOrderHash"/>.</summary>
+    public int MergeOrderCount { get; private set; }
+
+    /// <summary>Restarts the merge-order hash.</summary>
+    public void ResetMergeOrder()
+    {
+        MergeOrderHash = MeshInputDigest.FnvOffset;
+        MergeOrderCount = 0;
+    }
+
+    // One routed mod in this many is timed (resolution vs arm) while the merge laps run.
+    private const int ROUTE_SAMPLE_STRIDE = 64;
+    private long _routeSampleCounter;
+    private readonly Dictionary<CrossChunkModCensus.Key, CrossChunkModCensus.Slot> _censusScratch =
+        new Dictionary<CrossChunkModCensus.Key, CrossChunkModCensus.Slot>();
+
     // The pass's stable merges that changed no light, so the deferred self re-mesh loop can attribute its requests.
     // Filled only while the monitor's slots are active.
     private readonly HashSet<ChunkCoord> _unchangedStableMerges = new HashSet<ChunkCoord>();
 
     private PerfMergeTotals _mergeTotals;
+    private PerfRouteTotals _routeTotals;
     private readonly Dictionary<ChunkCoord, HashSet<Vector2Int>> _droppedLightUpdates = new Dictionary<ChunkCoord, HashSet<Vector2Int>>();
 
     /// <summary>
@@ -1408,9 +1450,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         // the unbudgeted leg (the startup coroutine, which calls the pass without a window) keeps plain
         // dictionary order, including which job defers when the structure-mods budget exhausts. The
         // cursor is reduced modulo the key count so the index sum below can never overflow int.
-        int genScanStart = 0;
-        if (window.HasBudget && genKeyCount > 0)
-            genScanStart = _genScanCursor = (_genScanCursor + 1) % genKeyCount;
+        int genScanStart = PipelinePassBudget.NextScanStart(ref _genScanCursor, genKeyCount, window.HasBudget);
 
         // FP-2 stop-reason inputs. Two limits can end this pass, NOT one (FP-7b): the ms ceiling, and the
         // per-frame structure-mods quota — which breaks the scan outright at its third site and defers a job
@@ -1756,9 +1796,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
 
         // Rotation gated on window.HasBudget + cursor reduced modulo the count — same fairness and
         // overflow rationale as the generation pass above.
-        int meshScanStart = 0;
-        if (window.HasBudget && meshKeyCount > 0)
-            meshScanStart = _meshScanCursor = (_meshScanCursor + 1) % meshKeyCount;
+        int meshScanStart = PipelinePassBudget.NextScanStart(ref _meshScanCursor, meshKeyCount, window.HasBudget);
 
         // MP-4: the two-stage HF-2 fault isolation and the release-inside / remove-after ordering live in
         // the shared JobCompletionPass skeleton (driven here through _meshDriver and by the lighting pass
@@ -1937,7 +1975,10 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     /// removed with its chunk left re-schedulable, and the pass continues
     /// (<see cref="LastFaultedLightJobs"/> counts occurrences).
     /// </summary>
-    public void ProcessLightingJobs()
+    /// <param name="window">Optional time ceiling: when it expires the pass stops before the next merge and the
+    /// remaining completed jobs stay registered for a later frame, visited from a rotating start. <c>default</c> merges
+    /// every completed job.</param>
+    public void ProcessLightingJobs(PipelinePassBudget.Window window = default)
     {
         // Reset startup-diagnostic counters before the early-out so a no-op call reports zeros
         // rather than leaving stale values from the previous sweep.
@@ -1976,12 +2017,18 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         // here via the IJobCompletionDriver<ChunkCoord> hooks below and by the editor frame simulator,
         // so both replay the same bookkeeping (HF-4 #2). Snapshot is byte-identical to iterating the live
         // dictionary — the loop never adds to LightingJobs and removal is after-loop. Enrollment fills
-        // _completedLightJobs (also read by the merge's cross-chunk _completedLightJobs.Contains check).
+        // _completedLightJobs and _completedLightJobSet (the set is what the merge's cross-chunk route reads).
         _lightCompletionCandidates.Clear();
         foreach (ChunkCoord coord in LightingJobs.Keys)
             _lightCompletionCandidates.Add(coord);
 
-        JobCompletionPass.RunMergeLoop(_lightCompletionCandidates, this, _completedLightJobs);
+        // Rotated only under a ceiling (the mesh pass's rule), so an unbudgeted pass keeps its exact visit order.
+        int lightScanStart = PipelinePassBudget.NextScanStart(ref _lightMergeCursor, _lightCompletionCandidates.Count, window.HasBudget);
+
+        _lightCompleteFaults.Clear();
+        bool lightCeilingExpired = JobCompletionPass.RunMergeLoop(
+            _lightCompletionCandidates, this, _completedLightJobs, window, lightScanStart, _completedLightJobSet);
+        if (lightCeilingExpired && PerfStore.SlotsActive) _mergeTotals.CeilingDeferredJobs += CountCeilingDeferredJobs();
 
         // Save vanishing neighbor updates (BATCH)
         foreach (KeyValuePair<ChunkCoord, HashSet<Vector2Int>> kvp in _droppedLightUpdates)
@@ -2048,6 +2095,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     void IJobCompletionDriver<ChunkCoord>.OnCompleteFault(ChunkCoord key, Exception e)
     {
         LastFaultedLightJobs++;
+        _lightCompleteFaults.Add(key);
         Debug.LogError($"[LIGHTING] Handle.Complete() for chunk {key} faulted — job left enrolled for retry. {e}");
     }
 
@@ -2132,6 +2180,14 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         bool counting = lap != 0L;
         if (counting) _mergeTotals.Merges++;
 
+        // The route split and the merge-order hash feed only the startup report.
+        bool splitting = counting && RouteSplitEnabled;
+        if (RouteSplitEnabled)
+        {
+            MergeOrderHash = ((MergeOrderHash ^ (uint)chunkCoord.X) * MeshInputDigest.FnvPrime ^ (uint)chunkCoord.Z) * MeshInputDigest.FnvPrime;
+            MergeOrderCount++;
+        }
+
         bool capturing = LivelockWatchdog.Capturing;
         if (capturing)
         {
@@ -2145,7 +2201,8 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
             lap = PerfTickTotals.Lap(ref _mergeTotals.ApplyTicks, lap);
 
             int effectiveBeforeDrain = LastCrossChunkModsEffective;
-            int deferredCount = capturing && _deferredCrossChunkMods.TryGetValue(chunkCoord, out List<DeferredLightMod> pending)
+            long supportBeforeDrain = _routeTotals.SupportTicks;
+            int deferredCount = (capturing || splitting) && _deferredCrossChunkMods.TryGetValue(chunkCoord, out List<DeferredLightMod> pending)
                 ? pending.Count
                 : 0;
 
@@ -2155,6 +2212,12 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
             DrainDeferredCrossChunkMods(chunkCoord, chunkData);
             lap = PerfTickTotals.Lap(ref _mergeTotals.DrainTicks, lap);
             if (capturing) LivelockWatchdog.RecordDrain(deferredCount, LastCrossChunkModsEffective - effectiveBeforeDrain);
+            if (splitting)
+            {
+                _routeTotals.Drained += deferredCount;
+                _routeTotals.EffectiveDrained += LastCrossChunkModsEffective - effectiveBeforeDrain;
+                _routeTotals.SupportDrainTicks += _routeTotals.SupportTicks - supportBeforeDrain;
+            }
 
             // The emitting chunk's voxel origin — excluded from the Bug 13 live-support veto
             // (its data is exactly the stale side the removal mods came from).
@@ -2164,37 +2227,72 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
             // data, clearing stale ghost light through the removal veto (Bug 14). Runs after the
             // merge + deferred drain so superseded claims are recognized.
             int staleBeforeVerify = LastStalePullBacksCleared;
+            int effectiveBeforeVerify = LastCrossChunkModsEffective;
             VerifyPullBackClaims(chunkData, emitterOriginXZ, jobData.PullBackClaims);
             lap = PerfTickTotals.Lap(ref _mergeTotals.PullBackTicks, lap);
             if (capturing) LivelockWatchdog.RecordStalePullBacks(LastStalePullBacksCleared - staleBeforeVerify);
 
+            // The census reads the list before routing and stays out of every merge lap.
+            if (RouteCensusEnabled)
+            {
+                CrossChunkModCensus.Accumulate(jobData.Mods.AsArray(), _censusScratch, ref _routeTotals);
+                if (counting) lap = Stopwatch.GetTimestamp();
+            }
+
+            int effectiveBeforeRoute = LastCrossChunkModsEffective;
+            long supportBeforeRoute = _routeTotals.SupportTicks;
+            bool hasPreviousTarget = false;
+            ChunkCoord previousTarget = default;
+            if (splitting)
+            {
+                _routeTotals.EffectivePullBack += effectiveBeforeRoute - effectiveBeforeVerify;
+                _routeTotals.Emitted += jobData.Mods.Length;
+            }
+
+            // Nothing the route reads changes inside this loop, so one resolve per run of same-chunk mods is exact.
+            bool useRouteCache = _world.settings.lightRouteCache;
+            CrossChunkRouteCache routeCache = default;
+
             foreach (LightModification mod in jobData.Mods)
             {
+                long sampleStart = splitting && ++_routeSampleCounter % ROUTE_SAMPLE_STRIDE == 0L ? Stopwatch.GetTimestamp() : 0L;
                 Vector2Int neighborChunkVoxelPos = _world.worldData.GetChunkCoordFor(mod.GlobalPosition);
-                ChunkCoord neighborChunkCoord = ChunkCoord.FromVoxelOrigin(neighborChunkVoxelPos);
+                ChunkCoord neighborChunkCoord;
+                ChunkData neighborChunk;
+                LightingJobProcessor.CrossChunkModRoute route;
+                if (useRouteCache && routeCache.TryHit(neighborChunkVoxelPos))
+                {
+                    neighborChunkCoord = routeCache.Coord;
+                    neighborChunk = routeCache.Chunk;
+                    route = routeCache.Route;
+                }
+                else
+                {
+                    route = ResolveCrossChunkRoute(neighborChunkVoxelPos, useRouteCache, out neighborChunkCoord, out neighborChunk);
+                    if (useRouteCache) routeCache.Store(neighborChunkVoxelPos, neighborChunkCoord, neighborChunk, route);
+                }
 
-                // Resolve the target chunk's state, then route via the shared decision so the
-                // editor validation harness exercises this exact drop/persist/defer/apply rule.
-                // The terrain lookup and in-flight checks are guarded by targetInWorld so an
-                // out-of-world mod short-circuits without touching the chunk store or job dict.
-                bool targetInWorld = World.IsChunkInWorld(neighborChunkCoord);
-                ChunkData neighborChunk = targetInWorld
-                    ? _world.worldData.RequestChunk(neighborChunkVoxelPos, false)
-                    : null;
-                bool targetLoaded = neighborChunk != null && neighborChunk.IsPopulated;
-
-                // A target already processed this pass (_completedLightJobs) has merged and is
-                // safe to apply to directly; one still in flight must be deferred (Bug 08 path 2).
-                bool targetJobInFlightThisPass = targetInWorld &&
-                                                 LightingJobs.ContainsKey(neighborChunkCoord) &&
-                                                 !_completedLightJobs.Contains(neighborChunkCoord);
-
-                LightingJobProcessor.CrossChunkModRoute route = LightingJobProcessor.RouteCrossChunkMod(
-                    targetInWorld, targetLoaded, targetJobInFlightThisPass);
+                // The shadow check stays out of the route lap and the resolve sample: its time shifts both starts.
+                if (useRouteCache && RouteCensusEnabled)
+                {
+                    long checkStart = Stopwatch.GetTimestamp();
+                    CheckRouteCacheHit(neighborChunkVoxelPos, in routeCache);
+                    long checkTicks = Stopwatch.GetTimestamp() - checkStart;
+                    if (lap != 0L) lap += checkTicks;
+                    if (sampleStart != 0L) sampleStart += checkTicks;
+                }
 
                 // Out-of-world mods can never be consumed; everything else keeps the chunk from
                 // being treated as stable until delivered.
                 hasRealCrossChunkMods |= LightingJobProcessor.CountsAsRealCrossChunkMod(route);
+                long sampleRouted = sampleStart != 0L ? Stopwatch.GetTimestamp() : 0L;
+                if (splitting)
+                {
+                    if (hasPreviousTarget && previousTarget == neighborChunkCoord) _routeTotals.SameTargetMods++;
+                    previousTarget = neighborChunkCoord;
+                    hasPreviousTarget = true;
+                    CountRouteArm(route);
+                }
 
                 if (capturing && route != LightingJobProcessor.CrossChunkModRoute.ApplyDirect)
                     LivelockWatchdog.RecordMod(in mod, route, 0, false);
@@ -2204,11 +2302,11 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                     case LightingJobProcessor.CrossChunkModRoute.DropOutOfWorld:
                         // Dropped without affecting stability (boundary chunks would otherwise
                         // reschedule lighting indefinitely).
-                        continue;
+                        break;
 
                     case LightingJobProcessor.CrossChunkModRoute.PersistUndeliverable:
                         PersistUndeliverableLightMod(neighborChunkCoord, in mod);
-                        continue;
+                        break;
 
                     case LightingJobProcessor.CrossChunkModRoute.Defer:
                         // Applying now would be overwritten by the target's own full-LightMap
@@ -2220,7 +2318,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                         }
 
                         deferredList.Add(new DeferredLightMod(emitterOriginXZ, in mod));
-                        continue;
+                        break;
 
                     case LightingJobProcessor.CrossChunkModRoute.ApplyDirect:
                         // Diagnostics: an ApplyDirect mod counts toward stability regardless of
@@ -2231,18 +2329,31 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                         if (!capturing)
                         {
                             ApplyCrossChunkLightMod(neighborChunk, in mod, emitterOriginXZ);
-                            continue;
+                            break;
                         }
 
                         Vector3Int targetLocal = _world.worldData.GetLocalVoxelPositionInChunk(mod.GlobalPosition);
                         ushort targetLightBefore = neighborChunk.GetLightData(targetLocal.x, targetLocal.y, targetLocal.z);
                         bool applied = ApplyCrossChunkLightMod(neighborChunk, in mod, emitterOriginXZ);
                         LivelockWatchdog.RecordMod(in mod, route, targetLightBefore, applied);
-                        continue;
+                        break;
+                }
+
+                if (sampleStart != 0L)
+                {
+                    long sampleEnd = Stopwatch.GetTimestamp();
+                    _routeTotals.Samples++;
+                    _routeTotals.SampleResolveTicks += sampleRouted - sampleStart;
+                    _routeTotals.SampleArmTicks += sampleEnd - sampleRouted;
                 }
             }
 
             lap = PerfTickTotals.Lap(ref _mergeTotals.RouteTicks, lap);
+            if (splitting)
+            {
+                _routeTotals.EffectiveDirect += LastCrossChunkModsEffective - effectiveBeforeRoute;
+                _routeTotals.SupportRouteTicks += _routeTotals.SupportTicks - supportBeforeRoute;
+            }
 
             // Every write this merge caused on this chunk has landed: tell the neighbors whose meshes read a border
             // that changed, before any stability decision below reads their flags.
@@ -2445,6 +2556,72 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         }
     }
 
+    /// <summary>
+    /// Resolves a cross-chunk mod's target chunk and routes it through the shared decision, so the editor validation
+    /// harness exercises this exact drop/persist/defer/apply rule.
+    /// </summary>
+    /// <param name="chunkVoxelOrigin">The target chunk's voxel-space origin.</param>
+    /// <param name="useCompletedSet">Whether to test "already merged" on the set instead of scanning the list.</param>
+    /// <param name="coord">The target chunk's coordinate.</param>
+    /// <param name="chunk">The target chunk's data, or null when it is out of world or not loaded.</param>
+    /// <returns>The route the mod must take.</returns>
+    private LightingJobProcessor.CrossChunkModRoute ResolveCrossChunkRoute(Vector2Int chunkVoxelOrigin,
+        bool useCompletedSet, out ChunkCoord coord, out ChunkData chunk)
+    {
+        coord = ChunkCoord.FromVoxelOrigin(chunkVoxelOrigin);
+
+        // The terrain lookup and in-flight checks are guarded by targetInWorld so an out-of-world mod
+        // short-circuits without touching the chunk store or job dict.
+        bool targetInWorld = World.IsChunkInWorld(coord);
+        chunk = targetInWorld ? _world.worldData.RequestChunk(chunkVoxelOrigin, false) : null;
+        bool targetLoaded = chunk != null && chunk.IsPopulated;
+
+        // A target already processed this pass (_completedLightJobs) has merged and is
+        // safe to apply to directly; one still in flight must be deferred (Bug 08 path 2).
+        bool targetJobInFlightThisPass = targetInWorld &&
+                                         LightingJobs.ContainsKey(coord) &&
+                                         !(useCompletedSet ? _completedLightJobSet.Contains(coord) : _completedLightJobs.Contains(coord));
+
+        return LightingJobProcessor.RouteCrossChunkMod(targetInWorld, targetLoaded, targetJobInFlightThisPass);
+    }
+
+    /// <summary>Re-resolves the cached route the reference way and counts a difference in <see cref="RouteCacheMismatches"/> (diagnostic).</summary>
+    /// <param name="chunkVoxelOrigin">The target chunk's voxel-space origin.</param>
+    /// <param name="cache">The cache holding the route the loop used.</param>
+    private void CheckRouteCacheHit(Vector2Int chunkVoxelOrigin, in CrossChunkRouteCache cache)
+    {
+        // The list scan is the reference, so the check also covers the set.
+        LightingJobProcessor.CrossChunkModRoute fresh = ResolveCrossChunkRoute(chunkVoxelOrigin, false, out ChunkCoord coord, out ChunkData chunk);
+        if (fresh != cache.Route || coord != cache.Coord || !ReferenceEquals(chunk, cache.Chunk)) RouteCacheMismatches++;
+    }
+
+    /// <summary>Counts the completed candidates a ceiling break left unmerged this pass (a job left N frames counts N times).</summary>
+    /// <returns>The completed jobs neither enrolled nor faulted this pass.</returns>
+    private int CountCeilingDeferredJobs()
+    {
+        int deferred = 0;
+        foreach (ChunkCoord coord in _lightCompletionCandidates)
+        {
+            if (!_completedLightJobSet.Contains(coord) && !_lightCompleteFaults.Contains(coord)
+                && LightingJobs[coord].Handle.IsCompleted) deferred++;
+        }
+
+        return deferred;
+    }
+
+    /// <summary>Counts one routed mod under its arm in the route split.</summary>
+    /// <param name="route">The arm the route chose.</param>
+    private void CountRouteArm(LightingJobProcessor.CrossChunkModRoute route)
+    {
+        switch (route)
+        {
+            case LightingJobProcessor.CrossChunkModRoute.DropOutOfWorld: _routeTotals.Drops++; break;
+            case LightingJobProcessor.CrossChunkModRoute.PersistUndeliverable: _routeTotals.Persists++; break;
+            case LightingJobProcessor.CrossChunkModRoute.Defer: _routeTotals.Defers++; break;
+            case LightingJobProcessor.CrossChunkModRoute.ApplyDirect: _routeTotals.Direct++; break;
+        }
+    }
+
     /// <summary>Counts the cardinals a stable merge did not request that requesting all four would have newly queued.</summary>
     /// <param name="chunkCoord">The chunk whose merge is stable.</param>
     /// <param name="requested">The neighbors it requests, as <see cref="ChunkBorderMask"/> bits.</param>
@@ -2502,8 +2679,11 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         // CrossChunkLightModApplier.ComputeSkylight. Skip the neighbor scans for placements/uplifts
         // (the common case during initial-load skylight propagation), whose decision ignores it.
         byte independentSkySupport = 0;
+        long scanStart = 0L;
         if (mod.Channel == LightChannel.Sky && mod.LightLevel == 0)
         {
+            scanStart = RouteSplitEnabled ? PerfStore.Begin() : 0L;
+
             // Support is attenuated by the target voxel's own opacity (the light enters it), matching
             // NeighborhoodLightingJob.AttenuateLight — a flat air step would over-estimate support into
             // semi-transparent media and wrongly veto a legitimate removal. Independent support is the
@@ -2522,6 +2702,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         byte independentBlockR = 0, independentBlockG = 0, independentBlockB = 0;
         if (mod.Channel == LightChannel.Block && mod.IsRemoval)
         {
+            scanStart = RouteSplitEnabled ? PerfStore.Begin() : 0L;
             CrossChunkLightModApplier.TargetEntryCost blockEntryCost = TargetEntryCostFor(targetChunk, localVoxelPos);
             CrossChunkLightModApplier.InChunkBlocklightSupport(targetChunk, localVoxelPos, blockEntryCost,
                 _getBlockData, out byte inR, out byte inG, out byte inB);
@@ -2532,6 +2713,12 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
             independentBlockR = Math.Max(inR, crR);
             independentBlockG = Math.Max(inG, crG);
             independentBlockB = Math.Max(inB, crB);
+        }
+
+        if (scanStart != 0L)
+        {
+            _routeTotals.SupportScans++;
+            PerfTickTotals.Lap(ref _routeTotals.SupportTicks, scanStart);
         }
 
         CrossChunkLightModApplier.ApplyDecision decision = CrossChunkLightModApplier.Compute(currentLight, in mod,
@@ -2686,7 +2873,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
         // LightMap keeps its schedule-time snapshot, which the job provably did not change.
         ChunkMath.ExtractCenterLight(jobData.PaddedLight, jobData.LightMap, jobData.BandMinY, jobData.BandHeight);
 
-        return chunkData.ApplyJobLightMap(jobData.LightMap, _world.BlockTypes, jobData.BandMinY, jobData.BandHeight,
+        return chunkData.ApplyJobLightMap(jobData.LightMap, _world.IsOpaqueById, jobData.BandMinY, jobData.BandHeight,
             ref _mergeTotals);
     }
 

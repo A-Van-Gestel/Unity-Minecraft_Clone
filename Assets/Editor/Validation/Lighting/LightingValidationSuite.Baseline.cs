@@ -233,7 +233,21 @@ namespace Editor.Validation.Lighting
             // --- ES-7.4 mesh-input tracking (B132-B136): which neighbors read which border column, and what a light
             // write tells them. Lives in Baselines/LightingValidationSuite.Baseline.ES74MeshInputs.cs. ---
             AddEs74MeshInputBaselineScenarios(scenarios);
+
+            // --- Cross-chunk route cache (B138). Lives in Baselines/LightingValidationSuite.Baseline.RouteCache.cs. ---
+            AddRouteCacheBaselineScenarios(scenarios);
+
+            // --- Lighting merge time ceiling (B139). Lives in Baselines/LightingValidationSuite.Baseline.MergeCeiling.cs. ---
+            AddMergeCeilingBaselineScenarios(scenarios);
         }
+
+        /// <summary>Hook for the merge-ceiling baseline B139 (implemented in Baselines/LightingValidationSuite.Baseline.MergeCeiling.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddMergeCeilingBaselineScenarios(List<Scenario> scenarios);
+
+        /// <summary>Hook for the route-cache baseline B138 (implemented in Baselines/LightingValidationSuite.Baseline.RouteCache.cs).</summary>
+        /// <param name="scenarios">The scenario list to append to.</param>
+        static partial void AddRouteCacheBaselineScenarios(List<Scenario> scenarios);
 
         /// <summary>Hook for the ES-7.4 mesh-input baselines B132-B136 (implemented in Baselines/LightingValidationSuite.Baseline.ES74MeshInputs.cs).</summary>
         /// <param name="scenarios">The scenario list to append to.</param>

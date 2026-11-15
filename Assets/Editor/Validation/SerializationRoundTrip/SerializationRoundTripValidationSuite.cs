@@ -96,6 +96,7 @@ namespace Editor.Validation.SerializationRoundTrip
                 new Scenario("B15: pending skylight columns and blocklight mods survive save → load", PendingLightStoresSurviveSaveAndLoad),
                 new Scenario("B16: pending voxel mods survive save → load with position, id and meta intact", PendingModStoreSurvivesSaveAndLoad),
                 new Scenario("B17: light queues are pool-rented only while nodes are pending, returned on flush and reset, and reused warm", LightQueuesAreRentedOnlyWhilePending),
+                new Scenario("B18: a load worker's recount equals the main-thread counts, and a table-less load leaves derived counts unset", WorkerRecountMatchesMainThreadCounts),
                 new Scenario("K04: a dense chunk with large pending light queues still saves and reloads", DenseChunkWithLargeLightQueuesSaves, "SERIALIZATION_BUGS §04"),
                 new Scenario("K08: an invalid pending column is rejected, not byte-truncated onto another column", InvalidPendingColumnsAreRejectedNotTruncated, "SERIALIZATION_BUGS §08"),
             };

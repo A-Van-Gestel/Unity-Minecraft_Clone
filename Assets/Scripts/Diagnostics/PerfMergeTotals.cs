@@ -74,5 +74,8 @@ namespace Diagnostics
 
         /// <summary>Those whose stored counts disagreed with their voxels (and were repaired).</summary>
         public long CountDrifts;
+
+        /// <summary>Completed lighting jobs the merge ceiling left for a later frame.</summary>
+        public long CeilingDeferredJobs;
     }
 }

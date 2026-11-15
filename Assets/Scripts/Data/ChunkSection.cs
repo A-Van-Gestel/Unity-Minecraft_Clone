@@ -168,12 +168,12 @@ namespace Data
         /// Recalculates NonAir, Opaque, Emissive and flowing-fluid counts.
         /// Uses a mask-based check (<c>data &amp; ID_MASK</c>) to correctly ignore air voxels
         /// that only carry light data (skylight/blocklight bits set, block ID = 0).
-        /// The emissive and flowing-fluid tests go through their static lookups (not
-        /// <paramref name="blockTypes"/>) so they agree with the incremental
-        /// <c>ChunkData.SetVoxel</c> maintenance on every path.
+        /// The emissive and flowing-fluid tests go through their static lookups so they agree with the
+        /// incremental <c>ChunkData.SetVoxel</c> maintenance on every path. Reads only immutable flat tables, so it is
+        /// safe off the main thread on a section no other thread holds.
         /// </summary>
-        /// <param name="blockTypes">The blockTypes array to look up opacity.</param>
-        public unsafe void RecalculateCounts([CanBeNull] BlockType[] blockTypes)
+        /// <param name="isOpaqueById">The flat opacity lookup, or null to count non-air voxels only.</param>
+        public void RecalculateCounts([CanBeNull] bool[] isOpaqueById)
         {
             // Reset counts
             nonAirCount = 0;
@@ -181,15 +181,15 @@ namespace Data
             emissiveCount = 0;
             emitterFluidCount = 0;
 
-            // Fallback: If no blockTypes proved, we can only calculate NonAir (and Emissive,
+            // Fallback: without an opacity table we can only calculate NonAir (and Emissive,
             // whose lookup is palette-instance-independent).
-            if (blockTypes == null)
+            if (isOpaqueById == null)
             {
                 RecalculateNonAirCount();
                 return;
             }
 
-            CountVoxels(blockTypes, out nonAirCount, out opaqueCount, out emissiveCount, out emitterFluidCount);
+            CountVoxels(isOpaqueById, out nonAirCount, out opaqueCount, out emissiveCount, out emitterFluidCount);
             emitterFluidGeneration = FluidBlockLookup.Generation;
         }
 
@@ -197,12 +197,12 @@ namespace Data
         /// Counts the section's voxels the way <see cref="RecalculateCounts"/> does, without storing anything — so a
         /// caller can compare fresh counts with the maintained ones.
         /// </summary>
-        /// <param name="blockTypes">The blockTypes array to look up opacity.</param>
+        /// <param name="isOpaqueById">The flat opacity lookup, indexed by block id.</param>
         /// <param name="nonAir">Voxels whose block ID is not air.</param>
         /// <param name="opaque">Those whose block is opaque.</param>
         /// <param name="emissive">Those whose block emits light.</param>
         /// <param name="emitterFluid">Those holding flowing fluid.</param>
-        public unsafe void CountVoxels([NotNull] BlockType[] blockTypes, out int nonAir, out int opaque, out int emissive,
+        public unsafe void CountVoxels([NotNull] bool[] isOpaqueById, out int nonAir, out int opaque, out int emissive,
             out int emitterFluid)
         {
             int localNonAir = 0;
@@ -231,16 +231,7 @@ namespace Data
                     if (FluidBlockLookup.IsEmitterFluid(data)) localFlowing++;
 
                     // Safety check for ID bounds to prevent crashes in unsafe context
-                    if (id < blockTypes.Length)
-                    {
-                        // Note: blockTypes[id] is a reference type lookup (pointer chase).
-                        // This is the most expensive part, but cannot be easily avoided
-                        // without changing the data architecture to use flat structs/arrays.
-                        if (blockTypes[id].IsOpaque)
-                        {
-                            localOpaque++;
-                        }
-                    }
+                    if (id < isOpaqueById.Length && isOpaqueById[id]) localOpaque++;
                 }
             }
 
