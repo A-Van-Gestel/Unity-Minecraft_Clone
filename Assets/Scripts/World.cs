@@ -596,6 +596,9 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     // Whether that check ran in at least one sweep (it needs shared snapshots on).
     private bool _startupStaleSnapshotsChecked;
 
+    /// <summary>Per-chunk startup generation record (opt-in, <c>startupWorldDigest</c>); null once logged or when off.</summary>
+    internal StartupGenerationDiagnostics StartupGenDiag;
+
     /// <summary>This launch's startup-coroutine split (ES-3); logged once at the handoff.</summary>
     public StartupPhaseTotals StartupPhaseTotals => _startupPhaseTotals;
 
@@ -961,6 +964,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         StorageManager = new ChunkStorageManager(worldName, IsVolatileMode, SaveSystem.CURRENT_VERSION);
         ModManager = new ModificationManager(worldName, IsVolatileMode);
         LightingStateManager = new LightingStateManager(worldName, IsVolatileMode);
+        StartupGenDiag = settings.startupWorldDigest ? new StartupGenerationDiagnostics() : null;
 
         // 3. Load Global Metadata (Level.dat & Pending Mods)
         // Only load if it's NOT a new game AND Persistence is actually enabled.
@@ -1239,9 +1243,13 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     {
         ulong voxelHash = MeshInputDigest.FnvOffset;
         ulong lightHash = MeshInputDigest.FnvOffset;
+        ulong rawHash = MeshInputDigest.FnvOffset;
         const int volume = ChunkMath.CHUNK_VOLUME;
         NativeArray<uint> voxels = new NativeArray<uint>(volume, Allocator.Temp, NativeArrayOptions.UninitializedMemory);
         NativeArray<ushort> light = new NativeArray<ushort>(volume, Allocator.Temp, NativeArrayOptions.UninitializedMemory);
+        StringBuilder chunkReport = StartupGenDiag != null
+            ? new StringBuilder(capacity: chunks.Count * StartupGenerationDiagnostics.ReportLineCapacity)
+            : null;
         try
         {
             foreach (ChunkCoord chunkCoord in chunks)
@@ -1249,10 +1257,18 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                 Vector2Int origin = chunkCoord.ToVoxelOrigin();
                 worldData.FillChunkMapForJob(origin, voxels);
                 worldData.FillChunkLightMapForJob(origin, light);
+                ulong chunkHash = MeshInputDigest.FnvOffset;
                 for (int i = 0; i < volume; i++)
                 {
                     voxelHash = (voxelHash ^ voxels[i]) * MeshInputDigest.FnvPrime;
                     lightHash = (lightHash ^ light[i]) * MeshInputDigest.FnvPrime;
+                    chunkHash = (chunkHash ^ voxels[i]) * MeshInputDigest.FnvPrime;
+                }
+
+                if (chunkReport != null)
+                {
+                    StartupGenDiag.AppendLine(chunkReport, chunkCoord, chunkHash);
+                    rawHash = (rawHash ^ StartupGenDiag.Get(chunkCoord).Raw) * MeshInputDigest.FnvPrime;
                 }
             }
         }
@@ -1260,6 +1276,13 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         {
             voxels.Dispose();
             light.Dispose();
+        }
+
+        if (chunkReport != null)
+        {
+            // Bug 07 diagnostic: one line per chunk, diffable across runs; gameplay generation is not recorded.
+            Debug.Log($"[Startup] Generation digest: raw {rawHash.ToString(StartupGenerationDiagnostics.HashFormat)} over {chunks.Count} chunks\n{chunkReport}");
+            StartupGenDiag = null;
         }
 
         voxelDigest = voxelHash;
@@ -3849,6 +3872,14 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                                out VoxelState existing) &&
                            !BlockTagUtility.CanApplyMod(in mod, existing.ID, BlockTypes);
 
+            if (StartupGenDiag != null)
+            {
+                StartupGenerationDiagnostics.Entry diag =
+                    StartupGenDiag.Get(ChunkCoord.FromVoxelOrigin(chunkData.Position));
+                diag.Replayed++;
+                if (refused) diag.ReplayRefused++;
+            }
+
             if (refused) continue;
 
             // Applied directly to the data; ModifyVoxel handles the lighting queues and the bucket of the cell itself.
@@ -4109,6 +4140,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
             {
                 // Send to Persistent Manager
                 ModManager.AddPendingMod(chunkCoord, v);
+                if (StartupGenDiag != null) StartupGenDiag.Get(chunkCoord).Pended++;
                 continue;
             }
 
@@ -4118,8 +4150,11 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
             if (worldData.TryGetVoxel(targetPos.x, targetPos.y, targetPos.z, out VoxelState existingState) &&
                 !BlockTagUtility.CanApplyMod(in v, existingState.ID, BlockTypes))
             {
+                if (StartupGenDiag != null) StartupGenDiag.Get(chunkCoord).Refused++;
                 continue; // Skip this VoxelMod, move to the next in the queue.
             }
+
+            if (StartupGenDiag != null) StartupGenDiag.Get(chunkCoord).Applied++;
 
             // --- 3. If chunk is ready, Apply Modification ---
             Vector3Int localPos = worldData.GetLocalVoxelPositionInChunk(v.GlobalPosition);

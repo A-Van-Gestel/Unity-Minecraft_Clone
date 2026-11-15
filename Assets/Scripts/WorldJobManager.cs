@@ -1513,6 +1513,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                 // --- STAGE 1: Populate with base terrain (Once per chunk) ---
                 if (!chunkData.IsPopulated)
                 {
+                    _world.StartupGenDiag?.RecordRaw(jobEntry.Key, jobEntry.Value.Map);
                     chunkData.Populate(jobEntry.Value.Map, jobEntry.Value.HeightMap);
 
                     // Prefer the job's active-voxel list (IsCreated contract on GenerationJobData.ActiveVoxels).
@@ -1541,6 +1542,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                         Position = new int3(mod.GlobalPosition.x, mod.GlobalPosition.y, mod.GlobalPosition.z),
                         PoolEntryIndex = mod.ID,
                     };
+                    _world.StartupGenDiag?.RecordMarker(jobEntry.Key, marker.Position, marker.PoolEntryIndex);
                     _structureMods.Clear();
                     _chunkGenerator.ExpandStructure(marker, _structureMods);
 
@@ -1590,6 +1592,7 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
                         previousMarker = marker;
                         hasPreviousMarker = true;
 #endif
+                        _world.StartupGenDiag?.RecordMarker(jobEntry.Key, marker.Position, marker.PoolEntryIndex);
                         _structureMods.Clear();
                         _chunkGenerator.ExpandStructure(marker, _structureMods);
 
