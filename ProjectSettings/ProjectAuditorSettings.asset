@@ -33,4 +33,10 @@ MonoBehaviour:
         Value: 204800
       - Key: StreamingAssetsFolderSizeLimit
         Value: 50
+      - Key: TextureEmptySpaceLimit
+        Value: 50
+      - Key: TextureTransparentBorderLimit
+        Value: 75
+      - Key: VeryLongClipStreamingThresholdBytes
+        Value: 5242880
     CurrentParamsIndex: 0
