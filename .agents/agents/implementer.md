@@ -81,7 +81,8 @@ prompt names, never `/tmp` or the repo (`TMPDIR` is unset on this machine).
    `unity command console get --tail <n> --result-only`, raising `<n>` until the summary line is inside
    the window, and save that dump to `<scratchpad>/suite_<n>.txt`. Green before you go on, and the
    new scenario's own `[PASS]` line must be there — a green suite without it ran nothing new.
-6. **Prove every new or changed scenario red**: `python -u Tools/Python/prove_red.py --file <src>
+6. **Prove every new or changed scenario red** (`prove-red` on `PATH` is a different tool, for shell
+   test commands; suites always go through `prove_red.py`): `python -u Tools/Python/prove_red.py --file <src>
    --old … --new … --suite "<menu path>" --expect "<scenario ID>"` (or `--batch <json>` for several;
    write the JSON in the scratchpad), piped through `2>&1 | tee <scratchpad>/prove_red_<n>.txt; echo
    "EXIT=${PIPESTATUS[0]}"`, Bash timeout 600000. Add `--no-baseline` only when step 5 just ran the

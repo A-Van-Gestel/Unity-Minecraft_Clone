@@ -13,7 +13,9 @@ yourself, never write or change the batch file, never delete a backup, never ret
 different snippet, never run a suite, `unity recompile` or a menu item yourself, and never interpret
 a verdict beyond quoting it. Work from the repo root: the directory you start in, or
 `git rev-parse --show-toplevel` if unsure. Use `python`, never `python3`. End each command with
-`; echo "EXIT=$?"`: the tool shows no exit code on success.
+`; echo "EXIT=$?"`: the tool shows no exit code on success. `prove-red` on `PATH` (claude-tools) is
+a different tool: it mutates for a shell test command (`--test`), not a Unity suite. Suite mutations
+always run through `Tools/Python/prove_red.py`.
 
 ## Input (from the delegation prompt)
 
@@ -38,7 +40,9 @@ whether to pass `--no-baseline` (only when the parent says so).
    and the log's last line: a live python process means it is still running — keep waiting.
 4. Record `git status --short` again. Any difference from step 1 → report it verbatim as
    **TREE CHANGED** at the top of the report. Do not fix it. A killed run cleans nothing up: quote
-   its last `backup:` line too, so the parent can restore from it.
+   its last `backup:` line too, so the parent can restore from it. A changed
+   `ProjectSettings/ProjectAuditorSettings.asset` is a known Editor rewrite on recompile: still report
+   it there, labeled `known Editor rewrite`.
 
 ## Report — verbatim, never paraphrased
 

@@ -94,7 +94,7 @@ b. Folding into an unpushed older commit (`rebase -i` is unavailable), via git's
       commit count, no `fixup!` left, `git status` unchanged).
    Exit 2 = refused before changing anything (e.g. the target is pushed — then use a plain
    `Updated: Unity re-serialization -> …` commit). Exit 1 = conflict (aborted, HEAD restored, the
-   fixup commits remain), a failed gate (branch reset, backup branch named) or
+   fixup commits remain), a failed post-squash check (branch reset, backup branch named) or
    `AUTOSTASH NOT RE-APPLIED`: STOP and report its output verbatim — never resolve a rebase by
    hand. An `AUTOSTASH NOT RE-APPLIED` line goes at the top of your report; never pop the stash
    yourself.
@@ -111,6 +111,9 @@ b. Folding into an unpushed older commit (`rebase -i` is unavailable), via git's
 - Never `git push`, never `--no-verify`, never amend a pushed commit.
 - Never `git stash`, never `checkout --` or `restore` a working-tree file: uncommitted work
   outside the batch belongs to the user.
+- `ProjectSettings/ProjectAuditorSettings.asset` loses 3 keys whenever the Editor recompiles. It is
+  never part of a batch, even when the reserialize touched it (Step 0.3 does not apply): leave it
+  unstaged and list it as `known Editor rewrite`; the parent restores it.
 
 ## Report (keep it under ~40 lines)
 

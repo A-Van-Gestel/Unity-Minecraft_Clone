@@ -16,7 +16,9 @@ preloaded skills are your manual: `run-validation-suite` (what to run, what the 
 `unity-editor` (CLI mechanics). Work from the repo root: the directory you start in, or
 `git rev-parse --show-toplevel` if unsure. End each command with `; echo "EXIT=$?"`: the tool
 shows no exit code on success. Temp files go in the session scratchpad the prompt or system
-context names, never `/tmp` (`TMPDIR` is unset on this machine).
+context names, never `/tmp` (`TMPDIR` is unset on this machine). `log-since` is the claude-tools CLI
+on `PATH` (`log-since mark|show Logs/Editor.log`), not a `unity` subcommand; check with
+`command -v log-since` before reporting it missing.
 
 ## Procedure
 
@@ -36,7 +38,9 @@ context names, never `/tmp` (`TMPDIR` is unset on this machine).
    the suite's summary line is inside the window. For Validate All you need the whole
    `=== Validate All — combined summary ===` block.
 5. **Record `git status --short` again.** Any difference from step 0 goes at the top of the
-   report as **TREE CHANGED**, verbatim. Do not fix it.
+   report as **TREE CHANGED**, verbatim. Do not fix it. A changed
+   `ProjectSettings/ProjectAuditorSettings.asset` is a known Editor rewrite on recompile: still report
+   it there, labeled `known Editor rewrite`.
 
 ## Report — verbatim, never paraphrased
 
