@@ -38,12 +38,12 @@ The pool retains up to `_maxRetainedPerType` buffers **per element type**, acros
 
 giving a **cap-limited** ceiling of ≈ **246 MB** of Persistent native memory.
 
-**Demand-limited retention is much lower, and the distinction is the point.** The pool never retains more than the actual concurrent-rental peak for each type, and that peak is *not* uniform across the four:
+**Demand-limited retention is not the same figure for every type, and the distinction is the point.** The pool never retains more than the actual concurrent-rental peak for each type, and that peak is *not* uniform across the four:
 
-- The full-chunk maps are rented **9 per job** (centre + 8 neighbours), so at max job settings they peak at ≈468 each — `(32 lighting + 20 mesh) × 9` — which is what the 512 cap was sized just above, and what makes their combined ≈88 MB reachable in practice.
+- The full-chunk maps are rented **9 per job** (center + 8 neighbors), so at max job settings demand reaches **≈756** each — `(64 lighting + 20 mesh) × 9`, the lighting term being the in-flight ceiling `maxInFlightLightingJobs` (`SettingsManager.cs:598`), not the per-frame rate cap — which is **above** the 512 cap: their combined retention is cap-limited at ≈96 MB, and the excess beyond the cap shows up as pool misses (`JobArrayMisses`, ES-33) rather than as retained memory.
 - The **padded** buffers are rented **one of each per lighting job**, so they are bounded by lighting jobs in flight (tens, not hundreds) — on the order of 10 MB, nowhere near their 150 MB share of the cap.
 
-Steady-state retention is therefore ≈96 MB; only a pathological rental pattern approaches the 246 MB the cap permits.
+Steady-state retention is therefore ≈106 MB (≈96 MB of full-chunk maps at the cap + ≈10 MB padded); only a pathological rental pattern approaches the 246 MB the cap permits.
 
 **A platform-dependent cap already exists:** **OM-1** device calibration derives `Settings.chunkJobArrayPoolRetention` as `min(512, f(systemMemorySize))`, so low-RAM devices (including Android) get a proportionally smaller cap and a high-RAM desktop resolves to 512. The **soft-trim** (dispose down to N when idle) does not: retention is monotonic within a session, and the cap is captured once at `ChunkJobArrayPool` construction, so a changed retention only applies on the next world load.
 

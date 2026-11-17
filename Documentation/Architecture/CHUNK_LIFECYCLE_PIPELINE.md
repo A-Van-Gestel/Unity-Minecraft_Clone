@@ -647,16 +647,16 @@ by convention at each writer.
 
 **Producers (3):**
 
-| Site                                                        | Behavior                                                                                                                             |
-|-------------------------------------------------------------|--------------------------------------------------------------------------------------------------------------------------------------|
-| `WorldData.QueueSkylightRecalculation` (`WorldData.cs:460`) | Writes the key **unconditionally**, then sets `HasLightChangesToProcess` **only if the owner chunk is resident**.                    |
-| Disk-load restore (`World.cs:1358`)                         | Writes the dictionary directly (union into an existing set, or hand over a pooled one) and sets the flag by hand adjacent (`:1368`). |
-| Generation-completion restore (`WorldJobManager.cs:1218`)   | Same shape, additionally gated on `enableLighting`.                                                                                  |
+| Site                                                                 | Behavior                                                                                                                                           |
+|----------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------|
+| `WorldData.QueueSkylightRecalculation` (`WorldData.cs:461`)          | Writes the key **unconditionally**, then sets `HasLightChangesToProcess` **only if the owner chunk is resident**.                                  |
+| Disk-load restore (`LoadOrGenerateChunkInner`, `World.cs:1662–1669`) | Writes the dictionary directly (union into an existing set, or hand over a pooled one) and sets the flag via `FlagLightWork()` adjacent (`:1672`). |
+| Generation-completion restore (`WorldJobManager.cs:1678–1688`)       | Same shape, additionally gated on `enableLighting`.                                                                                                |
 
-**Consumers (2):** `ScheduleLightingUpdate` (`WorldJobManager.cs:831`) drains the columns into the lighting job,
-removes the key and releases the pooled set — the normal exit. `UnloadChunks` (`World.cs:3688`) persists any
-remainder via `PersistOrphanedSkylightColumns` (`:3692`), then removes the key and releases the set (`:3696`)
-**strictly before** the only `worldData.RemoveChunk` (`:3754`), so unload never leaves a key behind.
+**Consumers (2):** `ScheduleLightingUpdate` (`WorldJobManager.cs:1197`; the drain at `:1265`–`:1272`) drains the columns into the lighting job,
+removes the key and releases the pooled set — the normal exit. `UnloadChunks` (`World.cs:4476`) persists any
+remainder via `PersistOrphanedSkylightColumns` (`:4609`), then removes the key and releases the set (`:4615`)
+**strictly before** the only `worldData.RemoveChunk` (`:4672`), so unload never leaves a key behind.
 
 **Why the pairing matters.** The ~1 s fail-safe scan re-flags work using `IsPopulated AND (any lighting flag)`.
 An owner that fails that predicate is skipped, so its queued columns sleep until something else moves them —

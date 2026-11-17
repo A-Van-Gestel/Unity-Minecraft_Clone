@@ -1,7 +1,9 @@
 # Architectural Analysis: Region File Thread Safety & Concurrency
 
-**Version:** 1.0  
+**Version:** 1.1  
 **Date:** 2026-07-26  
+**Amended:** 2026-11-17 (v1.1) — the summary's "reads are what block gameplay" corrected: both reads and writes
+run on `Task.Run` workers, so the lock costs late chunk arrival, not frame time. Design content unchanged.  
 **Status:** **Proposed design — not implemented.** `RegionFile` still serializes *all* I/O behind one
 exclusive lock; none of the strategies below has been built.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
@@ -10,7 +12,9 @@ exclusive lock; none of the strategies below has been built.
 > without risking save corruption. **The recommended direction (§Conclusion): split the read and write
 > locks — concurrent reads via `FileStream` pooling or `RandomAccess`, writes kept serialized** — because
 > writes must mutate shared metadata (`_offsets`, `_sectorUsage`) and can resize the file, so fully
-> concurrent writes buy little and risk much. Reads are what block gameplay; writes already run async.
+> concurrent writes buy little and risk much. Reads and writes both run off the main thread (`LoadChunkAsync`
+> awaits a `Task.Run` worker, `ChunkStorageManager.cs:210`), so what a read held behind the lock costs is **late
+> chunk arrival** — the chunk appearing, lighting and meshing behind it — not a slow frame of gameplay itself.
 
 **Audited:** 2026-07-26, at commit `3f579e44` (branch `feat/world-scaling`). The premise was
 re-verified in code, not assumed: `Assets/Scripts/Serialization/RegionFile.cs` holds a single
@@ -95,6 +99,13 @@ The most performant and safest immediate step is to **split the Read and Write l
 *Entries before v1.0 are reconstructed from git history — this document predates the project's
 Document History convention, so they record what the commits changed, not contemporaneous notes.*
 
+* **v1.1** - **Drift sync against HEAD** (2026-11-17, docs only). The summary blockquote no longer claims reads
+  block gameplay: `ChunkStorageManager.LoadChunkAsync` awaits a `Task.Run` worker (`:210`) and `StorageIoStats`
+  times the lookup on that worker (`:218–223`), so a read queued behind the write lock delays **chunk arrival**
+  — and the lighting and meshing that follow it — rather than a frame. The `_fileLock` sites and the
+  `Audited:` line (2026-07-26, `3f579e44`) were left as written; `grep -n "lock (_fileLock)"` now reports six
+  sites (`:45, :123, :203, :317, :331, :399`) against that stamp's five, which is drift for a later re-audit to
+  carry, not a restamp here.
 * **v1.0** - Mandatory header added (2026-07-26): `Version`/`Date`/`Status`/`Target`, summary
   blockquote, `Audited` line, and the relationship list. Status set to **Proposed design — not
   implemented** after re-verifying in code that `RegionFile` still takes one exclusive `_fileLock` on
@@ -109,7 +120,7 @@ Document History convention, so they record what the commits changed, not contem
 
 ---
 
-**Last Updated:** 2026-07-26 (header added; premise re-verified against `RegionFile.cs`)  
+**Last Updated:** 2026-11-17 (summary's read-cost claim corrected; 2026-07-26: header added; premise re-verified against `RegionFile.cs`)  
 **Next Review:** when `SL-4` is scheduled — re-verify the §Background lock inventory against
 `RegionFile.cs` first, and confirm whether `System.IO.RandomAccess` is actually available on the
 project's API compatibility level (§4 assumes it may be, and never confirmed it).

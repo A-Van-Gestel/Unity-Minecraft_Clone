@@ -1,11 +1,15 @@
 # Chunk Pipeline Performance Analysis
 
-**Version:** 1.3  
+**Version:** 1.4  
 **Date:** 2026-06-11  
 **Amended:** 2026-07-27 — §6 ordering caveat: items 5 and 6 are gated on the FP-* capture.  
 **Amended:** 2026-07-28 (v1.2) — **the FP-4 capture ran and lifted that gate.** The symptom is
 ordering-bound + admission-bound, so items 5 and 6 (both throughput work) are **not** licensed by the
 evidence. §6 records the result and the redirected order.  
+**Amended:** 2026-11-17 (v1.4) — **§2's observed shape re-read against HEAD.** The merge sits at
+`WorldJobManager.cs:2867`, its loop is band-clamped to the job's rows, no section recount runs outside an
+instrumented build, and in-flight cross-chunk mods are deferred and drained after the merge rather than lost to
+the overwrite. §2 stays open — the merge is still a main-thread pass per completed job.  
 **Status:** **Partially implemented.** §1.1 (job `NativeArray` pooling) and the whole §3 backpressure
 family are shipped — §3.1/§3.2 + recommendation 3 (2026-07-21) and §3.4/§3.5 + the §5.3 draw rider
 (2026-07-23). **§2 and §4 remain open**, and §5.3 was later *superseded* when MP-6 deleted the stage it
@@ -59,7 +63,7 @@ Related docs: `Architecture/CHUNK_LIFECYCLE_PIPELINE.md`, `Architecture/LIGHTING
 
 ## Summary (TL;DR)
 
-The single biggest structural cost: **every lighting and meshing job allocates and memcpys ~1.7 MB of full-chunk snapshots on the main thread at schedule time, and merges results back with a full 32,768-voxel main-thread scan at completion time** (§1, §2).
+The single biggest structural cost: **every lighting and meshing job allocates and memcpys ~1.7 MB of full-chunk snapshots on the main thread at schedule time, and merges results back in a main-thread pass over the job's band rows at completion time** (§1, §2).
 
 Both observed symptoms are downstream of design gaps rather than tuning problems:
 
@@ -132,9 +136,18 @@ With `maxLightJobsPerFrame = 32` and `maxMeshRebuildsPerFrame = 10`, a single fr
 
 ### Observed
 
-`WorldJobManager.ApplyLightingJobResult` (`WorldJobManager.cs`, ~line 793) runs a full 32,768-iteration loop per completed lighting job (overwriting `section.LightData`, checking emptiness), **plus** `section.RecalculateCounts(...)` per non-new section. At 32 completions per frame this exceeds 1M iterations inside `Update()`.
+`WorldJobManager.ApplyLightingJobResult` (`WorldJobManager.cs:2867`) runs the per-section merge loop over the
+job's gathered band rows only — `ChunkMath.ExtractCenterLight` and `ChunkData.ApplyJobLightMap` both take the
+job's `BandMinY`/`BandHeight` (`:2874`–`:2877`) — and no longer recounts block types per section: the counts
+`SetVoxel` maintains are trusted, and only an instrumented build re-derives a section's counts, and only when a
+drift check flags them (`ChunkData.VerifySectionCounts`, `ChunkData.cs:1700`–`:1727`). The loop is therefore
+band-clamped rather than the full 32,768-iteration pass this section first measured, and the merge still runs on
+the main thread per completed job — the cost this section is about, and the reason `P-3` (ES-12) stays open.
 
-Additionally, the merge *overwrites* the live light map with results computed from a pre-job snapshot; cross-chunk mods applied to the live data during the job window are knowingly sacrificed (comment at ~line 836) and rely on edge-check convergence to repair — see §4.
+Additionally, the merge *overwrites* the live light map with results computed from a pre-job snapshot; cross-chunk
+mods aimed at a chunk whose job is still in flight are deferred and drained right after the merge rather than lost
+to that overwrite (the Bug 08 path-2 fix, described on `WorldJobManager.cs:2861–2862`), so §4's edge-check convergence
+is the backstop rather than the only route back.
 
 ### Recommendation
 
@@ -560,6 +573,14 @@ Interpretation: if the **same handful of coords** reschedules every sweep with `
 project's Document History convention, so they record what the commits changed rather than
 contemporaneous notes.*
 
+* **v1.4** - **§2's observed shape re-read against HEAD** (2026-11-17, docs only). The merge method is at
+  `WorldJobManager.cs:2867` (not ~793); `ExtractCenterLight` + `ChunkData.ApplyJobLightMap` take the job's
+  `BandMinY`/`BandHeight`, so the per-section loop runs over the band, not the full 32,768-cell chunk (ES-7.3);
+  the per-section `RecalculateCounts` is gone outside instrumented builds, where a drift check re-derives the
+  counts (`ChunkData.VerifySectionCounts`, `ChunkData.cs:1700`–`:1727`; ES-7.2); and cross-chunk mods aimed at a
+  chunk with a job in flight are deferred and drained right after the merge instead of being sacrificed to the
+  pre-job snapshot (the Bug 08 path-2 fix). §2 itself stays open: the merge still runs on the main thread per
+  completed job, which is `P-3` / roadmap ES-12.
 * **v1.2** - **§6's gate lifted by the FP-4 capture** (2026-07-28). The capture this document deferred to
   ([report](../Performance/CHUNK_PIPELINE_FP4_FLIGHT_PROFILE_IL2CPP_2026-07-28_BENCHMARK.md)) arbitrates the
   15+ m/s symptom as **ordering-bound + admission-bound**: 61.2 % waste at 200 m/s against `InFlightCap`
@@ -598,7 +619,7 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-08-02 (§2 sized by P9-1 and re-ranked to enabler; §6 item 7 updated with the P-9 measurement outcome)  
+**Last Updated:** 2026-11-17 (§2's observed shape re-read against HEAD; 2026-08-02: §2 sized by P9-1 and re-ranked to enabler; §6 item 7 updated with the P-9 measurement outcome)  
 **Next Review:** when §2 (`ApplyLightingJobResult` merge scan, owned by P-3) or §4 (load-path edge-check
 cascade) is picked up. **§4 needs re-verification before use** — §4.2's Bug 11 was fixed in June 2026,
 yet §4.3 still reads as live "do this first" instructions written before that.

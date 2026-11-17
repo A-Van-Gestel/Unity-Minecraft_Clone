@@ -315,7 +315,9 @@ and then blocked inside `OnApplicationQuit`, so those continuations never run be
 worker observed the cancel before writing therefore never reaches the CP-6 retry registry, and the edit is
 lost. CP-6's own contract assumes the 100 ms sleep covers "a continuation that hasn't staged"
 (`CHUNK_LIFECYCLE_ORCHESTRATION_REFACTOR.md` CP-6) — on this reading it cannot. The comment at
-`ChunkStorageManager.cs:21`, which says the continuation resumes on a ThreadPool thread, is likely wrong.
+`ChunkStorageManager.cs:20–21` no longer speaks about which thread the continuation resumes on — it records only
+that the CP-1 probe counters increment inside the `Task.Run` worker and in the main-thread catch arms — so the
+scheduling question is left to this entry's own reading, not settled by that comment.
 
 **Save & Quit to Main Menu.** Same `SaveWorldData()`, then `LoadScene`. Nothing cancels the shutdown token on
 this path; `World.OnDestroy` nulls `Instance` (`:756`) before `StorageManager.Dispose()` (`:782`), and

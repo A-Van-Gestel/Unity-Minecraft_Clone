@@ -1,7 +1,10 @@
 # Advanced Visibility Culling (Graph Connectivity)
 
-**Version:** 1.0  
+**Version:** 1.1  
 **Date:** 2026-07-26  
+**Amended:** 2026-11-17 (v1.1) — §8's draw-call estimate re-read: a section carries **up to 3** submeshes
+(opaque, transparent and fluid — `SectionRenderer.cs:193–201`, an empty group uploads none), which is the same
+count the roadmap's §2.3 renderer row states. Design content unchanged.  
 **Status:** **Proposed design — not implemented.** Phases 0 **and 0.5** are complete — the §7.3 renderer
 ownership split, the last hard prerequisite, shipped 2026-07-25 as MP-5 — but the culler itself
 (Phases 1–3: connectivity masks, BFS traversal, integration) is unbuilt.  
@@ -239,7 +242,8 @@ Both are rare events compared to per-frame; rotation costs nothing. Add the frus
 
 ## 8. Performance expectations & prerequisites
 
-- **Expected win:** while underground or walking over cave systems, the majority of subsurface sections stop rendering — saving draw calls (2 per section: opaque + transparent submeshes), vertex work, and Unity culling overhead. This is the single largest *rendering* win available after the GPU items in `PERFORMANCE_IMPROVEMENTS_REPORT.md` (see `GS-*`), and it compounds with them. On tile-based mobile GPUs the overdraw itself is partly absorbed by early-Z, so the measured win is mostly draw-call/vertex/CPU-culling — still large with thousands of section
+- **Expected win:** while underground or walking over cave systems, the majority of subsurface sections stop rendering — saving draw calls (up to 3 per section: opaque, transparent and fluid submeshes — `SectionRenderer.cs:199–201`
+  uploads a submesh only where that group's index count is non-zero), vertex work, and Unity culling overhead. This is the single largest *rendering* win available after the GPU items in `PERFORMANCE_IMPROVEMENTS_REPORT.md` (see `GS-*`), and it compounds with them. On tile-based mobile GPUs the overdraw itself is partly absorbed by early-Z, so the measured win is mostly draw-call/vertex/CPU-culling — still large with thousands of section
   renderers.
 - **Flood-fill cost:** one 16³ flood fill per meshed section inside the already-running
   `MeshGenerationJob` — a 4096-bit visited mask is 64 `ulong`s (512 B, stackalloc), seeded per face; Burst-friendly; expected well under 5% of current mesh job time. Per §3, `IsEmpty`/
@@ -262,6 +266,11 @@ Both are rare events compared to per-frame; rotation costs nothing. Add the frus
 project's Document History convention, so they record what the commits changed rather than
 contemporaneous notes.*
 
+* **v1.1** - **§8's draw-call figure re-read against HEAD** (2026-11-17, docs only). A section's mesh carries
+  **up to 3** submeshes — opaque, transparent and fluid — and `SectionRenderer.cs:199–201` uploads a submesh only
+  where that group's index count is non-zero, so a fluid-bearing section is one draw more than the pair this
+  section assumed. That reconciles this document with `ENGINE_SCALING_PERFORMANCE_ROADMAP.md` §2.3's "up to 3
+  draws per visible section". No design content changed.
 * **v1.0** - Mandatory header completed (2026-07-26): `Version`/`Date`/`Target`, the **summary
   blockquote this document never had**, an `Audited`/`GS-5` tracking line and a relationship list. The
   existing bullet-style `Status`/`Current Implementation`/`Context` block is kept directly below as the
@@ -280,6 +289,6 @@ contemporaneous notes.*
 
 ---
 
-**Last Updated:** 2026-07-26 (header completed; Phases 1–3 still open)  
+**Last Updated:** 2026-11-17 (§8 draws per section re-read; 2026-07-26: header completed; Phases 1–3 still open)  
 **Next Review:** when `GS-5` Phase 1 is scheduled — re-verify §5's contract first (Phase 0.5 is closed,
 and §4.3's single apply site is now also the load-animation trigger point).
