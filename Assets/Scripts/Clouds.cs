@@ -130,7 +130,8 @@ public class Clouds : MonoBehaviour
 
     /// <summary>
     /// Cloud tile edge in blocks; must divide the pattern width. Deliberately larger than terrain chunks: coverage
-    /// scales with render distance, so fewer, bigger tiles keep the GameObject count bounded.
+    /// scales with render distance, so fewer, bigger tiles keep the GameObject count bounded (identical pattern
+    /// tiles share one mesh).
     /// </summary>
     public const int CloudTileSize = 64;
 
@@ -735,8 +736,8 @@ public class Clouds : MonoBehaviour
                 Mesh mesh = GetTileMesh(state, cloudTile);
                 if (mesh == null) continue; // Pattern leaves this tile empty — nothing to render.
 
-                long lap = System.Diagnostics.Stopwatch.GetTimestamp();
-                int collectionsAtLap = GC.CollectionCount(0);
+                long lap = _recordInitSplit ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
+                int collectionsAtLap = _recordInitSplit ? GC.CollectionCount(0) : 0;
                 bool createsTile = state.TilePool.Count == 0;
                 state.Tiles.Add(cloudTile, AcquireTile(state, mesh, localPos, cloudTile));
                 if (_recordInitSplit)
@@ -834,8 +835,8 @@ public class Clouds : MonoBehaviour
         if (state.TileMeshes.TryGetValue(patternKey, out Mesh mesh))
             return mesh;
 
-        long lap = System.Diagnostics.Stopwatch.GetTimestamp();
-        int collectionsAtLap = GC.CollectionCount(0);
+        long lap = _recordInitSplit ? System.Diagnostics.Stopwatch.GetTimestamp() : 0;
+        int collectionsAtLap = _recordInitSplit ? GC.CollectionCount(0) : 0;
         switch (state.EffectiveStyle)
         {
             case CloudStyle.Fast:
