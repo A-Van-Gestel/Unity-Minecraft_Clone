@@ -184,6 +184,10 @@ namespace Diagnostics
         [NoAutoStaticsCleanup] // reset in DomainReset
         private static PerfFrameTimingSource s_frameTiming;
 
+        /// <summary>The render-counter reader; exists at <see cref="PerfTier.Systems"/> and above.</summary>
+        [NoAutoStaticsCleanup] // reset in DomainReset
+        private static PerfRenderStatsSource s_renderStats;
+
         [NoAutoStaticsCleanup] // reset in DomainReset
         private static float s_hitchMinMs;
 
@@ -363,6 +367,7 @@ namespace Diagnostics
             RefreshSlotsActive();
             ApplyFrameTierResources();
             ApplyJobSamples();
+            ApplyRenderStats();
             RefreshExport();
 
             if (s_ring == null) return;
@@ -465,6 +470,9 @@ namespace Diagnostics
         /// <param name="counter">A gauge — a counter before <see cref="FirstPerFrameCount"/>.</param>
         /// <param name="value">The gauge's level.</param>
         public static void SetGauge(PerfCounter counter, int value) => s_counterValues[(int)counter] = value;
+
+        /// <summary>Sets the <c>Render*</c> gauges from Unity's render counters. A no-op below <see cref="PerfTier.Systems"/>.</summary>
+        public static void SampleRenderStats() => s_renderStats?.Sample();
 
         /// <summary>
         /// Adds a per-frame count's growth since the previous sample of its running total. The first sample, the first
@@ -829,6 +837,28 @@ namespace Diagnostics
             }
         }
 
+        /// <summary>
+        /// Creates the render-counter reader at <see cref="PerfTier.Systems"/> and above and frees it below: only those
+        /// tiers hold counter columns, so a reader below them would sample into nothing.
+        /// </summary>
+        private static void ApplyRenderStats()
+        {
+            if (s_tier < PerfTier.Systems || s_isShutDown)
+            {
+                ReleaseRenderStats();
+                return;
+            }
+
+            s_renderStats ??= new PerfRenderStatsSource();
+            RegisterShutDown();
+        }
+
+        private static void ReleaseRenderStats()
+        {
+            s_renderStats?.Dispose();
+            s_renderStats = null;
+        }
+
         private static double CreateProfilerTickToNs()
         {
             ProfilerUnsafeUtility.TimestampConversionRatio ratio = ProfilerUnsafeUtility.TimestampToNanosecondsConversionRatio;
@@ -868,7 +898,7 @@ namespace Diagnostics
             s_isShutDown = true;
         }
 
-        /// <summary>Frees the ring, the hitch detector and the frame-timing reader, and stops listening for shutdown.</summary>
+        /// <summary>Frees the ring, the hitch detector and the frame-timing and render-counter readers, and stops listening for shutdown.</summary>
         private static void DisposeNative()
         {
             Application.quitting -= ShutDown;
@@ -877,6 +907,7 @@ namespace Diagnostics
 #endif
             CloseExport();
             ReleaseFrameTierResources();
+            ReleaseRenderStats();
             s_ring?.Dispose();
             s_ring = null;
             s_jobLatencyMs = null;

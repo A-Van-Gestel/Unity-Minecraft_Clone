@@ -3643,8 +3643,9 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     }
 
     /// <summary>
-    /// Records this frame's pipeline and pool levels, and the pool misses since the last frame, into the performance
-    /// monitor's counters. Called at the end of <see cref="Update"/> while the slot probes are recording.
+    /// Records this frame's pipeline and pool levels, the previous frame's render counters, and the pool misses since
+    /// the last frame, into the performance monitor's counters. Called at the end of <see cref="Update"/> while the slot
+    /// probes are recording.
     /// </summary>
     private void SamplePerfCounters()
     {
@@ -3662,6 +3663,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         PerfStore.SetGauge(PerfCounter.JobArraysPooled, JobManager.JobArraysPooled);
         PerfStore.SetGauge(PerfCounter.MeshOutputsPooled, JobManager.MeshOutputsPooled);
         PerfStore.SetGauge(PerfCounter.IoInFlight, StorageIoStats.InFlight);
+        PerfStore.SampleRenderStats();
 
         PerfStore.SampleTotal(PerfCounter.SectionPoolMisses, ChunkPool.CreatedSections);
         PerfStore.SampleTotal(PerfCounter.DataPoolMisses, ChunkPool.CreatedData);

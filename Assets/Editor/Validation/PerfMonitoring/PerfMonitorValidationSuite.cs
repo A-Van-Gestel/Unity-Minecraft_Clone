@@ -17,7 +17,7 @@ namespace Editor.Validation.PerfMonitoring
     /// slot-column lifecycle, <see cref="PerfWindowStats"/>' exact percentiles against a sorted oracle,
     /// <see cref="PerfStore"/>'s tier gating, frame boundary and shutdown, and the
     /// <see cref="WorldFrameProfiler"/> facade's slot mapping and bit-identical published values. The Frame-tier
-    /// scenarios (B11–B19: GC readings, frame-timing back-fill, hitch detection) live in the <c>.Frame</c> part, and the
+    /// scenarios (B11–B19: GC readings, frame-timing back-fill, hitch detection) and the render counters (B43) live in the <c>.Frame</c> part, and the
     /// coverage scenarios (B20–B23: the unattributed remainder and the counters) in the <c>.Coverage</c> part, and the
     /// worker scenarios (B24–B30: job timing, per-job samples and storage I/O) in the <c>.Workers</c> part, the tick
     /// breakdown (B31) in the <c>.Tick</c> part, the export scenarios (B32–B37: phase statistics, the tier floor and export) in the <c>.Export</c> part, the startup timeline (B38–B39) and phase report (B41) and the cross-chunk mod census (B42) in the <c>.Startup</c> part, and the lighting-merge breakdown (B40) in the <c>.Merge</c> part.
@@ -108,6 +108,7 @@ namespace Editor.Validation.PerfMonitoring
                 new Scenario("B40 Merge breakdown: every totals field maps to its counter, the band predicate is row-exact, a real merge compacts a uniform-lit absent section without churn and verifies its kept counts (a planted drift is caught and repaired); below Systems only the verifier counts", RunB40MergeBreakdown),
                 new Scenario("B41 Startup phase report: phase 1, one line per sweep in order, sweeps past the cap folded into one row, the total sums every sweep, the tail; an unfinished coroutine says so", RunB41StartupPhaseReport),
                 new Scenario("B42 Cross-chunk mod census: repeats per (voxel, channel) key, redundant placements per channel, a removal resets its key, the scratch map is cleared per call, a zeroed placement is not a removal", RunB42CrossChunkModCensus),
+                new Scenario("B43 Render counters: a reader only at Systems and above, freed on leaving and at shutdown; each Render counter in its own gauge; readings clamp without wrapping", RunB43RenderStats),
             };
             return ValidationSuiteRunner.Execute("Performance Monitor", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }

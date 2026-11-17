@@ -611,6 +611,8 @@ all `ProfilerRecorder` readings PM-0 verified valid in a Master player
 (`PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md` §8 q1) — since none exists. The Frame Debugger has no
 scripting API beyond `FrameDebugger.enabled`, so it carries none of that, and the block shaders' SRP Batcher compatibility comes out of
 the same draw split rather than as a separate inspector check.
+*Readers shipped (Step 0a, 2026-11-17):* the 7 `Render*` gauges in the performance monitor
+(`PERFORMANCE_MONITOR_AND_LOGGER_OVERHAUL.md`, Counters); the baseline itself is still to be taken.
 1. **16-bit indices** when a section has ≤ 65 535 vertices, UInt32 fallback (indices are ~16 % of upload
    bytes and already section-local).
 2. **Bucketed vertex capacity** so `SetVertexBufferParams` stops reallocating on every edit, and a

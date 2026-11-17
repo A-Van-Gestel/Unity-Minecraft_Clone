@@ -13,6 +13,7 @@ namespace Editor.Validation.PerfMonitoring
     public static partial class PerfMonitorValidationSuite
     {
         private const double NORMAL_FRAME_MS = 5.0;
+        private const int RENDER_READING = 12345;
         private const double HITCH_FRAME_MS = 100.0;
         private const double BASELINE_FRAME_MS = 20.0;
         private const double LOW_BASELINE_FRAME_MS = 4.0;
@@ -198,6 +199,75 @@ namespace Editor.Validation.PerfMonitoring
                 && GetStoreField("s_frameTiming") == null && PerfStore.Hitches == null);
             return ok;
         });
+
+        private static bool RunB43RenderStats() => WithFreshStore(() =>
+        {
+            bool ok = Check("Basic: no render reader", GetStoreField("s_renderStats") == null);
+            PerfStore.SetTier(PerfTier.Frame);
+            ok &= Check("Frame: no render reader", GetStoreField("s_renderStats") == null);
+
+            PerfStore.SetTier(PerfTier.Systems);
+            PerfRenderStatsSource source = (PerfRenderStatsSource)GetStoreField("s_renderStats");
+            ok &= Check("Systems: render reader exists", source != null && !source.IsDisposed);
+            PerfStore.SetTier(PerfTier.Capture);
+            ok &= Check("Capture: the same reader", GetStoreField("s_renderStats") == source);
+
+            ok &= Check("Binding table: the seven Render counters, each in its own gauge", RenderBindingsMatch());
+            bool allValid = source != null;
+            for (int row = 0; source != null && row < PerfRenderStatsSource.Bindings.Length; row++)
+                allValid &= source.IsRecorderValid(row);
+            ok &= Check("Every Render counter exists in the Editor", allValid);
+
+            ok &= Check("Readings clamp into a gauge without wrapping",
+                PerfRenderStatsSource.ClampToGauge(long.MaxValue) == int.MaxValue
+                && PerfRenderStatsSource.ClampToGauge(-1) == 0
+                && PerfRenderStatsSource.ClampToGauge(RENDER_READING) == RENDER_READING);
+
+            int[] values = (int[])GetStoreField("s_counterValues");
+            ok &= Check("Sampling the live counters does not throw", !Throws(PerfStore.SampleRenderStats));
+            bool allNonNegative = true;
+            foreach (PerfRenderStatsSource.Binding binding in PerfRenderStatsSource.Bindings)
+                allNonNegative &= values[(int)binding.Gauge] >= 0;
+            ok &= Check("Every Render gauge holds a non-negative reading", allNonNegative);
+
+            PerfStore.SetTier(PerfTier.Frame);
+            ok &= Check("Back to Frame: reader disposed and dropped",
+                source != null && source.IsDisposed && GetStoreField("s_renderStats") == null);
+
+            PerfStore.SetTier(PerfTier.Systems);
+            PerfRenderStatsSource fresh = (PerfRenderStatsSource)GetStoreField("s_renderStats");
+            InvokeStorePrivate("ShutDown");
+            ok &= Check("Shutdown frees the reader", fresh != null && fresh.IsDisposed && GetStoreField("s_renderStats") == null);
+            PerfStore.SetTier(PerfTier.Systems);
+            ok &= Check("After shutdown a tier change creates no reader", GetStoreField("s_renderStats") == null);
+            return ok;
+        });
+
+        /// <summary>Whether <see cref="PerfRenderStatsSource.Bindings"/> pairs exactly the expected counters and gauges, each a gauge (before <see cref="PerfStore.FirstPerFrameCount"/>).</summary>
+        private static bool RenderBindingsMatch()
+        {
+            (string Name, PerfCounter Gauge)[] expected =
+            {
+                ("SRP Batcher Draw Calls Count", PerfCounter.RenderSrpBatcherDraws),
+                ("Standard Draw Calls Count", PerfCounter.RenderStandardDraws),
+                ("SetPass Calls Count", PerfCounter.RenderSetPassCalls),
+                ("Triangles Count", PerfCounter.RenderTriangles),
+                ("Vertices Count", PerfCounter.RenderVertices),
+                ("Vertex Buffer Upload In Frame Bytes", PerfCounter.RenderVertexUploadBytes),
+                ("Index Buffer Upload In Frame Bytes", PerfCounter.RenderIndexUploadBytes),
+            };
+
+            PerfRenderStatsSource.Binding[] bindings = PerfRenderStatsSource.Bindings;
+            if (bindings.Length != expected.Length) return false;
+
+            for (int i = 0; i < bindings.Length; i++)
+            {
+                if (bindings[i].CounterName != expected[i].Name || bindings[i].Gauge != expected[i].Gauge) return false;
+                if (bindings[i].Gauge >= PerfStore.FirstPerFrameCount) return false;
+            }
+
+            return true;
+        }
 
         private static bool RunB15HitchThreshold() => WithFreshStore(() =>
         {

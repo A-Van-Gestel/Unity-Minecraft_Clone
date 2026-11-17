@@ -57,6 +57,9 @@ SLOT_SUFFIX = "_ms"
 GAUGES = ["GenerationQueue", "GenerationInFlight", "LightReady", "LightWaiting", "LightInFlight", "MeshQueue",
           "MeshInFlight", "ModificationQueue", "ResidentChunks", "ActiveChunks", "ActiveSections", "JobArraysPooled",
           "MeshOutputsPooled", "IoInFlight"]
+# Mirrors PerfRenderStatsSource.Bindings: gauges too, reporting the previous rendered frame.
+RENDER_GAUGES = ["RenderSrpBatcherDraws", "RenderStandardDraws", "RenderSetPassCalls", "RenderTriangles",
+                 "RenderVertices", "RenderVertexUploadBytes", "RenderIndexUploadBytes"]
 JOB_TYPES = ["Generation", "Light", "Mesh", "Fluid", "FluidSoundScan"]
 TICK_PARTS = ["TickListUs", "TickPrepareUs", "TickScheduleUs", "TickWaitUs", "TickGrassUs", "TickFluidReplayUs"]
 # MergeCountsUs runs inside MergeApplyUs, so it is a column of its own rather than a part.
@@ -201,7 +204,7 @@ def gather(phases, part_paths):
                     if row[index] == "":
                         continue
                     value = int(row[index])
-                    if column in GAUGES:
+                    if column in GAUGES or column in RENDER_GAUGES:
                         phase.add(column, value)
                     else:
                         phase.sums[column] += value
@@ -284,9 +287,9 @@ def slot_tables(phases, slots):
     return "\n\n".join(sections)
 
 
-def gauge_table(phases):
+def gauge_table(phases, gauges=GAUGES):
     rows = []
-    for gauge in GAUGES:
+    for gauge in gauges:
         cells = [gauge]
         for p in phases:
             values = p.values.get(gauge, [])
@@ -416,7 +419,8 @@ def summarize(report_lines, folder, session=None):
            f"{outside} rows outside every phase", "",
            "Cross-check against the report: " + ("every phase matches." if not problems else "MISMATCH — see below."),
            "", phase_overview(phases), "", "### Slots per phase (mean over every frame of the phase)", "",
-           slot_tables(phases, slots), "", "### Gauges", "", gauge_table(phases), "", "### Jobs", "",
+           slot_tables(phases, slots), "", "### Gauges", "", gauge_table(phases), "",
+           "### Render (previous rendered frame)", "", gauge_table(phases, RENDER_GAUGES), "", "### Jobs", "",
            job_table(phases), "", "### Disk I/O", "", io_table(phases), "", "### Behavior tick (ms per frame)", "",
            tick_table(phases), "", "### Lighting merge (ms per frame; counts are phase totals)", "",
            merge_table(phases), "", "### Pool misses and untimed jobs (phase totals)", "", pool_table(phases), "",

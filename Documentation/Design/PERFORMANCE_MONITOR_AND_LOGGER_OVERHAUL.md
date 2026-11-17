@@ -509,19 +509,23 @@ bytes), saves on every path (serialize and write time, payload bytes and their u
 it covers, and the operations in flight. Region files touched outside it — the migration step, the world list — and the
 non-chunk files (`level.dat`, pending modifications, pending lighting) are not counted.
 
-**Counters (Systems tier).** 76, sampled in `World.SamplePerfCounters`:
+**Counters (Systems tier).** 86, sampled in `World.SamplePerfCounters`:
 - *Gauges (14):* the pipeline queues and jobs in flight (`GenerationQueue`, `GenerationInFlight`, `LightReady`,
   `LightWaiting`, `LightInFlight`, `MeshQueue`, `MeshInFlight`, `ModificationQueue`), residency (`ResidentChunks`,
   `ActiveChunks`, `ActiveSections`), the native pools' idle stock (`JobArraysPooled`, `MeshOutputsPooled`) and `IoInFlight`.
-- *Per-frame counts (62):* pool misses (section, chunk data, job array, mesh output, save buffer); completed / latency /
-  busy for each of the five job types, and `UntimedJobs`; the twelve disk I/O counts; the behavior tick's six timed parts
+- *Render gauges (7, ES-25):* `RenderSrpBatcherDraws`, `RenderStandardDraws`, `RenderSetPassCalls`, `RenderTriangles`,
+  `RenderVertices`, `RenderVertexUploadBytes`, `RenderIndexUploadBytes` — the previous rendered frame's values of
+  Unity's `Render`-category counters, read by `PerfRenderStatsSource`, which `PerfStore` holds at Systems and above.
+  `summarize_perf_session.py` prints them as their own `### Render` table.
+- *Per-frame counts (65, the lighting merge's 21 below included):* pool misses (section, chunk data, job array, mesh
+  output, save buffer); completed / latency / busy for each of the five job types, and `UntimedJobs`; the twelve disk I/O counts; the behavior tick's six timed parts
   (`TickListUs`, `TickPrepareUs`, `TickScheduleUs`, `TickWaitUs`, `TickGrassUs`, `TickFluidReplayUs`, from
   `PerfTickTotals`), its counts (`TickFluidChunks`, `TickFluidVoxels`, `TickSnapshotKb`, `TickGrassVoxels`) and
   `FluidTickerPoolMisses`. Since ES-29, `TickSnapshotKb` counts the sections the tick's shared arena actually copied
   (16 KB each, grass and fluid prepares together), `TickPrepareUs` includes the grass prepares, and `TickGrassUs` is
   the grass jobs' replay — the grass rules run on workers, inside `TickWaitUs`.
   The tick's drain bookkeeping and ticker returns are timed by no part: `/perf stats` shows them as the average "Other".
-- *The lighting merge (18, ES-7, from `PerfMergeTotals` owned by `WorldJobManager`):* five timed parts of `LightMerge` —
+- *The lighting merge (21, ES-7, from `PerfMergeTotals` owned by `WorldJobManager`):* five timed parts of `LightMerge` —
   `MergeApplyUs` (band extract + `ChunkData.ApplyJobLightMap`), `MergeDrainUs` (deferred cross-chunk mods), `MergePullBackUs`,
   `MergeRouteUs` (outbound mods and their support scans), `MergeCascadeUs` (stability, the edge-check cascade and the
   merge's mesh requests) — plus `MergeCountsUs` inside the apply (the instrumented-build block-count verifier; 0 in a

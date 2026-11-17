@@ -1,18 +1,23 @@
 """summarize_perf_session.py: report parsing in any culture, phase routing by frame range, the derived job and I/O
 figures, hitch attribution, and the cross-check that fails a phase cut from the wrong rows."""
 import os
+import re
 import shutil
 import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from helpers import run_script
+from helpers import TOOLS_DIR, run_script
 import summarize_perf_session as summary
+
+PERF_COUNTER_SOURCE = Path(TOOLS_DIR).parents[1] / "Assets" / "Scripts" / "Diagnostics" / "PerfCounter.cs"
+FIRST_PER_FRAME_COUNT = "SectionPoolMisses"
 
 SESSION = "PerfSession_2026-10-10_12-00-00-000"
 HEADER = summary.FRAME_COLUMNS + ["Tick_ms", "Apply_ms", "GenerationQueue", "GenerationCompleted",
-                                  "GenerationLatencyUs", "GenerationBusyUs", "DiskLoadHits", "DiskReadUs"]
+                                  "GenerationLatencyUs", "GenerationBusyUs", "DiskLoadHits", "DiskReadUs",
+                                  "RenderSrpBatcherDraws"]
 
 
 def report_text(frames_a="5", frames_b="3"):
@@ -31,15 +36,16 @@ def report_text(frames_a="5", frames_b="3"):
     ]).splitlines()
 
 
-def row(frame, wall, tick, completed=0, latency=0, busy=0, hits=0, read=0, collections=0):
+def row(frame, wall, tick, completed=0, latency=0, busy=0, hits=0, read=0, collections=0, draws=0):
     frame_cells = [frame, f"{wall:.3f}", "1.000", "", "1", collections, "", "", ""]
-    return ",".join(str(c) for c in frame_cells + [f"{tick:.3f}", "0.000", 4, completed, latency, busy, hits, read])
+    return ",".join(str(c) for c in frame_cells + [f"{tick:.3f}", "0.000", 4, completed, latency, busy, hits, read, draws])
 
 
 class FixtureTests(unittest.TestCase):
     def setUp(self):
         self.folder = Path(tempfile.mkdtemp(prefix="perf-session-test-"))
-        rows_a = [row(f, 10.0 + (f - 10), 2.0, completed=2, latency=4000, busy=1000) for f in range(10, 15)]
+        rows_a = [row(f, 10.0 + (f - 10), 2.0, completed=2, latency=4000, busy=1000, draws=100 * f)
+                  for f in range(10, 15)]
         rows_b = [row(f, 1046.3, 0.5, hits=1, read=500, collections=1 if f == 15 else 0) for f in range(15, 18)]
         outside = [row(9, 99.0, 0.0), row(18, 99.0, 0.0)]
         part1 = [",".join(HEADER), outside[0]] + rows_a[:3]
@@ -91,6 +97,15 @@ class FixtureTests(unittest.TestCase):
         self.assertIn("| Tick | 2.000 |", markdown)
         self.assertIn("| Generation Pass / 10 m/s | 1 | 14.0 | 0 | Tick 1 |", markdown)
 
+    def test_render_counters_are_gauges_not_totals(self):
+        phases = summary.parse_report(report_text())
+        _, parts, _ = summary.session_files(self.folder, None)
+        summary.gather(phases, parts)
+        self.assertNotIn("RenderSrpBatcherDraws", phases[0].sums)
+        # Frames 10..14 draw 1000..1400: mean 1200, p99 and max 1400.
+        markdown, _ = summary.summarize(report_text(), self.folder)
+        self.assertIn("| RenderSrpBatcherDraws | 1200.0 / 1400 / 1400 |", markdown)
+
     def test_overview_counts_frames_over_the_fixed_bars(self):
         # Strictly over each bar: 33.0 counts for neither, 33.5 and 50.0 only for 33, 50.5 for both.
         phase = SimpleNamespace(label="P", rows=5, collections=0,
@@ -114,6 +129,14 @@ class FixtureTests(unittest.TestCase):
         code, out = run_script("summarize_perf_session.py", "--report", str(report), "--folder", str(self.folder))
         self.assertEqual(code, 1, out)
         self.assertIn("MISMATCH", out)
+
+
+class GaugeParityTests(unittest.TestCase):
+    def test_gauge_lists_mirror_the_perf_counter_gauge_group(self):
+        # A gauge missing here would be summed per phase instead of read as a level.
+        body = PERF_COUNTER_SOURCE.read_text(encoding="utf-8").split("enum PerfCounter")[1]
+        members = re.findall(r"^\s*([A-Z]\w*),\s*$", body, re.M)
+        self.assertEqual(summary.GAUGES + summary.RENDER_GAUGES, members[:members.index(FIRST_PER_FRAME_COUNT)])
 
 
 if __name__ == "__main__":

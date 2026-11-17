@@ -54,6 +54,27 @@ namespace Diagnostics
         /// <summary>Background chunk loads and saves submitted and not yet resumed on their caller.</summary>
         IoInFlight,
 
+        /// <summary>SRP Batcher draw calls of the previous rendered frame.</summary>
+        RenderSrpBatcherDraws,
+
+        /// <summary>Draw calls outside the SRP Batcher in the previous rendered frame.</summary>
+        RenderStandardDraws,
+
+        /// <summary>SetPass calls of the previous rendered frame.</summary>
+        RenderSetPassCalls,
+
+        /// <summary>Triangles drawn in the previous rendered frame.</summary>
+        RenderTriangles,
+
+        /// <summary>Vertices drawn in the previous rendered frame.</summary>
+        RenderVertices,
+
+        /// <summary>Vertex buffer bytes uploaded to the GPU in the previous rendered frame.</summary>
+        RenderVertexUploadBytes,
+
+        /// <summary>Index buffer bytes uploaded to the GPU in the previous rendered frame.</summary>
+        RenderIndexUploadBytes,
+
         /// <summary>Sections the section pool had to create this frame (a pool miss).</summary>
         SectionPoolMisses,
 
