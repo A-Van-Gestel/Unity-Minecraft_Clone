@@ -128,6 +128,10 @@ unity command editor.playmode stop                 # when done
 
 Verified 2026-10-09 end to end on a fresh seed-4242 world (noon and midnight frames of a placed wall).
 
+- **Play in the open `World` scene loads the user's own world** (`Editor_Temp_Saves/New World`);
+  `enableVolatileSaveData` only picks that folder, it is not throwaway. Before any edit in Play: back up
+  `Assets/settings.json`, set `dev.keepChunksInMemory: true`, confirm the `[Memory Only Mode]` console
+  line, and restore the file byte-for-byte afterwards.
 - **State change and capture never share a call.** `World.Update()` pushes the global shader uniforms, so in
   the call that ran `/time set midnight` `GlobalLightLevel` still read `1`; the next call read `0.267`.
   `Status` and `Capture` both report it — check it before trusting a frame. Freshly placed blocks remesh
