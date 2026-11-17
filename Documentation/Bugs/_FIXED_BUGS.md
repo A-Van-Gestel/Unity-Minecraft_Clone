@@ -2587,3 +2587,43 @@ After: `dirty=True [git status failed (git exited 128)]`; a clean tree still rea
 still lists its paths. Not reproducible through a normal build, since a healthy git never takes this path.
 
 ---
+
+### ~~03. Block Editor clones `BlockType` field-by-field, so new fields are silently dropped~~ (EDITOR_TOOL_BUGS.md §01)
+
+**Severity:** Implementation (data loss)  
+**Files:** `Assets/Editor/BlockEditor/BlockEditorWindow.cs` — `LoadBlockData`;
+`Assets/Editor/BlockEditor/BlockEditorWindow.BlockEditor.cs` — `DuplicateSelectedBlock`  
+**Fixed:** September 2026
+
+The Block Editor does not edit `BlockDatabase.asset` directly. `LoadBlockData` builds a **hand-written,
+field-by-field copy** of every `BlockType` into `_blockTypesCopy` (so the window can offer Save/Revert),
+and `SaveBlockData` writes that copy back over the asset. `DuplicateSelectedBlock` repeats the same
+literal field list a second time.
+
+Any field added to `BlockType` without also being added to **both** lists is therefore:
+
+1. invisible in the window (it reads as the type's default), and
+2. **erased from the asset on the next Save** — including the Save offered by Unity's unsaved-changes
+   prompt when the window closes.
+
+**Proven by:** the `soundMaterial` channel (2026-08-28). It was added to `BlockType` and given a Block
+Editor dropdown, but not to either copy list. Every block showed `None`, and one Save zeroed all 37
+authored values in `BlockDatabase.asset`. The values were restored from git and both lists corrected —
+but the *pattern* is unchanged, so the next field added repeats it exactly.
+
+**Impact:** silent, destructive loss of authored block data. It does not fail loudly, does not fail at
+edit time, and the loss is only visible by diffing the asset. The `Validate Sound Engine` census
+(`Every Placeable Block Has An Authored Sound Material`) catches this particular field on the next
+`Validate All`, but only *after* the damage has reached disk.
+
+**Proposed fix:** replace both literal lists with a single reflection copy over
+`typeof(BlockType).GetFields()`. The semantics are identical to today's code — value types by value,
+asset references shallow — but no future field can be omitted, and the replacement is shorter than either
+list it removes. A validation baseline asserting round-trip completeness is only worth writing if the
+hand-written form is kept.
+
+**Resolution:** both copy paths now call `BlockTypeCloner.Clone`
+(`Assets/Editor/BlockEditor/Helpers/BlockTypeCloner.cs`), a reflective copy over every instance field of `BlockType`,
+public and private, so a newly added field is carried without touching the cloner (commit `97129286`).
+
+---
