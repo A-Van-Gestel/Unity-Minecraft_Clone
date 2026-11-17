@@ -591,8 +591,9 @@ public class Settings
 
     /// <summary>
     /// Maximum lighting jobs allowed in flight before the ready-set scan stops scheduling for the
-    /// frame (memory bound — each job rents ~11 pooled full-volume buffers, so this ceiling keeps a
-    /// hitch-scaled §3.4 quota from blowing past the pool retention into a Persistent alloc storm).
+    /// frame (memory bound — each job rents 9 + 9 pooled full-chunk maps and 2 padded buffers, so this
+    /// ceiling keeps a hitch-scaled §3.4 quota from blowing past the pool retention into a Persistent alloc
+    /// storm).
     /// Always active; not device-calibrated (2× the desktop per-frame cap).
     /// </summary>
     public int maxInFlightLightingJobs = 64;

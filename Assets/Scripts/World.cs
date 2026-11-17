@@ -3334,9 +3334,9 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                 PipelinePassBudget.StartWindow(PipelinePassBudget.ScaleCeilingMs(settings.lightScheduleBudgetMs, ceilingScaleInterval));
 
             // In-flight memory bound: a hitch-scaled quota may admit up to 8× the per-frame cap, and
-            // each lighting job rents ~11 pooled full-volume buffers — without this ceiling one long
-            // frame could blow past the pool retention into a Persistent alloc storm (the §1.1
-            // incident class).
+            // each lighting job rents 9 + 9 pooled full-chunk maps and 2 padded buffers — without this
+            // ceiling one long frame could blow past the pool retention into a Persistent alloc storm
+            // (the §1.1 incident class).
             int inFlightLightCap = Mathf.Max(1, settings.maxInFlightLightingJobs);
 
             // FP-2 stop-reason inputs, classified after the loop by the SAME pure helper the mesh drain

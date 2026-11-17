@@ -24,14 +24,15 @@ namespace Helpers
         /// Maximum buffers retained per element type; returns beyond this cap dispose instead,
         /// so a backlog spike does not permanently pin its peak native memory.
         /// <para>Device-calibrated (OM-1, <c>Settings.chunkJobArrayPoolRetention</c>): on a high-RAM
-        /// desktop this resolves to <c>512</c> — sized above peak steady-state in-flight demand for the
-        /// full-chunk maps (≈468 buffers per type at max job settings: (32 lighting + 20 mesh jobs) × 9
-        /// buffers per type) so renting never degrades into an alloc/free storm. Low-RAM devices get a
-        /// proportionally smaller cap so the pool ceiling matches what they can hold.</para>
+        /// desktop this resolves to <c>512</c>. In-flight demand for the full-chunk maps can exceed it: ≈756
+        /// buffers per type at max job settings ((64 lighting + 20 mesh jobs in flight) × 9 buffers per type);
+        /// returns past the cap dispose, and a rent that finds the stack empty allocates (the
+        /// <c>JobArrayMisses</c> counter). Low-RAM devices get a proportionally smaller cap so the pool ceiling
+        /// matches what they can hold.</para>
         /// <para><b>Retention ceilings differ per stack.</b> The cap applies to each of the four types
         /// independently, so at 512 it permits ≈246 MB (64 + 32 + 100 + 50). Demand-limited retention is
-        /// far lower and ≈96 MB in practice: only the full-chunk maps approach the cap (9 per job), while
-        /// the padded buffers are rented one of each per lighting job and peak in the tens.</para>
+        /// lower, ≈106 MB in practice: the full-chunk maps reach the cap (9 per job, ≈96 MB), while the padded
+        /// buffers are rented one of each per lighting job and peak in the tens (≈10 MB).</para>
         /// </summary>
         private readonly int _maxRetainedPerType;
 

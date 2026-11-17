@@ -7,7 +7,7 @@ namespace Benchmarks
     /// Opt-in, <see cref="Stopwatch"/>-based sub-phase profiler that slices the <b>interior of
     /// <c>World.Update</c></b> into the main-thread cost centers the pipeline spends its frame on: the
     /// behavior <see cref="Phase.Tick"/>, the modification <see cref="Phase.Apply"/> drain, one slot per
-    /// budgeted pass, and one for each of the three <b>unbudgeted</b> lighting regions.
+    /// budgeted pass (the lighting merge included), and one for each of the two <b>unbudgeted</b> lighting regions.
     /// <para>
     /// This is the measurement the <b>isolated</b> tick benchmark could not provide: those cost centers are
     /// private methods callable only from <c>World.Update</c>, so attributing the <i>real</i> ocean frame
@@ -17,7 +17,7 @@ namespace Benchmarks
     /// </para>
     /// <para>
     /// <b>Merge and scan are separate slots (P9-0).</b> A single combined "lighting" slot could not say
-    /// whether a frame's cost sat in <c>ProcessLightingJobs</c>' unbudgeted merge or in the budgeted
+    /// whether a frame's cost sat in <c>ProcessLightingJobs</c>' merge or in the budgeted
     /// ready-set scan — the ambiguity that forced the P9-0a capture to *model* the split with a fitted
     /// parameter instead of measuring it. <see cref="LastFrameLightMs"/> and <see cref="LastFrameMeshMs"/>
     /// remain available as the sums, so consumers wanting the old granularity are unaffected.
