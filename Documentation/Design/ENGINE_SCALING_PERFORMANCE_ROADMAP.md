@@ -1,6 +1,6 @@
 # Engine Scaling Performance Roadmap
 
-**Version:** 1.31  
+**Version:** 1.32  
 **Date:** 2026-11-17  
 **Status:** In progress — `ES-0` ✅ complete (2026-10-10: drain stamp shipped, every-layer re-measurement in §2.6 — added
 `ES-29`), `ES-1`, `ES-2` and `ES-6.1` shipped (2026-10-02); ES-0's GC.Alloc attribution captured (2026-10-03, §2.2.1 —
@@ -30,7 +30,8 @@ load — tail clouds 146 → 12 ms, handoff −65 ms new world / −41 ms existi
 startup merge's cross-chunk route is looked up instead of re-derived — new-world handoff −462 ms); `ES-8` ✅
 shipped (2026-11-15: the disk-load recount moved to the load worker, and the gameplay merge took an 8 ms
 ceiling; the `ApplyModifications` ceiling and the budgeted disk-load pump were priced out), both scored in
-[`ENGINE_SCALING_ES34_ES8_MERGE_ROUTE_IL2CPP_2026-11-15_BENCHMARK.md`](../Performance/ENGINE_SCALING_ES34_ES8_MERGE_ROUTE_IL2CPP_2026-11-15_BENCHMARK.md); §8 question 8 answered (World Generation Bug 07);
+[`ENGINE_SCALING_ES34_ES8_MERGE_ROUTE_IL2CPP_2026-11-15_BENCHMARK.md`](../Performance/ENGINE_SCALING_ES34_ES8_MERGE_ROUTE_IL2CPP_2026-11-15_BENCHMARK.md); `ES-37`–`ES-41` filed (2026-11-17, from the improvements report's open `P-1`, `GS-2`, `SL-4`, `WG-3`, `GS-8`);
+§8 question 8 answered (World Generation Bug 07);
 §8 question 6 (the Unity API checks) answered — `GraphicsStateCollection` and the `SetData(NativeArray,
 int, int, int)` order confirmed, the two `Graphics` questions deferred to ES-20's prototype, and ES-5's PSO
 warmup is variant-only on today's D3D11 players; the rest is a near-to-far horizon, not scheduled. Tier 1
@@ -72,7 +73,7 @@ quoted numbers are from those captures and the Player.log; anything else is tagg
 **Relationship to other documents:**
 
 - [`PERFORMANCE_IMPROVEMENTS_REPORT.md`](PERFORMANCE_IMPROVEMENTS_REPORT.md) — master backlog. This
-  roadmap **orders and bundles** its open items (`SU-*`, `SL-*`, `OM-2/3`, `WG-*`, `P-1/3/5/7`, `GS-5/6`,
+  roadmap **orders and bundles** its open items (`SU-*`, `SL-*`, `OM-2/3`, `WG-*`, `P-1/3/5/7`, `GS-2/5/6/8`,
   `MR-8`, `DT-3`) against the three symptoms; their detail stays there. New items get `ES-*` IDs here.
 - [`CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md`](CHUNK_PIPELINE_PERFORMANCE_ANALYSIS.md) /
   [`CHUNK_PIPELINE_SCHEDULE_QUOTA_THROUGHPUT.md`](CHUNK_PIPELINE_SCHEDULE_QUOTA_THROUGHPUT.md) — the
@@ -898,6 +899,42 @@ begins only after a startup that generated no terrain (`StartupMeshWave.ShouldBe
 −177 ms and new worlds run the gameplay rate. Scored in a third Master build (report addendum): loaded-world Drained
 1 222 → 1 026 ms, burst-frame p95 +0.9 ms and worst −2.4 ms — **GO for loaded worlds**.
 
+**ES-37 — Copy only the neighbors' border slabs into lighting jobs.** → `P-1`. 🟡 / 🟡. Added 2026-11-17 from
+the improvements report's open items. A gameplay lighting job still fills 9 voxel + 9 light maps for its neighborhood
+on the main thread at schedule time (`WorldJobManager.RentAndFillVoxelMap` / `RentAndFillLightMap`, `:1048` /
+`:1060`; ≈ 1.73 MB per job, report `P-1`), although the job reads only the halo of each neighbor. ES-7.1's slab fill
+already makes compact sections cheap, and ES-3 shares one snapshot per chunk across the startup sweeps. Measure first:
+the fill's share of `LightSchedule` in a Capture-tier run. Lever: copy each neighbor's border slab only. ES-12 decides
+whether the center map still needs a full copy, so plan the two together.
+
+**ES-38 — Skip the opaque-texture copy while refraction is off.** → `GS-2`. 🟢 / 🟡. Added 2026-11-17 from the
+improvements report's open items. The URP asset requests the opaque texture for every camera
+(`m_RequireOpaqueTexture: 1`, `Assets/Settings/Rendering/VoxelEngine-URP-Asset.asset:23`), so URP copies the frame
+after the opaque pass even at Fluid Refraction 0. The shader half is done: refraction 0 enables `_FLUID_REFRACTION_OFF`
+(`GraphicsSettingsController.cs:57`), and `SampleSceneColor` sits behind `FLUID_ENABLE_REFRACTION`
+(`UberLiquidShader.shader:131`, `:179`). Lever: request the opaque texture only while refraction is on (the cloud
+prepass lands in it only for refraction's sake, `CloudShader.shader:28–29`). Price it on ES-25's render baseline
+(GPU ms) at the same settings before and after.
+
+**ES-39 — Price the region lock behind loads.** → `SL-4`. 🟡 / 🔴. Added 2026-11-17 from the improvements report's
+open items. Every `RegionFile` read and write takes the one exclusive `_fileLock`, so a load can wait behind a save of
+the same region (design: [`REGION_FILE_CONCURRENCY.md`](REGION_FILE_CONCURRENCY.md)). Loads run on workers, so the
+cost is late chunk arrival, not frame time. Gated on ES-32: its queueing/file-access split prices the wait; act only
+if the wait is a real share of load latency. The lever changes lock granularity over on-disk structures, hence 🔴.
+
+**ES-40 — Price structure expansion on the main thread.** → `WG-3`. 🟡 / 🟡. Added 2026-11-17 from the improvements
+report's open items. Structure markers expand into voxel mods on the main thread during generation completion
+(`IChunkGenerator.ExpandStructure`, `WorldJobManager.cs:1587`, `:1637`). ES-9 made it fill a reused list, so it no
+longer allocates per structure, but the per-mod work stays on the main thread. Measure first: the expansion's time per
+generation-completion frame at fast traversal. Lever (report `WG-3`): expand inside the generation job, keeping the
+marker order World Generation Bug 07's source-1 fix relies on.
+
+**ES-41 — Hoist the skybox's frame-constant terms.** → `GS-8`. 🟢 / 🟢. Added 2026-11-17 from the improvements
+report's open items. `SkyboxShader.shader` evaluates the sun-path haze (`:389`) and the moon frame (`:479`) per pixel,
+though both depend only on global uniforms. Lever: compute them in the vertex stage and pass them `nointerpolation`,
+the method `GS-7` used on the cloud shader — exact by construction. Small payoff (sky pixels only): a rider for any
+ES-25 rendering pass.
+
 ### Tier 2 — pipeline work on today's data model
 
 **ES-12 — Jobified lighting merge.** → `P-3`. 🟡 / 🟡. The internal split is already instrumented — ES-7a's
@@ -910,7 +947,8 @@ heightmap and marks the uniform sections; initial lighting seeds only the fronti
 neighbors' max heightmap, openings). Expected ~10× fewer initial BFS nodes and most of the initial
 cross-seam mod flood removed *(inferred)*, and **it removes the 200 k-cap hazard that taller worlds
 hit** (§2.4). Same family as `LIGHTING_SYSTEM_OVERVIEW.md` §5.3/§5.4. Gate: bit-identity vs today's
-initial lighting on the oracle + seam baselines.
+initial lighting on the oracle + seam baselines. Independent of ES-12 (decided 2026-11-17): it changes the
+generation output, the populate path and the job's seed phase, none of which reads the merge.
 
 **ES-14 — Generation critical path.** 🟡 / 🟡. Cache worm paths per cell instead of re-simulating up to
 33×33 cells for every chunk in a single-threaded job; → `WG-1` (the terrain job writes every element of
@@ -1053,8 +1091,13 @@ constants + migration change. Prerequisites: ES-13, ES-18, ES-19.
 | **ES-34 — Startup merge route**    | Price the ≈ 517 ms routing ≈ 1.06 M cross-chunk mods in startup sweep 1; coalesce or skip redundant routes                                     |   🟡   | —                   | ✅ 2026-11-15 (route lookup; handoff −462 ms, [report](../Performance/ENGINE_SCALING_ES34_ES8_MERGE_ROUTE_IL2CPP_2026-11-15_BENCHMARK.md))                                                                                                                                                                                                                                                                                                                                 |
 | **ES-35 — Startup clouds init**    | `clouds.Initialize()` ≈ 190 ms + 14–15 collections in the last frozen frame; job it or move it earlier                                         |   🟢   | —                   | ✅ 2026-11-14 (tail clouds 146 → 12 ms, handoff −65 ms, [report](../Performance/ENGINE_SCALING_ES35_ES36_STARTUP_TAIL_IL2CPP_2026-11-14_BENCHMARK.md))                                                                                                                                                                                                                                                                                                                     |
 | **ES-36 — Post-handoff mesh tail** | Scale `maxMeshRebuildsPerFrame` until the first drain after handoff (≈ 0.4 s tail at 10/frame)                                                 |   🟢   | —                   | ✅ 2026-11-14 for loaded worlds (Drained −177 ms); NO-GO on new worlds; `startupMeshWave` ([report](../Performance/ENGINE_SCALING_ES35_ES36_STARTUP_TAIL_IL2CPP_2026-11-14_BENCHMARK.md))                                                                                                                                                                                                                                                                                  |
+| **ES-37 — Border-slab copies**     | P-1: neighbor border slabs instead of full maps in lighting jobs                                                                               |   🟡   | ES-0                | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| **ES-38 — Opaque-texture copy**    | GS-2: request the opaque texture only while refraction is on                                                                                   |   🟢   | ES-25               | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| **ES-39 — Region lock**            | SL-4: price loads waiting behind saves; split the lock only if it pays                                                                         |   🟡   | ES-32               | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| **ES-40 — Structure expansion**    | WG-3: price main-thread expansion; move it into the generation job                                                                             |   🟡   | ES-0                | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| **ES-41 — Skybox constants**       | GS-8: frame-constant sky terms in the vertex stage                                                                                             |   🟢   | —                   | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | **ES-12 — Jobified merge**         | P-3                                                                                                                                            |   🟡   | ES-7                | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| **ES-13 — Sky from heightmap**     | Frontier-seeded initial lighting                                                                                                               |   🟡   | ES-12               | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| **ES-13 — Sky from heightmap**     | Frontier-seeded initial lighting                                                                                                               |   🟡   | —                   | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | **ES-14 — Gen critical path**      | Worm cache, WG-1, WG-2                                                                                                                         |   🟡   | ES-0                | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | **ES-15 — Lattice noise**          | Versioned generator profile                                                                                                                    |   🟡   | ES-14               | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
 | **ES-16 — Ordering**               | P-7                                                                                                                                            |   🔴   | ES-0                | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
@@ -1456,6 +1499,9 @@ saving is inferred from step 1's re-entry leg, not re-measured.
 
 ## Document History
 
+* **v1.32** - **`ES-37`–`ES-41` filed** (2026-11-17) from the improvements report's open items that no ES entry
+  owned (`P-1`, `GS-2`, `SL-4`, `WG-3`, `GS-8`): status line, Tier 1b entries, §7 rows, relationship list. ES-13's §7
+  dependency on ES-12 dropped (no code coupling; decided 2026-11-17).
 * **v1.31** - **Drift sync against HEAD** (2026-11-17, docs only — no code changed). `ES-8` (2026-11-15) and
   `ES-34` (2026-11-15) moved from open to shipped in the status line, §4.1's traversal row and ES-3's follow-up note
   (all three of `ES-34`–`ES-36` are now closed). ES-6: the `OnDataPopulated` rider (`ChunkData.NeedsActiveVoxelRescan`,
