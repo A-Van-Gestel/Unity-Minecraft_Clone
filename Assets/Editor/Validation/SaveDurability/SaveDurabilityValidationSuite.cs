@@ -25,6 +25,8 @@ namespace Editor.Validation.SaveDurability
     /// region files.
     /// <para>All scenarios are <b>baselines</b> (must stay green); a failure is a regression of the F5
     /// durability hole (silently lost session edits).</para>
+    /// <para>B17 guards the supersede against a caller that recycles its <see cref="ChunkData"/> mid-save.
+    /// Prove-red: reading <c>data.Position</c> after the await reds B17 (stale replay + wrong-coord drop).</para>
     /// <para><b>Prove-red:</b> routing the Failed/Canceled arms' snapshot back to the pool instead of
     /// <c>StageFailedSave</c> in <see cref="ChunkStorageManager.SaveChunkAsync"/> reds B2–B8 (the edit
     /// no longer survives); routing FailedPermanent into the registry reds B9 (retry loop); B1 stays
@@ -67,6 +69,7 @@ namespace Editor.Validation.SaveDurability
                 new Scenario("B14: saved-chunk query — an absent region yields nothing and leaves no region file (CMD-6)", SavedQueryLeavesNoFileForAbsentRegion),
                 new Scenario("B15: saved-chunk query — a saved chunk is found, its unsaved neighbors are not (CMD-6)", SavedQueryFindsOnlySavedChunks),
                 new Scenario("B16: saved-chunk query — spans regions and both signs; open and freshly opened regions agree (CMD-6)", SavedQuerySpansRegionsBothSigns),
+                new Scenario("B17: an async save whose ChunkData is recycled before it completes supersedes its own coord, not the recycled one's", RecycledSaveSupersedesItsOwnCoord),
             };
             return ValidationSuiteRunner.Execute("Save Durability", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }
@@ -521,6 +524,93 @@ namespace Editor.Validation.SaveDurability
             }
 
             ok &= Check("the unwritten regions in the rectangle were not created", RegionFileCount(fx) == filesAfterSaves);
+            return ok;
+        }
+
+        // --- Recycled caller data ------------------------------------------------------------------
+
+        /// <summary>Upper bound on pumping a save's continuation; a region write takes milliseconds.</summary>
+        private const int CONTINUATION_TIMEOUT_MS = 5000;
+
+        /// <summary>Holds posted continuations until <see cref="RunPending"/> runs them on the calling thread,
+        /// so a scenario can act between an async save's worker finishing and its continuation running.</summary>
+        private sealed class QueueSynchronizationContext : SynchronizationContext
+        {
+            private readonly Queue<(SendOrPostCallback callback, object state)> _pending = new Queue<(SendOrPostCallback, object)>();
+            private readonly object _gate = new object();
+
+            public override void Post(SendOrPostCallback d, object state)
+            {
+                lock (_gate) _pending.Enqueue((d, state));
+            }
+
+            /// <summary>Runs every queued continuation, including ones queued while running.</summary>
+            public void RunPending()
+            {
+                while (true)
+                {
+                    (SendOrPostCallback callback, object state) item;
+                    lock (_gate)
+                    {
+                        if (_pending.Count == 0) return;
+                        item = _pending.Dequeue();
+                    }
+
+                    item.callback(item.state);
+                }
+            }
+        }
+
+        /// <summary>B17. Red when: an async save reads its caller's <see cref="ChunkData"/> after the await —
+        /// once the caller recycles it, the success supersedes (0,0) instead of its own coord.</summary>
+        private static bool RecycledSaveSupersedesItsOwnCoord()
+        {
+            using Fixture fx = new Fixture();
+            Vector2Int pos = new Vector2Int(32, 32);
+            Vector2Int recycledPos = Vector2Int.zero; // where ReturnChunkData resets a pooled chunk's Position
+
+            // Two older pending entries: P's stale edit, and an unrelated edit at the recycled coord.
+            ChunkData v1 = MakeEditedChunk(pos, BlockIDs.Stone);
+            ChunkStorageManager.InjectSaveFaults(1);
+            bool ok = Check("v1 save reports Failed", RunSave(fx, v1) == ChunkSaveResult.Failed);
+            World.Instance.ChunkPool.ReturnChunkData(v1);
+
+            ChunkData other = MakeEditedChunk(recycledPos, BlockIDs.Grass);
+            ChunkStorageManager.InjectSaveFaults(1);
+            ok &= Check("(0,0) save reports Failed", RunSave(fx, other) == ChunkSaveResult.Failed);
+            World.Instance.ChunkPool.ReturnChunkData(other);
+
+            // Newer save of P, its ChunkData recycled before the continuation runs (the unload path's order).
+            ChunkData v2 = MakeEditedChunk(pos, BlockIDs.Grass);
+            SynchronizationContext previous = SynchronizationContext.Current;
+            QueueSynchronizationContext queue = new QueueSynchronizationContext();
+            SynchronizationContext.SetSynchronizationContext(queue);
+            Task<ChunkSaveResult> task;
+            try
+            {
+                task = fx.Storage.SaveChunkAsync(v2);
+                ok &= Check("save still in flight when its ChunkData is recycled (rig not vacuous)", !task.IsCompleted);
+                World.Instance.ChunkPool.ReturnChunkData(v2);
+
+                System.Diagnostics.Stopwatch waited = System.Diagnostics.Stopwatch.StartNew();
+                while (!task.IsCompleted && waited.ElapsedMilliseconds < CONTINUATION_TIMEOUT_MS)
+                {
+                    queue.RunPending();
+                    Thread.Sleep(1);
+                }
+            }
+            finally
+            {
+                SynchronizationContext.SetSynchronizationContext(previous);
+            }
+
+            if (!task.IsCompleted) return Check("save completed within the timeout", false);
+            ok &= Check("v2 save reports Written", task.GetAwaiter().GetResult() == ChunkSaveResult.Written);
+
+            ok &= Check("flush writes the one remaining pending save", fx.Storage.FlushFailedSavesSync() == 1);
+            ok &= Check("registry empty", fx.Storage.PendingFailedSaves == 0);
+            ok &= LoadedEditEquals(fx, pos, BlockIDs.Grass, "P keeps the newer write (stale v1 not replayed)");
+            ok &= LoadedEditEquals(fx, recycledPos, BlockIDs.Grass, "(0,0)'s pending edit survived P's write");
             return ok;
         }
     }

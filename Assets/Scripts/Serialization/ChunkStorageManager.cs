@@ -392,6 +392,7 @@ namespace Serialization
             //    its data-freshness sequence (the registry compares stamps, not completion order).
             ChunkData snapshot = CreateSerializationSnapshot(data);
             long seq = NextSaveSequence();
+            Vector2Int chunkVoxelPos = data.Position; // the caller may recycle data before the continuation runs
 
             ChunkSaveResult result;
             long submitted = 0L;
@@ -448,13 +449,13 @@ namespace Serialization
                 // Deterministic record-limit failure — retrying can never succeed, so this must take
                 // the FailedPermanent arm (snapshot released loudly), never the retry registry.
                 Interlocked.Increment(ref s_savesFailed);
-                Debug.LogError($"[SaveChunkAsync] Chunk at voxelPos {data.Position.ToString()} exceeds the region record limit — edits to this chunk cannot be persisted. ({e.Message})");
+                Debug.LogError($"[SaveChunkAsync] Chunk at voxelPos {chunkVoxelPos.ToString()} exceeds the region record limit — edits to this chunk cannot be persisted. ({e.Message})");
                 result = ChunkSaveResult.FailedPermanent;
             }
             catch (Exception e)
             {
                 Interlocked.Increment(ref s_savesFailed);
-                Debug.LogError($"[SaveChunkAsync] Failed to save chunk at voxelPos {data.Position.ToString()}: {e.Message}");
+                Debug.LogError($"[SaveChunkAsync] Failed to save chunk at voxelPos {chunkVoxelPos.ToString()}: {e.Message}");
                 result = ChunkSaveResult.Failed;
             }
             finally
@@ -482,7 +483,7 @@ namespace Serialization
             else
             {
                 World.Instance.ChunkPool.ReturnChunkData(snapshot);
-                if (result == ChunkSaveResult.Written) StageSupersede(data.Position, seq);
+                if (result == ChunkSaveResult.Written) StageSupersede(chunkVoxelPos, seq);
             }
 
             return result;
