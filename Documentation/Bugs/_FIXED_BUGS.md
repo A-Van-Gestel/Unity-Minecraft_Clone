@@ -2377,6 +2377,44 @@ One subtlety worth keeping: the per-chunk pass must not be gated on "the path co
 
 ---
 
+### ~~08. An unload save's success supersedes the wrong coordinate in the retry registry~~ (`SERIALIZATION_BUGS.md` §16)
+
+**Severity:** Data loss (stale snapshot replayed over newer bytes, or an unrelated chunk's failed save
+dropped) — reachable only after an earlier failed save  
+**Files:** `Serialization/ChunkStorageManager.cs` - `SaveChunkAsync`; `World.cs` - `UnloadChunks`,
+`SaveAllModifiedChunks`, `ForceUnloadAllChunks`; `ChunkPoolManager.cs` - `ReturnChunkData`  
+**Reported:** October 2026  
+**Fixed:** November 2026
+
+**Symptom:** `SaveChunkAsync` snapshotted the chunk synchronously, then `await`ed the serialize-and-write `Task.Run`.
+Its continuation read **`data.Position`** — the caller's live `ChunkData` — to stage the supersede op that drops any
+*older* pending retry-registry entry for that coordinate (CP-6's freshness rule). The unload path does not wait:
+right after firing the save, `UnloadChunks` returns `data` to the pool, and `ReturnChunkData` calls
+`data.Reset(Vector2Int.zero)` at once. By the time the continuation ran on a later frame, `data.Position` read
+`(0, 0)`, or the coordinate of whatever chunk the pool had since handed that instance to. A successful save then:
+- **missed its own coordinate** — an older registry entry for the chunk survived and was replayed later, overwriting
+  the newer bytes just written;
+- **hit a wrong coordinate** — an older entry at `(0, 0)` or the re-rented chunk's coordinate was dropped, and that
+  chunk's unsaved edits with it.
+
+Resident saves were exposed too: `SaveAllModifiedChunks` fires `SaveChunkAsync(data)` on live chunks, and if such a
+chunk unloaded, or `ForceUnloadAllChunks` recycled it, before the continuation ran, the same misread happened. Only the
+synchronous `SaveChunk` was safe (no await to cross). With no failed save pending the defect was invisible, which is
+the common case; the catch-arm logs also named the wrong coordinate (cosmetic). Save Durability B10 never saw it
+because it runs each save to completion while `data` is still live.
+
+**Fix:** `SaveChunkAsync` captures `Vector2Int chunkVoxelPos = data.Position;` before the first `await` and uses it for
+the supersede and both catch-arm logs; nothing reads the caller's `data` after the await. No on-disk bytes change.
+
+**Verification:** `B17` in `Minecraft Clone/Dev/Validate Save Durability` (authored as the `K16` repro, promoted after
+the fix). It plants failed saves for chunk P `(32, 32)` and `(0, 0)`, fires a newer save of P under a test-only queue
+`SynchronizationContext`, recycles P's `ChunkData` while the save is in flight, then pumps the continuation. Before the
+fix it failed on both arms (P reloaded the stale block; `(0, 0)` was missing on disk). Prove-red: the supersede reading
+`data.Position` again, and the capture moved after the await, each red B17. No in-game path exists (fault injection is
+Editor-only and the bug needs an earlier failed save), so the user confirmed on the suite evidence.
+
+---
+
 ## User Interface
 
 ### ~~02. Shortcut Info Panel~~

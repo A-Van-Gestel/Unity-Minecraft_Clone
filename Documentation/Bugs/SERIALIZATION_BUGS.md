@@ -4,7 +4,7 @@ This document outlines **open** bugs related to saving, loading, Region files, a
 
 > **Last reviewed:** August 2026
 >
-> **Numbering note:** `§02`, `§03`, `§06` and `§10` are **retired, not free** — all four are archived in
+> **Numbering note:** `§02`, `§03`, `§06`, `§10` and `§16` are **retired, not free** — all five are archived in
 > [`_FIXED_BUGS.md`](./_FIXED_BUGS.md). New entries continue from `§17`.
 
 ---
@@ -348,47 +348,5 @@ gaps), 2026-10-02.
 
 ---
 
-## 16. An unload save's success supersedes the wrong coordinate in the retry registry
-
-**Severity:** Suspected data loss (stale snapshot replayed over newer bytes, or an unrelated chunk's failed save
-dropped) — reachable only after an earlier failed save  
-**Confidence:** ⚠️ **Unconfirmed / speculated** — mechanism read in code only, **not reproduced**, no repro written
-(2026-10-25, ES-6 planning)  
-**Files:** `Serialization/ChunkStorageManager.cs` - `SaveChunkAsync` (`StageSupersede(data.Position, seq)` at `:476`,
-the catch-arm logs at `:442`, `:448`); `World.cs` - `UnloadChunks` (save fired at `:4328`, `ReturnChunkData(data)`
-at `:4369`); `ChunkPoolManager.cs` - `ReturnChunkData` (`:272–280`)
-
-`SaveChunkAsync` snapshots the chunk synchronously, then `await`s the serialize-and-write `Task.Run`. Its
-continuation reads **`data.Position`** — the live `ChunkData` — to stage the supersede op that drops any *older*
-pending retry-registry entry for that coordinate (CP-6's freshness rule). On the unload path the caller does not
-wait: right after firing the save, `UnloadChunks` returns `data` to the pool, and `ReturnChunkData` calls
-`data.Reset(Vector2Int.zero)` at once. By the time the continuation runs on a later frame, `data.Position` reads
-`(0, 0)`, or the coordinate of whatever chunk the pool has since handed that instance to.
-
-If that reading is right, a successful unload save:
-- **misses its own coordinate.** An older registry entry for the chunk (left by an earlier failed save) survives and
-  is replayed later, overwriting the newer bytes that were just written. Edits made after that failed save would be
-  lost.
-- **hits a wrong coordinate.** If `(0, 0)` or the re-rented chunk has a registry entry older than this save's
-  sequence, that entry is dropped, and the unrelated chunk's unsaved edits with it.
-
-The synchronous `SaveChunk` (`:333`) and saves of chunks that stay resident (`SaveWorldData`) read a live, unrecycled
-`data`, so they are not affected. With no failed save in the registry there is nothing to supersede and the defect is
-invisible, which is the common case. The catch-arm logs report the same wrong coordinate (cosmetic).
-
-**Why no suite sees it:** Save Durability B10 (`SuccessfulWriteSupersedesPendingEntry`) runs `SaveChunkAsync` to
-completion while `data` is still live and unrecycled, so `data.Position` is still correct when the supersede is
-staged.
-
-**Repro to try (not yet attempted):** in a Save Durability scenario, arm `ChunkStorageManager.InjectSaveFaults` so a
-first save of chunk C fails (C's snapshot enters the registry), then save C again with fresh data, recycling `data`
-through `ReturnChunkData` before the save completes, as `UnloadChunks` does. Drain the registry and check that C's
-entry was dropped (expected) or survives (bug). Then plant an older entry at `(0, 0)` and check it survives
-(expected) or is dropped (bug).
-
-**Fix direction (not applied):** capture the coordinate before the first `await` (for example
-`Vector2Int chunkVoxelPos = data.Position;` next to the snapshot) and use it for the supersede and the logs, or read
-`snapshot.Position` before the snapshot returns to the pool. Pin it with the scenario above, proven red against the
-current code.
-
-**Found by:** the ES-6 crossing-frame planning pass (local plan, 2026-10-25), checked against the code by hand.
+> Bug 16 (an unload save's success superseded the wrong coordinate) has been fixed — `SaveChunkAsync`
+> captures the coordinate before its first `await`. Archived to [`_FIXED_BUGS.md`](./_FIXED_BUGS.md).
