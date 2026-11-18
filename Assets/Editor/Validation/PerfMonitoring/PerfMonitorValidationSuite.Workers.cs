@@ -8,6 +8,7 @@ using Editor.DataGeneration;
 using Editor.Validation.Behavior.Framework;
 using Editor.Validation.Framework;
 using Editor.WorldTools.Libraries;
+using Helpers;
 using Jobs;
 using Jobs.BurstData;
 using Jobs.Data;
@@ -57,8 +58,31 @@ namespace Editor.Validation.PerfMonitoring
         private const int IO_BACKGROUND_OPS = 10;
         private const int IO_SAVE_RAW_BYTES = 11;
 
+        private const int SPLIT_LOAD_LOCK_WAITS = 0;
+        private const int SPLIT_SAVE_LOCK_WAITS = 1;
+        private const int SPLIT_REGION_OPENS = 2;
+        private const int SPLIT_LOAD_OPS = 3;
+        private const int SPLIT_LOAD_LATENCY_OPS = 4;
+        private const int SPLIT_READ_HIT_US = 5;
+        private const int SPLIT_LOAD_LOCK_WAIT_US = 6;
+        private const int SPLIT_SAVE_LOCK_WAIT_US = 7;
+        private const int SPLIT_REGION_OPEN_US = 8;
+        private const int SPLIT_LOAD_QUEUE_WAIT_US = 9;
+        private const int SPLIT_LOAD_LATENCY_US = 10;
+
         /// <summary>Background operations in the I/O round trip: one async save and two loads.</summary>
         private const int ROUND_TRIP_BACKGROUND_OPS = 3;
+
+        /// <summary>Loads in the I/O round trip: the hit and the miss.</summary>
+        private const int ROUND_TRIP_LOADS = 2;
+
+        /// <summary>Retention cap of the churn scenario's pool, and the full-chunk rents that overflow it by one.</summary>
+        private const int CHURN_POOL_CAP = 2;
+
+        private const int CHURN_RENTS = 3;
+
+        /// <summary>Length of the buffer returned to the wrong stack; neither pool length.</summary>
+        private const int CHURN_WRONG_LENGTH = 16;
 
         /// <summary>Utilization inputs: job threads, frames, and a per-frame busy-time step distinct per frame and type.</summary>
         private const int UTILIZATION_WORKERS = 7;
@@ -253,6 +277,146 @@ namespace Editor.Validation.PerfMonitoring
                 World.Instance.ChunkPool.ReturnChunkData(data);
             }
         });
+
+        private static bool RunB44JobArrayChurn() => WithFreshStore(() =>
+        {
+            using ChunkJobArrayPool quiet = new ChunkJobArrayPool(CHURN_POOL_CAP);
+            DriveChurn(quiet, out _);
+            bool ok = Check("Below Systems the pool takes no ticks", quiet.AllocTicks == 0 && quiet.FreeTicks == 0);
+            ok &= Check("Below Systems the counts still run: every rent a miss, one padded, one cap dispose",
+                quiet.TotalAllocated == CHURN_RENTS + 1 && quiet.TotalPaddedAllocated == 1 && quiet.TotalCapDisposed == 1);
+
+            PerfStore.SetTier(PerfTier.Systems);
+            using ChunkJobArrayPool pool = new ChunkJobArrayPool(CHURN_POOL_CAP);
+            pool.SamplePerfCounters();
+            DriveChurn(pool, out bool stepsHold);
+            ok &= Check("Three rents miss three times, none padded; three returns past a cap of two dispose once; one padded rent is one padded miss; a wrong-length return is no cap dispose",
+                stepsHold);
+            ok &= Check("At Systems the pool times its native allocations and its cap dispose", pool.AllocTicks > 0 && pool.FreeTicks > 0);
+
+            pool.SamplePerfCounters();
+            CommitMs(NORMAL_FRAME_MS, 1);
+            PerfFrameRing ring = GetStoreRing();
+            if (ring == null) return false;
+
+            ok &= Check("The cap disposes and padded misses reach their counters",
+                ring.GetCounter(0, PerfCounter.JobArrayCapDisposes) == 1 && ring.GetCounter(0, PerfCounter.JobArrayPaddedMisses) == 1);
+            ok &= Check("The alloc and free time reach their counters in microseconds",
+                ring.GetCounter(0, PerfCounter.JobArrayAllocUs) == PerfStore.TicksToMicros(pool.AllocTicks)
+                && ring.GetCounter(0, PerfCounter.JobArrayFreeUs) == PerfStore.TicksToMicros(pool.FreeTicks));
+            return ok;
+        });
+
+        /// <summary>Rents three full-chunk buffers and a padded one, returns them past the cap, then returns a wrong-length buffer into the full stack.</summary>
+        /// <param name="stepsHold">Whether every intermediate count matched the plan.</param>
+        private static void DriveChurn(ChunkJobArrayPool pool, out bool stepsHold)
+        {
+            NativeArray<uint>[] rented = new NativeArray<uint>[CHURN_RENTS];
+            for (int i = 0; i < CHURN_RENTS; i++)
+                rented[i] = pool.RentVoxelMap();
+
+            stepsHold = pool.TotalAllocated == CHURN_RENTS && pool.TotalPaddedAllocated == 0;
+            NativeArray<uint> padded = pool.RentPaddedVoxels();
+            stepsHold &= pool.TotalPaddedAllocated == 1;
+
+            foreach (NativeArray<uint> buffer in rented)
+                pool.Return(buffer);
+
+            stepsHold &= pool.TotalCapDisposed == 1;
+            pool.ReturnPaddedVoxels(padded);
+
+            pool.Return(new NativeArray<uint>(CHURN_WRONG_LENGTH, Allocator.Persistent));
+            stepsHold &= pool.TotalCapDisposed == 1;
+        }
+
+        private static bool RunB45StorageIoSplit() => WithFreshStore(() =>
+        {
+            Vector2Int savedPos = new Vector2Int(0, 0);
+            Vector2Int missingPos = new Vector2Int(VoxelData.ChunkWidth * UNSAVED_CHUNK_X, 0);
+
+            long[] split = SplitTotals();
+            FreshRoundTrip(savedPos, missingPos);
+            bool ok = Check("Below Systems none of the split totals move", SameTotals(split, SplitTotals()));
+
+            PerfStore.SetTier(PerfTier.Systems);
+            int inFlightBefore = StorageIoStats.InFlight;
+            split = SplitTotals();
+            long readBefore = StorageIoStats.ReadMicros;
+            StorageIoStats.SamplePerfCounters();
+            bool roundTrip = FreshRoundTrip(savedPos, missingPos);
+            long[] after = SplitTotals();
+            long readDelta = StorageIoStats.ReadMicros - readBefore;
+            StorageIoStats.SamplePerfCounters();
+            CommitMs(NORMAL_FRAME_MS, 1);
+            PerfFrameRing ring = GetStoreRing();
+            if (ring == null) return false;
+
+            ok &= Check("The round trip on fresh storage completes", roundTrip);
+            ok &= Check("One lock wait for the save, one for each of the two loads",
+                after[SPLIT_SAVE_LOCK_WAITS] - split[SPLIT_SAVE_LOCK_WAITS] == 1
+                && after[SPLIT_LOAD_LOCK_WAITS] - split[SPLIT_LOAD_LOCK_WAITS] == ROUND_TRIP_LOADS);
+            ok &= Check("One region open, on first touch; the two loads that follow open none",
+                after[SPLIT_REGION_OPENS] - split[SPLIT_REGION_OPENS] == 1);
+            ok &= Check("Both loads counted into the load-only queue wait and into the latency",
+                after[SPLIT_LOAD_OPS] - split[SPLIT_LOAD_OPS] == ROUND_TRIP_LOADS
+                && after[SPLIT_LOAD_LATENCY_OPS] - split[SPLIT_LOAD_LATENCY_OPS] == ROUND_TRIP_LOADS);
+            ok &= Check("Hit read time is part of the total read time",
+                after[SPLIT_READ_HIT_US] - split[SPLIT_READ_HIT_US] <= readDelta);
+            ok &= Check("The load-only queue wait is part of the combined wait",
+                after[SPLIT_LOAD_QUEUE_WAIT_US] - split[SPLIT_LOAD_QUEUE_WAIT_US] <= StorageIoStats.QueueWaitMicros);
+            ok &= Check("Every load that started has resumed", StorageIoStats.InFlight == inFlightBefore);
+
+            (PerfCounter Counter, long Expected)[] expected =
+            {
+                (PerfCounter.DiskLoadHits, 1L), (PerfCounter.DiskLoadMisses, 1L), (PerfCounter.DiskSaves, 1L),
+                (PerfCounter.IoBackgroundOps, ROUND_TRIP_BACKGROUND_OPS),
+                (PerfCounter.IoLoadOps, ROUND_TRIP_LOADS), (PerfCounter.DiskLoadLatencyOps, ROUND_TRIP_LOADS),
+                (PerfCounter.RegionOpens, 1L),
+                (PerfCounter.DiskReadUs, readDelta),
+                (PerfCounter.DiskReadHitUs, after[SPLIT_READ_HIT_US] - split[SPLIT_READ_HIT_US]),
+                (PerfCounter.LoadLockWaitUs, after[SPLIT_LOAD_LOCK_WAIT_US] - split[SPLIT_LOAD_LOCK_WAIT_US]),
+                (PerfCounter.SaveLockWaitUs, after[SPLIT_SAVE_LOCK_WAIT_US] - split[SPLIT_SAVE_LOCK_WAIT_US]),
+                (PerfCounter.RegionOpenUs, after[SPLIT_REGION_OPEN_US] - split[SPLIT_REGION_OPEN_US]),
+                (PerfCounter.IoLoadQueueWaitUs, after[SPLIT_LOAD_QUEUE_WAIT_US] - split[SPLIT_LOAD_QUEUE_WAIT_US]),
+                (PerfCounter.DiskLoadLatencyUs, after[SPLIT_LOAD_LATENCY_US] - split[SPLIT_LOAD_LATENCY_US]),
+            };
+            bool counters = true;
+            foreach ((PerfCounter counter, long value) in expected)
+            {
+                bool matches = ring.GetCounter(0, counter) == value;
+                if (!matches) Debug.LogError($"[PerfMonitor B45] {counter} read {ring.GetCounter(0, counter)}, expected {value}");
+                counters &= matches;
+            }
+
+            ok &= Check("Every disk counter, old and new, reads the frame's growth of its total after one sampling call", counters);
+            ok &= Check("The save and the hit counted their bytes", ring.GetCounter(0, PerfCounter.DiskSaveBytes) > 0
+                                                                      && ring.GetCounter(0, PerfCounter.DiskLoadBytes) > 0);
+            return ok;
+        });
+
+        /// <summary>Round-trips a chunk through a new storage, so its region is opened by this call.</summary>
+        private static bool FreshRoundTrip(Vector2Int savedPos, Vector2Int missingPos)
+        {
+            using IoFixture fx = new IoFixture();
+            ChunkData data = World.Instance.ChunkPool.GetChunkData(savedPos);
+            try
+            {
+                return RunIoRoundTrip(fx, data, savedPos, missingPos);
+            }
+            finally
+            {
+                World.Instance.ChunkPool.ReturnChunkData(data);
+            }
+        }
+
+        /// <summary>The split I/O running totals, indexed by the <c>SPLIT_*</c> constants.</summary>
+        private static long[] SplitTotals() => new[]
+        {
+            StorageIoStats.LoadLockWaits, StorageIoStats.SaveLockWaits, StorageIoStats.RegionOpens, StorageIoStats.LoadOps,
+            StorageIoStats.LoadLatencyOps, StorageIoStats.ReadHitMicros, StorageIoStats.LoadLockWaitMicros,
+            StorageIoStats.SaveLockWaitMicros, StorageIoStats.RegionOpenMicros, StorageIoStats.LoadQueueWaitMicros,
+            StorageIoStats.LoadLatencyMicros,
+        };
 
         private static bool RunB29WorkerUtilization() => WithFreshStore(() =>
         {

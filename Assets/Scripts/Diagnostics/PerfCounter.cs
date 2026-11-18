@@ -270,6 +270,45 @@ namespace Diagnostics
         /// <summary>Completed lighting jobs the merge ceiling left for a later frame.</summary>
         MergeCeilingDeferred,
 
+        /// <summary>Job array pool buffers disposed on return because their stack already held the retention cap.</summary>
+        JobArrayCapDisposes,
+
+        /// <summary>The halo-padded subset of <see cref="JobArrayMisses"/>.</summary>
+        JobArrayPaddedMisses,
+
+        /// <summary>Time inside native allocation for job array pool misses, in microseconds.</summary>
+        JobArrayAllocUs,
+
+        /// <summary>Time disposing job array pool buffers past the retention cap, in microseconds.</summary>
+        JobArrayFreeUs,
+
+        /// <summary>Disk read time of loads that found their chunk, in microseconds; a miss's share is <see cref="DiskReadUs"/> minus this.</summary>
+        DiskReadHitUs,
+
+        /// <summary>Time loads waited for a region file's lock, in microseconds.</summary>
+        LoadLockWaitUs,
+
+        /// <summary>Time saves waited for a region file's lock, in microseconds.</summary>
+        SaveLockWaitUs,
+
+        /// <summary>Region files opened.</summary>
+        RegionOpens,
+
+        /// <summary>Time spent opening region files, in microseconds.</summary>
+        RegionOpenUs,
+
+        /// <summary>The loads' share of <see cref="IoQueueWaitUs"/>, in microseconds.</summary>
+        IoLoadQueueWaitUs,
+
+        /// <summary>The loads among <see cref="IoBackgroundOps"/>.</summary>
+        IoLoadOps,
+
+        /// <summary>Time loads spent from submission until their caller resumed, in microseconds.</summary>
+        DiskLoadLatencyUs,
+
+        /// <summary>Loads that resumed their caller: the divisor of <see cref="DiskLoadLatencyUs"/>.</summary>
+        DiskLoadLatencyOps,
+
         /// <summary>Number of counters; not a counter.</summary>
         Count,
     }

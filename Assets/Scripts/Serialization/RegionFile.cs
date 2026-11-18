@@ -120,8 +120,10 @@ namespace Serialization
             // CRITICAL: Exclusive lock.
             // FileStream.Seek changes the position for the whole instance.
             // Multiple readers cannot share the stream simultaneously.
+            long lockStart = StorageIoStats.Stamp();
             lock (_fileLock)
             {
+                StorageIoStats.RecordLoadLockWait(lockStart);
                 try
                 {
                     int index = localX + localZ * CHUNKS_PER_SIDE;
@@ -200,8 +202,10 @@ namespace Serialization
         /// <param name="algorithm">The compression algorithm code to record in the region header.</param>
         public void SaveChunkData(int localX, int localZ, byte[] data, int payloadLength, CompressionAlgorithm algorithm)
         {
+            long lockStart = StorageIoStats.Stamp();
             lock (_fileLock)
             {
+                StorageIoStats.RecordSaveLockWait(lockStart);
                 try
                 {
                     int index = localX + localZ * CHUNKS_PER_SIDE;

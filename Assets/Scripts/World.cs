@@ -3668,6 +3668,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         PerfStore.SampleTotal(PerfCounter.SectionPoolMisses, ChunkPool.CreatedSections);
         PerfStore.SampleTotal(PerfCounter.DataPoolMisses, ChunkPool.CreatedData);
         PerfStore.SampleTotal(PerfCounter.JobArrayMisses, JobManager.JobArraysAllocated);
+        JobManager.SampleJobArrayPerfCounters();
         PerfStore.SampleTotal(PerfCounter.MeshOutputMisses, JobManager.MeshOutputsAllocated);
         PerfStore.SampleTotal(PerfCounter.SaveBufferMisses, SerializationBufferPool.TotalCreated);
 
@@ -3679,18 +3680,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
             PerfCounter.FluidSoundScanBusyUs);
         PerfStore.SampleTotal(PerfCounter.UntimedJobs, JobManager.UntimedJobs);
 
-        PerfStore.SampleTotal(PerfCounter.DiskLoadHits, StorageIoStats.LoadHits);
-        PerfStore.SampleTotal(PerfCounter.DiskLoadMisses, StorageIoStats.LoadMisses);
-        PerfStore.SampleTotal(PerfCounter.DiskReadUs, StorageIoStats.ReadMicros);
-        PerfStore.SampleTotal(PerfCounter.DeserializeUs, StorageIoStats.DeserializeMicros);
-        PerfStore.SampleTotal(PerfCounter.DiskLoadBytes, StorageIoStats.LoadBytes);
-        PerfStore.SampleTotal(PerfCounter.DiskSaves, StorageIoStats.Saves);
-        PerfStore.SampleTotal(PerfCounter.SerializeUs, StorageIoStats.SerializeMicros);
-        PerfStore.SampleTotal(PerfCounter.DiskWriteUs, StorageIoStats.WriteMicros);
-        PerfStore.SampleTotal(PerfCounter.DiskSaveBytes, StorageIoStats.SaveBytes);
-        PerfStore.SampleTotal(PerfCounter.DiskSaveRawBytes, StorageIoStats.SaveRawBytes);
-        PerfStore.SampleTotal(PerfCounter.IoQueueWaitUs, StorageIoStats.QueueWaitMicros);
-        PerfStore.SampleTotal(PerfCounter.IoBackgroundOps, StorageIoStats.BackgroundOps);
+        StorageIoStats.SamplePerfCounters();
 
         SampleTickCounters();
         SampleMergeCounters(in JobManager.MergeTotals);

@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
+using Diagnostics;
 using Jobs.Data;
 using Unity.Collections;
 
@@ -47,12 +49,28 @@ namespace Helpers
 
         private bool _isDisposed;
         private long _totalAllocated;
+        private long _totalPaddedAllocated;
+        private long _totalCapDisposed;
+        private long _allocTicks;
+        private long _freeTicks;
 
         /// <summary>Default retention cap reproducing the historical desktop constant.</summary>
         public const int DefaultMaxRetainedPerType = 512;
 
         /// <summary>Buffers allocated because no retained buffer of the requested type was available (pool misses).</summary>
         public long TotalAllocated => _totalAllocated;
+
+        /// <summary>The halo-padded subset of <see cref="TotalAllocated"/>.</summary>
+        public long TotalPaddedAllocated => _totalPaddedAllocated;
+
+        /// <summary>Returned buffers disposed because their stack already held the retention cap.</summary>
+        public long TotalCapDisposed => _totalCapDisposed;
+
+        /// <summary>Stopwatch ticks spent inside native allocation on misses; measured only while the performance monitor records.</summary>
+        public long AllocTicks => _allocTicks;
+
+        /// <summary>Stopwatch ticks spent disposing buffers past the retention cap; measured only while the performance monitor records.</summary>
+        public long FreeTicks => _freeTicks;
 
         /// <summary>Buffers of every type retained and ready to rent.</summary>
         public int PooledCount => _voxelMaps.Count + _lightMaps.Count + _paddedVoxels.Count + _paddedLight.Count;
@@ -71,6 +89,35 @@ namespace Helpers
             _maxRetainedPerType = maxRetainedPerType < 1 ? 1 : maxRetainedPerType;
         }
 
+        /// <summary>Samples the churn running totals into the performance monitor's per-frame counters.</summary>
+        public void SamplePerfCounters()
+        {
+            PerfStore.SampleTotal(PerfCounter.JobArrayCapDisposes, _totalCapDisposed);
+            PerfStore.SampleTotal(PerfCounter.JobArrayPaddedMisses, _totalPaddedAllocated);
+            PerfStore.SampleTotal(PerfCounter.JobArrayAllocUs, PerfStore.TicksToMicros(_allocTicks));
+            PerfStore.SampleTotal(PerfCounter.JobArrayFreeUs, PerfStore.TicksToMicros(_freeTicks));
+        }
+
+        private NativeArray<T> Allocate<T>(int length, bool isPadded) where T : struct
+        {
+            _totalAllocated++;
+            if (isPadded) _totalPaddedAllocated++;
+
+            long start = PerfStore.SlotsActive ? Stopwatch.GetTimestamp() : 0L;
+            NativeArray<T> array = new NativeArray<T>(length, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            if (start != 0L) _allocTicks += Stopwatch.GetTimestamp() - start;
+            return array;
+        }
+
+        private void DisposeOverCap<T>(NativeArray<T> buffer) where T : struct
+        {
+            _totalCapDisposed++;
+
+            long start = PerfStore.SlotsActive ? Stopwatch.GetTimestamp() : 0L;
+            buffer.Dispose();
+            if (start != 0L) _freeTicks += Stopwatch.GetTimestamp() - start;
+        }
+
         /// <summary>
         /// Rents a full-chunk <c>uint</c> voxel map buffer. Contents are undefined —
         /// the caller must write every element.
@@ -80,8 +127,7 @@ namespace Helpers
         {
             if (_voxelMaps.Count > 0) return _voxelMaps.Pop();
 
-            _totalAllocated++;
-            return new NativeArray<uint>(BufferLength, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            return Allocate<uint>(BufferLength, false);
         }
 
         /// <summary>
@@ -93,8 +139,7 @@ namespace Helpers
         {
             if (_lightMaps.Count > 0) return _lightMaps.Pop();
 
-            _totalAllocated++;
-            return new NativeArray<ushort>(BufferLength, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            return Allocate<ushort>(BufferLength, false);
         }
 
         /// <summary>
@@ -107,8 +152,7 @@ namespace Helpers
         {
             if (_paddedVoxels.Count > 0) return _paddedVoxels.Pop();
 
-            _totalAllocated++;
-            return new NativeArray<uint>(PaddedBufferLength, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            return Allocate<uint>(PaddedBufferLength, true);
         }
 
         /// <summary>
@@ -121,8 +165,7 @@ namespace Helpers
         {
             if (_paddedLight.Count > 0) return _paddedLight.Pop();
 
-            _totalAllocated++;
-            return new NativeArray<ushort>(PaddedBufferLength, Allocator.Persistent, NativeArrayOptions.UninitializedMemory);
+            return Allocate<ushort>(PaddedBufferLength, true);
         }
 
         /// <summary>
@@ -135,9 +178,15 @@ namespace Helpers
         {
             if (!buffer.IsCreated) return;
 
-            if (_isDisposed || _voxelMaps.Count >= _maxRetainedPerType || buffer.Length != BufferLength)
+            if (_isDisposed || buffer.Length != BufferLength)
             {
                 buffer.Dispose();
+                return;
+            }
+
+            if (_voxelMaps.Count >= _maxRetainedPerType)
+            {
+                DisposeOverCap(buffer);
                 return;
             }
 
@@ -154,9 +203,15 @@ namespace Helpers
         {
             if (!buffer.IsCreated) return;
 
-            if (_isDisposed || _lightMaps.Count >= _maxRetainedPerType || buffer.Length != BufferLength)
+            if (_isDisposed || buffer.Length != BufferLength)
             {
                 buffer.Dispose();
+                return;
+            }
+
+            if (_lightMaps.Count >= _maxRetainedPerType)
+            {
+                DisposeOverCap(buffer);
                 return;
             }
 
@@ -173,9 +228,15 @@ namespace Helpers
         {
             if (!buffer.IsCreated) return;
 
-            if (_isDisposed || _paddedVoxels.Count >= _maxRetainedPerType || buffer.Length != PaddedBufferLength)
+            if (_isDisposed || buffer.Length != PaddedBufferLength)
             {
                 buffer.Dispose();
+                return;
+            }
+
+            if (_paddedVoxels.Count >= _maxRetainedPerType)
+            {
+                DisposeOverCap(buffer);
                 return;
             }
 
@@ -192,9 +253,15 @@ namespace Helpers
         {
             if (!buffer.IsCreated) return;
 
-            if (_isDisposed || _paddedLight.Count >= _maxRetainedPerType || buffer.Length != PaddedBufferLength)
+            if (_isDisposed || buffer.Length != PaddedBufferLength)
             {
                 buffer.Dispose();
+                return;
+            }
+
+            if (_paddedLight.Count >= _maxRetainedPerType)
+            {
+                DisposeOverCap(buffer);
                 return;
             }
 

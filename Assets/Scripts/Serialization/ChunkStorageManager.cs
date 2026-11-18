@@ -209,7 +209,7 @@ namespace Serialization
             {
                 return await Task.Run(() =>
                 {
-                    StorageIoStats.RecordQueueWait(submitted);
+                    StorageIoStats.RecordQueueWait(submitted, true);
 
                     // CP-3 instrumented-build fault seam — a thrown load fault must surface as a FAULTED task (retry),
                     // never as the null "not on disk" result (which would regenerate over saved data).
@@ -255,6 +255,7 @@ namespace Serialization
             }
             finally
             {
+                StorageIoStats.RecordLoadLatency(submitted);
                 StorageIoStats.EndQueued(submitted);
             }
         }
@@ -411,7 +412,7 @@ namespace Serialization
                     submitted = StorageIoStats.BeginQueued();
                     await Task.Run(() =>
                     {
-                        StorageIoStats.RecordQueueWait(submitted);
+                        StorageIoStats.RecordQueueWait(submitted, false);
 
                         // Serialize
                         int length = SerializeWithInjection(snapshot, buffer, algorithm, out int uncompressedLength);
@@ -895,7 +896,13 @@ namespace Serialization
         private RegionFile GetRegion(Vector2Int regionCoord)
         {
             Lazy<RegionFile> lazy = _regions.GetOrAdd(regionCoord,
-                coord => new Lazy<RegionFile>(() => new RegionFile(RegionPath(coord))));
+                coord => new Lazy<RegionFile>(() =>
+                {
+                    long openStart = StorageIoStats.Stamp();
+                    RegionFile opened = new RegionFile(RegionPath(coord));
+                    StorageIoStats.RecordRegionOpen(openStart);
+                    return opened;
+                }));
 
             try
             {

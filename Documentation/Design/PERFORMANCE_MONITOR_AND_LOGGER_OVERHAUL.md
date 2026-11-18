@@ -1,7 +1,7 @@
 # Performance Monitor & Logger Overhaul Design
 
-**Version:** 1.19  
-**Date:** 2026-10-18  
+**Version:** 1.20  
+**Date:** 2026-11-18  
 **Status:** In progress — PM-0 ✅ complete (2026-10-03, Master answers in §8); PM-1 ✅ complete (2026-10-03, §7.2;
 confirmed in an IL2CPP Master build); PM-2 ✅ complete (2026-10-04, §7.3; confirmed in an IL2CPP Master build); PM-3 ✅
 complete (2026-10-04, §7.4; confirmed in an IL2CPP Master build); PM-4 ✅ complete (2026-10-05, §7.5; confirmed in an
@@ -333,6 +333,13 @@ resumes synchronously inside the `World.Update` slot that started the load, whic
   through one stream) and write time, payload bytes, and load hits versus misses (`StorageIoStats`). The compression
   *ratio* is deferred: only compressed bytes are known. "ThreadPool depth" is the engine's own count of background
   loads and saves in flight, plus the wait between submission and a pool thread starting each one.
+- *ES-32 / ES-33 measurement (2026-11-18), as built:* the read time is split, not re-measured: `DiskReadUs` still
+  spans a region's open (timed only on the thread running the `Lazy` factory) and the load's wait for the file lock,
+  so `LoadLockWaitUs` is its part and `DiskReadHitUs` the hits' share; `SaveLockWaitUs` is the same split of the
+  write time. `RegionOpenUs` counts every open whichever path triggers it (a load's read, a save's write, the
+  pre-generator's occupancy scan), so it bounds a load's open time from above; `IoLoadQueueWaitUs` / `IoLoadOps` separate the loads from the saves in the pool wait,
+  and `DiskLoadLatencyUs` runs from submission until their caller resumes. The job array pool's churn adds
+  disposes past its retention cap, its halo-padded misses and the time in each native allocate and past-cap dispose.
 
 ### 4.5 Hitch detection and snapshots
 
@@ -504,12 +511,16 @@ Outside `World.Update` (a slot here may contain world work it triggers, e.g. a c
 
 Unity's own jobs (rendering, animation, uGUI) are invisible, so utilization is the engine's share of the workers.
 
-**Background I/O (Systems tier).** `ChunkStorageManager` only: loads (hits, misses, read and deserialize time, payload
-bytes), saves on every path (serialize and write time, payload bytes and their uncompressed size), the ThreadPool wait and the background operations
-it covers, and the operations in flight. Region files touched outside it — the migration step, the world list — and the
-non-chunk files (`level.dat`, pending modifications, pending lighting) are not counted.
+**Background I/O (Systems tier).** `ChunkStorageManager` only: loads (hits and misses with their read times apart,
+the region opens and the load's wait for the file lock timed inside that read, deserialize time, payload bytes, the
+loads' share of the ThreadPool wait and their latency to the caller resuming), saves on every path (serialize and
+write time, their wait for the same lock, payload bytes and their uncompressed size), the ThreadPool wait and the
+background operations it covers, and the operations in flight. Region files touched outside it — the migration step,
+the world list — and the non-chunk files (`level.dat`, pending modifications, pending lighting) are not counted, except
+the lock waits: `RegionFile` records those itself, so a migration running while the monitor records adds to them.
 
-**Counters (Systems tier).** 86, sampled in `World.SamplePerfCounters`:
+**Counters (Systems tier).** 99, sampled in `World.SamplePerfCounters` — the disk I/O and job-array groups through
+`StorageIoStats.SamplePerfCounters` and the pool's own `SamplePerfCounters`:
 - *Gauges (14):* the pipeline queues and jobs in flight (`GenerationQueue`, `GenerationInFlight`, `LightReady`,
   `LightWaiting`, `LightInFlight`, `MeshQueue`, `MeshInFlight`, `ModificationQueue`), residency (`ResidentChunks`,
   `ActiveChunks`, `ActiveSections`), the native pools' idle stock (`JobArraysPooled`, `MeshOutputsPooled`) and `IoInFlight`.
@@ -517,9 +528,13 @@ non-chunk files (`level.dat`, pending modifications, pending lighting) are not c
   `RenderVertices`, `RenderVertexUploadBytes`, `RenderIndexUploadBytes` — the previous rendered frame's values of
   Unity's `Render`-category counters, read by `PerfRenderStatsSource`, which `PerfStore` holds at Systems and above.
   `summarize_perf_session.py` prints them as their own `### Render` table.
-- *Per-frame counts (65, the lighting merge's 21 below included):* pool misses (section, chunk data, job array, mesh
-  output, save buffer); completed / latency / busy for each of the five job types, and `UntimedJobs`; the twelve disk I/O counts; the behavior tick's six timed parts
-  (`TickListUs`, `TickPrepareUs`, `TickScheduleUs`, `TickWaitUs`, `TickGrassUs`, `TickFluidReplayUs`, from
+- *Per-frame counts (78, the lighting merge's 21 below included):* pool misses (section, chunk data, job array, mesh
+  output, save buffer); the job array pool's churn (returns disposed past the retention cap, the halo-padded subset
+  of its misses, and the time in each native allocate and each of those disposes, timed only while the monitor
+  records); completed / latency / busy for each of the five job types, and `UntimedJobs`; the twenty-one disk I/O
+  counts (the read time split between hits and misses, the region opens, the load and save waits for the file lock,
+  and the loads' own pool wait and their latency from submission to the caller resuming); the behavior tick's six timed
+  parts (`TickListUs`, `TickPrepareUs`, `TickScheduleUs`, `TickWaitUs`, `TickGrassUs`, `TickFluidReplayUs`, from
   `PerfTickTotals`), its counts (`TickFluidChunks`, `TickFluidVoxels`, `TickSnapshotKb`, `TickGrassVoxels`) and
   `FluidTickerPoolMisses`. Since ES-29, `TickSnapshotKb` counts the sections the tick's shared arena actually copied
   (16 KB each, grass and fluid prepares together), `TickPrepareUs` includes the grass prepares, and `TickGrassUs` is
@@ -1301,6 +1316,8 @@ Answers 1–4 come from `EngineApiProbe_2026-10-03_13-52-20.log`: a `Windows - P
 
 ## Document History
 
+* **v1.20** - §4.4 / §4.9 (2026-11-18): ES-32's disk I/O split (hit read, lock waits, region opens, load-only
+  pool wait and latency) and ES-33's job array churn counters; counters 86 → 99, per-frame 65 → 78.
 * **v1.19** - §4.9 coverage map (2026-11-06): `GrassTickJob` (ES-29's Burst grass tick) added to the worker-jobs
   table as untimed. `Tools/Python/check_perf_coverage_map.py` now runs the section's re-deriving commands and
   reports a slot or job struct the map does not name; the re-deriving block points at it.

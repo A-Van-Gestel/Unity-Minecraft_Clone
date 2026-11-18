@@ -107,6 +107,9 @@ public class WorldJobManager : IDisposable, IJobCompletionDriver<ChunkCoord>, IM
     /// <summary>Job buffers retained by the chunk job array pool, ready to rent.</summary>
     public int JobArraysPooled => _jobArrayPool.PooledCount;
 
+    /// <summary>Samples the chunk job array pool's churn totals into the performance monitor's counters.</summary>
+    public void SampleJobArrayPerfCounters() => _jobArrayPool.SamplePerfCounters();
+
     /// <summary>The lighting merge's running totals; the unload pass adds its pending-skylight counts here too.</summary>
     public ref PerfMergeTotals MergeTotals => ref _mergeTotals;
 

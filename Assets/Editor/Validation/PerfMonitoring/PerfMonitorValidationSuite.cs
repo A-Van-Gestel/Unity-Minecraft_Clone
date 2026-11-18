@@ -109,6 +109,8 @@ namespace Editor.Validation.PerfMonitoring
                 new Scenario("B41 Startup phase report: phase 1, one line per sweep in order, sweeps past the cap folded into one row, the total sums every sweep, the tail; an unfinished coroutine says so", RunB41StartupPhaseReport),
                 new Scenario("B42 Cross-chunk mod census: repeats per (voxel, channel) key, redundant placements per channel, a removal resets its key, the scratch map is cleared per call, a zeroed placement is not a removal", RunB42CrossChunkModCensus),
                 new Scenario("B43 Render counters: a reader only at Systems and above, freed on leaving and at shutdown; each Render counter in its own gauge; readings clamp without wrapping", RunB43RenderStats),
+                new Scenario("B44 Job array churn: pool misses, padded misses and cap disposes counted exactly (a wrong-length return is no cap dispose), alloc and free ticks only at Systems, all four reach their counters", RunB44JobArrayChurn),
+                new Scenario("B45 Storage I/O split: lock waits per side, one region open on first touch, load-only queue wait and latency ops, hit read inside total read; nothing below Systems; every disk counter reads back after one sampling call", RunB45StorageIoSplit),
             };
             return ValidationSuiteRunner.Execute("Performance Monitor", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }
