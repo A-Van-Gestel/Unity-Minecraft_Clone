@@ -1,7 +1,7 @@
 # Engine Scaling Performance Roadmap
 
-**Version:** 1.32  
-**Date:** 2026-11-17  
+**Version:** 1.33  
+**Date:** 2026-11-18  
 **Status:** In progress — `ES-0` ✅ complete (2026-10-10: drain stamp shipped, every-layer re-measurement in §2.6 — added
 `ES-29`), `ES-1`, `ES-2` and `ES-6.1` shipped (2026-10-02); ES-0's GC.Alloc attribution captured (2026-10-03, §2.2.1 —
 added `ES-26`/`ES-27`; PM-1's smoke capture added the `ES-28` quick win); `ES-26` ✅ shipped (2026-10-10: −75.9 % GC.Alloc
@@ -823,11 +823,12 @@ What landed:
 **ES-32 — Price the slow disk reads during fast generation.** 🟢 / 🟡. Added 2026-11-14 from the ES-0 re-measure
 (§2.6, [B1 disk I/O table](../Performance/ENGINE_SCALING_ES0_REMEASURE_IL2CPP_2026-10-10_BENCHMARK.md)). That
 table's `Read ms/hit` column divides the read time of **hits and misses alike** by the hit count —
-`StorageIoStats.RecordRead` runs for both arms (`ChunkStorageManager.cs:218–223`), and the summarizer's
-`per_op(DiskReadUs, hits)` is the same ratio (`summarize_perf_session.py:323`) — so **7.7 ms at 50 m/s and 7.9 ms
-at 200 m/s are not per-hit latencies**. Those two phases are miss-dominated (12 hits against 2 523 misses, 180
-against 9 503), so on that table's own columns their loads read **36 µs and 147 µs per load** — and Generation
-100 m/s, 22 µs — while the hit-dominated phases (Ensure Generated 20 289 hits/23 misses, Loading 200 m/s
+`StorageIoStats.RecordRead` runs for both arms (`ChunkStorageManager.cs:218–223`), and so did that capture's
+summarizer column `per_op(DiskReadUs, hits)` — so **7.7 ms at 50 m/s and 7.9 ms at 200 m/s are not per-hit latencies**.
+That column is gone: the summarizer now prints `Read µs/load`, with the hits' and misses' read times, the load and
+save lock waits and the region opens in their own columns. Those two phases are miss-dominated (12 hits against
+2 523 misses, 180 against 9 503), so on that table's own columns their loads read **36 µs and 147 µs per load** — and
+Generation 100 m/s, 22 µs — while the hit-dominated phases (Ensure Generated 20 289 hits/23 misses, Loading 200 m/s
 12 210/0) sit at 0.24–0.26 ms per load, where hits ≈ loads already. What stays open is whether a load ever
 waits behind the 2 500–9 600 saves of the same window *(inferred)*. Measure first,
 then pick the lever:
@@ -836,6 +837,8 @@ then pick the lever:
   frame at all, since reads run off the main thread;
 - if it is contention, the lever is ES-9's dedicated I/O worker with bounded queues: give reads priority over saves.
   Re-score after that worker ships rather than adding a separate scheduler.
+
+*Measurement step built 2026-11-18 (Performance Monitor B45); pricing rides the C1 capture.*
 
 **ES-33 — Stop the job-array pool's alloc/free churn at speed.** 🟢 / 🟡. Added 2026-11-14 from the ES-0 re-measure
 (§2.6). `ChunkJobArrayPool.Return` disposes a buffer returned while its type already holds the device-calibrated
@@ -846,6 +849,8 @@ misses, and time the native allocations and frees per frame. Levers, if it pays:
 - a higher cap only during fast traversal — bounded by goal 3's memory figure and the ~246 MB retention trade-off
   in `JOB_SYSTEM_BUGS.md` #02;
 - an idle soft-trim, so the cap can be higher without pinning the peak.
+
+*Measurement step built 2026-11-18 (Performance Monitor B44); pricing rides the C1 capture.*
 
 **ES-34 — Price the startup merge's cross-chunk route.** ✅ 2026-11-15 (GO). 🟡 / 🟡. Added 2026-11-14 from ES-3's startup phase report
 ([ES-3 report](../Performance/ENGINE_SCALING_ES3_LOADING_MODE_IL2CPP_2026-11-14_BENCHMARK.md)). Startup lighting sweep 1 is ≈ 0.97 s, and its merge spends **≈ 517 ms routing ≈ 1.06 M
@@ -1501,6 +1506,9 @@ saving is inferred from step 1's re-entry leg, not re-measured.
 
 ## Document History
 
+* **v1.33** - **`ES-32` / `ES-33` measurement step built** (2026-11-18): each entry notes its Performance
+  Monitor scenario (B45 / B44) and that pricing rides C1; ES-32's summarizer clause now says the per-hit ratio column
+  is gone (`Read µs/load` and the hit/miss, lock-wait and region-open split replace it).
 * **v1.32** - **`ES-37`–`ES-41` filed** (2026-11-17) from the improvements report's open items that no ES entry
   owned (`P-1`, `GS-2`, `SL-4`, `WG-3`, `GS-8`): status line, Tier 1b entries, §7 rows, relationship list. ES-13's §7
   dependency on ES-12 dropped (no code coupling; decided 2026-11-17).
