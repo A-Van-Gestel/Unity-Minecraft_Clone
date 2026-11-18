@@ -132,6 +132,13 @@ Verified 2026-10-09 end to end on a fresh seed-4242 world (noon and midnight fra
   `enableVolatileSaveData` only picks that folder, it is not throwaway. Before any edit in Play: back up
   `Assets/settings.json`, set `dev.keepChunksInMemory: true`, confirm the `[Memory Only Mode]` console
   line, and restore the file byte-for-byte afterwards.
+- **A run that must touch disk uses a throwaway world instead.** A keep-in-memory world never loads, unloads or saves
+  chunks, so disk I/O counters, save paths and reloads read 0 there. Open `MainMenu`, `Launch` a fresh world under a
+  name `Saves` does not list (`["<UniqueName>", 4242, true]`), and delete its `Editor_Temp_Saves/<UniqueName>` folder
+  after `playmode stop` — after checking it holds only this run's files. The user's own worlds stay unopened. Edited
+  chunks are saved on unload and loaded on return, which untouched generated chunks may not be.
+- **`PerfStore.SumCounter` holds only the last 2048 frames** — ≈ 7 s at Editor frame rates. Read counters within a
+  few seconds of the activity, or the window has rolled past it and every sum reads 0.
 - **State change and capture never share a call.** `World.Update()` pushes the global shader uniforms, so in
   the call that ran `/time set midnight` `GlobalLightLevel` still read `1`; the next call read `0.267`.
   `Status` and `Capture` both report it — check it before trusting a frame. Freshly placed blocks remesh
