@@ -1,6 +1,9 @@
 # Own stuff
 /Assets/settings.json*
 
+# Project Auditor rewrites this between 7 and 10 default keys per Unity process; holds no customization
+/ProjectSettings/ProjectAuditorSettings.asset
+
 # Validation-suite headless results (NUnit XML build artifact — ValidationSuiteCI.RunHeadless)
 /TestResults/
 
