@@ -38,9 +38,7 @@ on `PATH` (`log-since mark|show Logs/Editor.log`), not a `unity` subcommand; che
    the suite's summary line is inside the window. For Validate All you need the whole
    `=== Validate All — combined summary ===` block.
 5. **Record `git status --short` again.** Any difference from step 0 goes at the top of the
-   report as **TREE CHANGED**, verbatim. Do not fix it. A changed
-   `ProjectSettings/ProjectAuditorSettings.asset` is a known Editor rewrite on recompile: still report
-   it there, labeled `known Editor rewrite`.
+   report as **TREE CHANGED**, verbatim. Do not fix it.
 
 ## Report — verbatim, never paraphrased
 

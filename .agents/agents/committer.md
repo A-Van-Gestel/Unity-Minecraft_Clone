@@ -111,9 +111,6 @@ b. Folding into an unpushed older commit (`rebase -i` is unavailable), via git's
 - Never `git push`, never `--no-verify`, never amend a pushed commit.
 - Never `git stash`, never `checkout --` or `restore` a working-tree file: uncommitted work
   outside the batch belongs to the user.
-- `ProjectSettings/ProjectAuditorSettings.asset` loses 3 keys whenever the Editor recompiles. It is
-  never part of a batch, even when the reserialize touched it (Step 0.3 does not apply): leave it
-  unstaged and list it as `known Editor rewrite`; the parent restores it.
 
 ## Report (keep it under ~40 lines)
 
