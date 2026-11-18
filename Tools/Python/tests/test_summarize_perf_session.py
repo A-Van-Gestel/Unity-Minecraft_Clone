@@ -1,5 +1,6 @@
 """summarize_perf_session.py: report parsing in any culture, phase routing by frame range, the derived job and I/O
-figures, hitch attribution, and the cross-check that fails a phase cut from the wrong rows."""
+figures, hitch attribution, the counters a session's format can predate, and the cross-check that fails a phase cut
+from the wrong rows."""
 import os
 import re
 import shutil
@@ -15,9 +16,23 @@ PERF_COUNTER_SOURCE = Path(TOOLS_DIR).parents[1] / "Assets" / "Scripts" / "Diagn
 FIRST_PER_FRAME_COUNT = "SectionPoolMisses"
 
 SESSION = "PerfSession_2026-10-10_12-00-00-000"
+# A session in the format the engine writes today: every counter the summarizer reads a figure from, slots aside.
 HEADER = summary.FRAME_COLUMNS + ["Tick_ms", "Apply_ms", "GenerationQueue", "GenerationCompleted",
-                                  "GenerationLatencyUs", "GenerationBusyUs", "DiskLoadHits", "DiskReadUs",
+                                  "GenerationLatencyUs", "GenerationBusyUs", "DiskLoadHits", "DiskLoadMisses",
+                                  "DiskReadUs", "DiskReadHitUs", "DeserializeUs", "LoadLockWaitUs", "RegionOpens",
+                                  "RegionOpenUs", "DiskLoadBytes", "DiskSaveBytes", "DiskSaves", "SerializeUs",
+                                  "DiskWriteUs", "SaveLockWaitUs", "IoQueueWaitUs", "IoBackgroundOps",
+                                  "IoLoadQueueWaitUs", "IoLoadOps", "DiskLoadLatencyUs", "DiskLoadLatencyOps",
+                                  "LightInFlight", "MeshInFlight", *summary.POOL_MISSES, "JobArrayCapDisposes",
+                                  "JobArrayPaddedMisses", "JobArrayAllocUs", "JobArrayFreeUs",
                                   "RenderSrpBatcherDraws"]
+# The counters that joined the format after it first shipped; a session older than them has no column to read.
+NEW_COUNTERS = ["DiskReadHitUs", "LoadLockWaitUs", "RegionOpens", "RegionOpenUs", "SaveLockWaitUs",
+                "IoLoadQueueWaitUs", "IoLoadOps", "DiskLoadLatencyUs", "DiskLoadLatencyOps",
+                "JobArrayCapDisposes", "JobArrayPaddedMisses", "JobArrayAllocUs", "JobArrayFreeUs"]
+OLD_HEADER = [c for c in HEADER if c not in NEW_COUNTERS]
+# A format without either in-flight gauge: the demand column then has no source at all.
+GAUGELESS_HEADER = [c for c in HEADER if c not in summary.JOB_ARRAY_IN_FLIGHT]
 
 
 def report_text(frames_a="5", frames_b="3"):
@@ -36,17 +51,21 @@ def report_text(frames_a="5", frames_b="3"):
     ]).splitlines()
 
 
-def row(frame, wall, tick, completed=0, latency=0, busy=0, hits=0, read=0, collections=0, draws=0):
-    frame_cells = [frame, f"{wall:.3f}", "1.000", "", "1", collections, "", "", ""]
-    return ",".join(str(c) for c in frame_cells + [f"{tick:.3f}", "0.000", 4, completed, latency, busy, hits, read, draws])
+def row(frame, wall, tick, header=HEADER, collections=0, **counters):
+    """One session row: the frame cells, then a cell for every counter column `header` carries, named as kwargs."""
+    values = dict(counters, Tick_ms=f"{tick:.3f}")
+    cells = [frame, f"{wall:.3f}", "1.000", "", "1", collections, "", "", ""]
+    return ",".join(str(c) for c in cells + [values.get(column, 0)
+                                            for column in header[len(summary.FRAME_COLUMNS):]])
 
 
 class FixtureTests(unittest.TestCase):
     def setUp(self):
         self.folder = Path(tempfile.mkdtemp(prefix="perf-session-test-"))
-        rows_a = [row(f, 10.0 + (f - 10), 2.0, completed=2, latency=4000, busy=1000, draws=100 * f)
-                  for f in range(10, 15)]
-        rows_b = [row(f, 1046.3, 0.5, hits=1, read=500, collections=1 if f == 15 else 0) for f in range(15, 18)]
+        rows_a = [row(f, 10.0 + (f - 10), 2.0, GenerationCompleted=2, GenerationLatencyUs=4000,
+                      GenerationBusyUs=1000, RenderSrpBatcherDraws=100 * f) for f in range(10, 15)]
+        rows_b = [row(f, 1046.3, 0.5, DiskLoadHits=1, DiskReadUs=500, DiskReadHitUs=500,
+                      collections=1 if f == 15 else 0) for f in range(15, 18)]
         outside = [row(9, 99.0, 0.0), row(18, 99.0, 0.0)]
         part1 = [",".join(HEADER), outside[0]] + rows_a[:3]
         part2 = [",".join(HEADER)] + rows_a[3:] + rows_b + [outside[1]]
@@ -92,8 +111,9 @@ class FixtureTests(unittest.TestCase):
         self.assertEqual(problems, [])
         # 10 jobs over 5 frames: 20 ms latency and 5 ms busy in total -> 2.000 ms latency, 0.500 ms busy per job.
         self.assertIn("| Generation Pass / 10 m/s | Generation | 10 | 2.00 | 0.500 |", markdown)
-        # Three hits read in 1.5 ms -> 0.500 ms per hit.
-        self.assertIn("| Loading Pass / 50 m/s | 3 | 0 | 0.500 |", markdown)
+        # Three loads, all hits: 1 500 µs read over them is 500.0 µs per load and 0.500 ms per hit, and with
+        # nothing missed the per-miss and per-open rates have no divisor to divide by.
+        self.assertIn("| Loading Pass / 50 m/s | 3 | 0 | 500.0 | 0.500 | n/a | 0.0 | 0 | n/a | 0.000 |", markdown)
         self.assertIn("| Tick | 2.000 |", markdown)
         self.assertIn("| Generation Pass / 10 m/s | 1 | 14.0 | 0 | Tick 1 |", markdown)
 
@@ -129,6 +149,116 @@ class FixtureTests(unittest.TestCase):
         code, out = run_script("summarize_perf_session.py", "--report", str(report), "--folder", str(self.folder))
         self.assertEqual(code, 1, out)
         self.assertIn("MISMATCH", out)
+
+
+def solo_report(first, end, frames):
+    """One phase's Frame Health row for frames [first, end), every wall percentile the same value."""
+    return "\n".join([
+        "=== Solo Pass — Frame Health (every frame) ===",
+        "  Phase    Frames  Wall p50  Wall p99     Worst  CPU p50  CPU p99  GC p99  GCs  Hitches  GPU p99"
+        "  First frame  End frame",
+        f"  10 m/s   {frames:>6}   10,0 ms   10,0 ms   10,0 ms   1,0 ms   1,0 ms  n/a  0  0  n/a  {first}  {end}",
+        "",
+    ]).splitlines()
+
+
+def gather_phase(rows, header=HEADER, first=10):
+    """Writes `rows` as a one-phase session of its own; returns the phase and the columns its header has."""
+    folder = Path(tempfile.mkdtemp(prefix="perf-column-test-"))
+    try:
+        for line in rows:
+            assert len(line.split(",")) == len(header), "a fixture row was built for another header"
+        (folder / f"{SESSION}.csv").write_text("\n".join([",".join(header), *rows]) + "\n", encoding="ascii")
+        phases = summary.parse_report(solo_report(first, first + len(rows), len(rows)))
+        _, parts, _ = summary.session_files(folder, None)
+        part_header, outside = summary.gather(phases, parts)
+        assert outside == 0, "a fixture row fell outside the phase"
+        return phases[0], set(part_header)
+    finally:
+        shutil.rmtree(folder, ignore_errors=True)
+
+
+def first_row_cells(table_text):
+    """The first data row of a table, keyed by that table's header, so a figure cannot be found in a wrong column."""
+    lines = table_text.splitlines()
+    return dict(zip((c.strip() for c in lines[0].strip("|").split("|")),
+                    (c.strip() for c in lines[2].strip("|").split("|"))))
+
+
+class CounterColumnTests(unittest.TestCase):
+    """The disk I/O and pool columns, on sessions whose format can predate the counters they would read."""
+
+    def test_read_per_load_divides_by_the_misses_too(self):
+        # 12 hits against 2 500 misses, as the miss-dominated generation phases measure: the read total belongs to
+        # every load, so dividing it by the hit count alone prices one load at hundreds of microseconds.
+        rows = [row(10, 10.0, 0.5, DiskLoadHits=12, DiskLoadMisses=1, DiskReadUs=6280, DiskReadHitUs=3960)]
+        rows += [row(11 + i, 10.0, 0.5, DiskLoadMisses=1, DiskReadUs=1) for i in range(2499)]
+        phase, present = gather_phase(rows)
+        cells = first_row_cells(summary.io_table([phase], present))
+        self.assertEqual((cells["Load hits"], cells["Misses"]), ("12", "2500"))
+        self.assertEqual(cells["Read µs/load"], "3.5")       # 8 779 µs over 2 512 loads
+        self.assertEqual(cells["Read ms/hit"], "0.330")      # the cache hits' own 3 960 µs over 12 hits
+        self.assertEqual(cells["Read µs/miss"], "1.9")       # the 4 819 µs left over, over the misses alone
+
+    def test_a_session_older_than_the_counters_prints_the_dash(self):
+        # The counters the format already had keep their figures; the ones it has no column for print `—`, and the
+        # summarizer never invents a zero for them.
+        rows = [row(10, 10.0, 0.5, header=OLD_HEADER, DiskLoadHits=4, DiskLoadMisses=6, DiskReadUs=2000,
+                    DeserializeUs=2000, DiskLoadBytes=1048576, DiskSaves=1, SerializeUs=500,
+                    IoQueueWaitUs=100, IoBackgroundOps=2, SectionPoolMisses=7)]
+        phase, present = gather_phase(rows, header=OLD_HEADER)
+        io_row, pool_row = (first_row_cells(summary.io_table([phase], present)),
+                            first_row_cells(summary.pool_table([phase], present)))
+        self.assertEqual((io_row["Read µs/load"], io_row["Deserialize ms/hit"], io_row["MB loaded"],
+                          io_row["Pool wait ms/op"]), ("200.0", "0.500", "1.0", "0.050"))
+        # A column the old format does have, left at zero by this phase, prints its zero rather than the dash.
+        self.assertEqual((io_row["Write ms/save"], io_row["MB saved"]), ("0.000", "0.0"))
+        # A column of the older format keeps its count in the table it is now grouped with.
+        self.assertEqual(pool_row["SectionPoolMisses"], "7")
+        for column in ("Read ms/hit", "Read µs/miss", "Lock wait µs/load", "Region opens", "Open ms/open",
+                       "Save lock wait ms/save", "Load pool wait ms/op", "Load latency ms"):
+            self.assertEqual(io_row[column], "—", column)
+        for column in ("JobArrayCapDisposes", "JobArrayPaddedMisses", "JobArrayAllocUs", "JobArrayFreeUs",
+                       "Churn µs/frame"):
+            self.assertEqual(pool_row[column], "—", column)
+
+    def test_churn_is_the_maps_allocated_and_freed_per_frame(self):
+        rows = [row(10, 10.0, 0.5, JobArrayAllocUs=900, JobArrayFreeUs=100), row(11, 10.0, 0.5)]
+        phase, present = gather_phase(rows)
+        cells = first_row_cells(summary.pool_table([phase], present))
+        self.assertEqual((cells["JobArrayAllocUs"], cells["JobArrayFreeUs"]), ("900", "100"))
+        self.assertEqual(cells["Churn µs/frame"], "500.0")
+
+    def test_peak_demand_is_the_maps_one_frame_wanted(self):
+        rows = [row(10, 10.0, 0.5, LightInFlight=7, MeshInFlight=2), row(11, 10.0, 0.5, LightInFlight=2,
+                    MeshInFlight=7), row(12, 10.0, 0.5, LightInFlight=1, MeshInFlight=1)]
+        phase, present = gather_phase(rows)
+        cells = first_row_cells(summary.pool_table([phase], present))
+        # Both of the first two frames hold nine jobs in flight, so 81 maps were wanted at once: each level's own
+        # maximum would claim 126, which no frame ever asked for.
+        self.assertEqual(cells["Peak demand/type"], "81")
+
+    def test_peak_demand_prints_the_dash_without_its_gauges(self):
+        rows = [row(10, 10.0, 0.5, header=GAUGELESS_HEADER, JobArrayAllocUs=900, JobArrayFreeUs=100),
+                row(11, 10.0, 0.5, header=GAUGELESS_HEADER)]
+        phase, present = gather_phase(rows, header=GAUGELESS_HEADER)
+        cells = first_row_cells(summary.pool_table([phase], present))
+        self.assertEqual(cells["Peak demand/type"], "—")
+        self.assertEqual(cells["Churn µs/frame"], "500.0")
+
+    def test_lock_wait_and_queue_rates_on_exact_counters(self):
+        rows = [row(10, 10.0, 0.5, DiskLoadHits=2, DiskLoadMisses=3, DiskReadUs=1000, DiskReadHitUs=400,
+                    LoadLockWaitUs=1500, RegionOpens=2, RegionOpenUs=300, DiskSaves=1, SaveLockWaitUs=250,
+                    IoLoadOps=4, IoLoadQueueWaitUs=200, DiskLoadLatencyUs=7000, DiskLoadLatencyOps=5)]
+        phase, present = gather_phase(rows)
+        cells = first_row_cells(summary.io_table([phase], present))
+        self.assertEqual(cells["Lock wait µs/load"], "300.0")
+        self.assertEqual((cells["Read µs/load"], cells["Read ms/hit"], cells["Read µs/miss"]),
+                         ("200.0", "0.200", "200.0"))
+        self.assertEqual((cells["Region opens"], cells["Open ms/open"]), ("2", "0.150"))
+        self.assertEqual(cells["Save lock wait ms/save"], "0.250")
+        self.assertEqual(cells["Load pool wait ms/op"], "0.050")
+        self.assertEqual(cells["Load latency ms"], "1.400")
 
 
 class GaugeParityTests(unittest.TestCase):

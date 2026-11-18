@@ -11,7 +11,9 @@ WHAT THIS DOES
       - every slot that recorded time: mean ms per frame, p99 and worst;
       - the gauges (queues, jobs in flight, residency, pools): mean, p99 and max;
       - per job type: jobs completed, mean latency, mean worker busy time per job, busy ms per wall second;
-      - disk I/O per operation, the behavior tick's six parts, and the pool misses;
+      - disk I/O split by load hits and misses (read cost, lock wait, region opens, saves and their load-pool queue)
+        and the job-array pools (allocations, frees, churn and peak maps in demand);
+      - the behavior tick's six parts and the lighting merge;
       - the hitch files whose hitch frame lies in the phase: how many, the worst, and which slot led them.
     It then cross-checks every phase against the report's own Frame Health row: the frame count must match exactly and
     wall p50 / p99 / worst within one printed unit (0.1 ms; the session file rounds to 0.001 ms). Exits 1 on any
@@ -27,7 +29,9 @@ WHY IT EXISTS
 
 DETERMINISM
     Files are read in sorted name order, percentiles are nearest-rank (the store's own definition) and every figure
-    uses fixed formatting, so the same inputs always produce byte-identical output.
+    uses fixed formatting, so the same inputs always produce byte-identical output. Counters whose columns a header
+    lacks sum to an empty 0, so a phase of a session in the older format prints `—` for them rather than a figure
+    the format never measured.
 
 RUN
     python Tools/Python/summarize_perf_session.py --report <BenchmarkRun_*.log> [--folder <PerfLogs>]
@@ -66,6 +70,10 @@ TICK_PARTS = ["TickListUs", "TickPrepareUs", "TickScheduleUs", "TickWaitUs", "Ti
 MERGE_PARTS = ["MergeApplyUs", "MergeDrainUs", "MergePullBackUs", "MergeRouteUs", "MergeCascadeUs"]
 POOL_MISSES = ["SectionPoolMisses", "DataPoolMisses", "JobArrayMisses", "MeshOutputMisses", "SaveBufferMisses",
                "FluidTickerPoolMisses", "UntimedJobs"]
+JOB_ARRAY_COUNTERS = ["JobArrayCapDisposes", "JobArrayPaddedMisses", "JobArrayAllocUs", "JobArrayFreeUs"]
+# One job maps one center + eight neighbor maps per type, so a job in flight accounts for nine job arrays.
+JOB_ARRAY_MAPS_PER_JOB = 9
+JOB_ARRAY_IN_FLIGHT = ["LightInFlight", "MeshInFlight"]
 
 FRAME_HEALTH_TITLE = re.compile(r"^=== (.+?) — Frame Health \(every frame\) ===$")
 COLUMN_SPLIT = re.compile(r"\s{2,}")
@@ -80,11 +88,15 @@ MIN_SLOT_MEAN_MS = 0.0005
 MEDIAN = 50
 HIGH = 99
 US_PER_MS = 1000.0
+# The µs columns carry less precision than the ms ones: their unit is already a thousandth of a millisecond.
+US_DECIMALS = 1
 BYTES_PER_MB = 1024.0 * 1024.0
 MS_PER_SECOND = 1000.0
 # Fixed slow-frame bars: the report's hitch threshold scales with the median, so legs with different medians are
 # judged against different bars; these stay comparable across legs.
 SLOW_FRAME_MS = (33.0, 50.0)
+# A counter the session's header has no column for prints this instead of the 0 its empty Counter would give.
+DASH = "—"
 
 
 class Phase:
@@ -99,6 +111,7 @@ class Phase:
         self.sums = Counter()  # per-frame counter -> sum over the phase
         self.rows = 0
         self.collections = 0
+        self.peak_demand = 0.0  # the frame of the phase whose job arrays were in most demand
         self.hitches = []
 
     @property
@@ -174,7 +187,8 @@ def session_files(folder, session):
 
 
 def gather(phases, part_paths):
-    """Routes every session row into its phase; returns the header and the count of rows outside every phase."""
+    """Routes every session row into its phase, taking the peak job-array demand row by row; returns the header
+    and the count of rows outside every phase."""
     ordered = sorted(phases, key=lambda p: p.first)
     header, outside = None, 0
     for path in part_paths:
@@ -200,14 +214,21 @@ def gather(phases, part_paths):
                 for index, column in slot_columns:
                     if row[index] != "":
                         phase.add(column[:-len(SLOT_SUFFIX)], float(row[index]))
+                # Light and Mesh in flight peak on different frames, so the frame wanting the most job arrays has to
+                # be taken row by row here: pool_table could only add the two levels' separate maxima.
+                in_flight = {}
                 for index, column in counter_columns:
                     if row[index] == "":
                         continue
                     value = int(row[index])
                     if column in GAUGES or column in RENDER_GAUGES:
                         phase.add(column, value)
+                        if column in JOB_ARRAY_IN_FLIGHT:
+                            in_flight[column] = value
                     else:
                         phase.sums[column] += value
+                if len(in_flight) == len(JOB_ARRAY_IN_FLIGHT):
+                    phase.peak_demand = max(phase.peak_demand, sum(in_flight.values()) * JOB_ARRAY_MAPS_PER_JOB)
     return header, outside
 
 
@@ -318,17 +339,76 @@ def per_op(total_us, ops):
     return fmt(total_us / ops / US_PER_MS, 3) if ops else "n/a"
 
 
-def io_table(phases):
+def ms_per(sums, name, ops, present):
+    """One counter's ms per unit; `—` for a column the header lacks, `n/a` when the divisor is empty."""
+    if name not in present:
+        return DASH
+    return per_op(sums[name], ops)
+
+
+def us_per(sums, name, ops, present):
+    """One counter's µs per unit; `—` for a column the header lacks, `n/a` when the divisor is empty."""
+    if name not in present:
+        return DASH
+    return fmt(sums[name] / ops, US_DECIMALS) if ops else "n/a"
+
+
+def us_per_total(sums, names, ops, present):
+    """A rate over counters read as one figure; `—` unless the header carries every one of them."""
+    if any(name not in present for name in names):
+        return DASH
+    return fmt(sum(sums[name] for name in names) / ops, US_DECIMALS) if ops else "n/a"
+
+
+def us_per_remainder(sums, total, part, ops, present):
+    """µs per unit for the part of `total` that `part` does not account for; both columns are needed, as a missing
+    `part` would otherwise blame every read on the loads that did hit."""
+    if total not in present or part not in present:
+        return DASH
+    return fmt((sums[total] - sums[part]) / ops, US_DECIMALS) if ops else "n/a"
+
+
+def phase_total(sums, name, present):
+    """A counter's phase total; `—` for a column the header lacks, so an empty sum is not read as a measured zero."""
+    return DASH if name not in present else sums[name]
+
+
+def mb(sums, name, present):
+    """A bytes counter's megabytes for the phase; `—` for a column the header lacks."""
+    if name not in present:
+        return DASH
+    return fmt(sums[name] / BYTES_PER_MB, 1)
+
+
+def io_table(phases, present):
+    """Disk I/O per phase, with the loads that found their chunk on disk and the ones that did not priced apart."""
     rows = []
     for p in phases:
         s = p.sums
         hits, misses, saves = s["DiskLoadHits"], s["DiskLoadMisses"], s["DiskSaves"]
-        rows.append([p.label, hits, misses, per_op(s["DiskReadUs"], hits), per_op(s["DeserializeUs"], hits),
-                     fmt(s["DiskLoadBytes"] / BYTES_PER_MB, 1), saves, per_op(s["SerializeUs"], saves),
-                     per_op(s["DiskWriteUs"], saves), fmt(s["DiskSaveBytes"] / BYTES_PER_MB, 1),
-                     per_op(s["IoQueueWaitUs"], s["IoBackgroundOps"])])
-    return table(["Phase", "Load hits", "Misses", "Read ms/hit", "Deserialize ms/hit", "MB loaded", "Saves",
-                  "Serialize ms/save", "Write ms/save", "MB saved", "Pool wait ms/op"], rows)
+        loads = hits + misses
+        opens = s["RegionOpens"]
+        rows.append([p.label, hits, misses,
+                     us_per(s, "DiskReadUs", loads, present),
+                     ms_per(s, "DiskReadHitUs", hits, present),
+                     us_per_remainder(s, "DiskReadUs", "DiskReadHitUs", misses, present),
+                     us_per(s, "LoadLockWaitUs", loads, present),
+                     phase_total(s, "RegionOpens", present),
+                     ms_per(s, "RegionOpenUs", opens, present),
+                     ms_per(s, "DeserializeUs", hits, present),
+                     mb(s, "DiskLoadBytes", present),
+                     saves,
+                     ms_per(s, "SerializeUs", saves, present),
+                     ms_per(s, "DiskWriteUs", saves, present),
+                     ms_per(s, "SaveLockWaitUs", saves, present),
+                     mb(s, "DiskSaveBytes", present),
+                     ms_per(s, "IoQueueWaitUs", s["IoBackgroundOps"], present),
+                     ms_per(s, "IoLoadQueueWaitUs", s["IoLoadOps"], present),
+                     ms_per(s, "DiskLoadLatencyUs", s["DiskLoadLatencyOps"], present)])
+    return table(["Phase", "Load hits", "Misses", "Read µs/load", "Read ms/hit", "Read µs/miss", "Lock wait µs/load",
+                  "Region opens", "Open ms/open", "Deserialize ms/hit", "MB loaded", "Saves", "Serialize ms/save",
+                  "Write ms/save", "Save lock wait ms/save", "MB saved", "Pool wait ms/op", "Load pool wait ms/op",
+                  "Load latency ms"], rows)
 
 
 def tick_table(phases):
@@ -369,9 +449,18 @@ def merge_table(phases):
                   "Count drifts", "Gate skipped", "Gate diagonals", "Ceiling deferred"], rows)
 
 
-def pool_table(phases):
-    rows = [[p.label] + [p.sums[name] for name in POOL_MISSES] for p in phases]
-    return table(["Phase"] + POOL_MISSES, rows)
+def pool_table(phases, present):
+    """Pool misses and job-array churn per phase, plus the maps the phase's most demanding frame wanted."""
+    # The demand column comes from the two in-flight gauges, so a format without them has nothing to peak on.
+    gauges = all(name in present for name in JOB_ARRAY_IN_FLIGHT)
+    rows = []
+    for p in phases:
+        s = p.sums
+        frames = p.rows or 1
+        rows.append([p.label] + [phase_total(s, name, present) for name in POOL_MISSES + JOB_ARRAY_COUNTERS] +
+                    [us_per_total(s, ["JobArrayAllocUs", "JobArrayFreeUs"], frames, present),
+                     fmt(p.peak_demand, 0) if gauges else DASH])
+    return table(["Phase"] + POOL_MISSES + JOB_ARRAY_COUNTERS + ["Churn µs/frame", "Peak demand/type"], rows)
 
 
 def hitch_table(phases):
@@ -413,6 +502,8 @@ def summarize(report_lines, folder, session=None):
     header, outside = gather(phases, parts)
     attach_hitches(phases, hitch_paths)
     slots = [c[:-len(SLOT_SUFFIX)] for c in header[len(FRAME_COLUMNS):] if c.endswith(SLOT_SUFFIX)]
+    # The counters this session's format wrote at all; a column an older session lacks prints `—`, not an empty 0.
+    present = set(header)
     problems = cross_check(phases)
 
     out = [f"### Session {name} — {len(parts)} part(s), {len(hitch_paths)} hitch file(s), "
@@ -421,9 +512,10 @@ def summarize(report_lines, folder, session=None):
            "", phase_overview(phases), "", "### Slots per phase (mean over every frame of the phase)", "",
            slot_tables(phases, slots), "", "### Gauges", "", gauge_table(phases), "",
            "### Render (previous rendered frame)", "", gauge_table(phases, RENDER_GAUGES), "", "### Jobs", "",
-           job_table(phases), "", "### Disk I/O", "", io_table(phases), "", "### Behavior tick (ms per frame)", "",
-           tick_table(phases), "", "### Lighting merge (ms per frame; counts are phase totals)", "",
-           merge_table(phases), "", "### Pool misses and untimed jobs (phase totals)", "", pool_table(phases), "",
+           job_table(phases), "", "### Disk I/O", "", io_table(phases, present), "",
+           "### Behavior tick (ms per frame)", "", tick_table(phases), "",
+           "### Lighting merge (ms per frame; counts are phase totals)", "", merge_table(phases), "",
+           "### Pool misses, churn and peak demand (phase totals)", "", pool_table(phases, present), "",
            "### Hitch records", "", hitch_table(phases)]
     if problems:
         out += ["", "### Cross-check problems", ""] + [f"- {line}" for line in problems]
