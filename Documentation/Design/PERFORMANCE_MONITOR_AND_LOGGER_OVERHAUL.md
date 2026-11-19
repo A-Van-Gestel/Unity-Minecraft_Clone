@@ -1,7 +1,7 @@
 # Performance Monitor & Logger Overhaul Design
 
-**Version:** 1.20  
-**Date:** 2026-11-18  
+**Version:** 1.21  
+**Date:** 2026-11-19  
 **Status:** In progress — PM-0 ✅ complete (2026-10-03, Master answers in §8); PM-1 ✅ complete (2026-10-03, §7.2;
 confirmed in an IL2CPP Master build); PM-2 ✅ complete (2026-10-04, §7.3; confirmed in an IL2CPP Master build); PM-3 ✅
 complete (2026-10-04, §7.4; confirmed in an IL2CPP Master build); PM-4 ✅ complete (2026-10-05, §7.5; confirmed in an
@@ -519,7 +519,7 @@ background operations it covers, and the operations in flight. Region files touc
 the world list — and the non-chunk files (`level.dat`, pending modifications, pending lighting) are not counted, except
 the lock waits: `RegionFile` records those itself, so a migration running while the monitor records adds to them.
 
-**Counters (Systems tier).** 99, sampled in `World.SamplePerfCounters` — the disk I/O and job-array groups through
+**Counters (Systems tier).** 127, sampled in `World.SamplePerfCounters` — the disk I/O and job-array groups through
 `StorageIoStats.SamplePerfCounters` and the pool's own `SamplePerfCounters`:
 - *Gauges (14):* the pipeline queues and jobs in flight (`GenerationQueue`, `GenerationInFlight`, `LightReady`,
   `LightWaiting`, `LightInFlight`, `MeshQueue`, `MeshInFlight`, `ModificationQueue`), residency (`ResidentChunks`,
@@ -528,7 +528,7 @@ the lock waits: `RegionFile` records those itself, so a migration running while 
   `RenderVertices`, `RenderVertexUploadBytes`, `RenderIndexUploadBytes` — the previous rendered frame's values of
   Unity's `Render`-category counters, read by `PerfRenderStatsSource`, which `PerfStore` holds at Systems and above.
   `summarize_perf_session.py` prints them as their own `### Render` table.
-- *Per-frame counts (78, the lighting merge's 21 below included):* pool misses (section, chunk data, job array, mesh
+- *Per-frame counts (106, the lighting merge's 21 below included):* pool misses (section, chunk data, job array, mesh
   output, save buffer); the job array pool's churn (returns disposed past the retention cap, the halo-padded subset
   of its misses, and the time in each native allocate and each of those disposes, timed only while the monitor
   records); completed / latency / busy for each of the five job types, and `UntimedJobs`; the twenty-one disk I/O
@@ -562,24 +562,37 @@ the lock waits: `RegionFile` records those itself, so a migration running while 
   support scans and their time, the same-target-chunk share, and a 1-in-64 sampled split of per-mod time into target resolution and arm work (an
   estimate). Under `startupWorldDigest` the report adds a per-job census (`CrossChunkModCensus`) and a `[Startup] Merge order` line with the
   merge-order hash.
+- *The crossing split (24, ES-6, from `PerfCrossingTotals`):* laps in `World.CheckViewDistance` and `World.UnloadChunks`,
+  sampled by `World.SampleCrossingCounters`. The `ViewDistance` slot's six parts: `XingCloudsUs`, `XingSpiralUs`,
+  `XingDeactScanUs`, `XingDeactivateUs`, `XingActivateUs`, `XingActiveSetUs`. The `Unload` slot's six: `UnloadScanUs`,
+  `UnloadDecideUs`, `UnloadBookkeepUs`, `UnloadSaveUs`, `UnloadVisualUs`, `UnloadDataReturnUs`. Counts: `Crossings`,
+  `XingGenEnqueued`, `XingActivations`, `XingDeactivations`, `UnloadCandidates`, `UnloadedChunks`, `UnloadSaved`,
+  `UnloadSavedSections`, `UnloadDeferJob`, `UnloadDeferStrand`. `SaveReturnUs` / `SaveReturns` time the async save's
+  snapshot return to the data pool (`ChunkStorageManager.SaveChunkAsync`, via `StorageIoStats.RecordSnapshotReturn`); it
+  runs in a later frame outside any slot, so it belongs to no part. All count only while slots record. `/perf stats` prints a
+  "Crossing split" block and `/perf hitches` names the largest part ("ViewDistance led by …", "Unload led by …");
+  `summarize_perf_session.py` prints a "View-distance crossings" table of per-crossing means. Scenario: B46.
+- *The light schedules (4, from `PerfLightScheduleTotals`, sampled by `World.SampleLightScheduleCounters`):* the gameplay
+  lighting scan's arms `LightSchedInitial`, `LightSchedEdge`, `LightSchedRegular`, and `LightSchedLoadInitial` (the
+  initial lighting a chunk loaded from disk schedules directly in `LoadOrGenerateChunkInner`). The startup sweeps are not
+  counted; they have their own startup lines. The summarizer prints them as "Lighting schedules by arm". Scenario: B47.
 
 **Known gaps.**
 
-| Gap                                                                                                                                                                                         | Consequence                                                                                                                                 | Owner                                                          |
-|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------|----------------------------------------------------------------|
-| Other composite slots (`Unload`; `LightMerge` was split by ES-7 on 2026-10-18)                                                                                                              | a hitch they lead cannot say which part                                                                                                     | PM-8's pattern (§7.6), if their hitches warrant it — not filed |
-| Per-chunk fluid prepare distribution                                                                                                                                                        | the prepare is a per-frame sum, so a few heavy chunks and many light ones read alike                                                        | not filed — PM-8 decision 2                                    |
-| Unity's own main-thread work: uGUI layout and canvas rebuilds, the renderer features' Render Graph recording (UI band composite and blur, cloud prepass, underwater overlay), animation     | in the frame's CPU time, in no slot                                                                                                         | not filed; `AC-4` covers the UI blur's cost statically         |
-| A whole-frame remainder                                                                                                                                                                     | CPU time outside every slot and outside `World.Update` has no figure                                                                        | not filed                                                      |
-| Per-pass GPU time                                                                                                                                                                           | a GPU-bound frame cannot say which pass                                                                                                     | `ES-25`'s rendering baseline (Frame Debugger)                  |
-| Memory per frame                                                                                                                                                                            | a memory spike cannot be tied to a hitch                                                                                                    | not filed                                                      |
-| Main menu and loading scenes                                                                                                                                                                | `PerformanceMonitor` lives in the World scene, so they record no frames                                                                     | not filed                                                      |
-| The initial load's counters                                                                                                                                                                 | sampled in `World.Update`, so they read 0 until it ends; the coroutine's own split is the `Startup Coroutine` section of `StartupRun_*.log` | not filed                                                      |
-| Per-job latency split (queue wait, execution, completion lag)                                                                                                                               | latency is one figure                                                                                                                       | v2 swimlanes (extension roadmap)                               |
-| Per-slot and per-counter statistics over a whole phase                                                                                                                                      | the report's phase statistics cover the frame fields; slots and counters per phase need the session file                                    | not filed — PM-6 decision 4                                    |
-| Log volume and cost                                                                                                                                                                         | —                                                                                                                                           | **PM-7**                                                       |
-| Small or debug per-frame code: `ChunkLoadAnimation` (one per chunk), `VoxelRigidbody.Update`/`LateUpdate`, `TerrainGenDebugOverlay`, `CreditsMenuController`, the benchmark harness scripts | negligible or tooling                                                                                                                       | not filed — low value                                          |
-| Untimed jobs: `CloudPatternJob`, `VoxelVisualizerJob`, the legacy generation job's busy time                                                                                                | —                                                                                                                                           | not filed — low value                                          |
+| Gap                                                                                                                                                                                         | Consequence                                                                                                                                 | Owner                                                  |
+|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------|--------------------------------------------------------|
+| Per-chunk fluid prepare distribution                                                                                                                                                        | the prepare is a per-frame sum, so a few heavy chunks and many light ones read alike                                                        | not filed — PM-8 decision 2                            |
+| Unity's own main-thread work: uGUI layout and canvas rebuilds, the renderer features' Render Graph recording (UI band composite and blur, cloud prepass, underwater overlay), animation     | in the frame's CPU time, in no slot                                                                                                         | not filed; `AC-4` covers the UI blur's cost statically |
+| A whole-frame remainder                                                                                                                                                                     | CPU time outside every slot and outside `World.Update` has no figure                                                                        | not filed                                              |
+| Per-pass GPU time                                                                                                                                                                           | a GPU-bound frame cannot say which pass                                                                                                     | `ES-25`'s rendering baseline (Frame Debugger)          |
+| Memory per frame                                                                                                                                                                            | a memory spike cannot be tied to a hitch                                                                                                    | not filed                                              |
+| Main menu and loading scenes                                                                                                                                                                | `PerformanceMonitor` lives in the World scene, so they record no frames                                                                     | not filed                                              |
+| The initial load's counters                                                                                                                                                                 | sampled in `World.Update`, so they read 0 until it ends; the coroutine's own split is the `Startup Coroutine` section of `StartupRun_*.log` | not filed                                              |
+| Per-job latency split (queue wait, execution, completion lag)                                                                                                                               | latency is one figure                                                                                                                       | v2 swimlanes (extension roadmap)                       |
+| Per-slot and per-counter statistics over a whole phase                                                                                                                                      | the report's phase statistics cover the frame fields; slots and counters per phase need the session file                                    | not filed — PM-6 decision 4                            |
+| Log volume and cost                                                                                                                                                                         | —                                                                                                                                           | **PM-7**                                               |
+| Small or debug per-frame code: `ChunkLoadAnimation` (one per chunk), `VoxelRigidbody.Update`/`LateUpdate`, `TerrainGenDebugOverlay`, `CreditsMenuController`, the benchmark harness scripts | negligible or tooling                                                                                                                       | not filed — low value                                  |
+| Untimed jobs: `CloudPatternJob`, `VoxelVisualizerJob`, the legacy generation job's busy time                                                                                                | —                                                                                                                                           | not filed — low value                                  |
 
 **Re-deriving the map** (from the repo root):
 
@@ -1316,6 +1329,8 @@ Answers 1–4 come from `EngineApiProbe_2026-10-03_13-52-20.log`: a `Windows - P
 
 ## Document History
 
+* **v1.21** - §4.9 coverage map (2026-11-19): ES-6's crossing split and the gameplay light schedules by arm; counters 99 → 127,
+  per-frame 78 → 106; scenarios B46 / B47; the `Unload` gap closed (`ViewDistance` and `Unload` are both split).
 * **v1.20** - §4.4 / §4.9 (2026-11-18): ES-32's disk I/O split (hit read, lock waits, region opens, load-only
   pool wait and latency) and ES-33's job array churn counters; counters 86 → 99, per-frame 65 → 78.
 * **v1.19** - §4.9 coverage map (2026-11-06): `GrassTickJob` (ES-29's Burst grass tick) added to the worker-jobs

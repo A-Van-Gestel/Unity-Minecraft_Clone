@@ -1,7 +1,7 @@
 # Engine Scaling Performance Roadmap
 
-**Version:** 1.33  
-**Date:** 2026-11-18  
+**Version:** 1.34  
+**Date:** 2026-11-19  
 **Status:** In progress — `ES-0` ✅ complete (2026-10-10: drain stamp shipped, every-layer re-measurement in §2.6 — added
 `ES-29`), `ES-1`, `ES-2` and `ES-6.1` shipped (2026-10-02); ES-0's GC.Alloc attribution captured (2026-10-03, §2.2.1 —
 added `ES-26`/`ES-27`; PM-1's smoke capture added the `ES-28` quick win); `ES-26` ✅ shipped (2026-10-10: −75.9 % GC.Alloc
@@ -487,12 +487,12 @@ On today's players ES-5 is therefore variant warmup only. Benefit unmeasured.
 **ES-6 — Shrink the crossing frame.** 🟢–🟡 / 🟡. Two riders are closed: the `OnDataPopulated` skip on
 visual re-attach (✅ 2026-10-02, ES-6.1 — `ChunkData.NeedsActiveVoxelRescan`, tested in `Chunk.cs:154`) and
 `DT-3`'s visualization gate (✅ 2026-11-06). The rest measures the crossing frame before touching it: the
-two crossing slots are `ViewDistance` (`World.cs:4863–5016`) and `Unload` (`:5019–5021`), and their parts
+two crossing slots are `ViewDistance` (`World.cs:4932–5109`) and `Unload` (`:5112–5114`), and their parts
 have to be priced separately, because a leaving chunk's visual teardown is charged to `ViewDistance`
-(`ChunkPool.Return` at `:4962`), not to `Unload`, and a steady crossing pays O(load-square) bookkeeping
+(`ChunkPool.Return` at `:5048`), not to `Unload`, and a steady crossing pays O(load-square) bookkeeping
 whatever the move — the generation queue rebuilt over the full `(2·LoadDistance+1)²` spiral, the
 active-chunk removal scan, the view-set rebuild. Only then the levers — an ownership save on unload, a
-budgeted unload pump, or a delta view update — each taken only where its own part prices out.
+budgeted unload pump, or a delta view update — each taken only where its own part prices out. The split is built (2026-11-19, Performance Monitor B46; the summarizer prints a per-crossing table); the levers wait on its Master capture (C1).
 
 **ES-7 — Cut lighting main-thread work without changing output.** 🟢 / 🟡. In the order the lighting
 sweep recommended:
@@ -1080,7 +1080,7 @@ constants + migration change. Prerequisites: ES-13, ES-18, ES-19.
 | **ES-3 — Loading mode**            | SU-1 + SU-2, pooled/banded/shared startup snapshots                                                                                            |   🟡   | ES-0                | quota lift + shared sweep snapshots ✅ 2026-11-14 (handoff −37.8 %, [report](../Performance/ENGINE_SCALING_ES3_LOADING_MODE_IL2CPP_2026-11-14_BENCHMARK.md)); banding, `SU-2` cap, overlay open                                                                                                                                                                                                                                                                            |
 | **ES-4 — First-Update burst**      | Pool prewarm, lazy borders, async scene load                                                                                                   |   🟢   | —                   | lazy borders ✅ 2026-11-06; pool prewarm and loading screen open                                                                                                                                                                                                                                                                                                                                                                                                           |
 | **ES-5 — PSO warmup**              | Shader state prewarm                                                                                                                           |   🟢   | —                   | —                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| **ES-6 — Crossing frame**          | `ViewDistance`/`Unload` crossing split, then the levers (packet §7.1 for the priced rider)                                                     |   🟡   | ES-0                | ES-6.1 ✅ 2026-10-02 (in-game), `DT-3` ✅ 2026-11-06; the split and the levers open                                                                                                                                                                                                                                                                                                                                                                                        |
+| **ES-6 — Crossing frame**          | `ViewDistance`/`Unload` crossing split, then the levers (packet §7.1 for the priced rider)                                                     |   🟡   | ES-0                | ES-6.1 ✅ 2026-10-02 (in-game), `DT-3` ✅ 2026-11-06; the split built 2026-11-19 (B46), the levers open (gated on C1)                                                                                                                                                                                                                                                                                                                                                      |
 | **ES-7 — Lighting cuts**           | Slab fill, counts, band-clamped merge, remesh gating                                                                                           |   🟢   | ES-0                | ✅ 2026-10-18 ES-7a = 7.1–7.3 (3 vd-10 + 2 vd-32 Master runs per leg; merge −48 % per job); ✅ 2026-11-13 7.4 (3 flag legs; generation mesh jobs −22 % / −36 %; flags in the census)                                                                                                                                                                                                                                                                                       |
 | **ES-8 — Budgets**                 | `ApplyModifications`, SL-2 pump, merge ceiling                                                                                                 |   🟡   | ES-0                | ✅ 2026-11-15 (recount on the worker; merge ceiling 8 ms; Apply ceiling and pump dropped, [report](../Performance/ENGINE_SCALING_ES34_ES8_MERGE_ROUTE_IL2CPP_2026-11-15_BENCHMARK.md))                                                                                                                                                                                                                                                                                     |
 | **ES-9 — I/O path**                | Offset-table probe, SL-1, section-ownership save, OM-3                                                                                         |   🟡   | ES-0                | 3 slices ✅ 2026-11-06 (unload log, fault continuation, `ExpandStructure`); probe, payloads, I/O worker, ownership save open                                                                                                                                                                                                                                                                                                                                               |
@@ -1506,6 +1506,8 @@ saving is inferred from step 1's re-entry leg, not re-measured.
 
 ## Document History
 
+* **v1.34** - **`ES-6` crossing split built** (2026-11-19): the `ViewDistance` / `Unload` parts are counted (Performance
+  Monitor B46, per-crossing summarizer table); the levers wait on C1. The ES-6 anchors re-derived.
 * **v1.33** - **`ES-32` / `ES-33` measurement step built** (2026-11-18): each entry notes its Performance
   Monitor scenario (B45 / B44) and that pricing rides C1; ES-32's summarizer clause now says the per-hit ratio column
   is gone (`Read µs/load` and the hit/miss, lock-wait and region-open split replace it).
