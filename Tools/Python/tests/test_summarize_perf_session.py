@@ -26,7 +26,7 @@ HEADER = summary.FRAME_COLUMNS + ["Tick_ms", "Apply_ms", "GenerationQueue", "Gen
                                   "LightInFlight", "MeshInFlight", *summary.POOL_MISSES, "JobArrayCapDisposes",
                                   "JobArrayPaddedMisses", "JobArrayAllocUs", "JobArrayFreeUs",
                                   "ViewDistance_ms", "Unload_ms", *summary.XING_PARTS, *summary.UNLOAD_PARTS, "Crossings",
-                                  *summary.CROSSING_COUNTS, "SaveReturnUs", "SaveReturns",
+                                  *summary.CROSSING_COUNTS, "SaveReturnUs", "SaveReturns", *summary.LIGHT_SCHEDULES, "LightCompleted",
                                   "RenderSrpBatcherDraws"]
 # The counters that joined the format after it first shipped; a session older than them has no column to read.
 NEW_COUNTERS = ["DiskReadHitUs", "LoadLockWaitUs", "RegionOpens", "RegionOpenUs", "SaveLockWaitUs",
@@ -285,6 +285,20 @@ class CounterColumnTests(unittest.TestCase):
                           cells["Candidates/crossing"], cells["Save return µs/return"]),
                          ("0", "n/a", "n/a", "n/a", "n/a", "n/a"))
         self.assertEqual(cells["Save return ms/frame"], "0.000")
+
+    def test_light_schedules_split_by_arm_with_the_initial_share(self):
+        # Ten frames, 40 jobs: the two initial arms (scan + disk load) are 10 of them, a 25 % share.
+        rows = [row(10 + i, 10.0, 0.5, LightSchedInitial=1 if i < 6 else 0, LightSchedEdge=2, LightSchedRegular=1,
+                    LightSchedLoadInitial=1 if i < 4 else 0, LightCompleted=4) for i in range(10)]
+        phase, present = gather_phase(rows)
+        cells = first_row_cells(summary.light_schedule_table([phase]))
+        self.assertEqual((cells["Initial/frame"], cells["Edge/frame"], cells["Regular/frame"],
+                          cells["Load initial/frame"], cells["Initial share %"], cells["Scheduled"], cells["Completed"]),
+                         ("0.60", "2.00", "1.00", "0.40", "25.0", "40", "40"))
+
+    def test_a_phase_that_scheduled_no_lighting_has_no_initial_share(self):
+        phase, present = gather_phase([row(10, 10.0, 0.5)])
+        self.assertEqual(first_row_cells(summary.light_schedule_table([phase]))["Initial share %"], "n/a")
 
     def test_lock_wait_and_queue_rates_on_exact_counters(self):
         rows = [row(10, 10.0, 0.5, DiskLoadHits=2, DiskLoadMisses=3, DiskReadUs=1000, DiskReadHitUs=400,

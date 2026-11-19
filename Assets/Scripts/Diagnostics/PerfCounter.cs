@@ -381,6 +381,18 @@ namespace Diagnostics
         /// <summary>Save snapshots returned to the data pool: the divisor of <see cref="SaveReturnUs"/>.</summary>
         SaveReturns,
 
+        /// <summary>Gameplay lighting jobs the scan scheduled on its initial-lighting arm.</summary>
+        LightSchedInitial,
+
+        /// <summary>Gameplay lighting jobs the scan scheduled on its edge-check arm.</summary>
+        LightSchedEdge,
+
+        /// <summary>Gameplay lighting jobs the scan scheduled on its regular light-changes arm.</summary>
+        LightSchedRegular,
+
+        /// <summary>Initial-lighting jobs a chunk loaded from disk scheduled outside the scan.</summary>
+        LightSchedLoadInitial,
+
         /// <summary>Number of counters; not a counter.</summary>
         Count,
     }

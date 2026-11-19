@@ -20,7 +20,7 @@ namespace Editor.Validation.PerfMonitoring
     /// scenarios (B11–B19: GC readings, frame-timing back-fill, hitch detection) and the render counters (B43) live in the <c>.Frame</c> part, and the
     /// coverage scenarios (B20–B23: the unattributed remainder and the counters) in the <c>.Coverage</c> part, and the
     /// worker scenarios (B24–B30: job timing, per-job samples and storage I/O) in the <c>.Workers</c> part, the tick
-    /// breakdown (B31) in the <c>.Tick</c> part, the export scenarios (B32–B37: phase statistics, the tier floor and export) in the <c>.Export</c> part, the startup timeline (B38–B39) and phase report (B41) and the cross-chunk mod census (B42) in the <c>.Startup</c> part, and the lighting-merge breakdown (B40) in the <c>.Merge</c> part.
+    /// breakdown (B31) in the <c>.Tick</c> part, the export scenarios (B32–B37: phase statistics, the tier floor and export) in the <c>.Export</c> part, the startup timeline (B38–B39) and phase report (B41) and the cross-chunk mod census (B42) in the <c>.Startup</c> part, and the lighting-merge breakdown (B40) in the <c>.Merge</c> part, the view-distance crossing breakdown (B46) in the <c>.Crossing</c> part, and the light-schedule split (B47) in the <c>.LightSchedule</c> part.
     /// <para>
     /// Timing <i>values</i> are not asserted beyond "zero" versus "positive" — wall-clock durations are not
     /// deterministic. Every scenario that touches the static store starts and ends from
@@ -112,6 +112,7 @@ namespace Editor.Validation.PerfMonitoring
                 new Scenario("B44 Job array churn: pool misses, padded misses and cap disposes counted exactly (a wrong-length return is no cap dispose), alloc and free ticks only at Systems, all four reach their counters", RunB44JobArrayChurn),
                 new Scenario("B45 Storage I/O split: lock waits per side, one region open on first touch, load-only queue wait and latency ops, hit read inside total read; nothing below Systems; every disk counter reads back after one sampling call", RunB45StorageIoSplit),
                 new Scenario("B46 Crossing breakdown: every crossing totals field maps to exactly one distinct per-frame counter and reaches it with ticks converted; an untimed lap charges nothing; a save snapshot's return counts one op and its time only while slots record", RunB46CrossingBreakdown),
+                new Scenario("B47 Light schedule split: each scheduling scan arm counts into its own field and no other action counts; every light-schedule totals field maps to exactly one distinct per-frame counter", RunB47LightScheduleSplit),
             };
             return ValidationSuiteRunner.Execute("Performance Monitor", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }

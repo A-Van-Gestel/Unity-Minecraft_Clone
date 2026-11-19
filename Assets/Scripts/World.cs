@@ -411,6 +411,9 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     // The view-distance and unload passes' parts and work counts, sampled into the Xing*/Unload* counters every frame.
     private PerfCrossingTotals _crossingTotals;
 
+    // Gameplay lighting jobs scheduled per arm, counted while the slots record; sampled into the LightSched* counters.
+    private PerfLightScheduleTotals _lightScheduleTotals;
+
     /// <summary>Lazily-created pool of per-chunk fluid runners for the parallel tick (one in-flight per scheduled chunk). Cleared in <c>OnDestroy</c>.</summary>
     private DynamicPool<FluidBurstTicker> FluidTickerPool =>
         _fluidTickerPool ??= new DynamicPool<FluidBurstTicker>(() => new FluidBurstTicker(), t => t.Dispose());
@@ -1727,7 +1730,8 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                             data.RecalculateSkylight();
 
                             // 2. Schedule the job immediately using Data overload
-                            JobManager.ScheduleLightingUpdate(data);
+                            if (JobManager.ScheduleLightingUpdate(data) && PerfStore.SlotsActive)
+                                _lightScheduleTotals.LoadInitial++;
 
                             // 3. Clear flag so we don't do this again.
                             data.ClearInitialLighting();
@@ -3448,6 +3452,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                                 if (action == LightingScanDecision.ScanAction.ScheduleInitial)
                                     chunkData.ClearInitialLighting();
                                 lightJobsScheduled++;
+                                if (PerfStore.SlotsActive) _lightScheduleTotals.RecordScan(action);
 
                                 // P9-0: one quota unit spent. Counted here rather than at completion — the
                                 // §3.1 rate ceiling is consumed by the schedule, not by the merge.
@@ -3688,6 +3693,17 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         SampleTickCounters();
         SampleMergeCounters(in JobManager.MergeTotals);
         SampleCrossingCounters(in _crossingTotals);
+        SampleLightScheduleCounters(in _lightScheduleTotals);
+    }
+
+    /// <summary>Samples the gameplay lighting schedules' running totals into the <c>LightSched*</c> counters.</summary>
+    /// <param name="totals">The schedules counted per arm.</param>
+    private static void SampleLightScheduleCounters(in PerfLightScheduleTotals totals)
+    {
+        PerfStore.SampleTotal(PerfCounter.LightSchedInitial, totals.Initial);
+        PerfStore.SampleTotal(PerfCounter.LightSchedEdge, totals.Edge);
+        PerfStore.SampleTotal(PerfCounter.LightSchedRegular, totals.Regular);
+        PerfStore.SampleTotal(PerfCounter.LightSchedLoadInitial, totals.LoadInitial);
     }
 
     /// <summary>Samples the lighting merge's running totals into the <c>Merge*</c> and <c>Unload*</c> counters.</summary>

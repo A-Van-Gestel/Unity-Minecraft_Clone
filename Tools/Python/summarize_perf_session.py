@@ -15,6 +15,7 @@ WHAT THIS DOES
         and the job-array pools (allocations, frees, churn and peak maps in demand);
       - the behavior tick's six parts and the lighting merge;
       - the two view-distance crossings priced apart: each pass's parts per crossing, and what its passes did per crossing;
+      - gameplay lighting jobs by the arm that scheduled them, and the initial arms' share;
       - the hitch files whose hitch frame lies in the phase: how many, the worst, and which slot led them.
     It then cross-checks every phase against the report's own Frame Health row: the frame count must match exactly and
     wall p50 / p99 / worst within one printed unit (0.1 ms; the session file rounds to 0.001 ms). Exits 1 on any
@@ -79,6 +80,8 @@ CROSSING_COUNTS = ["XingGenEnqueued", "XingActivations", "XingDeactivations", "U
                    "UnloadSaved", "UnloadSavedSections", "UnloadDeferJob", "UnloadDeferStrand"]
 CROSSING_COUNT_NAMES = ["Generation enqueued", "Activations", "Deactivations", "Candidates", "Unloaded", "Saved",
                         "Saved sections", "Deferred job", "Deferred strand"]
+# Gameplay lighting jobs by the arm that scheduled them; the startup sweeps report theirs on their own lines.
+LIGHT_SCHEDULES = ["LightSchedInitial", "LightSchedEdge", "LightSchedRegular", "LightSchedLoadInitial"]
 POOL_MISSES = ["SectionPoolMisses", "DataPoolMisses", "JobArrayMisses", "MeshOutputMisses", "SaveBufferMisses",
                "FluidTickerPoolMisses", "UntimedJobs"]
 JOB_ARRAY_COUNTERS = ["JobArrayCapDisposes", "JobArrayPaddedMisses", "JobArrayAllocUs", "JobArrayFreeUs"]
@@ -492,6 +495,21 @@ def crossing_table(phases, present):
                   "Save return ms/frame", "Save return µs/return"], rows)
 
 
+def light_schedule_table(phases):
+    """Gameplay lighting jobs scheduled per frame by arm, the initial arms' share, and the jobs completed beside them."""
+    rows = []
+    for p in phases:
+        frames = p.rows or 1
+        arms = [p.sums[name] for name in LIGHT_SCHEDULES]
+        scheduled = sum(arms)
+        initial = p.sums["LightSchedInitial"] + p.sums["LightSchedLoadInitial"]
+        rows.append([p.label] + [fmt(n / frames, 2) for n in arms] +
+                    [fmt(100.0 * initial / scheduled, 1) if scheduled else "n/a", scheduled,
+                     p.sums["LightCompleted"]])
+    return table(["Phase", "Initial/frame", "Edge/frame", "Regular/frame", "Load initial/frame", "Initial share %",
+                  "Scheduled", "Completed"], rows)
+
+
 def pool_table(phases, present):
     """Pool misses and job-array churn per phase, plus the maps the phase's most demanding frame wanted."""
     # The demand column comes from the two in-flight gauges, so a format without them has nothing to peak on.
@@ -563,6 +581,10 @@ def summarize(report_lines, folder, session=None):
     if "Crossings" in present:
         out += ["", "### View-distance crossings (ms per crossing; counts are per crossing)", "",
                 crossing_table(phases, present)]
+    # Same reason: a session without the arm counters would read as one that scheduled no lighting.
+    if "LightSchedInitial" in present:
+        out += ["", "### Lighting schedules by arm (per frame; Scheduled and Completed are phase totals)", "",
+                light_schedule_table(phases)]
     out += ["", "### Pool misses, churn and peak demand (phase totals)", "", pool_table(phases, present), "",
             "### Hitch records", "", hitch_table(phases)]
     if problems:
