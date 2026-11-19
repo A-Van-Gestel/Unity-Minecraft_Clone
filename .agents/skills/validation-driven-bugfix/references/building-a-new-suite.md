@@ -36,7 +36,7 @@ voxels.
 
 ## Phase 2 — Baselines
 
-`<System>ValidationSuite.cs` (runner with menu item `Minecraft Clone/Dev/Validate <System>`) + `.Baseline.cs`. Cover: the core happy path, each spec rule in isolation, the cross-boundary happy path, and a returns-to-baseline (place/undo) invariant. ALL must pass before Phase 3 — a red baseline here means framework bug, not engine bug.
+`<System>ValidationSuite.cs` (runner with menu item `Minecraft Clone/Dev/Validate <System>`) + `.Baseline.cs`. Cover: the core happy path, each spec rule in isolation, the cross-boundary happy path, and a returns-to-baseline (place/undo) invariant. ALL must pass before Phase 3 — a red baseline here means framework bug, not engine bug. A scenario that checks a counter sampled from a converted running total (`SampleTotal(c, TicksToMicros(total))`) must expect `TicksToMicros(before + delta) − TicksToMicros(before)`, not `TicksToMicros(delta)`: an earlier scenario can leave a non-zero start, and the two round differently by 1 µs.
 
 ## Phase 3 — Known-bug repros
 
