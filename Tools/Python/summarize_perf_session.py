@@ -14,6 +14,7 @@ WHAT THIS DOES
       - disk I/O split by load hits and misses (read cost, lock wait, region opens, saves and their load-pool queue)
         and the job-array pools (allocations, frees, churn and peak maps in demand);
       - the behavior tick's six parts and the lighting merge;
+      - the two view-distance crossings priced apart: each pass's parts per crossing, and what its passes did per crossing;
       - the hitch files whose hitch frame lies in the phase: how many, the worst, and which slot led them.
     It then cross-checks every phase against the report's own Frame Health row: the frame count must match exactly and
     wall p50 / p99 / worst within one printed unit (0.1 ms; the session file rounds to 0.001 ms). Exits 1 on any
@@ -68,6 +69,16 @@ JOB_TYPES = ["Generation", "Light", "Mesh", "Fluid", "FluidSoundScan"]
 TICK_PARTS = ["TickListUs", "TickPrepareUs", "TickScheduleUs", "TickWaitUs", "TickGrassUs", "TickFluidReplayUs"]
 # MergeCountsUs runs inside MergeApplyUs, so it is a column of its own rather than a part.
 MERGE_PARTS = ["MergeApplyUs", "MergeDrainUs", "MergePullBackUs", "MergeRouteUs", "MergeCascadeUs"]
+# The two passes a view-distance crossing runs, each timed by parts charged to one crossing rather than one frame.
+XING_PARTS = ["XingCloudsUs", "XingSpiralUs", "XingDeactScanUs", "XingDeactivateUs", "XingActivateUs", "XingActiveSetUs"]
+UNLOAD_PARTS = ["UnloadScanUs", "UnloadDecideUs", "UnloadBookkeepUs", "UnloadSaveUs", "UnloadVisualUs",
+                "UnloadDataReturnUs"]
+XING_NAMES = ["Clouds", "Spiral", "DeactScan", "Deactivate", "Activate", "ActiveSet"]
+UNLOAD_NAMES = ["Scan", "Decide", "Bookkeep", "Save", "Visual", "DataReturn"]
+CROSSING_COUNTS = ["XingGenEnqueued", "XingActivations", "XingDeactivations", "UnloadCandidates", "UnloadedChunks",
+                   "UnloadSaved", "UnloadSavedSections", "UnloadDeferJob", "UnloadDeferStrand"]
+CROSSING_COUNT_NAMES = ["Generation enqueued", "Activations", "Deactivations", "Candidates", "Unloaded", "Saved",
+                        "Saved sections", "Deferred job", "Deferred strand"]
 POOL_MISSES = ["SectionPoolMisses", "DataPoolMisses", "JobArrayMisses", "MeshOutputMisses", "SaveBufferMisses",
                "FluidTickerPoolMisses", "UntimedJobs"]
 JOB_ARRAY_COUNTERS = ["JobArrayCapDisposes", "JobArrayPaddedMisses", "JobArrayAllocUs", "JobArrayFreeUs"]
@@ -353,6 +364,13 @@ def us_per(sums, name, ops, present):
     return fmt(sums[name] / ops, US_DECIMALS) if ops else "n/a"
 
 
+def count_per(sums, name, unit, present):
+    """A work count's figure per unit; `—` for a column the header lacks, `n/a` when the divisor is empty."""
+    if name not in present:
+        return DASH
+    return fmt(sums[name] / unit, 2) if unit else "n/a"
+
+
 def us_per_total(sums, names, ops, present):
     """A rate over counters read as one figure; `—` unless the header carries every one of them."""
     if any(name not in present for name in names):
@@ -449,6 +467,31 @@ def merge_table(phases):
                   "Count drifts", "Gate skipped", "Gate diagonals", "Ceiling deferred"], rows)
 
 
+def crossing_table(phases, present):
+    """The two passes one crossing runs, priced per crossing: a crossing, unlike a frame, only happens when the
+    player leaves a chunk, so its cost belongs to that event rather than divided by the phase's frame count."""
+    rows = []
+    for p in phases:
+        s = p.sums
+        frames = p.rows or 1
+        crossings = s["Crossings"]
+
+        view = sum(p.values.get("ViewDistance", [])) / crossings if crossings else math.nan
+        unload = sum(p.values.get("Unload", [])) / crossings if crossings else math.nan
+        view_parts = [s[part] / crossings / US_PER_MS if crossings else math.nan for part in XING_PARTS]
+        unload_parts = [s[part] / crossings / US_PER_MS if crossings else math.nan for part in UNLOAD_PARTS]
+
+        rows.append([p.label, phase_total(s, "Crossings", present), fmt(view, 3)] + [fmt(v, 3) for v in view_parts] +
+                    [fmt(view - sum(view_parts), 3), fmt(unload, 3)] + [fmt(v, 3) for v in unload_parts] +
+                    [fmt(unload - sum(unload_parts), 3)] +
+                    [count_per(s, name, crossings, present) for name in CROSSING_COUNTS] +
+                    [ms_per(s, "SaveReturnUs", frames, present),
+                     us_per(s, "SaveReturnUs", s["SaveReturns"], present)])
+    return table(["Phase", "Crossings", "ViewDistance ms/crossing", *XING_NAMES, "View Other", "Unload ms/crossing",
+                  *UNLOAD_NAMES, "Unload Other", *(f"{name}/crossing" for name in CROSSING_COUNT_NAMES),
+                  "Save return ms/frame", "Save return µs/return"], rows)
+
+
 def pool_table(phases, present):
     """Pool misses and job-array churn per phase, plus the maps the phase's most demanding frame wanted."""
     # The demand column comes from the two in-flight gauges, so a format without them has nothing to peak on.
@@ -514,9 +557,14 @@ def summarize(report_lines, folder, session=None):
            "### Render (previous rendered frame)", "", gauge_table(phases, RENDER_GAUGES), "", "### Jobs", "",
            job_table(phases), "", "### Disk I/O", "", io_table(phases, present), "",
            "### Behavior tick (ms per frame)", "", tick_table(phases), "",
-           "### Lighting merge (ms per frame; counts are phase totals)", "", merge_table(phases), "",
-           "### Pool misses, churn and peak demand (phase totals)", "", pool_table(phases, present), "",
-           "### Hitch records", "", hitch_table(phases)]
+           "### Lighting merge (ms per frame; counts are phase totals)", "", merge_table(phases)]
+    # A session predating the crossing columns has no crossings to divide by, and printing zeros for them would
+    # read as crossings that cost nothing.
+    if "Crossings" in present:
+        out += ["", "### View-distance crossings (ms per crossing; counts are per crossing)", "",
+                crossing_table(phases, present)]
+    out += ["", "### Pool misses, churn and peak demand (phase totals)", "", pool_table(phases, present), "",
+            "### Hitch records", "", hitch_table(phases)]
     if problems:
         out += ["", "### Cross-check problems", ""] + [f"- {line}" for line in problems]
     return "\n".join(out) + "\n", problems

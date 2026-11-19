@@ -408,6 +408,9 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
     // The behavior tick's main-thread parts, accumulated while the monitor's slots record; sampled into the Tick* counters.
     private PerfTickTotals _tickTotals;
 
+    // The view-distance and unload passes' parts and work counts, sampled into the Xing*/Unload* counters every frame.
+    private PerfCrossingTotals _crossingTotals;
+
     /// <summary>Lazily-created pool of per-chunk fluid runners for the parallel tick (one in-flight per scheduled chunk). Cleared in <c>OnDestroy</c>.</summary>
     private DynamicPool<FluidBurstTicker> FluidTickerPool =>
         _fluidTickerPool ??= new DynamicPool<FluidBurstTicker>(() => new FluidBurstTicker(), t => t.Dispose());
@@ -3684,6 +3687,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
 
         SampleTickCounters();
         SampleMergeCounters(in JobManager.MergeTotals);
+        SampleCrossingCounters(in _crossingTotals);
     }
 
     /// <summary>Samples the lighting merge's running totals into the <c>Merge*</c> and <c>Unload*</c> counters.</summary>
@@ -3711,6 +3715,34 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         PerfStore.SampleTotal(PerfCounter.MergeGateSkippable, totals.GateSkippable);
         PerfStore.SampleTotal(PerfCounter.MergeGateDiagonals, totals.GateDiagonals);
         PerfStore.SampleTotal(PerfCounter.MergeCeilingDeferred, totals.CeilingDeferredJobs);
+    }
+
+    /// <summary>Samples the view-distance and unload passes' running totals into the <c>Xing*</c> and <c>Unload*</c> counters.</summary>
+    /// <param name="totals">The two crossing passes' running totals, in ticks and work counts.</param>
+    private static void SampleCrossingCounters(in PerfCrossingTotals totals)
+    {
+        PerfStore.SampleTotal(PerfCounter.XingCloudsUs, PerfStore.TicksToMicros(totals.CloudsTicks));
+        PerfStore.SampleTotal(PerfCounter.XingSpiralUs, PerfStore.TicksToMicros(totals.SpiralTicks));
+        PerfStore.SampleTotal(PerfCounter.XingDeactScanUs, PerfStore.TicksToMicros(totals.DeactScanTicks));
+        PerfStore.SampleTotal(PerfCounter.XingDeactivateUs, PerfStore.TicksToMicros(totals.DeactivateTicks));
+        PerfStore.SampleTotal(PerfCounter.XingActivateUs, PerfStore.TicksToMicros(totals.ActivateTicks));
+        PerfStore.SampleTotal(PerfCounter.XingActiveSetUs, PerfStore.TicksToMicros(totals.ActiveSetTicks));
+        PerfStore.SampleTotal(PerfCounter.UnloadScanUs, PerfStore.TicksToMicros(totals.UnloadScanTicks));
+        PerfStore.SampleTotal(PerfCounter.UnloadDecideUs, PerfStore.TicksToMicros(totals.UnloadDecideTicks));
+        PerfStore.SampleTotal(PerfCounter.UnloadBookkeepUs, PerfStore.TicksToMicros(totals.UnloadBookkeepTicks));
+        PerfStore.SampleTotal(PerfCounter.UnloadSaveUs, PerfStore.TicksToMicros(totals.UnloadSaveTicks));
+        PerfStore.SampleTotal(PerfCounter.UnloadVisualUs, PerfStore.TicksToMicros(totals.UnloadVisualTicks));
+        PerfStore.SampleTotal(PerfCounter.UnloadDataReturnUs, PerfStore.TicksToMicros(totals.UnloadDataReturnTicks));
+        PerfStore.SampleTotal(PerfCounter.Crossings, totals.Crossings);
+        PerfStore.SampleTotal(PerfCounter.XingGenEnqueued, totals.GenEnqueued);
+        PerfStore.SampleTotal(PerfCounter.XingActivations, totals.Activations);
+        PerfStore.SampleTotal(PerfCounter.XingDeactivations, totals.Deactivations);
+        PerfStore.SampleTotal(PerfCounter.UnloadCandidates, totals.UnloadCandidates);
+        PerfStore.SampleTotal(PerfCounter.UnloadedChunks, totals.UnloadedChunks);
+        PerfStore.SampleTotal(PerfCounter.UnloadSaved, totals.UnloadSaved);
+        PerfStore.SampleTotal(PerfCounter.UnloadSavedSections, totals.UnloadSavedSections);
+        PerfStore.SampleTotal(PerfCounter.UnloadDeferJob, totals.UnloadDeferJob);
+        PerfStore.SampleTotal(PerfCounter.UnloadDeferStrand, totals.UnloadDeferStrand);
     }
 
     /// <summary>Samples the behavior tick's running totals into the <c>Tick*</c> counters and the fluid ticker pool's misses.</summary>
@@ -4463,7 +4495,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
 
     /// <summary>
     /// Unloads chunks that are outside the load distance.
-    /// Saves them if modified, destroys the GameObject, and removes data from memory.
+    /// Saves them if modified, returns their GameObjects to the pool, and removes data from memory.
     /// </summary>
     private void UnloadChunks()
     {
@@ -4475,6 +4507,9 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
             _unloadDeferJobRunning = _unloadDeferLightPending = _unloadDeferWouldStrand = _unloadedLastPass = _unloadedLightPersisted = 0;
             return;
         }
+
+        // Slot-less start: it times this pass's parts, and a 0 leaves every lap and count a no-op.
+        long lap = PerfStore.Begin();
 
         // OPTIMIZATION: Use ListPool to avoid allocations
         List<ChunkCoord> chunksToRemove = ListPool<ChunkCoord>.Get();
@@ -4493,6 +4528,9 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                 chunksToRemove.Add(chunkCoord);
             }
         }
+
+        lap = PerfTickTotals.Lap(ref _crossingTotals.UnloadScanTicks, lap);
+        if (lap != 0) _crossingTotals.UnloadCandidates += chunksToRemove.Count;
 
         // Step B: Unload
         foreach (ChunkCoord chunkCoord in chunksToRemove)
@@ -4541,6 +4579,9 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                     jobRunning: isJobRunning,
                     processingLight: isProcessingLight,
                     wouldStrandInRangeNeighbor: wouldStrandInRangeNeighbor));
+
+            // Lapped before the switch, so a deferred candidate's whole iteration counts as decide time.
+            lap = PerfTickTotals.Lap(ref _crossingTotals.UnloadDecideTicks, lap);
 
             switch (decision)
             {
@@ -4610,6 +4651,8 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                 if (globalCols != null) HashSetPool<Vector2Int>.Release(globalCols);
             }
 
+            lap = PerfTickTotals.Lap(ref _crossingTotals.UnloadBookkeepTicks, lap);
+
             // 2. Save if modified
             if (worldData.ModifiedChunks.Contains(data))
             {
@@ -4618,6 +4661,14 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                 // chunks are not re-saved; their earlier save re-lights or edge-checks on load.
                 if (decision == ChunkUnloadDecision.Result.UnloadPersistLightPending)
                     data.FlagInitialLighting();
+
+                // The sections the snapshot will serialize, counted before SaveChunkAsync takes its copy.
+                if (lap != 0)
+                {
+                    _crossingTotals.UnloadSaved++;
+                    for (int sectionIndex = 0; sectionIndex < ChunkMath.SECTIONS_PER_CHUNK; sectionIndex++)
+                        if (data.sections[sectionIndex] != null) _crossingTotals.UnloadSavedSections++;
+                }
 
                 // Fire and forget (StorageManager handles the Snapshot lifecycle). CP-6: a failed save is
                 // no longer silent — SaveChunkAsync hands the snapshot (the edits' only surviving copy once
@@ -4637,6 +4688,9 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                 // the pool would hand it to another chunk, falsely marking it modified.
                 worldData.ModifiedChunks.Remove(data);
             }
+
+            // Charged whether the candidate saved or not, so the save check's cost shows at both arms.
+            lap = PerfTickTotals.Lap(ref _crossingTotals.UnloadSaveTicks, lap);
 
             // POOLING: Recycle Visuals
             if (_chunkMap.TryGetValue(chunkCoord, out Chunk chunkObj))
@@ -4660,6 +4714,8 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                 _chunkMap.Remove(chunkCoord);
             }
 
+            lap = PerfTickTotals.Lap(ref _crossingTotals.UnloadVisualTicks, lap);
+
             // 3. Remove Data Reference from World
             worldData.RemoveChunk(chunkVoxelPos);
 
@@ -4667,6 +4723,15 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
             // POOLING: Return data to pool
             ChunkPool.ReturnChunkData(data);
             unloaded++;
+            lap = PerfTickTotals.Lap(ref _crossingTotals.UnloadDataReturnTicks, lap);
+        }
+
+        // Reuses the pass's own HUD tallies, so an unloaded chunk cannot also be counted as a deferral.
+        if (lap != 0)
+        {
+            _crossingTotals.UnloadedChunks += unloaded;
+            _crossingTotals.UnloadDeferJob += deferJob;
+            _crossingTotals.UnloadDeferStrand += deferStrand;
         }
 
         // CP-1: publish this pass's tallies for the debug HUD.
@@ -4854,7 +4919,11 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
         // span closes before UnloadChunks, which has a slot of its own, so the two stay disjoint.
         long viewDistanceStart = PerfStore.Begin(PerfSlot.ViewDistance);
 
+        // Slot-less start: it times this pass's parts, and a 0 below Systems leaves every lap and count a no-op.
+        long lap = PerfStore.Begin();
+
         clouds.UpdateClouds();
+        lap = PerfTickTotals.Lap(ref _crossingTotals.CloudsTicks, lap);
 
         ChunkCoord playerCurrentChunkCoord = WorldOrigin.UnityToChunk(_playerTransform.position);
 
@@ -4864,6 +4933,9 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
             PerfStore.End(PerfSlot.ViewDistance, viewDistanceStart);
             return;
         }
+
+        // Past the early return the pass rebuilds the view: one crossing, the divisor of the crossing figures.
+        if (lap != 0) _crossingTotals.Crossings++;
 
         _playerLastChunkCoord = playerCurrentChunkCoord;
 
@@ -4905,6 +4977,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                     && _pendingGenerationRequests.Add(chunkCoord))
                 {
                     _generationRequestQueue.Enqueue(chunkCoord);
+                    if (lap != 0) _crossingTotals.GenEnqueued++;
 
                     // FP-1 stage stamp: the chain's first hop. Idempotent across the per-crossing queue
                     // rebuild — see PipelineTelemetry.StampRequested.
@@ -4923,6 +4996,8 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
             spiralLoop.Next();
         }
 
+        lap = PerfTickTotals.Lap(ref _crossingTotals.SpiralTicks, lap);
+
         // Deactivate chunks that are no longer in view.
         _chunksToRemove.Clear();
         foreach (ChunkCoord chunkCoord in _activeChunks)
@@ -4932,6 +5007,9 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                 _chunksToRemove.Add(chunkCoord);
             }
         }
+
+        lap = PerfTickTotals.Lap(ref _crossingTotals.DeactScanTicks, lap);
+        if (lap != 0) _crossingTotals.Deactivations += _chunksToRemove.Count;
 
         foreach (ChunkCoord chunkCoord in _chunksToRemove)
         {
@@ -4960,6 +5038,8 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                 voxelVisualizer.ClearChunkVisualization(chunkCoord);
         }
 
+        lap = PerfTickTotals.Lap(ref _crossingTotals.DeactivateTicks, lap);
+
         // Activate chunks that have entered view.
         foreach (ChunkCoord chunkCoord in _currentViewChunks)
         {
@@ -4967,6 +5047,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
             {
                 // POOLING: Get from pool
                 Chunk newChunk = ChunkPool.Get(chunkCoord);
+                if (lap != 0) _crossingTotals.Activations++;
                 _chunkMap.Add(chunkCoord, newChunk);
                 CreateChunkBorder(chunkCoord);
 
@@ -4985,6 +5066,7 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
                 if (!chunk.IsActive)
                 {
                     chunk.IsActive = true;
+                    if (lap != 0) _crossingTotals.Activations++;
                     if (!_chunkBorders.ContainsKey(chunkCoord))
                     {
                         CreateChunkBorder(chunkCoord);
@@ -5001,10 +5083,13 @@ public class World : MonoBehaviour, IMeshDrainHost, INeighborGates
             AddChunksToUpdateVisualization(chunkCoord);
         }
 
+        lap = PerfTickTotals.Lap(ref _crossingTotals.ActivateTicks, lap);
+
         // Update the master activeChunks set.
         // OPTIMIZATION: Clear and copy to avoid replacing the reference with a new allocation.
         _activeChunks.Clear();
         _activeChunks.UnionWith(_currentViewChunks);
+        PerfTickTotals.Lap(ref _crossingTotals.ActiveSetTicks, lap);
         PerfStore.End(PerfSlot.ViewDistance, viewDistanceStart);
 
         // Run cleanup

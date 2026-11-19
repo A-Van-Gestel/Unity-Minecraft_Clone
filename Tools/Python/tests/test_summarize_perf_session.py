@@ -25,6 +25,8 @@ HEADER = summary.FRAME_COLUMNS + ["Tick_ms", "Apply_ms", "GenerationQueue", "Gen
                                   "IoLoadQueueWaitUs", "IoLoadOps", "DiskLoadLatencyUs", "DiskLoadLatencyOps",
                                   "LightInFlight", "MeshInFlight", *summary.POOL_MISSES, "JobArrayCapDisposes",
                                   "JobArrayPaddedMisses", "JobArrayAllocUs", "JobArrayFreeUs",
+                                  "ViewDistance_ms", "Unload_ms", *summary.XING_PARTS, *summary.UNLOAD_PARTS, "Crossings",
+                                  *summary.CROSSING_COUNTS, "SaveReturnUs", "SaveReturns",
                                   "RenderSrpBatcherDraws"]
 # The counters that joined the format after it first shipped; a session older than them has no column to read.
 NEW_COUNTERS = ["DiskReadHitUs", "LoadLockWaitUs", "RegionOpens", "RegionOpenUs", "SaveLockWaitUs",
@@ -245,6 +247,44 @@ class CounterColumnTests(unittest.TestCase):
         cells = first_row_cells(summary.pool_table([phase], present))
         self.assertEqual(cells["Peak demand/type"], "—")
         self.assertEqual(cells["Churn µs/frame"], "500.0")
+
+    def test_crossings_price_each_pass_per_crossing(self):
+        # Four crossings over one frame: every part belongs to a crossing, so it divides by 4 and not by the frame
+        # count; the two slots' remainders are what their parts leave of the crossing's own measured time.
+        rows = [row(10, 10.0, 0.5, Crossings=4, ViewDistance_ms=210.0, Unload_ms=60.0, XingCloudsUs=20_000,
+                    XingSpiralUs=140_000, XingDeactScanUs=12_000, XingDeactivateUs=16_000, XingActivateUs=8_000,
+                    XingActiveSetUs=4_000, XingGenEnqueued=40, XingActivations=8, XingDeactivations=4,
+                    UnloadScanUs=4_000, UnloadDecideUs=20_000, UnloadBookkeepUs=800,
+                    UnloadSaveUs=8_000, UnloadVisualUs=4_000, UnloadDataReturnUs=4_000, UnloadCandidates=12,
+                    UnloadedChunks=6, UnloadSaved=4, UnloadSavedSections=20, UnloadDeferJob=2, UnloadDeferStrand=4,
+                    SaveReturnUs=6_000, SaveReturns=3)]
+        phase, present = gather_phase(rows)
+        cells = first_row_cells(summary.crossing_table([phase], present))
+        self.assertEqual((cells["Crossings"], cells["ViewDistance ms/crossing"], cells["Clouds"], cells["Spiral"],
+                          cells["DeactScan"], cells["Deactivate"], cells["Activate"], cells["ActiveSet"],
+                          cells["View Other"]),
+                         ("4", "52.500", "5.000", "35.000", "3.000", "4.000", "2.000", "1.000", "2.500"))
+        self.assertEqual((cells["Unload ms/crossing"], cells["Scan"], cells["Decide"], cells["Bookkeep"], cells["Save"],
+                          cells["Visual"], cells["DataReturn"], cells["Unload Other"]),
+                         ("15.000", "1.000", "5.000", "0.200", "2.000", "1.000", "1.000", "4.800"))
+        self.assertEqual((cells["Generation enqueued/crossing"], cells["Activations/crossing"],
+                          cells["Deactivations/crossing"], cells["Candidates/crossing"], cells["Unloaded/crossing"],
+                          cells["Saved/crossing"], cells["Saved sections/crossing"], cells["Deferred job/crossing"],
+                          cells["Deferred strand/crossing"]),
+                         ("10.00", "2.00", "1.00", "3.00", "1.50", "1.00", "5.00", "0.50", "1.00"))
+        # The save snapshot returns to the pool in a later frame, outside the crossing, so it is charged per frame and
+        # per return: three returns costing 6 ms in total is 6 ms of that frame and 2 000 µs per return.
+        self.assertEqual((cells["Save return ms/frame"], cells["Save return µs/return"]), ("6.000", "2000.0"))
+
+    def test_a_phase_that_never_crossed_prints_no_per_crossing_figure(self):
+        # A phase whose player never left a chunk has crossings to divide by nothing: neither the passes' parts nor
+        # their per-crossing counts read as a measured zero.
+        phase, present = gather_phase([row(10, 10.0, 0.5)])
+        cells = first_row_cells(summary.crossing_table([phase], present))
+        self.assertEqual((cells["Crossings"], cells["ViewDistance ms/crossing"], cells["Clouds"], cells["Unload Other"],
+                          cells["Candidates/crossing"], cells["Save return µs/return"]),
+                         ("0", "n/a", "n/a", "n/a", "n/a", "n/a"))
+        self.assertEqual(cells["Save return ms/frame"], "0.000")
 
     def test_lock_wait_and_queue_rates_on_exact_counters(self):
         rows = [row(10, 10.0, 0.5, DiskLoadHits=2, DiskLoadMisses=3, DiskReadUs=1000, DiskReadHitUs=400,

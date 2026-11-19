@@ -69,6 +69,32 @@ namespace Commands
         [NoAutoStaticsCleanup] // immutable table
         private static readonly string[] s_mergePartNames = { "Apply", "Drain", "PullBack", "Route", "Cascade" };
 
+        /// <summary>
+        /// The view-distance pass's timed parts, in pass order; <see cref="s_xingPartNames"/> labels them. Both
+        /// crossing passes are charged from one <see cref="PerfStore.Begin()"/> start each, so their parts partition
+        /// the pass and the remainder is what they leave unexplained.
+        /// </summary>
+        [NoAutoStaticsCleanup] // immutable table
+        private static readonly PerfCounter[] s_xingParts =
+        {
+            PerfCounter.XingCloudsUs, PerfCounter.XingSpiralUs, PerfCounter.XingDeactScanUs, PerfCounter.XingDeactivateUs,
+            PerfCounter.XingActivateUs, PerfCounter.XingActiveSetUs,
+        };
+
+        [NoAutoStaticsCleanup] // immutable table
+        private static readonly string[] s_xingPartNames = { "Clouds", "Spiral", "DeactScan", "Deactivate", "Activate", "ActiveSet" };
+
+        /// <summary>The unload pass's timed parts, in pass order; <see cref="s_unloadPartNames"/> labels them.</summary>
+        [NoAutoStaticsCleanup] // immutable table
+        private static readonly PerfCounter[] s_unloadParts =
+        {
+            PerfCounter.UnloadScanUs, PerfCounter.UnloadDecideUs, PerfCounter.UnloadBookkeepUs, PerfCounter.UnloadSaveUs,
+            PerfCounter.UnloadVisualUs, PerfCounter.UnloadDataReturnUs,
+        };
+
+        [NoAutoStaticsCleanup] // immutable table
+        private static readonly string[] s_unloadPartNames = { "Scan", "Decide", "Bookkeep", "Save", "Visual", "DataReturn" };
+
         /// <inheritdoc/>
         public string Name => "perf";
 
@@ -222,6 +248,7 @@ namespace Commands
 
             AddTickLines(lines);
             AddMergeLines(lines);
+            AddCrossingLines(lines);
             AddCounterLines(lines);
             AddWorkerLines(lines);
             AddDiskLines(lines);
@@ -334,6 +361,48 @@ namespace Commands
         /// <summary>A merge count's window sum per merged job.</summary>
         private static string PerMerge(PerfCounter counter, long merges) =>
             ((double)PerfStore.SumCounter(counter) / merges).ToString(RATIO_FORMAT, CultureInfo.InvariantCulture);
+
+        /// <summary>
+        /// Adds the two view-distance crossings' splits — each pass's parts' statistics and the average its parts
+        /// leave unexplained — in the shape the tick and merge splits use.
+        /// </summary>
+        /// <param name="lines">The report's lines to append to.</param>
+        private static void AddCrossingLines(List<ConsoleLine> lines)
+        {
+            if (PerfStore.SummarizeSlotMs(PerfSlot.ViewDistance).Mean == 0f &&
+                PerfStore.SummarizeSlotMs(PerfSlot.Unload).Mean == 0f) return;
+
+            lines.Add(new ConsoleLine(ConsoleLineSeverity.Info, "Crossing split (avg / p99 / worst ms):"));
+            AddCrossingPass(lines, PerfSlot.ViewDistance, s_xingParts, s_xingPartNames);
+            AddCrossingPass(lines, PerfSlot.Unload, s_unloadParts, s_unloadPartNames);
+        }
+
+        /// <summary>
+        /// Adds one crossing pass's parts and the average they leave unexplained; a pass that recorded no time over
+        /// the window prints nothing, as its parts would all be zeros.
+        /// </summary>
+        /// <param name="lines">The report's lines to append to.</param>
+        /// <param name="slot">The pass's slot.</param>
+        /// <param name="parts">The pass's timed part counters, in pass order.</param>
+        /// <param name="names">The labels for <paramref name="parts"/>.</param>
+        private static void AddCrossingPass(List<ConsoleLine> lines, PerfSlot slot, PerfCounter[] parts, string[] names)
+        {
+            PerfWindowSummary pass = PerfStore.SummarizeSlotMs(slot);
+            if (pass.Mean == 0f) return;
+
+            lines.Add(new ConsoleLine(ConsoleLineSeverity.Info, $"  {slot.ToString().PadRight(SLOT_NAME_WIDTH)} parts:"));
+            double partsMeanMs = 0.0;
+            for (int i = 0; i < parts.Length; i++)
+            {
+                PerfWindowSummary s = PerfStore.SummarizeCounter(parts[i]);
+                partsMeanMs += s.Mean / MICROSECONDS_PER_MILLISECOND;
+                lines.Add(new ConsoleLine(ConsoleLineSeverity.Info,
+                    $"    {names[i].PadRight(SLOT_NAME_WIDTH)} {UsAsMs(s.Mean)} / {UsAsMs(s.P99)} / {UsAsMs(s.Max)}"));
+            }
+
+            lines.Add(new ConsoleLine(ConsoleLineSeverity.Info,
+                $"    {"Other".PadRight(SLOT_NAME_WIDTH)} {Ms((float)(pass.Mean - partsMeanMs))} avg"));
+        }
 
         /// <summary>Adds the job workers' utilization over the counter frames and each timed job type's per-job latency and busy time.</summary>
         private static void AddWorkerLines(List<ConsoleLine> lines)
@@ -513,6 +582,8 @@ namespace Commands
                 {
                     PerfSlot.Tick => LargestPart(hitches, age, record.WorstRow, s_tickParts, s_tickPartNames),
                     PerfSlot.LightMerge => LargestPart(hitches, age, record.WorstRow, s_mergeParts, s_mergePartNames),
+                    PerfSlot.ViewDistance => LargestPart(hitches, age, record.WorstRow, s_xingParts, s_xingPartNames),
+                    PerfSlot.Unload => LargestPart(hitches, age, record.WorstRow, s_unloadParts, s_unloadPartNames),
                     _ => null,
                 };
                 if (largestPart != null) text += $"; {top} led by {largestPart}";

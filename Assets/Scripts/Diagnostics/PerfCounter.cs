@@ -309,6 +309,78 @@ namespace Diagnostics
         /// <summary>Loads that resumed their caller: the divisor of <see cref="DiskLoadLatencyUs"/>.</summary>
         DiskLoadLatencyOps,
 
+        /// <summary>View-distance pass time spent updating the clouds, in microseconds.</summary>
+        XingCloudsUs,
+
+        /// <summary>View-distance pass time spent scanning the load square — placeholders, generation requests and the view candidates — in microseconds.</summary>
+        XingSpiralUs,
+
+        /// <summary>View-distance pass time spent collecting the active chunks that left view, in microseconds.</summary>
+        XingDeactScanUs,
+
+        /// <summary>View-distance pass time spent tearing down the chunks that left view, in microseconds.</summary>
+        XingDeactivateUs,
+
+        /// <summary>View-distance pass time spent bringing the chunks that entered view up, in microseconds.</summary>
+        XingActivateUs,
+
+        /// <summary>View-distance pass time spent rebuilding the master active-chunk set, in microseconds.</summary>
+        XingActiveSetUs,
+
+        /// <summary>Unload pass time spent scanning the resident chunks for unload candidates, in microseconds.</summary>
+        UnloadScanUs,
+
+        /// <summary>Unload pass time spent gathering the unload facts and deciding each candidate, deferrals included, in microseconds.</summary>
+        UnloadDecideUs,
+
+        /// <summary>Unload pass time spent on a leaving chunk's telemetry stamp, pending-sky count and orphaned skylight columns, in microseconds.</summary>
+        UnloadBookkeepUs,
+
+        /// <summary>Unload pass time spent inside the save check for each candidate, whether it saved or not, in microseconds.</summary>
+        UnloadSaveUs,
+
+        /// <summary>Unload pass time spent recycling a leaving chunk's visuals, in microseconds.</summary>
+        UnloadVisualUs,
+
+        /// <summary>Unload pass time spent removing a leaving chunk from the world and returning its data to the pool, in microseconds.</summary>
+        UnloadDataReturnUs,
+
+        /// <summary>Crossings this frame: the player's chunk changed, so both passes ran; the divisor of the crossing figures.</summary>
+        Crossings,
+
+        /// <summary>Generation requests a crossing re-enqueued for the per-frame drain.</summary>
+        XingGenEnqueued,
+
+        /// <summary>Chunks a crossing took from the pool or reactivated.</summary>
+        XingActivations,
+
+        /// <summary>Chunks a crossing left view and tore down.</summary>
+        XingDeactivations,
+
+        /// <summary>Chunks outside the unload boundary an unload pass considered; the divisor of the unload figures.</summary>
+        UnloadCandidates,
+
+        /// <summary>Chunks an unload pass tore down and recycled.</summary>
+        UnloadedChunks,
+
+        /// <summary>Unloaded chunks whose edits were handed to a save.</summary>
+        UnloadSaved,
+
+        /// <summary>Voxel sections those saved chunks carried, for their save payload's size.</summary>
+        UnloadSavedSections,
+
+        /// <summary>Unload candidates deferred because a job was touching them.</summary>
+        UnloadDeferJob,
+
+        /// <summary>Unload candidates deferred because an in-range neighbor still needed their data.</summary>
+        UnloadDeferStrand,
+
+        /// <summary>Time a save's snapshot return to the data pool cost, in microseconds.</summary>
+        SaveReturnUs,
+
+        /// <summary>Save snapshots returned to the data pool: the divisor of <see cref="SaveReturnUs"/>.</summary>
+        SaveReturns,
+
         /// <summary>Number of counters; not a counter.</summary>
         Count,
     }

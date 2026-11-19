@@ -9,8 +9,9 @@ namespace Serialization
 {
     /// <summary>
     /// Running totals of chunk disk I/O for the performance monitor's counters: loads (region hits and misses, read and
-    /// deserialize time, payload bytes), saves (serialize and write time, payload bytes), the time each background
-    /// operation waited for a ThreadPool thread, and the operations in flight.
+    /// deserialize time, payload bytes), saves (serialize and write time, payload bytes, and the time their snapshot
+    /// took returning to the data pool), the time each background operation waited for a ThreadPool thread, and the
+    /// operations in flight.
     /// <para>
     /// Updated from ThreadPool threads and the main thread, so every total is <see cref="Interlocked"/>. An operation is
     /// measured only when it starts while <see cref="PerfStore.SlotsActive"/>: <see cref="Stamp"/> and
@@ -92,6 +93,12 @@ namespace Serialization
         [NoAutoStaticsCleanup] // reset in DomainReset
         private static long s_loadLatencyOps;
 
+        [NoAutoStaticsCleanup] // reset in DomainReset
+        private static long s_snapshotReturnTicks;
+
+        [NoAutoStaticsCleanup] // reset in DomainReset
+        private static long s_snapshotReturns;
+
         /// <summary>Loads that found the chunk in its region file.</summary>
         public static long LoadHits => Interlocked.Read(ref s_loadHits);
 
@@ -167,6 +174,12 @@ namespace Serialization
         /// <summary>Loads that resumed their caller: the divisor of <see cref="LoadLatencyMicros"/>.</summary>
         public static long LoadLatencyOps => Interlocked.Read(ref s_loadLatencyOps);
 
+        /// <summary>Time a save's snapshot spent returning to the data pool, in microseconds.</summary>
+        public static long SnapshotReturnMicros => PerfStore.TicksToMicros(Interlocked.Read(ref s_snapshotReturnTicks));
+
+        /// <summary>Save snapshots returned to the data pool: the divisor of <see cref="SnapshotReturnMicros"/>.</summary>
+        public static long SnapshotReturns => Interlocked.Read(ref s_snapshotReturns);
+
         /// <summary>Starts timing an operation.</summary>
         /// <returns>The start timestamp, or 0 when the monitor is not recording.</returns>
         public static long Stamp() => PerfStore.SlotsActive ? Stopwatch.GetTimestamp() : 0L;
@@ -225,6 +238,16 @@ namespace Serialization
 
             Interlocked.Add(ref s_saveLockWaitTicks, Stopwatch.GetTimestamp() - startTimestamp);
             Interlocked.Increment(ref s_saveLockWaits);
+        }
+
+        /// <summary>Records the save's snapshot being handed back to the data pool. Call after the return.</summary>
+        /// <param name="startTimestamp">The value <see cref="Stamp"/> returned before the return; 0 is a no-op.</param>
+        public static void RecordSnapshotReturn(long startTimestamp)
+        {
+            if (startTimestamp == 0L) return;
+
+            Interlocked.Add(ref s_snapshotReturnTicks, Stopwatch.GetTimestamp() - startTimestamp);
+            Interlocked.Increment(ref s_snapshotReturns);
         }
 
         /// <summary>Records a region file opened.</summary>
@@ -323,6 +346,8 @@ namespace Serialization
             PerfStore.SampleTotal(PerfCounter.IoLoadOps, LoadOps);
             PerfStore.SampleTotal(PerfCounter.DiskLoadLatencyUs, LoadLatencyMicros);
             PerfStore.SampleTotal(PerfCounter.DiskLoadLatencyOps, LoadLatencyOps);
+            PerfStore.SampleTotal(PerfCounter.SaveReturnUs, SnapshotReturnMicros);
+            PerfStore.SampleTotal(PerfCounter.SaveReturns, SnapshotReturns);
         }
 
         /// <summary>Zeroes every total on play-mode entry.</summary>
@@ -353,6 +378,8 @@ namespace Serialization
             Interlocked.Exchange(ref s_loadOps, 0L);
             Interlocked.Exchange(ref s_loadLatencyTicks, 0L);
             Interlocked.Exchange(ref s_loadLatencyOps, 0L);
+            Interlocked.Exchange(ref s_snapshotReturnTicks, 0L);
+            Interlocked.Exchange(ref s_snapshotReturns, 0L);
         }
     }
 }

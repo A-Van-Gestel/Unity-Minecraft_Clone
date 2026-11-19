@@ -111,6 +111,7 @@ namespace Editor.Validation.PerfMonitoring
                 new Scenario("B43 Render counters: a reader only at Systems and above, freed on leaving and at shutdown; each Render counter in its own gauge; readings clamp without wrapping", RunB43RenderStats),
                 new Scenario("B44 Job array churn: pool misses, padded misses and cap disposes counted exactly (a wrong-length return is no cap dispose), alloc and free ticks only at Systems, all four reach their counters", RunB44JobArrayChurn),
                 new Scenario("B45 Storage I/O split: lock waits per side, one region open on first touch, load-only queue wait and latency ops, hit read inside total read; nothing below Systems; every disk counter reads back after one sampling call", RunB45StorageIoSplit),
+                new Scenario("B46 Crossing breakdown: every crossing totals field maps to exactly one distinct per-frame counter and reaches it with ticks converted; an untimed lap charges nothing; a save snapshot's return counts one op and its time only while slots record", RunB46CrossingBreakdown),
             };
             return ValidationSuiteRunner.Execute("Performance Monitor", scenarios, KnownBugChannel.Unimplemented, logToConsole, showProgress);
         }

@@ -483,7 +483,9 @@ namespace Serialization
             }
             else
             {
+                long returnStart = StorageIoStats.Stamp();
                 World.Instance.ChunkPool.ReturnChunkData(snapshot);
+                StorageIoStats.RecordSnapshotReturn(returnStart);
                 if (result == ChunkSaveResult.Written) StageSupersede(chunkVoxelPos, seq);
             }
 
