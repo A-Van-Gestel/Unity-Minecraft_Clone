@@ -1,6 +1,6 @@
 # Unity CLI Extensions Roadmap
 
-**Version:** 1.1  
+**Version:** 1.2  
 **Date:** 2026-09-27  
 **Status:** Open backlog. Items are removed (archived) when implemented and verified.
 
@@ -78,6 +78,11 @@ Player instead of the Editor. It needs a Development player with the Pipeline ru
 **Do.** Only if a player-only bug needs live inspection: enable the runtime server for a
 Development build and document the security posture. Never for Release.
 
+**Update (2026-11-20).** Player serving is now also the planned `AH-2` phase of
+[`AGENT_HARNESS.md`](AGENT_HARNESS.md), where the `voxel-engine` commands would be served by a Development
+player behind a runtime start switch. `AH-2` settles this item; the "Never for Release" line is revisited
+by its `AH-3` spike.
+
 ## UC-8 — Project Auditor through the CLI
 
 **What exists today.** The Editor exposes `audit` / `audit_status` (Project Auditor scan, async).
@@ -90,6 +95,7 @@ saved-report route before switching.
 
 ## Document History
 
+* **v1.2** - `UC-7`: cross-reference to the agent harness's `AH-2` (2026-11-20).
 * **v1.1** - `UC-5` closed: RC 94 release build ships no Pipeline/Roslyn assembly (Architecture §7).
 * **v1.0** - Initial backlog, split out of `Design/UNITY_MCP_TO_CLI_MIGRATION.md` on its promotion to
   `Architecture/UNITY_CLI_EDITOR_BRIDGE.md`.

@@ -1,6 +1,6 @@
 # Unity CLI Editor Bridge
 
-**Version:** 1.8  
+**Version:** 1.9  
 **Date:** 2026-09-27  
 **Status:** Implemented (Stable)  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production) — agent tooling, Editor only
@@ -27,6 +27,8 @@ the same day during the migration.
 
 - [`../Design/UNITY_CLI_EXTENSIONS_ROADMAP.md`](../Design/UNITY_CLI_EXTENSIONS_ROADMAP.md) — owns
   the bridge's unbuilt work (`UC-6`…`UC-8`); `UC-5`, the §7 release-build check, closed there.
+- [`../Design/AGENT_HARNESS.md`](../Design/AGENT_HARNESS.md) — the `voxel-engine` custom command group
+  built on this bridge (§1, §2), and the planned player-build serving (§7).
 - [`../Design/PROJECT_AUDITOR_FINDINGS_REPORT.md`](../Design/PROJECT_AUDITOR_FINDINGS_REPORT.md) —
   §3.4 records why the package advisories for this bridge are deliberate.
 - [`../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md`](../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md)
@@ -56,15 +58,16 @@ The `UC-*` IDs were issued by the design this document was promoted from
 
 ## 1. Components
 
-| Component            | Where                                                          | Role                                                                                                 |
-|----------------------|----------------------------------------------------------------|------------------------------------------------------------------------------------------------------|
-| Unity CLI            | `unity` on `PATH` (`%LOCALAPPDATA%\Unity\bin`), machine-global | Shell entry point: `unity command`, `unity recompile`, `unity job`, `unity status`.                  |
-| `com.unity.pipeline` | `Packages/manifest.json`, pinned `1.0.0`                       | Runs inside the Editor, serves the CLI on localhost.                                                 |
-| Agent environment    | `.claude/settings.json` → `env`                                | `UNITY_PROJECT_PATH=.`, `UNITY_NO_BANNER`, `UNITY_NO_UPDATE_CHECK`; read-only CLI calls pre-allowed. |
-| `unity-editor` skill | `.agents/skills/unity-editor/`                                 | The agent-facing reference card, recipes and gotcha list.                                            |
-| Profiler queries     | `Tools/UnityCli/Profiler/ProfilerQueries.cs`                   | Profiler analysis entry points (§6).                                                                 |
-| Profiler capture     | `Tools/UnityCli/Profiler/ProfilerCapture.cs`                   | Arms a recording with GC.Alloc call stacks and stops + saves it after a phase marker (§6).           |
-| Capture folder       | `Assets/AgentCaptures~/` (gitignored)                          | The one safe place for saved captures (§5).                                                          |
+| Component            | Where                                                          | Role                                                                                                    |
+|----------------------|----------------------------------------------------------------|---------------------------------------------------------------------------------------------------------|
+| Unity CLI            | `unity` on `PATH` (`%LOCALAPPDATA%\Unity\bin`), machine-global | Shell entry point: `unity command`, `unity recompile`, `unity job`, `unity status`.                     |
+| `com.unity.pipeline` | `Packages/manifest.json`, pinned `1.0.0`                       | Runs inside the Editor, serves the CLI on localhost.                                                    |
+| Agent environment    | `.claude/settings.json` → `env`                                | `UNITY_PROJECT_PATH=.`, `UNITY_NO_BANNER`, `UNITY_NO_UPDATE_CHECK`; read-only CLI calls pre-allowed.    |
+| `unity-editor` skill | `.agents/skills/unity-editor/`                                 | The agent-facing reference card, recipes and gotcha list.                                               |
+| Profiler queries     | `Tools/UnityCli/Profiler/ProfilerQueries.cs`                   | Profiler analysis entry points (§6).                                                                    |
+| Profiler capture     | `Tools/UnityCli/Profiler/ProfilerCapture.cs`                   | Arms a recording with GC.Alloc call stacks and stops + saves it after a phase marker (§6).              |
+| Capture folder       | `Assets/AgentCaptures~/` (gitignored)                          | The one safe place for saved captures (§5).                                                             |
+| `voxel-engine` group | `Assets/Scripts/AgentHarness/`, `Assets/Editor/AgentHarness/`  | Custom `[CliGroupCommand]` commands that drive the running game safely (§2; `Design/AGENT_HARNESS.md`). |
 
 `CLAUDE.md` / `AGENTS.md` carry the always-loaded rules (compile gate, long operations, captures,
 play-mode confirmation) and route everything else to the skill.
@@ -102,6 +105,12 @@ other directory the CLI fails with *"Not a Unity project"* rather than guessing.
 **`script run`** compiles a `.cs` file in memory (no import, no domain reload), from any path, and
 calls a named static entry point with a JSON `args` array converted to its parameter types. **C#
 default parameter values are not applied** — every argument must be passed.
+
+**Custom commands.** The package also serves project-defined `[CliGroupCommand]` static methods from
+`Assembly-CSharp` (no asmdef reference needed), with typed `--name value` flags that keep their C# defaults.
+This project defines one group, `voxel-engine` (`unity command voxel-engine <name>`): typed, safe-by-default
+commands for running the game in Play mode (start a world, wait, move, edit blocks, capture). They are
+served in Play mode too (checked 2026-11-20); the command list, safety model and roadmap are in [`../Design/AGENT_HARNESS.md`](../Design/AGENT_HARNESS.md).
 
 **Console.** `console get` returns entries plus a `cursor` and `session`; passing them back as
 `--since` / `--since-session` reads only new entries.
@@ -204,8 +213,13 @@ Scripting defines decide what reaches a player. `Unity.Pipeline` (runtime) and
 `Unity.Pipeline.IlInterpreter` compile into a player only when `ENABLE_RUNTIME_PIPELINE` or
 `ENABLE_RUNTIME_PIPELINE_DEV` is defined, and `Unity.Pipeline.ScenePreview` only with
 `ENABLE_PIPELINE_SCENE_PREVIEW`; this project defines none of them. `Unity.Pipeline.Attributes` is
-unconstrained. Expected for StandaloneWindows64, from the 1.0.0 `.asmdef` constraints (not yet
-re-measured on a 1.0.0 build):
+unconstrained, which is why the `voxel-engine` commands compile into every build and stay inert
+without the runtime assemblies. The same toggles are how a player would serve commands
+(`--runtime` / `--runtime-path`); enabling them for a Development or Master build is the planned
+`AH-2`/`AH-3` work in [`../Design/AGENT_HARNESS.md`](../Design/AGENT_HARNESS.md) and is not done here.
+
+Expected for StandaloneWindows64, from the 1.0.0 `.asmdef` constraints (not yet re-measured on a 1.0.0
+build):
 
 | Player build | Pipeline assemblies compiled in  |
 |--------------|----------------------------------|
@@ -275,6 +289,8 @@ bridge installed is `61480be4`.
 
 ## Document History
 
+* **v1.9** - §1/§2: the custom `voxel-engine` command group (`Design/AGENT_HARNESS.md`); §7: the package can also
+  serve players through the Runtime Pipeline toggles, not enabled in this project (2026-11-20).
 * **v1.8** - CLI 1.0.0 + `com.unity.pipeline` 1.0.0 (first stable): `script eval` prints only its value
   and fails by exit `6`; no Editor is exit `12`; `capture screenshot` and `script eval_file` removed; §7: runtime
   assemblies gated on the `ENABLE_RUNTIME_PIPELINE*` defines, so Development builds no longer compile them (2026-11-13).

@@ -25,6 +25,7 @@ This is the primary folder for all game development.
     -   `BlockEditorWindow.cs`: The custom UI for editing all `BlockType` assets.
     -   `AtlasPacker.cs`: The tool for combining individual block textures into a single texture atlas. Its input tiles live in `Editor/AtlasPacker/SourceTextures/`; only the baked atlas ships.
     -   `FluidDataGenerator.cs`: A script to pre-calculate and save fluid mesh data as `ScriptableObject` assets.
+-   **Agent harness:** `Editor/AgentHarness/` holds the editor-only `voxel-engine play` command (`AgentPlayCommand.cs`); `Editor/Validation/AgentHarness/` holds the `Validate Agent Harness` suite. The runtime half is `Scripts/AgentHarness/`.
 
 ### `Assets/Resources/`
 
@@ -70,6 +71,15 @@ This is the heart of the project, containing all C# source code. It is organized
 -   **Examples:**
     -   `LaunchSession.cs`: Applies the arguments, starts the action, and exits with a status code when the run reports back. Its `ApplySessionOverrides` is also how a harness sets fixed capture conditions without them being saved.
     -   `AutomatedRunLauncher.cs`: Starts the benchmark, fluid-stress and startup-probe runs — shared by the main-menu buttons and the launch actions.
+
+#### `Scripts/AgentHarness/`
+
+-   **Purpose:** The `voxel-engine` Unity CLI command group (namespace `AgentHarness`): typed, one-call-per-action commands an AI agent uses to drive the running game — start a safe world, wait, move, edit blocks, capture. Every session world runs in `RuntimeMode.Agent` with its own save root, so a player's worlds are never opened writable. Design, safety model and command reference: `Documentation/Design/AGENT_HARNESS.md`.
+-   **Examples:**
+    -   `AgentCommands.cs`: The `[CliGroupCommand]` wrappers; each calls the facade and writes a structured result.
+    -   `AgentSession.cs`: The session lifecycle — launch, persistence/mute overrides, agent save-root clean-up.
+    -   `AgentWorldOps.cs`: The engine-facing operations (status, pose, block ops, console passthrough, capture, route check), in voxel space only.
+    -   `AgentInput.cs` / `AgentRoute.cs`: The timed input source added to `InputManager`, and the straight-route dry run behind `move_to`.
 
 #### `Scripts/Helpers/`
 

@@ -59,6 +59,7 @@ Implemented to allow testing without corrupting production saves.
 * **Production Saves:** `Application.persistentDataPath/Saves/{WorldName}/`
 * **Editor Volatile Saves:** `Application.persistentDataPath/Editor_Temp_Saves/{WorldName}/`
 * **Benchmark Saves:** `Application.persistentDataPath/Benchmark_Saves/{WorldName}/` — used when `WorldLaunchState.CurrentMode == RuntimeMode.Benchmark`; can be purged via `SaveSystem.ClearAllBenchmarks()`.
+* **Agent Saves:** `Application.persistentDataPath/Agent_Saves/{WorldName}/` — used when `WorldLaunchState.CurrentMode == RuntimeMode.Agent` (worlds an agent opens through the `voxel-engine` harness, see [`../Design/AGENT_HARNESS.md`](../Design/AGENT_HARNESS.md)); same on-disk format, resolved by `SaveSystem.GetAgentSaveRoot()` whatever the volatile flag, and deleted by the harness's `clean_world`.
 * **Behavior:** When "Volatile Mode" is enabled in editor settings, saves go to temporary location.
 * **Note:** Volatile saves persist between editor sessions unless manually deleted.
 
