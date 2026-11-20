@@ -1,5 +1,9 @@
 // Play-mode world rig for the Unity CLI: list saves, launch a world, drive it, and capture frames.
 //
+// DEPRECATED  Use the `voxel-engine` CLI commands (Assets/Scripts/AgentHarness/, recipe `playmode-world`):
+//             they launch isolated agent worlds instead of the user's own. Kept until the harness is
+//             confirmed working in use, then deleted.
+//
 // RUN     unity command script run --file Tools/UnityCli/PlayMode/WorldRig.cs \
 //             --entry UnityCli.WorldRig.<Entry> --args '<json array>' --result-only
 //         Every argument is required (script run applies no C# defaults). Compiled in memory on each

@@ -74,8 +74,8 @@ Retry it; it is not a hang.
 | Packages                               | `package list`                                                                            |
 | See what a view shows                  | `capture scene_view` / `capture game_view` → `Assets/AgentCaptures~/`, then read the PNG  |
 | Profiler data                          | `script run` on `Tools/UnityCli/Profiler/ProfilerQueries.cs`                              |
-| Load/drive a world in Play mode, capture | `script run` on `Tools/UnityCli/PlayMode/WorldRig.cs` (recipe `playmode-world`)         |
-| Behavior-tick input on a live world      | `script run` on `Tools/UnityCli/PlayMode/TickShapeProbe.cs` (`Measure`, after `WorldRig.Launch`; `AuditSleepers` checks the registration contract) |
+| Load/drive a world in Play mode, capture | `unity command voxel-engine …` (recipe `playmode-world`; `WorldRig.cs` is deprecated)    |
+| Behavior-tick input on a live world      | `script run` on `Tools/UnityCli/PlayMode/TickShapeProbe.cs` (`Measure`, after `voxel-engine session_start`; `AuditSleepers` checks the registration contract) |
 | Generated blocks at given coordinates (edit mode) | `script run` on `Tools/UnityCli/WorldGen/TerrainBlockDump.cs` (`Dump` with seed + voxel box) |
 
 ## Routing
