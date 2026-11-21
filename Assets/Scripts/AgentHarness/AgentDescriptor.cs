@@ -111,8 +111,9 @@ namespace AgentHarness
         }
 
         /// <summary>
-        /// Leaves a descriptor the package wrote alone; otherwise stops the package's failing writer and publishes the
-        /// same descriptor itself, refreshed on the package's heartbeat and deleted when the player quits.
+        /// Leaves a descriptor this process wrote alone; otherwise (none, or one left by a killed or older player) stops
+        /// the package's failing writer and publishes the same descriptor itself, refreshed on the package's heartbeat
+        /// and deleted when the player quits.
         /// </summary>
         /// <param name="error">Why no descriptor could be published, when it returns false.</param>
         /// <returns>True when a descriptor is on disk.</returns>
@@ -129,14 +130,24 @@ namespace AgentHarness
             }
 
             var path = (string)members.FilePath.GetValue(packageFile);
-            if (File.Exists(path))
+            bool ownFile;
+            try
+            {
+                ownFile = File.Exists(path) && IsOwnDescriptor(path);
+            }
+            catch (IOException)
+            {
+                ownFile = false; // unreadable: the takeover's write reports whether the path is usable
+            }
+
+            if (ownFile)
                 return true;
 
             object identity = members.Identity.GetValue(packageFile);
             object registry = members.Registry.GetValue(packageFile);
             var getToken = (Func<string>)members.Token.GetValue(packageFile);
 
-            // Its heartbeat would keep failing (and logging) every interval; nothing is on disk for it to delete.
+            // Its heartbeat would keep failing (and logging) every interval; nothing of its own is on disk to delete.
             members.Dispose.Invoke(packageFile, null);
             members.PublishedFile.SetValue(null, null);
 
@@ -219,11 +230,10 @@ namespace AgentHarness
             if (heartbeat == null)
                 return;
 
-            using (var stopped = new ManualResetEvent(false))
-            {
-                if (heartbeat.Dispose(stopped))
-                    stopped.WaitOne(HEARTBEAT_STOP_MILLISECONDS);
-            }
+            // Disposed only once signaled: after a timeout the timer still signals it when the late write ends.
+            var stopped = new ManualResetEvent(false);
+            if (!heartbeat.Dispose(stopped) || stopped.WaitOne(HEARTBEAT_STOP_MILLISECONDS))
+                stopped.Dispose();
         }
 
         // True when the descriptor names this process, as the package's own delete checks.

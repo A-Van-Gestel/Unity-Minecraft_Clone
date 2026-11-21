@@ -1,6 +1,6 @@
 # Agent Harness (AH-*) Design
 
-**Version:** 1.2  
+**Version:** 1.3  
 **Date:** 2026-11-20  
 **Status:** In progress — `AH-0` (commands, safe session, server-side waits, suite) and `AH-1` (timed agent input, `move_to`, `interact`) are shipped and verified in Play mode 2026-11-20; `AH-2` (Development player serving through `-mc-run agent`) is shipped and verified in an IL2CPP Development build 2026-11-21; `AH-3`/`AH-4` (Master builds, menu/world management) are unscheduled and start only on a concrete need.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production) — agent tooling, Editor today
@@ -156,7 +156,9 @@ while the player walks.
    applies the persistence mode, optionally mutes, sets the launch state (`CurrentMode = Agent`,
    `WorldName`, `Seed`, `IsNewGame`, `SelectedWorldType = Standard`, `BorderRadius = 0`), stamps the world
    scene request and loads `Scenes/World`. A new world replaces an earlier folder of the same name under
-   the agent root; `--load true` loads the saved agent world instead.
+   the agent root, deleted only after the arguments pass (`AgentSession.ValidateStart`) and before any state
+   changes, so a refused start keeps it and a failed delete is a clean refusal; `--load true` loads the saved
+   agent world instead, which needs `--mode Throwaway` (Memory never reads saved data, §4.2).
 2. **Run**: `IsSessionWorld` is true while a session is active and the launch mode is `Agent`. The
    world-changing commands consult it (§4.3).
 3. **End** (`session_end`, or any return to the main menu): `session_end` finds the
@@ -167,7 +169,8 @@ while the player walks.
    `BeforeSceneLoad` hook (`AgentSafePlayHook`, a separate class so `AgentSession` keeps one reset hook)
    consumes it: if Play opened the **World** scene, that world becomes the memory-mode session world
    `agent-play` before `World.Start` reads the persistence setting. Play from the main menu starts
-   normally and the agent follows with `session_start`.
+   normally and the agent follows with `session_start`. `play` refuses while scripts have compile errors, and
+   an editor-update watch drops the request when Play is not entered, so a later manual Play stays normal.
 
 ### 4.2 Session modes
 
@@ -176,7 +179,8 @@ while the player walks.
 | **Memory**    | `dev.keepChunksInMemory` forced on for the session; nothing but `level.dat` reaches disk (see below).      | Default; fast functional runs. Development only. |
 | **Throwaway** | Saved under `<persistentDataPath>/Agent_Saves/<name>/`, reloadable with `--load true` until `clean_world`. | Disk-I/O work, save/reload, perf probes.         |
 
-Memory mode refuses outside a debug build, because the `Dev` settings section is read only there.
+Memory mode refuses outside a debug build, because the `Dev` settings section is read only there, and
+refuses `--load`: with persistence off `World.Start` reads no saved data and would regenerate from the seed.
 A memory-mode world never loads, unloads or saves chunks, so disk-I/O counters, save paths and reloads read
 0 in it; a run that must touch disk uses Throwaway.
 
@@ -190,7 +194,7 @@ Every layer is enforced in code; none depends on an agent following a recipe.
 | Settings not edited    | Memory mode overrides `dev.keepChunksInMemory` in memory through `LaunchSession.ApplySessionOverrides`; `settings.json` is never edited, and the original value is restored when the main menu loads. | `AgentSession.TryApplyPersistence`, `OnSceneLoaded`              |
 | Mutation gate          | `set_block`, `console` and `interact` refuse unless the world is a session world or `--allow-persisted true` is passed. With no loaded world they refuse even with the flag.                          | `AgentWorldOps.CheckMutationAllowed`                             |
 | Name confinement       | A world name must be one plain folder directly under the agent root: no separators, no `.`/`..`, no invalid file-name characters. `clean_world` can therefore only delete a child of the agent root.  | `AgentSession.IsValidWorldName`, `TryCleanWorlds`                |
-| Loaded world protected | `clean_world` refuses to delete the loaded session world.                                                                                                                                             | `AgentSession.TryCleanWorlds`                                    |
+| Loaded world protected | While a session is active (from `session_start`, through the scene load), `clean_world` refuses `--all` and the session world's name, matched case-insensitively as Windows folders are.              | `AgentSession.IsCleanBlocked`, `TryCleanWorlds`                  |
 | Quiet by default       | A session mutes audio through `LaunchSession.MuteForSession`; `--muted false` opts out; the volume is restored when the session ends.                                                                 | `AgentSession.Mute`, `OnSceneLoaded`                             |
 | Hold expiry            | An input hold lasts a span of game time and expires on its own; a scene unload, `input_release` and the domain reset release everything.                                                              | `AgentInput`                                                     |
 
@@ -244,7 +248,9 @@ agent input while a menu is open or an automated mode runs, as it does real inpu
 System device was rejected (§9) because it depends on window focus and is imprecise.
 
 **`move_to`.** Before moving it dry-runs the straight horizontal line (`AgentRoute.Check`, sampled every
-half block, pure and unit-tested) and refuses with `hints` unless `--force true`. The line is computed
+half block, pure and unit-tested) and refuses with `hints` unless `--force true`. A sample step that changes
+both x and z also checks the side cell the line crossed; through an exact corner it reports a `Wall` only when
+both side cells block, since one corner is grazed and slid past. The line is computed
 relative to the player's feet cell (integer cell plus a small float offset), so it stays exact at any
 distance from spawn; `pose` and `look_at` likewise split a voxel position into an exact integer cell and its
 fraction before converting through `WorldOrigin`.
@@ -265,7 +271,7 @@ agent flies (`console --line "fly on"`, then `input_hold --jump true`) or uses `
 ### 4.6 Verification
 
 - **Suite `Minecraft Clone/Dev/Validate Agent Harness`** (`Assets/Editor/Validation/AgentHarness/`,
-  registered in `Validate All`; `ExpectedSuiteCount` 32 → 33). All ten scenarios are baselines:
+  registered in `Validate All`; `ExpectedSuiteCount` 32 → 33). All thirteen scenarios are baselines:
 
 | ID    | Pins                                                                                                                          |
 |-------|-------------------------------------------------------------------------------------------------------------------------------|
@@ -279,6 +285,9 @@ agent flies (`console --line "fly on"`, then `input_hold --jump true`) or uses `
 | AH-08 | `clean_world` by name deletes exactly that agent world (a sibling survives) and refuses an unknown name.                      |
 | AH-09 | The `Unity.Pipeline` members `AgentDescriptor` reflects into still exist (a package upgrade reds here, not in a player).      |
 | AH-10 | `quit` refuses only in the Editor, and a player's default capture folder is under `persistentDataPath`, not its build folder. |
+| AH-11 | `clean_world` refuses the active session's world in any case, and `--all`, while a session is active.                         |
+| AH-12 | `session_start` refuses Memory with `--load`, and Memory outside a debug build.                                               |
+| AH-13 | A diagonal route checks the side cell it crosses (not the other), and an exact corner blocks only between two walls.          |
 
   The suite header records the mutations that red each baseline. The load-bearing one is AH-04. The suite
   is headless and covers the pure logic and the gates; the live game is verified by the Play smoke.
@@ -378,7 +387,8 @@ remain in `git status` afterwards. This phase also settles `UC-7`.
 - **Descriptor:** the package restricts `.unity-pipeline-runtime-port` with `whoami`/`icacls`, which cannot start in
   an IL2CPP player, so it never writes the file. `AgentDescriptor` takes over the package's own descriptor (identity,
   endpoints, token, 15 s heartbeat) by reflection and writes it without the current-user restriction; the package logs
-  its error once. AH-09 pins the reflected members.
+  its error once. A descriptor already on disk is kept only when its `pid` is this process; one left by a killed
+  or older player is replaced. AH-09 pins the reflected members.
 - **Stripping roots** (`Assets/link.xml`): the `AgentHarness` namespace and anonymous types (commands, flags and
   results are reached by reflection), and `Unity.Pipeline` whole with `ignoreIfMissing` — Medium stripping otherwise
   drops the getters its descriptor serializes, leaving no `pid`. That root grows the Development build's output by
@@ -467,6 +477,9 @@ Agent-world loading would then share the menu's migration path, closing the v1 l
 
 ## Document History
 
+* **v1.3** - Review fixes: stale descriptor takeover, safe-play request dropped when Play is refused, `clean_world`
+  guard for the whole session, `session_start` validates before deleting and refuses Memory with `--load`, diagonal
+  route side cells; AH-11…AH-13 (2026-11-21).
 * **v1.2** - §8 question 4: the build size of the `Unity.Pipeline` stripping root (2026-11-21).
 * **v1.1** - `AH-2` shipped: `-mc-run agent`, global dev toggle with `autoStart` off, `AgentDescriptor`, stripping
   roots, `quit`, AH-09/AH-10; §8 A3 and the start switch answered; `WorldRig.cs` deleted (2026-11-21).

@@ -1,6 +1,7 @@
 using AgentHarness;
 using Unity.Pipeline.Commands;
 using UnityEditor;
+using UnityEngine;
 using UnityEngine.SceneManagement;
 
 namespace Editor.AgentHarness
@@ -25,7 +26,14 @@ namespace Editor.AgentHarness
                 return ExitCode.Failed;
             }
 
+            if (EditorUtility.scriptCompilationFailed)
+            {
+                cmd.Log.Error("Scripts have compile errors, so Unity would refuse to enter Play mode; fix them first.");
+                return ExitCode.Failed;
+            }
+
             AgentSession.RequestSafePlay(muted);
+            WatchForRefusedPlay();
             EditorApplication.isPlaying = true;
             cmd.Result.Write(new
             {
@@ -33,6 +41,31 @@ namespace Editor.AgentHarness
                 next = "voxel-engine wait --until WorldReady (World scene) or --until Menu, after the reload",
             });
             return ExitCode.Success;
+        }
+
+        /// <summary>
+        /// Drops the safe-play request if Play mode is refused, so the user's next manual Play is not turned into an
+        /// agent session. A Play entry consumes the request itself; its domain reload also ends this watch.
+        /// </summary>
+        internal static void WatchForRefusedPlay()
+        {
+            EditorApplication.update -= CheckPlayEntry;
+            EditorApplication.update += CheckPlayEntry;
+        }
+
+        private static void CheckPlayEntry()
+        {
+            if (EditorApplication.isPlaying || !AgentSession.IsSafePlayRequested)
+            {
+                EditorApplication.update -= CheckPlayEntry;
+                return;
+            }
+
+            if (EditorApplication.isPlayingOrWillChangePlaymode) return;
+
+            EditorApplication.update -= CheckPlayEntry;
+            AgentSession.CancelSafePlay();
+            Debug.LogWarning("[AgentHarness] Play mode was not entered; the safe-play request was dropped.");
         }
     }
 }

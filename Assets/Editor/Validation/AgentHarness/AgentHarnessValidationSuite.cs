@@ -14,7 +14,8 @@ namespace Editor.Validation.AgentHarness
 {
     /// <summary>
     /// Truth-table suite for the AI agent harness: the straight-route dry run on a fake voxel grid, the yaw helper,
-    /// the world-name guard that keeps <c>clean_world</c> inside the agent save root, the agent save routing, the
+    /// the world-name guard that keeps <c>clean_world</c> inside the agent save root, the active-session clean guard and
+    /// the <c>session_start</c> argument checks, the agent save routing, the
     /// edit-mode mutation refusal, the command count floor, the package members the player's descriptor fallback
     /// reflects into, and the Editor/player split of <c>quit</c> and <c>capture</c>. No scene, no player, no world.
     /// <para>
@@ -26,9 +27,11 @@ namespace Editor.Validation.AgentHarness
     /// reds AH-01; disabling the walking fluid check or reporting the water cell's air above reds AH-01; disabling the
     /// flying wall check reds AH-02; swapping the <c>Atan2</c> arguments reds AH-03; accepting every name reds AH-04;
     /// routing agent saves to the player's root reds AH-05; skipping the no-world refusal reds AH-06;
-    /// un-attributing a command reds AH-07; misspelling a reflected member name reds AH-09; and letting the Editor
-    /// quit or a player capture into its build folder reds AH-10. Mutating <c>TryCleanWorlds</c>' own name check is
-    /// never proven: it would delete the save root's parent.
+    /// un-attributing a command reds AH-07; misspelling a reflected member name reds AH-09; letting the Editor
+    /// quit or a player capture into its build folder reds AH-10; a case-sensitive clean guard reds AH-11; allowing
+    /// Memory with --load reds AH-12; skipping the crossed side cell, swapping the crossing order, or letting one wall
+    /// wedge a corner reds AH-13. Mutating <c>TryCleanWorlds</c>' own name check is never proven: it would delete the
+    /// save root's parent.
     /// </para>
     /// </summary>
     public static class AgentHarnessValidationSuite
@@ -64,6 +67,9 @@ namespace Editor.Validation.AgentHarness
                 new Scenario("AH-08 clean_world by name deletes exactly that agent world and refuses an unknown one", RunAh08CleanByName),
                 new Scenario("AH-09 The package members the player's descriptor fallback reflects into still exist", RunAh09DescriptorMembers),
                 new Scenario("AH-10 quit refuses only in the Editor, and a player's captures leave its build folder", RunAh10EditorPlayerSplit),
+                new Scenario("AH-11 clean_world refuses the active session's world (any case) and --all while a session is active", RunAh11CleanGuard),
+                new Scenario("AH-12 session_start refuses Memory mode with --load, and Memory mode outside a debug build", RunAh12StartValidation),
+                new Scenario("AH-13 A diagonal route checks the side cell it crosses, and an exact corner blocks only when wedged", RunAh13DiagonalRoute),
             };
             return ValidationSuiteRunner.Execute("Agent Harness", scenarios, KnownBugChannel.Unimplemented, logToConsole,
                 showProgress);
@@ -269,6 +275,70 @@ namespace Editor.Validation.AgentHarness
                 if (Directory.Exists(Path.Combine(root, name))) Directory.Delete(Path.Combine(root, name), true);
                 if (Directory.Exists(Path.Combine(root, sibling))) Directory.Delete(Path.Combine(root, sibling), true);
             }
+        }
+
+        /// <summary>AH-11 — the guard matches names as Windows folders do, and covers --all during the scene load.</summary>
+        private static bool RunAh11CleanGuard()
+        {
+            const string ACTIVE = "agent-world";
+            bool ok = Check("active session, same name in another case -> blocked",
+                AgentSession.IsCleanBlocked(true, ACTIVE, "Agent-World"));
+            ok &= Check("active session, --all -> blocked", AgentSession.IsCleanBlocked(true, ACTIVE, null));
+            ok &= Check("active session, another world -> allowed", !AgentSession.IsCleanBlocked(true, ACTIVE, "other"));
+            ok &= Check("no session, --all -> allowed", !AgentSession.IsCleanBlocked(false, ACTIVE, null));
+            return ok;
+        }
+
+        /// <summary>AH-12 — the argument checks run before session_start deletes an existing world.</summary>
+        private static bool RunAh12StartValidation()
+        {
+            bool ok = Check("Memory + load -> refused",
+                AgentSession.ValidateStart(AgentSessionMode.Memory, true, true) != null);
+            ok &= Check("Memory outside a debug build -> refused",
+                AgentSession.ValidateStart(AgentSessionMode.Memory, false, false) != null);
+            ok &= Check("Memory, new world, debug build -> allowed",
+                AgentSession.ValidateStart(AgentSessionMode.Memory, false, true) == null);
+            ok &= Check("Throwaway + load outside a debug build -> allowed",
+                AgentSession.ValidateStart(AgentSessionMode.Throwaway, true, false) == null);
+            return ok;
+        }
+
+        /// <summary>
+        /// AH-13 — routes from cell (10, 10) whose 0.5-block samples jump diagonally: the crossed side cell is checked
+        /// (an uncrossed one is not), and an exact corner crossing is a Wall only between two blocking side cells.
+        /// </summary>
+        private static bool RunAh13DiagonalRoute()
+        {
+            const int FEET_Y = FLOOR_Y + 1;
+            var start = new Vector3Int(START_CELL, FEET_Y, START_CELL);
+            var center = new Vector2(0.5f, 0.5f);
+            AgentRouteResult Route(Vector2 target, params Vector2Int[] walls)
+            {
+                var cells = new Dictionary<Vector3Int, AgentCell>();
+                foreach (Vector2Int wall in walls)
+                {
+                    cells[new Vector3Int(wall.x, FEET_Y, wall.y)] = AgentCell.Solid;
+                    cells[new Vector3Int(wall.x, FEET_Y + 1, wall.y)] = AgentCell.Solid;
+                }
+
+                return AgentRoute.Check(Grid(cells), start, center, target, false);
+            }
+
+            // To (2.5, 1.2): samples jump from cell (11, 10) to (12, 11) after crossing z first, through (11, 11).
+            var shallow = new Vector2(2.5f, 1.2f);
+            AgentRouteResult crossed = Route(shallow, new Vector2Int(11, 11));
+            bool ok = Check($"a wall on the crossed side cell -> Wall at (11, {FEET_Y + 1}, 11) (got {crossed.Block} at {crossed.BlockedAt})",
+                crossed.Block == AgentRouteBlock.Wall && crossed.BlockedAt == new Vector3Int(11, FEET_Y + 1, 11));
+            ok &= Check("a wall on the uncrossed side cell (12, 10) -> None",
+                Route(shallow, new Vector2Int(12, 10)).Block == AgentRouteBlock.None);
+
+            // To (3.5, 3.5): the line passes exactly through the corners between (10, 10) and (11, 11).
+            var diagonal = new Vector2(3.5f, 3.5f);
+            ok &= Check("an exact corner between two walls -> Wall",
+                Route(diagonal, new Vector2Int(11, 10), new Vector2Int(10, 11)).Block == AgentRouteBlock.Wall);
+            ok &= Check("an exact corner past one wall -> None (grazed)",
+                Route(diagonal, new Vector2Int(11, 10)).Block == AgentRouteBlock.None);
+            return ok;
         }
 
         /// <summary>AH-07 — the attributed methods on the command class match its declared count and group.</summary>

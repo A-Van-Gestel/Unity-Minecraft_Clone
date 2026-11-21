@@ -74,8 +74,8 @@ namespace AgentHarness
             [CliArg("timeout", "Timeout in seconds")] double timeoutInSeconds = 60)
         {
             float deadline = Time.realtimeSinceStartup + (float)(timeoutInSeconds - TIMEOUT_MARGIN_SECONDS);
-            int waited = 0;
-            while (!IsReached(until, frames, waited))
+            int startFrame = Time.frameCount;
+            while (!IsReached(until, frames, Time.frameCount - startFrame))
             {
                 if (Time.realtimeSinceStartup >= deadline)
                 {
@@ -86,7 +86,6 @@ namespace AgentHarness
 
                 await Task.Yield();
                 cmd.CancellationToken.ThrowIfCancellationRequested();
-                waited++;
             }
 
             cmd.Result.Write(AgentWorldOps.GetStatus());

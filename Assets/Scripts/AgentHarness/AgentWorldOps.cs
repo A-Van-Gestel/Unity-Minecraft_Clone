@@ -5,6 +5,7 @@ using Commands;
 using Data;
 using Helpers;
 using UI;
+using Unity.Scripting.LifecycleManagement;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using Object = UnityEngine.Object;
@@ -407,7 +408,12 @@ namespace AgentHarness
             if (player.IsNoclipping) return true;
 
             World world = World.Instance;
-            world.TryGetPlayerVoxelCell(out int feetX, out int feetY, out int feetZ);
+            if (!world.TryGetPlayerVoxelCell(out int feetX, out int feetY, out int feetZ))
+            {
+                error = "The player's voxel cell cannot be resolved.";
+                return false;
+            }
+
             var feetCell = new Vector3Int(feetX, feetY, feetZ);
 
             // Both points relative to the feet cell's corner: small floats stay exact at any distance from spawn.
@@ -547,6 +553,7 @@ namespace AgentHarness
             return hints.ToArray();
         }
 
+        [NoAutoStaticsCleanup] // immutable table
         private static readonly Vector3 CellCenterXZ = new Vector3(0.5f, 0f, 0.5f);
 
         // Splits a voxel position into its integer cell (converted exactly) and the fraction inside it.

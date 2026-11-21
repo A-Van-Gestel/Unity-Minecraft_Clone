@@ -38,6 +38,8 @@ namespace AgentHarness
         private const string WORLD_SCENE = "Scenes/World";
         private const string WORLD_SCENE_NAME = "World";
         private const string KEEP_IN_MEMORY_FIELD = LaunchSettingsOverrides.DevPrefix + nameof(DevSettings.keepChunksInMemory);
+        private const string MEMORY_NEEDS_DEBUG_BUILD =
+            "Memory mode needs a development build (dev settings are not loaded here); use throwaway.";
 
         /// <summary>World name used when Play starts straight in the World scene through the safe-play request.</summary>
         public const string SafePlayWorldName = "agent-play";
@@ -109,6 +111,8 @@ namespace AgentHarness
                 return Fail($"Active scene is '{SceneManager.GetActiveScene().name}'; a session starts from {MainMenuScene}.", out error);
             if (!IsValidWorldName(worldName))
                 return Fail($"'{worldName}' is not a valid world folder name.", out error);
+            error = ValidateStart(mode, load, Debug.isDebugBuild);
+            if (error != null) return false;
 
             WorldSaveData saved = null;
             if (load)
@@ -120,10 +124,10 @@ namespace AgentHarness
                                 "agent worlds are not migrated — clean it and create a new one.", out error);
             }
 
-            // A new world replaces any earlier agent world of the same name. Deleted before any state changes, so a
-            // failed delete (a locked file) leaves the session untouched.
+            // A new world replaces any earlier agent world of the same name. Deleted after the arguments are validated
+            // and before any state changes, so a refused start keeps the world and a failed delete changes nothing.
             string savePath = Path.Combine(SaveSystem.GetAgentSaveRoot(), worldName);
-            if (!load && Directory.Exists(savePath)) Directory.Delete(savePath, true);
+            if (!load && Directory.Exists(savePath) && !TryDeleteFolder(savePath, out error)) return false;
 
             if (!TryApplyPersistence(mode, out error)) return false;
             if (muted) Mute();
@@ -155,18 +159,16 @@ namespace AgentHarness
         public static bool TryCleanWorlds(string worldName, List<string> deleted, out string error)
         {
             string root = SaveSystem.GetAgentSaveRoot();
-            if (Application.isPlaying && s_active && WorldLaunchState.CurrentMode == RuntimeMode.Agent &&
-                SceneManager.GetActiveScene().name == WORLD_SCENE_NAME && (worldName == null || worldName == s_worldName))
-                return Fail($"'{s_worldName}' is loaded; end the session first.", out error);
+            if (IsCleanBlocked(Application.isPlaying && s_active, s_worldName, worldName))
+                return Fail($"Session world '{s_worldName}' is active; end the session first.", out error);
 
             if (worldName != null)
             {
                 string folder = Path.Combine(root, worldName);
                 if (!IsValidWorldName(worldName) || !Directory.Exists(folder))
                     return Fail($"No agent world '{worldName}' under {root}.", out error);
-                Directory.Delete(folder, true);
+                if (!TryDeleteFolder(folder, out error)) return false;
                 deleted.Add(worldName);
-                error = null;
                 return true;
             }
 
@@ -174,13 +176,54 @@ namespace AgentHarness
             {
                 foreach (string dir in Directory.GetDirectories(root))
                 {
-                    Directory.Delete(dir, true);
+                    if (!TryDeleteFolder(dir, out error))
+                        return Fail($"{error} Deleted before it: {deleted.Count}.", out error);
                     deleted.Add(new DirectoryInfo(dir).Name);
                 }
             }
 
             error = null;
             return true;
+        }
+
+        /// <summary>
+        /// Whether <c>clean_world</c> must refuse: any delete while a session is active (from launch, through the
+        /// scene load) would reach the live world for <c>--all</c> or its own name, matched as Windows folders are.
+        /// </summary>
+        /// <param name="sessionActive">True while an agent session is launched or loaded.</param>
+        /// <param name="activeWorldName">The active session's world name.</param>
+        /// <param name="requestedName">The world to delete, or <c>null</c> for every agent world.</param>
+        /// <returns>True when the delete would touch the active session's world.</returns>
+        public static bool IsCleanBlocked(bool sessionActive, string activeWorldName, string requestedName) =>
+            sessionActive && (requestedName == null ||
+                              string.Equals(requestedName, activeWorldName, System.StringComparison.OrdinalIgnoreCase));
+
+        /// <summary>Checks the <c>session_start</c> arguments that need no world or scene.</summary>
+        /// <param name="mode">How the world persists.</param>
+        /// <param name="load">True to load a saved agent world.</param>
+        /// <param name="isDebugBuild">True in the Editor and development players, where dev settings load.</param>
+        /// <returns>Why the start is refused, or <c>null</c>.</returns>
+        public static string ValidateStart(AgentSessionMode mode, bool load, bool isDebugBuild)
+        {
+            if (mode != AgentSessionMode.Memory) return null;
+            if (!isDebugBuild) return MEMORY_NEEDS_DEBUG_BUILD;
+            return load
+                ? "Memory mode never reads saved data, so --load would regenerate the world from its seed; use --mode Throwaway."
+                : null;
+        }
+
+        private static bool TryDeleteFolder(string folder, out string error)
+        {
+            try
+            {
+                Directory.Delete(folder, true);
+                error = null;
+                return true;
+            }
+            catch (System.Exception ex) when (ex is IOException || ex is System.UnauthorizedAccessException)
+            {
+                return Fail($"Could not delete '{folder}': {ex.Message}", out error);
+            }
         }
 
         /// <summary>
@@ -213,7 +256,7 @@ namespace AgentHarness
         {
             bool keepInMemory = mode == AgentSessionMode.Memory;
             if (keepInMemory && !Debug.isDebugBuild)
-                return Fail("Memory mode needs a development build (dev settings are not loaded here); use throwaway.", out error);
+                return Fail(MEMORY_NEEDS_DEBUG_BUILD, out error);
 
             Settings settings = SettingsManager.LoadSettings();
             if (settings.Dev.keepChunksInMemory == keepInMemory || !Debug.isDebugBuild)
@@ -287,6 +330,16 @@ namespace AgentHarness
         {
             SessionState.SetBool(SAFE_PLAY_KEY, true);
             SessionState.SetBool(SAFE_PLAY_MUTED_KEY, muted);
+        }
+
+        /// <summary>True while a safe-play request waits for the next Play-mode entry.</summary>
+        public static bool IsSafePlayRequested => SessionState.GetBool(SAFE_PLAY_KEY, false);
+
+        /// <summary>Drops a pending safe-play request, so a later manual Play opens the World scene as usual.</summary>
+        public static void CancelSafePlay()
+        {
+            SessionState.EraseBool(SAFE_PLAY_KEY);
+            SessionState.EraseBool(SAFE_PLAY_MUTED_KEY);
         }
 
         /// <summary>
