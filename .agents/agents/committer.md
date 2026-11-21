@@ -26,7 +26,7 @@ This prompt adds the repo know-how that lives nowhere else.
 1. Editor reachable and `ready` (not playing): run
    `unity command editor invoke_menu --path "Tools/Voxel Engine/Force Reserialize All Assets" --detach --format json`,
    then `unity job wait <jobId> --timeout 90` (repeat as separate calls until it returns), then
-   `until unity command editor status --result-only | grep -q '"status": "ready"'; do sleep 1; done`.
+   `unity status --until-ready --timeout 120`.
    Editor in Play mode or unreachable: skip the reserialize and say so in the report. Never press
    Play/Stop.
 2. Run `python Tools/Python/audit_reserialize_guids.py` (working tree vs HEAD). **Exit 1 = STOP**:

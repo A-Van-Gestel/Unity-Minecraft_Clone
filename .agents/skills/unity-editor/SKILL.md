@@ -3,7 +3,7 @@ name: unity-editor
 description: Reference card and recipes for driving the live Unity Editor from the shell with the Unity CLI (`unity command`, `unity recompile`, `unity job`) — running C# in the Editor (eval/script run), compile checks, console reads, menu items and code generation, long operations as detached jobs, scene/GameObject/serialized-field inspection, asset queries, captures, and profiler analysis. Use when you need to interact with the running Editor rather than just read/write files, when the user says "check it compiles in Unity", "run the menu item", "read the console", "capture the view", "profile this", "update the Unity CLI", or mentions unity-mcp / Unity_RunCommand (the old MCP bridge this replaces). For running validation suites use run-validation-suite; for debugging workflows use voxel-debugging.
 metadata:
   unity-cli-authored-against: Unity CLI 1.0.0-beta.11 + com.unity.pipeline 0.8.0-exp.1
-  unity-cli-last-verified: "2026-11-13 (Unity CLI 1.0.0 + com.unity.pipeline 1.0.0)"
+  unity-cli-last-verified: "2026-11-21 (Unity CLI 1.0.1 + com.unity.pipeline 1.0.1)"
 ---
 
 # Unity Editor via the Unity CLI
@@ -51,7 +51,7 @@ report `ready` before running anything that needs it (recipe in `references/reci
 In Play mode a pending change neither compiles nor reloads until Play stops, so `unity recompile`
 blocks — leave Play mode first (gotcha 15).
 
-**Domain reloads.** A call that lands during a reload fails fast (network error / HTTP 400).
+**Domain reloads.** A call that lands during a reload fails fast (exit `12`, `EDITOR_NOT_RUNNING`).
 Retry it; it is not a hang.
 
 **Play mode affects the user's Editor.** Always confirm with the user before `editor.playmode start`,
@@ -97,7 +97,7 @@ Retry it; it is not a hang.
   `--timeout` on a blocking call, and never one unbounded wait longer than the shell's timeout.
 - **Destructive asset commands** (`asset delete`, overwriting `write_text_file`, …) take
   `--confirm true`; run them with `--dry-run true` first.
-- **First `unity recompile` after a file write may return `400 Bad Request`** while auto-refresh imports; retry after a few seconds.
+- **`unity recompile` waits out the reload's own `400`/`503` replies**; one that still surfaces → retry after a few seconds.
 - **Version drift:** this card was verified against the versions in `metadata`. If `unity --version`
   or `package list` shows newer ones, re-check behavior against `unity command --query` and update
   the card and its `metadata`.
@@ -107,7 +107,8 @@ Retry it; it is not a hang.
   With the Editor open, re-run the smoke set and fix every doc or script whose answer changed:
   - `unity recompile --format json`: still exit 0, and `prove_red.py`'s `"errors":\s*(\d+)` still
     finds `data.summary.errors`;
-  - `editor status --result-only` still prints `"status": "ready"` (the ready-wait grep);
+  - `editor status --result-only` still prints `"status": "ready"` (`prove_red.py`'s ready check), and
+    `unity status --until-ready` still waits out a recompile's reload;
   - `console get --result-only` still has `entries[].seq` / `.message`;
   - a suite via `invoke_menu --detach`, then `job wait <id> --timeout 2`: exit 6 while it runs
     (`prove_red.py`'s `STILL_RUNNING_EXIT_CODE`), exit 0 once it is done;

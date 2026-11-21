@@ -20,11 +20,11 @@ there is no stale-DLL or new-file false green. When no Editor is running, fall b
 
 **Then wait for the reload before using the new code.** `recompile` returns when compilation
 ends; the domain reload that loads the result follows (~10 s here), and calls sent during it fail
-with a network error:
+with exit `12` (`EDITOR_NOT_RUNNING`):
 
 ```bash
 unity recompile --format json && \
-until unity command editor status --result-only | grep -q '"status": "ready"'; do sleep 1; done
+unity status --until-ready --timeout 120
 ```
 
 Verified: a constant changed three times read back its new value each time through this gate.

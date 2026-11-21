@@ -71,7 +71,7 @@ prompt names, never `/tmp` or the repo (`TMPDIR` is unset on this machine).
    `.agents/skills/validation-driven-bugfix/references/proving-baselines.md`.
 3. **Compile.** `unity recompile --format json` — never `dotnet build` alone, which cannot see a new
    `.cs` file. Exit 6 → fix your own errors and recompile. Then wait for the reload:
-   `until unity command editor status --result-only | grep -q '"status": "ready"'; do sleep 1; done`.
+   `unity status --until-ready --timeout 120`.
 4. **Lint.** `mcp__rider__lint_files` on your changed `.cs` files: clean in every line you touched;
    findings on untouched lines are pre-existing — list, never fix. Tool missing or failing →
    "Rider: not run".

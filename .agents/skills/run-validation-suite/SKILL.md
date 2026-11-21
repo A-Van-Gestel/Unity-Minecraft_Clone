@@ -33,8 +33,8 @@ it. Before trusting any suite run after an edit:
 
 1. `unity recompile --format json` — compiles the running Editor's assemblies, new files included,
    and must come back clean (exit `0`).
-2. Wait for the domain reload that loads them: poll `unity command editor status --result-only`
-   until it reports `"status": "ready"`. `recompile` returns **before** that reload.
+2. Wait for the domain reload that loads them: `unity status --until-ready --timeout 120`.
+   `recompile` returns **before** that reload.
 3. Only then run the suite. (There is no automatic stale-assembly guard yet — that is the open
    VS-3 item.)
 

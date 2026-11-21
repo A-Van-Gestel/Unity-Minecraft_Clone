@@ -1,6 +1,6 @@
 # Unity CLI Editor Bridge
 
-**Version:** 1.9  
+**Version:** 1.10  
 **Date:** 2026-09-27  
 **Status:** Implemented (Stable)  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production) — agent tooling, Editor only
@@ -61,7 +61,7 @@ The `UC-*` IDs were issued by the design this document was promoted from
 | Component            | Where                                                          | Role                                                                                                    |
 |----------------------|----------------------------------------------------------------|---------------------------------------------------------------------------------------------------------|
 | Unity CLI            | `unity` on `PATH` (`%LOCALAPPDATA%\Unity\bin`), machine-global | Shell entry point: `unity command`, `unity recompile`, `unity job`, `unity status`.                     |
-| `com.unity.pipeline` | `Packages/manifest.json`, pinned `1.0.0`                       | Runs inside the Editor, serves the CLI on localhost.                                                    |
+| `com.unity.pipeline` | `Packages/manifest.json`, pinned `1.0.1`                       | Runs inside the Editor, serves the CLI on localhost.                                                    |
 | Agent environment    | `.claude/settings.json` → `env`                                | `UNITY_PROJECT_PATH=.`, `UNITY_NO_BANNER`, `UNITY_NO_UPDATE_CHECK`; read-only CLI calls pre-allowed.    |
 | `unity-editor` skill | `.agents/skills/unity-editor/`                                 | The agent-facing reference card, recipes and gotcha list.                                               |
 | Profiler queries     | `Tools/UnityCli/Profiler/ProfilerQueries.cs`                   | Profiler analysis entry points (§6).                                                                    |
@@ -124,13 +124,13 @@ file created moments earlier, and returns Unity's own errors with file and line:
 `6` on compile errors.
 
 **It returns when compilation ends, before the domain reload that loads the result.** A command
-sent straight after it fails with a network error; once `editor status` reports
-`"status": "ready"`, the new code is live (a changed constant read back its new value). The gate
+sent straight after it fails with exit `12` (`EDITOR_NOT_RUNNING`); once the Editor reports
+`ready`, the new code is live (a changed constant read back its new value). The gate
 is therefore:
 
 ```bash
 unity recompile --format json && \
-until unity command editor status --result-only | grep -q '"status": "ready"'; do sleep 1; done
+unity status --until-ready --timeout 120
 ```
 
 Without a running Editor, `dotnet build` of the two project assemblies is the fallback; it cannot
@@ -153,7 +153,7 @@ and `editor status` reports `compiling` throughout. With no change pending it re
   later wait returns its result; `unity job status <id>` reports `state` (`running` / `completed`).
   Without `--timeout` the wait lasts as long as the job, which outlives an agent shell's default
   timeout, so agents repeat bounded waits as separate calls.
-- **A call that lands during a domain reload fails fast** (network error / HTTP 400) and can be
+- **A call that lands during a domain reload fails fast** (exit `12`, `EDITOR_NOT_RUNNING`) and can be
   retried. It never hangs and never needs an Editor restart.
 - **A blocked main thread** — a long synchronous command, a compile, or a modal dialog — makes
   every call wait and then fail at its `--timeout` with *"Pipeline command … timed out"*. Observed
@@ -274,7 +274,7 @@ bridge installed is `61480be4`.
 
 | Alternative                                                                                | Why rejected                                                                                                                                                                                                                                                                                                                                                                                                                                                | Date       |
 |--------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------|
-| `unity mcp` (the CLI's own MCP server) as a standing server                                | Nothing the shell path lacks; every tool call capped at a fixed 60 s with no detach; 5 s `script eval` default; 160 tools (~26k-token list). Kept only as the documented fallback for an agent without shell access.                                                                                                                                                                                                                                        | 2026-09-27 |
+| `unity mcp` (the CLI's own MCP server) as a standing server                                | Nothing the shell path lacks; every tool call capped at a fixed 60 s with no detach; 5 s `script eval` default; 160 tools (~26k-token list). Kept only as the documented fallback for an agent without shell access. Since CLI 1.0.0, `--tool-groups` (one tool per command group) removes the tool-list cost; the 60 s cap and `script eval` default were not re-checked.                                                                                  | 2026-09-27 |
 | Hybrid: trimmed old bridge beside the CLI                                                  | No old tool was unique. Its `Unity_Profiler_*` tools never worked over MCP (null `conversationContext`), `ValidateScript` is whole-file substring heuristics, captures had no size control.                                                                                                                                                                                                                                                                 | 2026-09-27 |
 | Keep ai.assistant installed alongside the CLI                                              | Two bridges, 19 patches to maintain, a deprecated package pinned against entitlement changes.                                                                                                                                                                                                                                                                                                                                                               | 2026-09-27 |
 | Upgrade ai.assistant to ≥ 2.13                                                             | Reintroduces the entitlement enforcement the 2.6.0-pre.1 pin avoided.                                                                                                                                                                                                                                                                                                                                                                                       | 2026-09-27 |
@@ -289,6 +289,9 @@ bridge installed is `61480be4`.
 
 ## Document History
 
+* **v1.10** - CLI 1.0.1 + `com.unity.pipeline` 1.0.1: a call during a domain reload exits `12`
+  (`EDITOR_NOT_RUNNING`); `unity recompile` waits out the reload's `400`/`503` replies; §3: the reload wait is
+  `unity status --until-ready`; §10: `unity mcp --tool-groups` noted (2026-11-21).
 * **v1.9** - §1/§2: the custom `voxel-engine` command group (`Design/AGENT_HARNESS.md`); §7: the package can also
   serve players through the Runtime Pipeline toggles, not enabled in this project (2026-11-20).
 * **v1.8** - CLI 1.0.0 + `com.unity.pipeline` 1.0.0 (first stable): `script eval` prints only its value
