@@ -34,7 +34,7 @@ v1 scope).
   (WS-4 phase table).
 - [`../Guides/CODING_STYLE_GUIDE.md`](../Guides/CODING_STYLE_GUIDE.md) — naming/docstring rules
   for the new public engine surface.
-- [`../Design/AGENT_HARNESS.md`](../Design/AGENT_HARNESS.md) — the `voxel-engine console` command runs a
+- [`AGENT_HARNESS_SYSTEM.md`](AGENT_HARNESS_SYSTEM.md) — the `voxel-engine console` command runs a
   console line through the live `ConsoleUI.Engine` for an agent (World scene only, refused on a non-session
   world unless `--allow-persisted`); the console itself is unchanged.
 

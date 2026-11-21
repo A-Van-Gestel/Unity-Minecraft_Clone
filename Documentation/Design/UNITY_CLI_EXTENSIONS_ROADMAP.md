@@ -79,13 +79,13 @@ Player instead of the Editor. It needs a Development player with the Pipeline ru
 Development build and document the security posture. Never for Release.
 
 **Update (2026-11-20).** Player serving is now also the planned `AH-2` phase of
-[`AGENT_HARNESS.md`](AGENT_HARNESS.md), where the `voxel-engine` commands would be served by a Development
+[`AGENT_HARNESS_SYSTEM.md`](../Architecture/AGENT_HARNESS_SYSTEM.md), where the `voxel-engine` commands would be served by a Development
 player behind a runtime start switch. `AH-2` settles this item; the "Never for Release" line is revisited
 by its `AH-3` spike.
 
 **Update (2026-11-21).** Settled by `AH-2`: a Development player started with `-mc-run agent` answers
 `unity command --runtime-path <build dir> …`, verified on an IL2CPP build; the security posture (loopback, token,
-server off unless asked, no release toggle) is in [`AGENT_HARNESS.md`](AGENT_HARNESS.md) §7.
+server off unless asked, no release toggle) is in [`AGENT_HARNESS_SYSTEM.md`](../Architecture/AGENT_HARNESS_SYSTEM.md) §6.
 
 ## UC-8 — Project Auditor through the CLI
 

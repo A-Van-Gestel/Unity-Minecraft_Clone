@@ -74,7 +74,7 @@ This is the heart of the project, containing all C# source code. It is organized
 
 #### `Scripts/AgentHarness/`
 
--   **Purpose:** The `voxel-engine` Unity CLI command group (namespace `AgentHarness`): typed, one-call-per-action commands an AI agent uses to drive the running game — start a safe world, wait, move, edit blocks, capture. Every session world runs in `RuntimeMode.Agent` with its own save root, so a player's worlds are never opened writable. Design, safety model and command reference: `Documentation/Design/AGENT_HARNESS.md`.
+-   **Purpose:** The `voxel-engine` Unity CLI command group (namespace `AgentHarness`): typed, one-call-per-action commands an AI agent uses to drive the running game — start a safe world, wait, move, edit blocks, capture. Every session world runs in `RuntimeMode.Agent` with its own save root, so a player's worlds are never opened writable. Safety model and command reference: `Documentation/Architecture/AGENT_HARNESS_SYSTEM.md`; unbuilt work: `Documentation/Design/AGENT_HARNESS_ROADMAP.md`.
 -   **Examples:**
     -   `AgentCommands.cs`: The `[CliGroupCommand]` wrappers; each calls the facade and writes a structured result.
     -   `AgentSession.cs`: The session lifecycle — launch, persistence/mute overrides, agent save-root clean-up.

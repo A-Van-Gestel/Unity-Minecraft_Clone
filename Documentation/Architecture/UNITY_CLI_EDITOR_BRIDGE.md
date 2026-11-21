@@ -27,8 +27,8 @@ the same day during the migration.
 
 - [`../Design/UNITY_CLI_EXTENSIONS_ROADMAP.md`](../Design/UNITY_CLI_EXTENSIONS_ROADMAP.md) — owns
   the bridge's unbuilt work (`UC-6`…`UC-8`); `UC-5`, the §7 release-build check, closed there.
-- [`../Design/AGENT_HARNESS.md`](../Design/AGENT_HARNESS.md) — the `voxel-engine` custom command group
-  built on this bridge (§1, §2), and the planned player-build serving (§7).
+- [`AGENT_HARNESS_SYSTEM.md`](AGENT_HARNESS_SYSTEM.md) — the `voxel-engine` custom command group
+  built on this bridge (§1, §2), and its Development-player serving (§6).
 - [`../Design/PROJECT_AUDITOR_FINDINGS_REPORT.md`](../Design/PROJECT_AUDITOR_FINDINGS_REPORT.md) —
   §3.4 records why the package advisories for this bridge are deliberate.
 - [`../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md`](../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md)
@@ -58,16 +58,16 @@ The `UC-*` IDs were issued by the design this document was promoted from
 
 ## 1. Components
 
-| Component            | Where                                                          | Role                                                                                                    |
-|----------------------|----------------------------------------------------------------|---------------------------------------------------------------------------------------------------------|
-| Unity CLI            | `unity` on `PATH` (`%LOCALAPPDATA%\Unity\bin`), machine-global | Shell entry point: `unity command`, `unity recompile`, `unity job`, `unity status`.                     |
-| `com.unity.pipeline` | `Packages/manifest.json`, pinned `1.0.1`                       | Runs inside the Editor, serves the CLI on localhost.                                                    |
-| Agent environment    | `.claude/settings.json` → `env`                                | `UNITY_PROJECT_PATH=.`, `UNITY_NO_BANNER`, `UNITY_NO_UPDATE_CHECK`; read-only CLI calls pre-allowed.    |
-| `unity-editor` skill | `.agents/skills/unity-editor/`                                 | The agent-facing reference card, recipes and gotcha list.                                               |
-| Profiler queries     | `Tools/UnityCli/Profiler/ProfilerQueries.cs`                   | Profiler analysis entry points (§6).                                                                    |
-| Profiler capture     | `Tools/UnityCli/Profiler/ProfilerCapture.cs`                   | Arms a recording with GC.Alloc call stacks and stops + saves it after a phase marker (§6).              |
-| Capture folder       | `Assets/AgentCaptures~/` (gitignored)                          | The one safe place for saved captures (§5).                                                             |
-| `voxel-engine` group | `Assets/Scripts/AgentHarness/`, `Assets/Editor/AgentHarness/`  | Custom `[CliGroupCommand]` commands that drive the running game safely (§2; `Design/AGENT_HARNESS.md`). |
+| Component            | Where                                                          | Role                                                                                                                 |
+|----------------------|----------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------|
+| Unity CLI            | `unity` on `PATH` (`%LOCALAPPDATA%\Unity\bin`), machine-global | Shell entry point: `unity command`, `unity recompile`, `unity job`, `unity status`.                                  |
+| `com.unity.pipeline` | `Packages/manifest.json`, pinned `1.0.1`                       | Runs inside the Editor, serves the CLI on localhost.                                                                 |
+| Agent environment    | `.claude/settings.json` → `env`                                | `UNITY_PROJECT_PATH=.`, `UNITY_NO_BANNER`, `UNITY_NO_UPDATE_CHECK`; read-only CLI calls pre-allowed.                 |
+| `unity-editor` skill | `.agents/skills/unity-editor/`                                 | The agent-facing reference card, recipes and gotcha list.                                                            |
+| Profiler queries     | `Tools/UnityCli/Profiler/ProfilerQueries.cs`                   | Profiler analysis entry points (§6).                                                                                 |
+| Profiler capture     | `Tools/UnityCli/Profiler/ProfilerCapture.cs`                   | Arms a recording with GC.Alloc call stacks and stops + saves it after a phase marker (§6).                           |
+| Capture folder       | `Assets/AgentCaptures~/` (gitignored)                          | The one safe place for saved captures (§5).                                                                          |
+| `voxel-engine` group | `Assets/Scripts/AgentHarness/`, `Assets/Editor/AgentHarness/`  | Custom `[CliGroupCommand]` commands that drive the running game safely (§2; `Architecture/AGENT_HARNESS_SYSTEM.md`). |
 
 `CLAUDE.md` / `AGENTS.md` carry the always-loaded rules (compile gate, long operations, captures,
 play-mode confirmation) and route everything else to the skill.
@@ -110,7 +110,7 @@ default parameter values are not applied** — every argument must be passed.
 `Assembly-CSharp` (no asmdef reference needed), with typed `--name value` flags that keep their C# defaults.
 This project defines one group, `voxel-engine` (`unity command voxel-engine <name>`): typed, safe-by-default
 commands for running the game in Play mode (start a world, wait, move, edit blocks, capture). They are
-served in Play mode too (checked 2026-11-20); the command list, safety model and roadmap are in [`../Design/AGENT_HARNESS.md`](../Design/AGENT_HARNESS.md).
+served in Play mode too (checked 2026-11-20); the command list and safety model are in [`AGENT_HARNESS_SYSTEM.md`](AGENT_HARNESS_SYSTEM.md), the roadmap in [`../Design/AGENT_HARNESS_ROADMAP.md`](../Design/AGENT_HARNESS_ROADMAP.md).
 
 **Console.** `console get` returns entries plus a `cursor` and `session`; passing them back as
 `--since` / `--since-session` reads only new entries.
@@ -219,7 +219,7 @@ Profiler players carry the runtime but start its server only for `-mc-run agent`
 (release) stays off, so Production and Master players carry none of it. `Unity.Pipeline.Attributes` is
 unconstrained, which is why the `voxel-engine` commands compile into every build and stay inert without
 the runtime assemblies. Player serving, its stripping roots and the descriptor workaround are in
-[`../Design/AGENT_HARNESS.md`](../Design/AGENT_HARNESS.md) (`AH-2`); a Master build (`AH-3`) is not done.
+[`AGENT_HARNESS_SYSTEM.md`](AGENT_HARNESS_SYSTEM.md) §6 (`AH-2`); a Master build (`AH-3`) is not done.
 
 Expected for StandaloneWindows64, from the 1.0.0 `.asmdef` constraints (not yet re-measured on a 1.0.0
 build):
