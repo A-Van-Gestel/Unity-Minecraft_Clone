@@ -11,7 +11,7 @@
 //         continue; return (string)a.GetType(\"UnityCli.PregenProbe\").GetMethod(\"Report\").Invoke(null, null); }
 //         return \"not found\";" --result-only
 //         Report() starts with RUNNING while the walk or the post-check is still going; Stop() cancels the walk.
-// NEEDS   A loaded World in Play mode (WorldRig.Launch). Entering Play mode is the user's call. The walk holds the
+// NEEDS   A loaded World in Play mode (voxel-engine session_start, then wait --until WorldReady). Entering Play mode is the user's call. The walk holds the
 //         player itself, so /fly and /noclip are not needed.
 
 using System.Collections.Generic;
