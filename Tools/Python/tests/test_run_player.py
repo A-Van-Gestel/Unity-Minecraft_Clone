@@ -48,6 +48,13 @@ class ParseTests(unittest.TestCase):
         self.assertEqual(run_player.parse_run_finished("[Launch] Run finished: report (none), exit code 1"), (None, 1))
         self.assertIsNone(run_player.parse_run_finished("nothing here"))
 
+    def test_success_needs_exit_zero_and_a_report_unless_none_is_required(self):
+        self.assertTrue(run_player.run_succeeded(("r.log", 0), report_required=True))
+        self.assertFalse(run_player.run_succeeded((None, 0), report_required=True))
+        self.assertTrue(run_player.run_succeeded((None, 0), report_required=False))
+        self.assertFalse(run_player.run_succeeded((None, 1), report_required=False))
+        self.assertFalse(run_player.run_succeeded(None, report_required=False))
+
 
 class ProcessTests(unittest.TestCase):
     def test_timeout_kills_the_process(self):
@@ -72,8 +79,8 @@ class MainTests(unittest.TestCase):
     def tearDown(self):
         shutil.rmtree(self.folder, ignore_errors=True)
 
-    def run_main(self, fake_process):
-        argv = ["--exe", str(self.exe), "--tag", "t1", "--out", str(self.out), "--", "-mc-run", "startup-new"]
+    def run_main(self, fake_process, *options):
+        argv = ["--exe", str(self.exe), "--tag", "t1", "--out", str(self.out), *options, "--", "-mc-run", "startup-new"]
         stdout = io.StringIO()
         with mock.patch.object(run_player, "player_log_path", return_value=self.log), \
                 mock.patch.object(run_player, "run_process", side_effect=fake_process), redirect_stdout(stdout):
@@ -97,6 +104,13 @@ class MainTests(unittest.TestCase):
         code, out = self.run_main(self.writes_log(FINISHED.format(code=0), (None, True)))
         self.assertEqual(code, 0, out)
         self.assertIn("killed (timeout)", out)
+
+    def test_a_run_without_a_report_fails_unless_no_report_is_given(self):
+        no_report = "[Launch] Run finished: report (none), exit code 0"
+        code, out = self.run_main(self.writes_log(no_report, (0, False)))
+        self.assertEqual(code, 1, out)
+        code, out = self.run_main(self.writes_log(no_report, (0, False)), "--no-report")
+        self.assertEqual(code, 0, out)
 
     def test_a_failed_run_prints_the_log_tail(self):
         code, out = self.run_main(self.writes_log("line a\nlast line\n" + FINISHED.format(code=1), (1, False)))
