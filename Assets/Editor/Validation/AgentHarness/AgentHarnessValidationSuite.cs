@@ -15,7 +15,8 @@ namespace Editor.Validation.AgentHarness
     /// <summary>
     /// Truth-table suite for the AI agent harness: the straight-route dry run on a fake voxel grid, the yaw helper,
     /// the world-name guard that keeps <c>clean_world</c> inside the agent save root, the agent save routing, the
-    /// edit-mode mutation refusal and the command count floor. No scene, no player, no world.
+    /// edit-mode mutation refusal, the command count floor, the package members the player's descriptor fallback
+    /// reflects into, and the Editor/player split of <c>quit</c> and <c>capture</c>. No scene, no player, no world.
     /// <para>
     /// All scenarios are <b>baselines</b>. The load-bearing one is AH-04: a name that escapes the agent root would
     /// let a delete reach the player's saves.
@@ -24,9 +25,10 @@ namespace Editor.Validation.AgentHarness
     /// <b>Prove-red</b> (each mutation applied, observed, and reverted): dropping the wall test of the one-block hop
     /// reds AH-01; disabling the walking fluid check or reporting the water cell's air above reds AH-01; disabling the
     /// flying wall check reds AH-02; swapping the <c>Atan2</c> arguments reds AH-03; accepting every name reds AH-04;
-    /// routing agent saves to the player's root reds AH-05; skipping the no-world refusal reds AH-06; and
-    /// un-attributing a command reds AH-07. Mutating <c>TryCleanWorlds</c>' own name check is never proven: it would
-    /// delete the save root's parent.
+    /// routing agent saves to the player's root reds AH-05; skipping the no-world refusal reds AH-06;
+    /// un-attributing a command reds AH-07; misspelling a reflected member name reds AH-09; and letting the Editor
+    /// quit or a player capture into its build folder reds AH-10. Mutating <c>TryCleanWorlds</c>' own name check is
+    /// never proven: it would delete the save root's parent.
     /// </para>
     /// </summary>
     public static class AgentHarnessValidationSuite
@@ -60,6 +62,8 @@ namespace Editor.Validation.AgentHarness
                 new Scenario("AH-06 A world-changing command is refused without a loaded world", RunAh06MutationRefused),
                 new Scenario("AH-07 Every declared harness command is registered in the voxel-engine group", RunAh07CommandCount),
                 new Scenario("AH-08 clean_world by name deletes exactly that agent world and refuses an unknown one", RunAh08CleanByName),
+                new Scenario("AH-09 The package members the player's descriptor fallback reflects into still exist", RunAh09DescriptorMembers),
+                new Scenario("AH-10 quit refuses only in the Editor, and a player's captures leave its build folder", RunAh10EditorPlayerSplit),
             };
             return ValidationSuiteRunner.Execute("Agent Harness", scenarios, KnownBugChannel.Unimplemented, logToConsole,
                 showProgress);
@@ -211,6 +215,30 @@ namespace Editor.Validation.AgentHarness
                 ok &= Check($"allowPersisted={allowPersisted}: refused with a message", !allowed && !string.IsNullOrEmpty(error));
             }
 
+            return ok;
+        }
+
+        /// <summary>AH-09 — a Unity.Pipeline upgrade that renames a descriptor member reds here, not only in a player.</summary>
+        private static bool RunAh09DescriptorMembers()
+        {
+            bool resolved = AgentDescriptor.CheckPackageMembers(out string error);
+            return Check($"every reflected Unity.Pipeline member resolves{(resolved ? "" : ": " + error)}", resolved);
+        }
+
+        /// <summary>AH-10 — the Editor stops Play rather than quitting; a player's dataPath is inside its build folder.</summary>
+        private static bool RunAh10EditorPlayerSplit()
+        {
+            const string DATA_PATH = "C:/Build/Game_Data";
+            const string PERSISTENT_PATH = "C:/Users/Agent/AppData/LocalLow/Company/Game";
+            bool ok = Check("quit is refused in the Editor", !string.IsNullOrEmpty(AgentWorldOps.QuitRefusal(true)));
+            ok &= Check("quit is allowed in a player", AgentWorldOps.QuitRefusal(false) == null);
+
+            string editorFolder = AgentWorldOps.DefaultCaptureFolder(true, DATA_PATH, PERSISTENT_PATH).Replace('\\', '/');
+            string playerFolder = AgentWorldOps.DefaultCaptureFolder(false, DATA_PATH, PERSISTENT_PATH).Replace('\\', '/');
+            ok &= Check($"Editor captures stay in the never-imported AgentCaptures~ ({editorFolder})",
+                editorFolder == DATA_PATH + "/AgentCaptures~");
+            ok &= Check($"player captures go under persistentDataPath ({playerFolder})",
+                playerFolder.StartsWith(PERSISTENT_PATH + "/", StringComparison.Ordinal));
             return ok;
         }
 

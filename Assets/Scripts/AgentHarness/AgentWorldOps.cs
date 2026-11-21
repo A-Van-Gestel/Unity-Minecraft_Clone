@@ -89,6 +89,8 @@ namespace AgentHarness
     {
         private const float HALF_TURN_DEGREES = 180f;
         private const float FULL_TURN_DEGREES = 360f;
+        private const string EDITOR_CAPTURE_FOLDER = "AgentCaptures~";
+        private const string PLAYER_CAPTURE_FOLDER = "AgentCaptures";
 
         /// <summary>Captures the current game state.</summary>
         /// <returns>A filled status; world and player fields stay default without a loaded world.</returns>
@@ -149,6 +151,22 @@ namespace AgentHarness
             Player player = world.player;
             return player == null || player.VoxelRigidbody == null || !player.VoxelRigidbody.IsTeleportHeld;
         }
+
+        /// <summary>The folder a capture without an explicit path goes to.</summary>
+        /// <param name="isEditor">True in the Editor, where captures stay in the never-imported <c>Assets/AgentCaptures~</c>.</param>
+        /// <param name="dataPath"><see cref="Application.dataPath"/>, which in a player is inside its build folder.</param>
+        /// <param name="persistentDataPath"><see cref="Application.persistentDataPath"/>, a player's capture root.</param>
+        /// <returns>The absolute capture folder.</returns>
+        public static string DefaultCaptureFolder(bool isEditor, string dataPath, string persistentDataPath) => isEditor
+            ? Path.Combine(dataPath, EDITOR_CAPTURE_FOLDER)
+            : Path.Combine(persistentDataPath, PLAYER_CAPTURE_FOLDER);
+
+        /// <summary>Why the process may not be quit by an agent, or <c>null</c> when it may.</summary>
+        /// <param name="isEditor">True in the Editor, whose Play mode is stopped rather than quit.</param>
+        /// <returns>The refusal, or <c>null</c> in a player.</returns>
+        public static string QuitRefusal(bool isEditor) => isEditor
+            ? "The Editor does not quit: stop Play mode with 'unity command editor.playmode stop'."
+            : null;
 
         /// <summary>Refuses a world-changing operation on anything but a session world, unless explicitly allowed.</summary>
         /// <param name="allowPersisted">The caller passed <c>--allow-persisted</c>.</param>

@@ -1,6 +1,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Threading.Tasks;
+using Launch;
 using Serialization;
 using UI;
 using Unity.Pipeline.Commands;
@@ -44,13 +45,12 @@ namespace AgentHarness
         internal const string Group = "voxel-engine";
 
         /// <summary>The number of commands this class declares; the harness suite fails when a command disappears.</summary>
-        internal const int CommandCount = 18;
+        internal const int CommandCount = 19;
 
         private const string ALLOW_PERSISTED_HELP = "Allow changing a world that is not an agent session world";
         private const double TIMEOUT_MARGIN_SECONDS = 1.0;
         private const int DEFAULT_CAPTURE_WIDTH = 1280;
         private const int DEFAULT_CAPTURE_HEIGHT = 720;
-        private const string CAPTURE_FOLDER = "AgentCaptures~";
         private const int SURFACE_Y = -1;
         private const float DEFAULT_HOLD_SECONDS = 0.5f;
         private const float DEFAULT_ARRIVAL_TOLERANCE = 0.5f;
@@ -234,7 +234,7 @@ namespace AgentHarness
         [CliGroupCommand(Group, "Render the main camera to a PNG one frame after the call, so it shows the latest state.", Effect = CommandEffect.Additive)]
         internal static async Task<ExitCode> Capture(
             CommandContext cmd,
-            [CliArg("output-path", "PNG path; default Assets/AgentCaptures~/capture_<frame>.png")] string outputPath = null,
+            [CliArg("output-path", "PNG path; default Assets/AgentCaptures~ (Editor) or <persistentDataPath>/AgentCaptures (player), capture_<frame>.png")] string outputPath = null,
             [CliArg("width", "Pixel width")] int width = DEFAULT_CAPTURE_WIDTH,
             [CliArg("height", "Pixel height")] int height = DEFAULT_CAPTURE_HEIGHT)
         {
@@ -242,7 +242,9 @@ namespace AgentHarness
             await Task.Yield();
             cmd.CancellationToken.ThrowIfCancellationRequested();
 
-            string path = outputPath ?? Path.Combine(Application.dataPath, CAPTURE_FOLDER, $"capture_{Time.frameCount}.png");
+            string folder = AgentWorldOps.DefaultCaptureFolder(Application.isEditor, Application.dataPath,
+                Application.persistentDataPath);
+            string path = outputPath ?? Path.Combine(folder, $"capture_{Time.frameCount}.png");
             if (!AgentWorldOps.TryCapture(path, width, height, out string error)) return Refuse(cmd, error);
 
             cmd.Result.Write(new { path, width, height });
@@ -372,6 +374,17 @@ namespace AgentHarness
 
             AgentWorldOps.TryGetBlock(new Vector3Int(x, y, z), out string block, out _, out _);
             cmd.Result.Write(new { action = action.ToString(), x, y, z, blockNow = block });
+            return ExitCode.Success;
+        }
+
+        [CliGroupCommand(Group, "Player only: end the agent run and exit the player with code 0 just after replying.", Effect = CommandEffect.Destructive)]
+        internal static ExitCode Quit(CommandContext cmd)
+        {
+            string refusal = AgentWorldOps.QuitRefusal(Application.isEditor);
+            if (refusal != null) return Refuse(cmd, refusal);
+
+            AgentServer.QuitSoon(LaunchSession.ExitSuccess);
+            cmd.Result.Write(new { quitting = true, exitCode = LaunchSession.ExitSuccess });
             return ExitCode.Success;
         }
 

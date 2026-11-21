@@ -1,0 +1,7 @@
+{
+    "port": 0,
+    "enableAuditLogging": true,
+    "autoStart": false,
+    "maxWorkItemsPerFrame": 10,
+    "settingsVersion": 2
+}

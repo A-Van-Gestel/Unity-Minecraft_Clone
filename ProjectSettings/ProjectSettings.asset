@@ -708,7 +708,10 @@ PlayerSettings:
   webWasm2023: 0
   webEnableSubmoduleStrippingCompatibility: 0
   webProgressiveAssetLoading: 0
-  scriptingDefineSymbols: {}
+  scriptingDefineSymbols:
+    Android: ENABLE_RUNTIME_PIPELINE_DEV
+    Server: ENABLE_RUNTIME_PIPELINE_DEV
+    Standalone: ENABLE_RUNTIME_PIPELINE_DEV
   additionalCompilerArguments: {}
   platformArchitecture: {}
   scriptingBackend:

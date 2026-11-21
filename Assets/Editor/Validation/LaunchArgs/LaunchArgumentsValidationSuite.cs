@@ -29,7 +29,7 @@ namespace Editor.Validation.LaunchArgs
     /// all-or-nothing <c>return null</c> reds B5 and B6; and an <see cref="LaunchActionInstaller.InstalledActionCount"/>
     /// out of step with the list reds B9; replacing a re-overridden entry wholesale (losing the first file value) reds
     /// B11; listing <c>dev.*</c> fields as changed reds B13; and a <see cref="LaunchSettingsOverrides.HoldsOverride"/>
-    /// that ignores a later edit reds B14.
+    /// that ignores a later edit reds B14; renaming the agent action reds B15.
     /// </para>
     /// </summary>
     public static class LaunchArgumentsValidationSuite
@@ -65,6 +65,7 @@ namespace Editor.Validation.LaunchArgs
                 new Scenario("B13 Change notifications name Settings fields only, never dev.*", RunB13ChangedFields),
                 new Scenario("B14 The report's settings block lists exactly the non-default fields, overrides tagged",
                     RunB14SettingsDifference),
+                new Scenario("B15 -mc-run agent names the installed agent launch action", RunB15AgentAction),
             };
             return ValidationSuiteRunner.Execute("Launch Arguments", scenarios, KnownBugChannel.Unimplemented, logToConsole,
                 showProgress);
@@ -285,6 +286,22 @@ namespace Editor.Validation.LaunchArgs
             }
 
             return ok;
+        }
+
+        /// <summary>B15 — the agent harness's player switch is reachable as <c>-mc-run agent</c>.</summary>
+        private static bool RunB15AgentAction()
+        {
+            LaunchArguments parsed = Parse("-mc-run", "agent", "-mc-mute");
+            bool ok = Check("'-mc-run agent' parses without errors", parsed.Action == "agent" && parsed.Errors.Count == 0);
+
+            ILaunchAction found = null;
+            foreach (ILaunchAction action in LaunchActionInstaller.CreateAll())
+            {
+                if (action.Name == parsed.Action)
+                    found = action;
+            }
+
+            return ok & Check("the installed 'agent' action is the AgentLaunchAction", found is AgentLaunchAction);
         }
 
         /// <summary>B10 — -mc-mute is a value-less flag that leaves the other options alone.</summary>
