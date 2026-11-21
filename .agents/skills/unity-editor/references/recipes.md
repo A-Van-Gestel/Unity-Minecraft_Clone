@@ -169,8 +169,44 @@ Verified 2026-11-20 end to end (safe play, memory and throwaway sessions, reload
   is stable, and `/noclip` holds an eye under its surface (lava's buoyancy floats the player out).
 - **Keep the rig as a script** (fixed seed + placements + pose + `time freeze`), not as a saved world: a later
   session re-runs it and gets a comparable frame.
-- `Tools/UnityCli/PlayMode/WorldRig.cs` (`script run`) is deprecated; it is kept only until the user has seen the
-  harness fully working.
+
+</recipe>
+
+<recipe name="player-agent">
+
+**"Drive a built Development player with the same `voxel-engine` commands"**
+
+A Development player carries the Unity CLI runtime server (the Pipeline's dev toggle is on, `autoStart` off) and
+starts it only for `-mc-run agent`, which also mutes and stays on the main menu. Building the player is the user's
+call (`player-runner`); launching and driving it go through `run_player.py --no-report`.
+
+```bash
+export MSYS_NO_PATHCONV=1
+B="<build dir>"                       # Windows path, e.g. from `cd "$B" && pwd -W`
+python Tools/Python/run_player.py --exe "$B/Minecraft Clone.exe" --tag agent --timeout 10 --no-report \
+  -- -mc-run agent                    # run in the background; it returns when the player quits
+V="unity command --runtime-path $B voxel-engine"   # quote "$B" when it contains spaces
+$V status                             # retry until the descriptor exists (a few seconds after launch)
+$V session_start --mode Memory --name probe --seed 4242
+$V wait --until WorldReady --timeout 120
+$V set_block --x 0 --y 90 --z 0 --block stone
+$V session_end; $V clean_world --name probe
+$V quit                               # player only: logs 'Run finished … exit code 0' and exits; run_player exits 0
+```
+
+Verified 2026-11-21 against an IL2CPP Development build (status, session, block edit, capture, end, clean, quit), and
+the refusal in a Master build (`-mc-run agent` → exit 1, no descriptor).
+
+- **The descriptor is the game's, not the package's.** The package restricts `.unity-pipeline-runtime-port` through
+  `whoami`/`icacls`, which an IL2CPP player cannot start, so it logs one `Descriptor … was not written` error and
+  `AgentDescriptor` writes the same file without that restriction (`[Agent] Wrote the runtime descriptor …`).
+- **`Unity.Pipeline` is preserved whole** (`Assets/link.xml`): Medium stripping otherwise drops the getters its
+  descriptor is serialized from, and the file comes out without `pid`, which the CLI rejects as no instance.
+- **Without `-mc-run agent` nothing listens**: no descriptor, no `Start HTTP server` line, and `--runtime-path` fails
+  with exit 6. The method-reload receiver (signed pushes only) is present in every Development build regardless.
+- **Agent worlds and captures live under the player's `persistentDataPath`** (`Agent_Saves/`, `AgentCaptures/`),
+  which the Editor shares, so `world_list` in either sees the other's agent worlds.
+- A harness-enabled build is for functional checks and low-precision probes, never a perf A/B leg.
 
 </recipe>
 

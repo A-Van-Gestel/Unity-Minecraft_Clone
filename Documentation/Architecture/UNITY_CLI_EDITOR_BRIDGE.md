@@ -1,6 +1,6 @@
 # Unity CLI Editor Bridge
 
-**Version:** 1.10  
+**Version:** 1.11  
 **Date:** 2026-09-27  
 **Status:** Implemented (Stable)  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production) — agent tooling, Editor only
@@ -51,7 +51,7 @@ The `UC-*` IDs were issued by the design this document was promoted from
 | **UC-4** | `unity mcp` evaluation + trimmed-old-bridge hybrid                       | ✅ 2026-09-27 | §10 (both rejected) |
 | **UC-5** | Confirm on a release build that the Roslyn plugins are stripped          | ✅ 2026-09-27 | §7                  |
 | **UC-6** | Headless `Validate All` in CI via `unity run --command` / `unity test`   | —             | Roadmap doc         |
-| **UC-7** | `--runtime` connection to a Development player                           | —             | Roadmap doc         |
+| **UC-7** | `--runtime` connection to a Development player                           | ✅ 2026-11-21 | §7 (`AH-2`)         |
 | **UC-8** | Re-run the Project Auditor report through the `audit` command            | —             | Roadmap doc         |
 
 ---
@@ -212,11 +212,14 @@ total matched an independent sum of root-level GC exactly (58033.8 KB over 2,000
 Scripting defines decide what reaches a player. `Unity.Pipeline` (runtime) and
 `Unity.Pipeline.IlInterpreter` compile into a player only when `ENABLE_RUNTIME_PIPELINE` or
 `ENABLE_RUNTIME_PIPELINE_DEV` is defined, and `Unity.Pipeline.ScenePreview` only with
-`ENABLE_PIPELINE_SCENE_PREVIEW`; this project defines none of them. `Unity.Pipeline.Attributes` is
-unconstrained, which is why the `voxel-engine` commands compile into every build and stay inert
-without the runtime assemblies. The same toggles are how a player would serve commands
-(`--runtime` / `--runtime-path`); enabling them for a Development or Master build is the planned
-`AH-2`/`AH-3` work in [`../Design/AGENT_HARNESS.md`](../Design/AGENT_HARNESS.md) and is not done here.
+`ENABLE_PIPELINE_SCENE_PREVIEW`. Since `AH-2` (2026-11-21) this project defines
+`ENABLE_RUNTIME_PIPELINE_DEV` (the **Enable in Development & Profiled Builds** toggle) with `autoStart` off in
+the tracked `ProjectSettings/Packages/com.unity.pipeline/RuntimePipelineConfig.json`, so Development and
+Profiler players carry the runtime but start its server only for `-mc-run agent`; `ENABLE_RUNTIME_PIPELINE`
+(release) stays off, so Production and Master players carry none of it. `Unity.Pipeline.Attributes` is
+unconstrained, which is why the `voxel-engine` commands compile into every build and stay inert without
+the runtime assemblies. Player serving, its stripping roots and the descriptor workaround are in
+[`../Design/AGENT_HARNESS.md`](../Design/AGENT_HARNESS.md) (`AH-2`); a Master build (`AH-3`) is not done.
 
 Expected for StandaloneWindows64, from the 1.0.0 `.asmdef` constraints (not yet re-measured on a 1.0.0
 build):
@@ -289,6 +292,8 @@ bridge installed is `61480be4`.
 
 ## Document History
 
+* **v1.11** - §7: `ENABLE_RUNTIME_PIPELINE_DEV` defined with `autoStart` off for `AH-2` player serving;
+  release builds unchanged (2026-11-21).
 * **v1.10** - CLI 1.0.1 + `com.unity.pipeline` 1.0.1: a call during a domain reload exits `12`
   (`EDITOR_NOT_RUNNING`); `unity recompile` waits out the reload's `400`/`503` replies; §3: the reload wait is
   `unity status --until-ready`; §10: `unity mcp --tool-groups` noted (2026-11-21).

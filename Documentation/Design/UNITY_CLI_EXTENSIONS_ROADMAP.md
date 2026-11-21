@@ -1,14 +1,14 @@
 # Unity CLI Extensions Roadmap
 
-**Version:** 1.2  
+**Version:** 1.3  
 **Date:** 2026-09-27  
 **Status:** Open backlog. Items are removed (archived) when implemented and verified.
 
 > Unbuilt work on the agent ↔ Editor bridge described in
 > [`../Architecture/UNITY_CLI_EDITOR_BRIDGE.md`](../Architecture/UNITY_CLI_EDITOR_BRIDGE.md): one
-> verification (`UC-5`, closed 2026-09-27) and three unscheduled extensions (`UC-6`…`UC-8`). The `UC-*` ID
-> space continues from the migration that built the bridge; `UC-0`…`UC-4` are closed and indexed
-> in the Architecture doc.
+> verification (`UC-5`, closed 2026-09-27), `UC-7` (closed 2026-11-21 by `AH-2`) and two unscheduled
+> extensions (`UC-6`, `UC-8`). The `UC-*` ID space continues from the migration that built the bridge;
+> `UC-0`…`UC-4` are closed and indexed in the Architecture doc.
 
 **Audited:** 2026-09-27, at commit `58bbdecc` (branch `mcp-to-cli-migration`).
 Each item's "What exists today" was checked against the live CLI (`unity --help`,
@@ -44,7 +44,7 @@ migration design.
 |----------|------------------------------------------------------------------|:------:|:----:|:-------:|:----:|:----:|---------------|
 | **UC-5** | Confirm the Roslyn plugins are stripped from a release build     |   🟢   |  🟢  |   🟡    |  ✅  |  ✅  | ✅ 2026-09-27 |
 | **UC-6** | Headless `Validate All` via `unity run --command` / `unity test` |   🟡   |  🟢  |   🟡    |  ✅  |  ✅  | —             |
-| **UC-7** | `--runtime` inspection of a Development player                   |   🟡   |  🟡  |   ⚪    |  ✅  |  ✅  | —             |
+| **UC-7** | `--runtime` inspection of a Development player                   |   🟡   |  🟡  |   ⚪    |  ✅  |  ✅  | ✅ 2026-11-21 |
 | **UC-8** | Re-run the Project Auditor report through `audit`                |   🟢   |  🟢  |   ⚪    |  ✅  |  ✅  | —             |
 
 ---
@@ -83,6 +83,10 @@ Development build and document the security posture. Never for Release.
 player behind a runtime start switch. `AH-2` settles this item; the "Never for Release" line is revisited
 by its `AH-3` spike.
 
+**Update (2026-11-21).** Settled by `AH-2`: a Development player started with `-mc-run agent` answers
+`unity command --runtime-path <build dir> …`, verified on an IL2CPP build; the security posture (loopback, token,
+server off unless asked, no release toggle) is in [`AGENT_HARNESS.md`](AGENT_HARNESS.md) §7.
+
 ## UC-8 — Project Auditor through the CLI
 
 **What exists today.** The Editor exposes `audit` / `audit_status` (Project Auditor scan, async).
@@ -95,6 +99,7 @@ saved-report route before switching.
 
 ## Document History
 
+* **v1.3** - `UC-7` settled by the agent harness's `AH-2` (2026-11-21).
 * **v1.2** - `UC-7`: cross-reference to the agent harness's `AH-2` (2026-11-20).
 * **v1.1** - `UC-5` closed: RC 94 release build ships no Pipeline/Roslyn assembly (Architecture §7).
 * **v1.0** - Initial backlog, split out of `Design/UNITY_MCP_TO_CLI_MIGRATION.md` on its promotion to

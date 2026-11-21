@@ -1,8 +1,8 @@
 # Agent Harness (AH-*) Design
 
-**Version:** 1.0  
+**Version:** 1.1  
 **Date:** 2026-11-20  
-**Status:** In progress — `AH-0` (commands, safe session, server-side waits, suite) and `AH-1` (timed agent input, `move_to`, `interact`) are shipped and verified in Play mode 2026-11-20; `AH-2`…`AH-4` (player builds, menu/world management) are unscheduled and start only on a concrete need.  
+**Status:** In progress — `AH-0` (commands, safe session, server-side waits, suite) and `AH-1` (timed agent input, `move_to`, `interact`) are shipped and verified in Play mode 2026-11-20; `AH-2` (Development player serving through `-mc-run agent`) is shipped and verified in an IL2CPP Development build 2026-11-21; `AH-3`/`AH-4` (Master builds, menu/world management) are unscheduled and start only on a concrete need.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production) — agent tooling, Editor today
 
 > The `voxel-engine` command group: typed, one-call-per-action Unity CLI commands an agent uses to
@@ -80,14 +80,14 @@ Token savings alone would never repay a large build. The real costs were elsewhe
 
 ## 2. Current state (what the harness builds on)
 
-| Area            | State                                                                                                                                                                                                                                                                                                     |
-|-----------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Transport       | `com.unity.pipeline` 1.0.0 serves custom `[CliGroupCommand]` static methods: typed `[CliArg]` flags with C# defaults, `Task<ExitCode>` for commands that run across frames, a per-request timeout. The Editor serves them today (UNITY_CLI_EDITOR_BRIDGE §2).                                             |
-| Player serving  | The package can serve players when the Runtime Pipeline toggles define `ENABLE_RUNTIME_PIPELINE_DEV` (development builds) or `ENABLE_RUNTIME_PIPELINE` (release builds, marked experimental by the package). This project defines neither, so no player serves commands yet (UNITY_CLI_EDITOR_BRIDGE §7). |
-| Command console | `Assets/Scripts/Commands/` exists only in the World scene (it cannot drive menus) and answers in prose lines. It carries no hidden/permission flag. It stays reachable through the `console` command.                                                                                                     |
-| Launch layer    | `Assets/Scripts/Launch/`: `-mc-run`/`-mc-set`/`-mc-mute`/`-mc-quit`. `LaunchSession.ApplySessionOverrides` is the in-memory, never-saved settings override the harness reuses; `dev.*` fields apply only in debug builds.                                                                                 |
-| Input seam      | `InputManager` already adds a `TouchControls` contribution to every gameplay value; the harness adds `AgentInput` to the same sums.                                                                                                                                                                       |
-| Old rig         | `Tools/UnityCli/PlayMode/WorldRig.cs` (`script run`, every argument required). Deprecated by this harness; deleted only after the harness has been seen fully working.                                                                                                                                    |
+| Area            | State                                                                                                                                                                                                                                                                                                                               |
+|-----------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Transport       | `com.unity.pipeline` 1.0.0 serves custom `[CliGroupCommand]` static methods: typed `[CliArg]` flags with C# defaults, `Task<ExitCode>` for commands that run across frames, a per-request timeout. The Editor serves them today (UNITY_CLI_EDITOR_BRIDGE §2).                                                                       |
+| Player serving  | The package can serve players when the Runtime Pipeline toggles define `ENABLE_RUNTIME_PIPELINE_DEV` (development builds) or `ENABLE_RUNTIME_PIPELINE` (release builds, marked experimental by the package). This project defines `ENABLE_RUNTIME_PIPELINE_DEV` with `autoStart` off since `AH-2` (§7; UNITY_CLI_EDITOR_BRIDGE §7). |
+| Command console | `Assets/Scripts/Commands/` exists only in the World scene (it cannot drive menus) and answers in prose lines. It carries no hidden/permission flag. It stays reachable through the `console` command.                                                                                                                               |
+| Launch layer    | `Assets/Scripts/Launch/`: `-mc-run`/`-mc-set`/`-mc-mute`/`-mc-quit`. `LaunchSession.ApplySessionOverrides` is the in-memory, never-saved settings override the harness reuses; `dev.*` fields apply only in debug builds.                                                                                                           |
+| Input seam      | `InputManager` already adds a `TouchControls` contribution to every gameplay value; the harness adds `AgentInput` to the same sums.                                                                                                                                                                                                 |
+| Old rig         | `Tools/UnityCli/PlayMode/WorldRig.cs` (`script run`, every argument required). Replaced by this harness and deleted with `AH-2` (2026-11-21).                                                                                                                                                                                       |
 
 ---
 
@@ -203,29 +203,30 @@ gate does not cover player-state commands (`pose`, `teleport`, `select_slot`, `i
 
 Run as `unity command voxel-engine <name> [--flag value]`; `--help` lists the flags. Under Git Bash export
 `MSYS_NO_PATHCONV=1` (or omit the leading `/` of a console line), which the `console` command accepts. The
-class declares 18 commands (`AgentCommands.CommandCount`); the editor-only `play` is the 19th.
+class declares 19 commands (`AgentCommands.CommandCount`); the editor-only `play` is the 20th.
 
-| Command         | Effect      | What it does                                                                                      | Key flags (defaults)                                                                              |
-|-----------------|-------------|---------------------------------------------------------------------------------------------------|---------------------------------------------------------------------------------------------------|
-| `play`          | Additive    | Editor only. Enters Play mode safely (§4.1.4).                                                    | `--muted` (true)                                                                                  |
-| `status`        | ReadOnly    | Scene, runtime mode, session, world, effective persistence, save folder, player, hotbar, `hints`. | —                                                                                                 |
-| `wait`          | ReadOnly    | Waits across frames, then reports status; `TimedOut` with the last status.                        | `--until` Frames \| WorldReady \| Menu (WorldReady), `--frames` (1), `--timeout` (60 s)           |
-| `session_start` | Destructive | From the main menu, launches an agent world (§4.1).                                               | `--mode` Memory \| Throwaway, `--name` (agent-world), `--seed` (0), `--load`, `--muted` (true)    |
-| `session_end`   | Additive    | Save and quit to the main menu, then waits for it.                                                | `--timeout` (60 s)                                                                                |
-| `world_list`    | ReadOnly    | Lists saved agent worlds (agent root only): name, seed, version, last played.                     | —                                                                                                 |
-| `clean_world`   | Destructive | Deletes agent worlds; exactly one of `--name` or `--all`.                                         | `--name`, `--all`                                                                                 |
-| `pose`          | Idempotent  | Places the camera eye at a voxel position with a yaw and pitch.                                   | `--x --y --z` (required), `--yaw` (0, faces +Z), `--pitch` (0, positive looks down)               |
-| `look_at`       | Idempotent  | Turns the player and camera toward a voxel-space point.                                           | `--x --y --z` (required)                                                                          |
-| `teleport`      | Idempotent  | Teleports through the world's arrival hold; follow with `wait --until WorldReady`.                | `--x --z` (required), `--y` (-1 = land on the surface)                                            |
-| `get_block`     | ReadOnly    | Reads the block name, id and meta at a cell; `NotFound` when unloaded.                            | `--x --y --z` (required)                                                                          |
-| `set_block`     | Destructive | Force-places a block by name (`Air` breaks), the `/setblock` path. Gated.                         | `--x --y --z --block` (required), `--allow-persisted`                                             |
-| `select_slot`   | Idempotent  | Selects a hotbar slot (0-based).                                                                  | `--index` (required)                                                                              |
-| `console`       | Destructive | Runs a console line on the live console and returns its lines, failure and pending flags. Gated.  | `--line` (required, leading `/` optional), `--allow-persisted`                                    |
-| `capture`       | Additive    | Renders the main camera to a PNG one frame after the call, so it shows the latest state.          | `--output-path` (`Assets/AgentCaptures~/capture_<frame>.png`), `--width` (1280), `--height` (720) |
-| `input_hold`    | Additive    | Holds movement and buttons for game-time seconds through `InputManager`, then reports.            | `--seconds` (0.5), `--forward`, `--strafe` (-1..1), `--jump`, `--crouch`, `--sprint`              |
-| `input_release` | Idempotent  | Releases every agent-held input at once.                                                          | —                                                                                                 |
-| `move_to`       | Additive    | Walks or flies to a voxel column with real movement, after a route dry run (§4.5).                | `--x --z` (required), `--tolerance` (0.5), `--sprint`, `--timeout` (60 s), `--force`              |
-| `interact`      | Destructive | Looks at a cell and breaks it or places the held block through `PlayerInteraction`. Gated.        | `--action` Break \| Place, `--x --y --z` (required), `--allow-persisted`                          |
+| Command         | Effect      | What it does                                                                                       | Key flags (defaults)                                                                                                                               |
+|-----------------|-------------|----------------------------------------------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------|
+| `play`          | Additive    | Editor only. Enters Play mode safely (§4.1.4).                                                     | `--muted` (true)                                                                                                                                   |
+| `status`        | ReadOnly    | Scene, runtime mode, session, world, effective persistence, save folder, player, hotbar, `hints`.  | —                                                                                                                                                  |
+| `wait`          | ReadOnly    | Waits across frames, then reports status; `TimedOut` with the last status.                         | `--until` Frames \| WorldReady \| Menu (WorldReady), `--frames` (1), `--timeout` (60 s)                                                            |
+| `session_start` | Destructive | From the main menu, launches an agent world (§4.1).                                                | `--mode` Memory \| Throwaway, `--name` (agent-world), `--seed` (0), `--load`, `--muted` (true)                                                     |
+| `session_end`   | Additive    | Save and quit to the main menu, then waits for it.                                                 | `--timeout` (60 s)                                                                                                                                 |
+| `world_list`    | ReadOnly    | Lists saved agent worlds (agent root only): name, seed, version, last played.                      | —                                                                                                                                                  |
+| `clean_world`   | Destructive | Deletes agent worlds; exactly one of `--name` or `--all`.                                          | `--name`, `--all`                                                                                                                                  |
+| `pose`          | Idempotent  | Places the camera eye at a voxel position with a yaw and pitch.                                    | `--x --y --z` (required), `--yaw` (0, faces +Z), `--pitch` (0, positive looks down)                                                                |
+| `look_at`       | Idempotent  | Turns the player and camera toward a voxel-space point.                                            | `--x --y --z` (required)                                                                                                                           |
+| `teleport`      | Idempotent  | Teleports through the world's arrival hold; follow with `wait --until WorldReady`.                 | `--x --z` (required), `--y` (-1 = land on the surface)                                                                                             |
+| `get_block`     | ReadOnly    | Reads the block name, id and meta at a cell; `NotFound` when unloaded.                             | `--x --y --z` (required)                                                                                                                           |
+| `set_block`     | Destructive | Force-places a block by name (`Air` breaks), the `/setblock` path. Gated.                          | `--x --y --z --block` (required), `--allow-persisted`                                                                                              |
+| `select_slot`   | Idempotent  | Selects a hotbar slot (0-based).                                                                   | `--index` (required)                                                                                                                               |
+| `console`       | Destructive | Runs a console line on the live console and returns its lines, failure and pending flags. Gated.   | `--line` (required, leading `/` optional), `--allow-persisted`                                                                                     |
+| `capture`       | Additive    | Renders the main camera to a PNG one frame after the call, so it shows the latest state.           | `--output-path` (`Assets/AgentCaptures~/capture_<frame>.png`; a player: `<persistentDataPath>/AgentCaptures/`), `--width` (1280), `--height` (720) |
+| `input_hold`    | Additive    | Holds movement and buttons for game-time seconds through `InputManager`, then reports.             | `--seconds` (0.5), `--forward`, `--strafe` (-1..1), `--jump`, `--crouch`, `--sprint`                                                               |
+| `input_release` | Idempotent  | Releases every agent-held input at once.                                                           | —                                                                                                                                                  |
+| `move_to`       | Additive    | Walks or flies to a voxel column with real movement, after a route dry run (§4.5).                 | `--x --z` (required), `--tolerance` (0.5), `--sprint`, `--timeout` (60 s), `--force`                                                               |
+| `interact`      | Destructive | Looks at a cell and breaks it or places the held block through `PlayerInteraction`. Gated.         | `--action` Break \| Place, `--x --y --z` (required), `--allow-persisted`                                                                           |
+| `quit`          | Destructive | Player only: logs `Run finished … exit code 0` and exits the player just after replying (§7 AH-2). | —                                                                                                                                                  |
 
 `status` carries a `hints` array (what blocks the agent and the next command: on the main menu, still
 loading, teleport hold, UI open, not a session world, player inside a block), so an agent rarely needs a
@@ -264,18 +265,20 @@ agent flies (`console --line "fly on"`, then `input_hold --jump true`) or uses `
 ### 4.6 Verification
 
 - **Suite `Minecraft Clone/Dev/Validate Agent Harness`** (`Assets/Editor/Validation/AgentHarness/`,
-  registered in `Validate All`; `ExpectedSuiteCount` 32 → 33). All eight scenarios are baselines:
+  registered in `Validate All`; `ExpectedSuiteCount` 32 → 33). All ten scenarios are baselines:
 
-| ID    | Pins                                                                                                     |
-|-------|----------------------------------------------------------------------------------------------------------|
-| AH-01 | A walking route reports its first obstruction and the responsible cell.                                  |
-| AH-02 | A flying route keeps its altitude, so only a solid cell on it blocks.                                    |
-| AH-03 | `YawTowards`: 0 faces +Z, 90 faces +X.                                                                   |
-| AH-04 | A world name cannot address anything but a child of the agent root; `clean_world ..` deletes nothing.    |
-| AH-05 | Agent mode saves under the agent root whatever the volatile flag; listing a missing root is empty.       |
-| AH-06 | A world-changing command is refused without a loaded world, even with `--allow-persisted`.               |
-| AH-07 | Every declared command is registered in the `voxel-engine` group (count floor).                          |
-| AH-08 | `clean_world` by name deletes exactly that agent world (a sibling survives) and refuses an unknown name. |
+| ID    | Pins                                                                                                                          |
+|-------|-------------------------------------------------------------------------------------------------------------------------------|
+| AH-01 | A walking route reports its first obstruction and the responsible cell.                                                       |
+| AH-02 | A flying route keeps its altitude, so only a solid cell on it blocks.                                                         |
+| AH-03 | `YawTowards`: 0 faces +Z, 90 faces +X.                                                                                        |
+| AH-04 | A world name cannot address anything but a child of the agent root; `clean_world ..` deletes nothing.                         |
+| AH-05 | Agent mode saves under the agent root whatever the volatile flag; listing a missing root is empty.                            |
+| AH-06 | A world-changing command is refused without a loaded world, even with `--allow-persisted`.                                    |
+| AH-07 | Every declared command is registered in the `voxel-engine` group (count floor).                                               |
+| AH-08 | `clean_world` by name deletes exactly that agent world (a sibling survives) and refuses an unknown name.                      |
+| AH-09 | The `Unity.Pipeline` members `AgentDescriptor` reflects into still exist (a package upgrade reds here, not in a player).      |
+| AH-10 | `quit` refuses only in the Editor, and a player's default capture folder is under `persistentDataPath`, not its build folder. |
 
   The suite header records the mutations that red each baseline. The load-bearing one is AH-04. The suite
   is headless and covers the pure logic and the gates; the live game is verified by the Play smoke.
@@ -289,7 +292,8 @@ agent flies (`console --line "fly on"`, then `input_hold --jump true`) or uses `
 
 ### 4.7 Limitations and gotchas
 
-- **Editor only.** No player serves the commands yet (§7). In the Editor, `editor status` never reports
+- **Editor and Development players only.** A Development player serves the commands under `-mc-run agent` (§7 AH-2);
+  Production and Master players do not (`AH-3`). In the Editor, `editor status` never reports
   `ready` during Play: wait with `voxel-engine wait`. After `play` the domain reloads, so the first `wait`
   may need a retry.
 - **A refused command's text is on stderr.** With `--result-only` it prints `Unknown error`; read stderr
@@ -339,12 +343,12 @@ agent flies (`console --line "fly on"`, then `input_hold --jump true`) or uses `
 |-------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------|:------:|------------|---------------|
 | **AH-0 — Command surface + safe session** | Facade, `voxel-engine` commands, `RuntimeMode.Agent` + agent save root, session lifecycle, safe `play`, server-side waits, suite |   🟡   | —          | ✅ 2026-11-20 |
 | **AH-1 — Smooth player control**          | `AgentInput` through the `InputManager` seam, `input_hold`/`input_release`, `move_to` with route dry run, `interact` break/place |   🟡   | AH-0       | ✅ 2026-11-20 |
-| **AH-2 — Development player**             | Serve the commands from a Development player; runtime start switch; a launch action that stays on the main menu                  |   🟡   | AH-0       | —             |
+| **AH-2 — Development player**             | Serve the commands from a Development player; runtime start switch; a launch action that stays on the main menu                  |   🟡   | AH-0       | ✅ 2026-11-21 |
 | **AH-3 — IL2CPP Master**                  | Spike the release server (stripping, `[Preserve]`); file-queue fallback transport                                                |   🔴   | AH-2       | —             |
 | **AH-4 — Menus and world management**     | Shared menu service behind the buttons and the commands; `menu`/`world` commands beyond agent worlds                             |   🟡   | AH-0       | —             |
 
-`AH-0` and `AH-1` deliver standalone value in the Editor, where the pain is today. `AH-2`…`AH-4` start only
-when a concrete player or Master need appears; each is its own session.
+`AH-0` and `AH-1` deliver standalone value in the Editor, where the pain is today; `AH-2` extends them to a
+Development player. `AH-3` and `AH-4` start only when a concrete Master or menu need appears; each is its own session.
 
 **Validation is built alongside, not after**: `AH-0` registered the `Validate Agent Harness` suite
 (AH-01…AH-08: route logic, yaw, name confinement, save routing, mutation gate, command count floor, named
@@ -361,6 +365,34 @@ define is the accepted fallback. The player then answers `unity command --runtim
 voxel-engine …`. A `-mc-run`-style launch action keeps the player on the main menu, muted, waiting for
 commands. Building the player is the user's call (`player-runner`), and transient pipeline assets must not
 remain in `git status` afterwards. This phase also settles `UC-7`.
+
+**As built (2026-11-21, verified in an IL2CPP Development build):**
+
+- **Switch:** `-mc-run agent` (`AgentLaunchAction`, installer count 4 → 5, Launch Arguments B15) mutes, stays on the
+  main menu and calls `AgentServer.TryStart`. No `Settings` field: nothing persisted can open the server. Without a
+  compiled-in server the action fails the run (exit 1 with `-mc-quit`); in the Editor it does nothing.
+- **Toggle scope:** the global **Enable in Development & Profiled Builds** toggle (`ENABLE_RUNTIME_PIPELINE_DEV` for
+  every installed build target) with `autoStart` off in the tracked `ProjectSettings/Packages/com.unity.pipeline/RuntimePipelineConfig.json`.
+  `AgentServer`'s `#if` mirrors the runtime asmdef constraint, checked by compiling player scripts for a Development
+  (runtime present, start branch) and a Release (runtime absent, refusal branch) Windows player.
+- **Descriptor:** the package restricts `.unity-pipeline-runtime-port` with `whoami`/`icacls`, which cannot start in
+  an IL2CPP player, so it never writes the file. `AgentDescriptor` takes over the package's own descriptor (identity,
+  endpoints, token, 15 s heartbeat) by reflection and writes it without the current-user restriction; the package logs
+  its error once. AH-09 pins the reflected members.
+- **Stripping roots** (`Assets/link.xml`): the `AgentHarness` namespace and anonymous types (commands, flags and
+  results are reached by reflection), and `Unity.Pipeline` whole with `ignoreIfMissing` — Medium stripping otherwise
+  drops the getters its descriptor serializes, leaving no `pid`. That root roughly doubles the Development build's
+  output size (1.78 → 2.68 GB); a narrower root is untested.
+- **Ending a run:** `voxel-engine quit` (player only) logs `Run finished … exit code 0` through `LaunchSession.EndRun`
+  and exits after replying; `run_player.py --no-report` counts that as success.
+- **Build folders:** a build leaves an empty `Assets/settings/Pipeline/` and its `.meta`, both gitignored.
+- **Verified:** ON — status, Memory session, `wait`, `set_block`/`get_block`, `capture`, `session_end`, `world_list`,
+  `clean_world`, `quit`, run exit 0; the descriptor's `lastHeartbeat` advances every 15 s and the file is gone after
+  `quit`. OFF (`-mc-run startup-new -mc-quit`, same build) — no descriptor, `--runtime-path` refused (exit 6), no
+  `Start HTTP server` line, run exit 0. Master (`Windows - Production`) — no `Unity.Pipeline` in the build, and
+  `-mc-run agent` logs the refusal and ends the run with exit 1, writing no descriptor.
+- **Cost:** every Development and Profiler build carries the runtime, its per-frame driver and the signed
+  method-reload receiver even with the server off.
 
 ### AH-3 — IL2CPP Master (decided direction)
 
@@ -383,10 +415,10 @@ Agent-world loading would then share the menu's migration path, closing the v1 l
 
 ### Extension roadmap (post-AH-4, in intended order)
 
-| Version | Extension                                                                                     |
-|---------|-----------------------------------------------------------------------------------------------|
-| **v2**  | Pathfinding for `move_to` — only if flying and noclip prove insufficient in real agent work.  |
-| **v3+** | Delete `Tools/UnityCli/PlayMode/WorldRig.cs` — after the harness has been seen fully working. |
+| Version | Extension                                                                                    |
+|---------|----------------------------------------------------------------------------------------------|
+| **v2**  | Pathfinding for `move_to` — only if flying and noclip prove insufficient in real agent work. |
+| **v3+** | ✅ 2026-11-21 — `Tools/UnityCli/PlayMode/WorldRig.cs` deleted with `AH-2`.                   |
 
 ---
 
@@ -394,13 +426,14 @@ Agent-world loading would then share the menu's migration path, closing the v1 l
 
 1. **A3 — build-profile defines vs the package assembly constraints.** The package says its toggle
    writes the `ENABLE_RUNTIME_PIPELINE*` defines project-wide for every installed build target; whether a
-   per-profile define satisfies the runtime asmdef `defineConstraints` is untested. Resolved by the
-   `AH-2`/`AH-3` spikes; if it fails, the global toggle (AH-2) or the file queue (AH-3) is used.
+   per-profile define satisfies the runtime asmdef `defineConstraints` is untested. **AH-2 answer
+   (2026-11-21):** moot for Development builds, which use the global toggle; still untested, and only relevant
+   if `AH-3` wants a profile-scoped release define.
 2. **A4 — the release server under IL2CPP Master.** Whether the experimental release Runtime Pipeline
    works with Medium stripping once the command classes carry `[Preserve]` is untested. Resolved by the
    `AH-3` spike; the file queue is the fallback.
-3. **Runtime start switch.** Whether the switch is a `Settings` field, a launch flag, or both — and the
-   flag's name — is decided in `AH-2`.
+3. **Runtime start switch.** **Answered in AH-2 (2026-11-21):** the launch action `-mc-run agent`, no `Settings`
+   field and no separate flag; `AH-3` reuses it.
 
 ---
 
@@ -419,9 +452,11 @@ Agent-world loading would then share the menu's migration path, closing the v1 l
 
 ## Document History
 
+* **v1.1** - `AH-2` shipped: `-mc-run agent`, global dev toggle with `autoStart` off, `AgentDescriptor`, stripping
+  roots, `quit`, AH-09/AH-10; §8 A3 and the start switch answered; `WorldRig.cs` deleted (2026-11-21).
 * **v1.0** - Initial design with `AH-0` and `AH-1` shipped and verified in Play mode (2026-11-20).
 
 ---
 
 **Last Updated:** 2026-11-20  
-**Next Review:** when `AH-2` starts (a concrete player need), or on promotion to Architecture after the last phase
+**Next Review:** when `AH-3` starts (a concrete Master need), or on promotion to Architecture after the last phase
