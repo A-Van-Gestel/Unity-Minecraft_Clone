@@ -19,13 +19,14 @@ WHY IT EXISTS
 
 RUN
     python Tools/Python/run_player.py --exe "<build>/Minecraft Clone.exe" --tag <name> [--timeout 15]
-        [--out <folder>] [--tail 30] -- -mc-run startup-new -mc-set perfMonitorTier=Frame
+        [--out <folder>] [--tail 30] [--no-report] -- -mc-run startup-new -mc-set perfMonitorTier=Frame
 
     Everything after `--` goes to the player. --out defaults to Tools/Python/output/player_runs (gitignored).
 
 EXIT CODES
     0  the log records a finished run with exit code 0 and a report — also when the player then had to be killed,
-       since a player occasionally freezes after Application.Quit with its report already complete
+       since a player occasionally freezes after Application.Quit with its report already complete; with
+       --no-report, a finished run with exit code 0 succeeds without a report (an agent run that writes none)
     1  anything else: the run failed or wrote no report, the player was killed before reporting, or Player.log was
        not written by this launch
 """
@@ -85,6 +86,14 @@ def parse_run_finished(log_text):
     return (None if report == "(none)" else report), int(last.group("code"))
 
 
+def run_succeeded(finished, report_required):
+    """True when the parsed 'Run finished' line records exit code 0, and a report unless none is required."""
+    if finished is None:
+        return False
+    report, code = finished
+    return code == 0 and (report is not None or not report_required)
+
+
 def log_signature(log_path):
     """The log's (modification time in ns, size), or None when it does not exist."""
     if not log_path.is_file():
@@ -117,6 +126,7 @@ def main(argv=None):
     parser.add_argument("--timeout", type=float, default=DEFAULT_TIMEOUT_MINUTES, help="minutes before the kill")
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT, help="folder for saved logs and runs.txt")
     parser.add_argument("--tail", type=int, default=DEFAULT_TAIL_LINES, help="log lines printed on a failed run")
+    parser.add_argument("--no-report", action="store_true", help="succeed on exit code 0 without a report")
     parser.add_argument("game_args", nargs=argparse.REMAINDER, help="'--' then the player's arguments")
     args = parser.parse_args(argv)
 
@@ -142,7 +152,7 @@ def main(argv=None):
         saved_log.write_text(log_text, encoding="utf-8")
 
     finished = parse_run_finished(log_text)
-    succeeded = finished is not None and finished[1] == 0 and finished[0] is not None
+    succeeded = run_succeeded(finished, report_required=not args.no_report)
     process_state = "killed (timeout)" if killed else f"exit {exit_code}"
     if finished is None:
         outcome = "no 'Run finished' line" if fresh else "Player.log not written by this launch"

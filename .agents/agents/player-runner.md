@@ -49,7 +49,10 @@ machine path into any file.
    `Tools/Python/output/player_runs/` and prints one result line (exit 0 = finished with a report).
    Then read the report it names and copy the requested sections verbatim. A failed run: quote its
    result line and the log tail the runner printed, and go on to the next run.
-5. **Cleanup — always, also after a failure.** Restore the profile recorded in step 2
+5. **Cleanup — always, also after a failure, and only once `build status` reports `"status": "completed"`.**
+   A restore while the build still runs changes what it packages: restoring
+   `UniversalRenderPipelineGlobalSettings.asset` mid-build shipped a player without its blit shaders (black frames,
+   thousands of URP `Blitter.Initialize` errors). Restore the profile recorded in step 2
    (player-capture §5). `git restore` `Assets/Resources/Data/BuildStamp.asset` and
    `Assets/UniversalRenderPipelineGlobalSettings.asset` only if the build changed them **and** they were
    clean in the step-1 snapshot; one that was already modified holds the user's work — leave it and

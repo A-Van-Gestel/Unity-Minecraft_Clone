@@ -31,5 +31,20 @@
     <type fullname="UI.SettingsMenuController" preserve="all" />
     <type fullname="UI.SettingsUIGenerator" preserve="all" />
     <namespace fullname="UI.Attributes" preserve="all" />
+
+    <!--
+      Managed stripping roots for the voxel-engine agent harness in a development player. The Unity CLI
+      runtime server finds the [CliGroupCommand] methods, binds their flags (enums included) and
+      serializes their results (anonymous types and status types) through reflection only.
+    -->
+    <namespace fullname="AgentHarness" preserve="all" />
+    <type fullname="&lt;&gt;f__AnonymousType*" preserve="all" />
   </assembly>
+
+  <!--
+    The Unity CLI runtime server serializes its own models (its runtime descriptor included) through reflection,
+    which Medium stripping cannot see. It is compiled only into development players with the Pipeline's dev
+    toggle on; every other build has no such assembly, which ignoreIfMissing allows.
+  -->
+  <assembly fullname="Unity.Pipeline" preserve="all" ignoreIfMissing="1" />
 </linker>

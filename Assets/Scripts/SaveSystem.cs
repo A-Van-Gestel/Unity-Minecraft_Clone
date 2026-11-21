@@ -71,10 +71,50 @@ public static class SaveSystem
             RuntimeMode.Benchmark => Path.Combine(Application.persistentDataPath, "Benchmark_Saves"),
             RuntimeMode.FluidStress => Path.Combine(Application.persistentDataPath, "FluidStress_Saves"),
             RuntimeMode.StartupProbe => Path.Combine(Application.persistentDataPath, "StartupProbe_Saves"),
+            RuntimeMode.Agent => GetAgentSaveRoot(),
             _ => useVolatilePath ? Path.Combine(Application.persistentDataPath, "Editor_Temp_Saves") : Path.Combine(Application.persistentDataPath, "Saves"),
         };
 
         return Path.Combine(baseFolder, worldName);
+    }
+
+    /// <summary>The folder under <see cref="Application.persistentDataPath"/> that <see cref="RuntimeMode.Agent"/> worlds live in.</summary>
+    public const string AgentSavesFolder = "Agent_Saves";
+
+    /// <summary>Resolves the isolated save root of <see cref="RuntimeMode.Agent"/> worlds, whatever the current mode.</summary>
+    /// <returns>The absolute folder path; it may not exist yet.</returns>
+    public static string GetAgentSaveRoot() => Path.Combine(Application.persistentDataPath, AgentSavesFolder);
+
+    /// <summary>Lists the valid, non-backup worlds under one save root, newest first, independent of the current mode.</summary>
+    /// <param name="baseFolder">The save root to scan, e.g. <see cref="GetAgentSaveRoot"/>.</param>
+    /// <returns>The worlds found; empty when the folder does not exist.</returns>
+    public static List<WorldSaveData> GetWorldsUnder(string baseFolder)
+    {
+        var worlds = new List<WorldSaveData>();
+        if (!Directory.Exists(baseFolder)) return worlds;
+
+        foreach (string dir in Directory.GetDirectories(baseFolder))
+        {
+            string worldName = new DirectoryInfo(dir).Name;
+            WorldSaveData data = LoadWorldMetadataAt(dir, worldName);
+
+            if (!IsWorldValid(data))
+            {
+                Debug.LogWarning($"Invalid world: {worldName}");
+                continue;
+            }
+
+            if (IsWorldBackup(worldName))
+            {
+                Debug.Log($"Backup world: {worldName}");
+                continue;
+            }
+
+            worlds.Add(data);
+        }
+
+        worlds.Sort((a, b) => b.lastPlayed.CompareTo(a.lastPlayed));
+        return worlds;
     }
 
     /// <summary>
@@ -161,9 +201,12 @@ public static class SaveSystem
     /// <param name="worldName">The name of the world.</param>
     /// <param name="useVolatilePath">If true, looks in the temporary editor path.</param>
     /// <returns>The deserialized <see cref="WorldSaveData"/> object, or null if the file does not exist.</returns>
-    public static WorldSaveData LoadWorldMetadata(string worldName, bool useVolatilePath)
+    public static WorldSaveData LoadWorldMetadata(string worldName, bool useVolatilePath) =>
+        LoadWorldMetadataAt(GetSavePath(worldName, useVolatilePath), worldName);
+
+    private static WorldSaveData LoadWorldMetadataAt(string worldFolder, string worldName)
     {
-        string path = Path.Combine(GetSavePath(worldName, useVolatilePath), "level.dat");
+        string path = Path.Combine(worldFolder, "level.dat");
         if (!File.Exists(path)) return null;
 
         try
@@ -238,37 +281,7 @@ public static class SaveSystem
             ? Path.Combine(Application.persistentDataPath, "Editor_Temp_Saves")
             : Path.Combine(Application.persistentDataPath, "Saves");
 
-        if (!Directory.Exists(baseFolder)) return new List<WorldSaveData>();
-
-        string[] directories = Directory.GetDirectories(baseFolder);
-        List<WorldSaveData> worlds = new List<WorldSaveData>();
-
-        foreach (string dir in directories)
-        {
-            string worldName = new DirectoryInfo(dir).Name;
-            WorldSaveData data = LoadWorldMetadata(worldName, useVolatilePath);
-
-            // Skip invalid worlds
-            if (!IsWorldValid(data))
-            {
-                Debug.LogWarning($"Invalid world: {worldName}");
-                continue;
-            }
-
-            // Skip backup worlds
-            if (IsWorldBackup(worldName))
-            {
-                Debug.Log($"Backup world: {worldName}");
-                continue;
-            }
-
-            worlds.Add(data);
-        }
-
-        // Sort by Last Played (Newest first)
-        worlds.Sort((a, b) => b.lastPlayed.CompareTo(a.lastPlayed));
-
-        return worlds;
+        return GetWorldsUnder(baseFolder);
     }
 
     /// <summary>

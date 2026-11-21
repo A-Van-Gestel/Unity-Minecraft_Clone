@@ -1,3 +1,4 @@
+using AgentHarness;
 using Data;
 using Input;
 using Unity.Scripting.LifecycleManagement;
@@ -105,6 +106,7 @@ public class InputManager : MonoBehaviour
             Vector2 result = _moveAction.ReadValue<Vector2>();
             if (TouchControls.Instance != null)
                 result += TouchControls.Instance.MoveInput;
+            result += AgentInput.MoveInput;
             return Vector2.ClampMagnitude(result, 1f);
         }
     }
@@ -130,19 +132,21 @@ public class InputManager : MonoBehaviour
 
     /// <summary><c>true</c> during the frame the Jump button was first pressed.</summary>
     public bool JumpPressed => _jumpAction.WasPressedThisFrame()
-                               || (TouchControls.Instance != null && TouchControls.Instance.JumpPressed);
+                               || (TouchControls.Instance != null && TouchControls.Instance.JumpPressed)
+                               || AgentInput.JumpPressed;
 
     /// <summary><c>true</c> while the Jump button is held down.</summary>
     public bool JumpHeld => _jumpAction.IsPressed()
-                            || (TouchControls.Instance != null && TouchControls.Instance.JumpHeld);
+                            || (TouchControls.Instance != null && TouchControls.Instance.JumpHeld)
+                            || AgentInput.JumpHeld;
 
     /// <summary>Analog jump value (0 or 1 for digital bindings).</summary>
-    public float JumpValue => Mathf.Max(_jumpAction.ReadValue<float>(),
-        TouchControls.Instance != null ? TouchControls.Instance.JumpValue : 0f);
+    public float JumpValue => Mathf.Max(Mathf.Max(_jumpAction.ReadValue<float>(),
+        TouchControls.Instance != null ? TouchControls.Instance.JumpValue : 0f), AgentInput.JumpHeld ? 1f : 0f);
 
     /// <summary>Analog crouch value (0 or 1 for digital bindings).</summary>
-    public float CrouchValue => Mathf.Max(_crouchAction.ReadValue<float>(),
-        TouchControls.Instance != null ? TouchControls.Instance.CrouchValue : 0f);
+    public float CrouchValue => Mathf.Max(Mathf.Max(_crouchAction.ReadValue<float>(),
+        TouchControls.Instance != null ? TouchControls.Instance.CrouchValue : 0f), AgentInput.CrouchValue);
 
     /// <summary><c>true</c> during the frame the Sprint button was first pressed.</summary>
     public bool SprintPressed => _sprintAction.WasPressedThisFrame();
@@ -152,11 +156,13 @@ public class InputManager : MonoBehaviour
 
     /// <summary><c>true</c> during the frame the Attack (LMB) button was first pressed.</summary>
     public bool AttackPressed => _attackAction.WasPressedThisFrame()
-                                 || (TouchControls.Instance != null && TouchControls.Instance.AttackPressed);
+                                 || (TouchControls.Instance != null && TouchControls.Instance.AttackPressed)
+                                 || AgentInput.AttackPressed;
 
     /// <summary><c>true</c> during the frame the Use (RMB) button was first pressed.</summary>
     public bool UsePressed => _useAction.WasPressedThisFrame()
-                              || (TouchControls.Instance != null && TouchControls.Instance.UsePressed);
+                              || (TouchControls.Instance != null && TouchControls.Instance.UsePressed)
+                              || AgentInput.UsePressed;
 
     /// <summary>Mouse scroll-wheel delta on the Y axis.</summary>
     public float ScrollValue => _scrollAction.ReadValue<Vector2>().y;

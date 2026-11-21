@@ -25,7 +25,7 @@ also matches `batch`). Pick the entry by its `name`.
 
 - Strings with spaces: quote them (`--path "Minecraft Clone/Dev/Validate All"`).
 - Booleans: `--dry-run true`, `--confirm true`.
-- The FIRST `unity recompile` after a file write often returns `400 Bad Request` while auto-refresh imports; retry after a few seconds.
+- `unity recompile` waits out the reload's own `400`/`503` replies; one that still surfaces → retry after a few seconds.
 - JSON-typed parameters (`args`, `operations`, `properties`): pass a JSON string, single-quoted
   in bash (`--args '[305, 10, 0]'`).
 - `script eval` takes its code as the first positional argument: `unity command script eval "return 1;"`.

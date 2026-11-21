@@ -1,6 +1,6 @@
 # Unity CLI Editor Bridge
 
-**Version:** 1.8  
+**Version:** 1.11  
 **Date:** 2026-09-27  
 **Status:** Implemented (Stable)  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production) — agent tooling, Editor only
@@ -27,6 +27,8 @@ the same day during the migration.
 
 - [`../Design/UNITY_CLI_EXTENSIONS_ROADMAP.md`](../Design/UNITY_CLI_EXTENSIONS_ROADMAP.md) — owns
   the bridge's unbuilt work (`UC-6`…`UC-8`); `UC-5`, the §7 release-build check, closed there.
+- [`AGENT_HARNESS_SYSTEM.md`](AGENT_HARNESS_SYSTEM.md) — the `voxel-engine` custom command group
+  built on this bridge (§1, §2), and its Development-player serving (§6).
 - [`../Design/PROJECT_AUDITOR_FINDINGS_REPORT.md`](../Design/PROJECT_AUDITOR_FINDINGS_REPORT.md) —
   §3.4 records why the package advisories for this bridge are deliberate.
 - [`../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md`](../Design/VALIDATION_SUITE_COVERAGE_ROADMAP.md)
@@ -49,22 +51,23 @@ The `UC-*` IDs were issued by the design this document was promoted from
 | **UC-4** | `unity mcp` evaluation + trimmed-old-bridge hybrid                       | ✅ 2026-09-27 | §10 (both rejected) |
 | **UC-5** | Confirm on a release build that the Roslyn plugins are stripped          | ✅ 2026-09-27 | §7                  |
 | **UC-6** | Headless `Validate All` in CI via `unity run --command` / `unity test`   | —             | Roadmap doc         |
-| **UC-7** | `--runtime` connection to a Development player                           | —             | Roadmap doc         |
+| **UC-7** | `--runtime` connection to a Development player                           | ✅ 2026-11-21 | §7 (`AH-2`)         |
 | **UC-8** | Re-run the Project Auditor report through the `audit` command            | —             | Roadmap doc         |
 
 ---
 
 ## 1. Components
 
-| Component            | Where                                                          | Role                                                                                                 |
-|----------------------|----------------------------------------------------------------|------------------------------------------------------------------------------------------------------|
-| Unity CLI            | `unity` on `PATH` (`%LOCALAPPDATA%\Unity\bin`), machine-global | Shell entry point: `unity command`, `unity recompile`, `unity job`, `unity status`.                  |
-| `com.unity.pipeline` | `Packages/manifest.json`, pinned `1.0.0`                       | Runs inside the Editor, serves the CLI on localhost.                                                 |
-| Agent environment    | `.claude/settings.json` → `env`                                | `UNITY_PROJECT_PATH=.`, `UNITY_NO_BANNER`, `UNITY_NO_UPDATE_CHECK`; read-only CLI calls pre-allowed. |
-| `unity-editor` skill | `.agents/skills/unity-editor/`                                 | The agent-facing reference card, recipes and gotcha list.                                            |
-| Profiler queries     | `Tools/UnityCli/Profiler/ProfilerQueries.cs`                   | Profiler analysis entry points (§6).                                                                 |
-| Profiler capture     | `Tools/UnityCli/Profiler/ProfilerCapture.cs`                   | Arms a recording with GC.Alloc call stacks and stops + saves it after a phase marker (§6).           |
-| Capture folder       | `Assets/AgentCaptures~/` (gitignored)                          | The one safe place for saved captures (§5).                                                          |
+| Component            | Where                                                          | Role                                                                                                                 |
+|----------------------|----------------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------|
+| Unity CLI            | `unity` on `PATH` (`%LOCALAPPDATA%\Unity\bin`), machine-global | Shell entry point: `unity command`, `unity recompile`, `unity job`, `unity status`.                                  |
+| `com.unity.pipeline` | `Packages/manifest.json`, pinned `1.0.1`                       | Runs inside the Editor, serves the CLI on localhost.                                                                 |
+| Agent environment    | `.claude/settings.json` → `env`                                | `UNITY_PROJECT_PATH=.`, `UNITY_NO_BANNER`, `UNITY_NO_UPDATE_CHECK`; read-only CLI calls pre-allowed.                 |
+| `unity-editor` skill | `.agents/skills/unity-editor/`                                 | The agent-facing reference card, recipes and gotcha list.                                                            |
+| Profiler queries     | `Tools/UnityCli/Profiler/ProfilerQueries.cs`                   | Profiler analysis entry points (§6).                                                                                 |
+| Profiler capture     | `Tools/UnityCli/Profiler/ProfilerCapture.cs`                   | Arms a recording with GC.Alloc call stacks and stops + saves it after a phase marker (§6).                           |
+| Capture folder       | `Assets/AgentCaptures~/` (gitignored)                          | The one safe place for saved captures (§5).                                                                          |
+| `voxel-engine` group | `Assets/Scripts/AgentHarness/`, `Assets/Editor/AgentHarness/`  | Custom `[CliGroupCommand]` commands that drive the running game safely (§2; `Architecture/AGENT_HARNESS_SYSTEM.md`). |
 
 `CLAUDE.md` / `AGENTS.md` carry the always-loaded rules (compile gate, long operations, captures,
 play-mode confirmation) and route everything else to the skill.
@@ -103,6 +106,12 @@ other directory the CLI fails with *"Not a Unity project"* rather than guessing.
 calls a named static entry point with a JSON `args` array converted to its parameter types. **C#
 default parameter values are not applied** — every argument must be passed.
 
+**Custom commands.** The package also serves project-defined `[CliGroupCommand]` static methods from
+`Assembly-CSharp` (no asmdef reference needed), with typed `--name value` flags that keep their C# defaults.
+This project defines one group, `voxel-engine` (`unity command voxel-engine <name>`): typed, safe-by-default
+commands for running the game in Play mode (start a world, wait, move, edit blocks, capture). They are
+served in Play mode too (checked 2026-11-20); the command list and safety model are in [`AGENT_HARNESS_SYSTEM.md`](AGENT_HARNESS_SYSTEM.md), the roadmap in [`../Design/AGENT_HARNESS_ROADMAP.md`](../Design/AGENT_HARNESS_ROADMAP.md).
+
 **Console.** `console get` returns entries plus a `cursor` and `session`; passing them back as
 `--since` / `--since-session` reads only new entries.
 
@@ -115,13 +124,13 @@ file created moments earlier, and returns Unity's own errors with file and line:
 `6` on compile errors.
 
 **It returns when compilation ends, before the domain reload that loads the result.** A command
-sent straight after it fails with a network error; once `editor status` reports
-`"status": "ready"`, the new code is live (a changed constant read back its new value). The gate
+sent straight after it fails with exit `12` (`EDITOR_NOT_RUNNING`); once the Editor reports
+`ready`, the new code is live (a changed constant read back its new value). The gate
 is therefore:
 
 ```bash
 unity recompile --format json && \
-until unity command editor status --result-only | grep -q '"status": "ready"'; do sleep 1; done
+unity status --until-ready --timeout 120
 ```
 
 Without a running Editor, `dotnet build` of the two project assemblies is the fallback; it cannot
@@ -144,7 +153,7 @@ and `editor status` reports `compiling` throughout. With no change pending it re
   later wait returns its result; `unity job status <id>` reports `state` (`running` / `completed`).
   Without `--timeout` the wait lasts as long as the job, which outlives an agent shell's default
   timeout, so agents repeat bounded waits as separate calls.
-- **A call that lands during a domain reload fails fast** (network error / HTTP 400) and can be
+- **A call that lands during a domain reload fails fast** (exit `12`, `EDITOR_NOT_RUNNING`) and can be
   retried. It never hangs and never needs an Editor restart.
 - **A blocked main thread** — a long synchronous command, a compile, or a modal dialog — makes
   every call wait and then fail at its `--timeout` with *"Pipeline command … timed out"*. Observed
@@ -203,9 +212,17 @@ total matched an independent sum of root-level GC exactly (58033.8 KB over 2,000
 Scripting defines decide what reaches a player. `Unity.Pipeline` (runtime) and
 `Unity.Pipeline.IlInterpreter` compile into a player only when `ENABLE_RUNTIME_PIPELINE` or
 `ENABLE_RUNTIME_PIPELINE_DEV` is defined, and `Unity.Pipeline.ScenePreview` only with
-`ENABLE_PIPELINE_SCENE_PREVIEW`; this project defines none of them. `Unity.Pipeline.Attributes` is
-unconstrained. Expected for StandaloneWindows64, from the 1.0.0 `.asmdef` constraints (not yet
-re-measured on a 1.0.0 build):
+`ENABLE_PIPELINE_SCENE_PREVIEW`. Since `AH-2` (2026-11-21) this project defines
+`ENABLE_RUNTIME_PIPELINE_DEV` (the **Enable in Development & Profiled Builds** toggle) with `autoStart` off in
+the tracked `ProjectSettings/Packages/com.unity.pipeline/RuntimePipelineConfig.json`, so Development and
+Profiler players carry the runtime but start its server only for `-mc-run agent`; `ENABLE_RUNTIME_PIPELINE`
+(release) stays off, so Production and Master players carry none of it. `Unity.Pipeline.Attributes` is
+unconstrained, which is why the `voxel-engine` commands compile into every build and stay inert without
+the runtime assemblies. Player serving, its stripping roots and the descriptor workaround are in
+[`AGENT_HARNESS_SYSTEM.md`](AGENT_HARNESS_SYSTEM.md) §6 (`AH-2`); a Master build (`AH-3`) is not done.
+
+Expected for StandaloneWindows64, from the 1.0.0 `.asmdef` constraints (not yet re-measured on a 1.0.0
+build):
 
 | Player build | Pipeline assemblies compiled in  |
 |--------------|----------------------------------|
@@ -260,7 +277,7 @@ bridge installed is `61480be4`.
 
 | Alternative                                                                                | Why rejected                                                                                                                                                                                                                                                                                                                                                                                                                                                | Date       |
 |--------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|------------|
-| `unity mcp` (the CLI's own MCP server) as a standing server                                | Nothing the shell path lacks; every tool call capped at a fixed 60 s with no detach; 5 s `script eval` default; 160 tools (~26k-token list). Kept only as the documented fallback for an agent without shell access.                                                                                                                                                                                                                                        | 2026-09-27 |
+| `unity mcp` (the CLI's own MCP server) as a standing server                                | Nothing the shell path lacks; every tool call capped at a fixed 60 s with no detach; 5 s `script eval` default; 160 tools (~26k-token list). Kept only as the documented fallback for an agent without shell access. Since CLI 1.0.0, `--tool-groups` (one tool per command group) removes the tool-list cost; the 60 s cap and `script eval` default were not re-checked.                                                                                  | 2026-09-27 |
 | Hybrid: trimmed old bridge beside the CLI                                                  | No old tool was unique. Its `Unity_Profiler_*` tools never worked over MCP (null `conversationContext`), `ValidateScript` is whole-file substring heuristics, captures had no size control.                                                                                                                                                                                                                                                                 | 2026-09-27 |
 | Keep ai.assistant installed alongside the CLI                                              | Two bridges, 19 patches to maintain, a deprecated package pinned against entitlement changes.                                                                                                                                                                                                                                                                                                                                                               | 2026-09-27 |
 | Upgrade ai.assistant to ≥ 2.13                                                             | Reintroduces the entitlement enforcement the 2.6.0-pre.1 pin avoided.                                                                                                                                                                                                                                                                                                                                                                                       | 2026-09-27 |
@@ -275,6 +292,13 @@ bridge installed is `61480be4`.
 
 ## Document History
 
+* **v1.11** - §7: `ENABLE_RUNTIME_PIPELINE_DEV` defined with `autoStart` off for `AH-2` player serving;
+  release builds unchanged (2026-11-21).
+* **v1.10** - CLI 1.0.1 + `com.unity.pipeline` 1.0.1: a call during a domain reload exits `12`
+  (`EDITOR_NOT_RUNNING`); `unity recompile` waits out the reload's `400`/`503` replies; §3: the reload wait is
+  `unity status --until-ready`; §10: `unity mcp --tool-groups` noted (2026-11-21).
+* **v1.9** - §1/§2: the custom `voxel-engine` command group (`Design/AGENT_HARNESS.md`); §7: the package can also
+  serve players through the Runtime Pipeline toggles, not enabled in this project (2026-11-20).
 * **v1.8** - CLI 1.0.0 + `com.unity.pipeline` 1.0.0 (first stable): `script eval` prints only its value
   and fails by exit `6`; no Editor is exit `12`; `capture screenshot` and `script eval_file` removed; §7: runtime
   assemblies gated on the `ENABLE_RUNTIME_PIPELINE*` defines, so Development builds no longer compile them (2026-11-13).

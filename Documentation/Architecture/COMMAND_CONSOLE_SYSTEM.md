@@ -1,6 +1,6 @@
 # Command Console System
 
-**Version:** 1.27  
+**Version:** 1.28  
 **Date:** 2026-10-17  
 **Status:** **Implemented (Stable)** — the v1 arc (CMD-0..3), **CMD-4 relative `~` coordinates** (§8.2), and **CMD-5 tab autocomplete + PowerShell-style inline ghost suggestion** (§8.3) are all shipped and in-game confirmed; **`/wind`** (§8.4) shipped + in-game confirmed 2026-08-10; **CMD-6 `/chunk generate`** (§8.7) shipped 2026-10-17. Guarded by the `Validate Command Console` suite (its current baseline count is in the `Validate All` combined summary). Promoted from `Design/` 2026-07-26. §7 and §8.1–§8.3 are retained as **as-built records**; §8's table is the live extension roadmap — the remaining v2/v3+ rows (selectable/copyable output, chat, entity selectors, permissions) are deferred wishes, each owed a design pass when it becomes concrete.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production)
@@ -34,6 +34,9 @@ v1 scope).
   (WS-4 phase table).
 - [`../Guides/CODING_STYLE_GUIDE.md`](../Guides/CODING_STYLE_GUIDE.md) — naming/docstring rules
   for the new public engine surface.
+- [`AGENT_HARNESS_SYSTEM.md`](AGENT_HARNESS_SYSTEM.md) — the `voxel-engine console` command runs a
+  console line through the live `ConsoleUI.Engine` for an agent (World scene only, refused on a non-session
+  world unless `--allow-persisted`); the console itself is unchanged.
 
 ---
 
@@ -648,6 +651,7 @@ the refusal texts, the progress and closing lines, teleports refused during a ru
 
 ## Document History
 
+* **v1.28** - Relationship: pointer to the agent harness's `console` passthrough (2026-11-20).
 * **v1.27** - §8.7: `/teleport` and `/spawn` are refused during a pre-generation run, and benchmark runs post no
   console lines. Suite 65 → 66 (B66). The status line no longer quotes a baseline count (2026-10-17).
 * **v1.26** - CMD-6 shipped as `/chunk generate` (new §8.7; §8's CMD-6 row; the `/chunk info` row notes the

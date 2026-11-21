@@ -29,5 +29,11 @@ namespace Data.Enums
         /// <c>StartupProbeController</c>.
         /// </summary>
         StartupProbe,
+
+        /// <summary>
+        /// A world an agent opened through the <c>voxel-engine</c> CLI harness: interactive like <see cref="Default"/>
+        /// (not an automated mode), but saved under its own isolated root so a player's worlds are never written.
+        /// </summary>
+        Agent,
     }
 }

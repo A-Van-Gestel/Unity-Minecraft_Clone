@@ -12,7 +12,7 @@
 //         unity command script run --file Tools/UnityCli/PlayMode/MeshStalenessProbe.cs \
 //             --entry UnityCli.MeshStalenessProbe.Disarm --args '[]' --result-only
 //         Compiled in memory on each call, never imported by Unity.
-// NEEDS   Play mode on a loaded world (WorldRig.Launch). A record exists only for a chunk whose mesh was scheduled
+// NEEDS   Play mode on a loaded world (voxel-engine session_start, then wait --until WorldReady). A record exists only for a chunk whose mesh was scheduled
 //         while armed, so Arm before the activity you want covered (a move, an edit, a reload), let the pipeline
 //         drain, then Audit. Audit itself writes nothing.
 // STATE   The probe keeps none of its own: every call compiles a new assembly with fresh statics, so all state

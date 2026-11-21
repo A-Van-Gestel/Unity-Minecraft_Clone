@@ -158,9 +158,20 @@ namespace Launch
             if (!s_quitWhenDone)
                 return false;
 
+            EndRun(exitCode, reportPath);
+            return true;
+        }
+
+        /// <summary>
+        /// Logs the run's outcome line and exits the process with <paramref name="exitCode"/>, with or without
+        /// <c>-mc-quit</c>; in the Editor it stops Play mode instead.
+        /// </summary>
+        /// <param name="exitCode"><see cref="ExitSuccess"/> or <see cref="ExitRunFailed"/>.</param>
+        /// <param name="reportPath">The report the run wrote, or <c>null</c> when it wrote none.</param>
+        public static void EndRun(int exitCode, string reportPath)
+        {
             Debug.Log($"{LOG_TAG}Run finished: report {reportPath ?? "(none)"}, exit code {exitCode}");
             Quit(exitCode);
-            return true;
         }
 
         private static bool TryFindAction(string name, out ILaunchAction found, out string error)

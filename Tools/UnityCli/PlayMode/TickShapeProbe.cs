@@ -4,7 +4,7 @@
 // RUN     unity command script run --file Tools/UnityCli/PlayMode/TickShapeProbe.cs \
 //             --entry UnityCli.TickShapeProbe.Measure --args '[]' --result-only
 //         Compiled in memory on each call, never imported by Unity.
-// NEEDS   A loaded World scene in Play mode (WorldRig.Launch). Sample right after a teleport onto new terrain to see a
+// NEEDS   A loaded World scene in Play mode (voxel-engine session_start, then wait --until WorldReady). Sample right after a teleport onto new terrain to see a
 //         generation burst, and again a tick or two later to see what the first tick dropped.
 // TRAP    The buckets change every tick (1 s), so two samples a few seconds apart are different ticks; read `tick=`.
 //

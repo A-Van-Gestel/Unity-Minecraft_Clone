@@ -28,7 +28,7 @@ on `PATH` (`log-since mark|show Logs/Editor.log`), not a `unity` subcommand; che
    (exit 12 / 17 / network error), wait ~5 s and retry once; still unreachable → STOP and report.
 2. **Compile current code.** `unity recompile --format json`. Exit 6 = compile errors: STOP and
    report the `error CS…` lines verbatim. Then wait for the reload:
-   `until unity command editor status --result-only | grep -q '"status": "ready"'; do sleep 1; done`.
+   `unity status --until-ready --timeout 120`.
 3. **Run.** For each requested suite (or `Validate All` when asked for "all"):
    `unity command editor invoke_menu --path "Minecraft Clone/Dev/Validate <Name>" --detach --format json`, then
    `unity job wait <jobId> --timeout 90` as separate shell calls until it returns. Never a bare,

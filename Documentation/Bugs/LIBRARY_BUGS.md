@@ -193,3 +193,41 @@ These are all 2D `noise.snoise(float2)` calls with hardcoded offsets acting as a
 - The factory methods are additive — no breaking changes to existing code.
 
 ---
+
+## URP — `Blitter.Initialize` null shader when a player quits in its first frames
+
+**Severity:** Bug (log noise at exit) — **open, cause not investigated**  
+**Status:** Observed 2026-11-21 in a Windows IL2CPP Master build (`Windows - Production`) during the agent harness
+`AH-2` failure-path test. No visible effect: it is logged after the run's outcome line, while the process exits.  
+**Files:** none identified — Unity URP (`UniversalRenderPipeline` constructor → `Blitter.Initialize`); the early
+quit goes through `Assets/Scripts/Launch/LaunchSession.cs` (`EndRun` → `Application.Quit`).
+
+**Symptom.** A player that quits during its first frames logs, after `[Launch] Run finished …`:
+
+```
+Cannot create required material because shader is null   (×3)
+Cannot initialize a LocalKeyword with a null Shader.
+NullReferenceException: Object reference not set to an instance of an object.
+  at UnityEngine.Rendering.LocalKeyword..ctor (UnityEngine.Shader shader, System.String name)
+  at UnityEngine.Rendering.Blitter.Initialize (UnityEngine.Shader blitPS, UnityEngine.Shader blitColorAndDepthPS)
+  at UnityEngine.Rendering.Universal.UniversalRenderPipeline..ctor (UniversalRenderPipelineAsset asset)
+  at UnityEngine.Rendering.RenderPipelineManager.TryPrepareRenderPipeline (RenderPipelineAsset pipelineAsset)
+```
+
+**Repro** (one occurrence each, Master build of 2026-11-21):
+
+- `python Tools/Python/run_player.py --exe "<Master build>/Minecraft Clone.exe" --tag t -- -mc-run bogus` —
+  an unknown action, so no harness code runs: the arguments are rejected in `RunPendingOnce` and the player quits.
+- `… -- -mc-run agent` — the agent action refuses in a build without the CLI runtime server and ends the run.
+
+Not seen in the Development builds (2 and 4) that quit via `-mc-run agent` + `voxel-engine quit`. A Master run that
+lives past its first frames was not checked.
+
+**Not the same as** a player built while `Assets/UniversalRenderPipelineGlobalSettings.asset` was restored
+mid-build: that player logged the same exception tens of thousands of times and rendered black frames (Development
+build, 2026-11-21). The `player-runner` agent now restores assets only after the build completes.
+
+**Open questions.** Whether URP is (re)creating its pipeline during shutdown after `Application.Quit` from the main
+menu's first `Start`, and whether a quit deferred by one frame avoids it.
+
+---
