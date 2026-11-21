@@ -1,6 +1,6 @@
 # Agent Harness (AH-*) Design
 
-**Version:** 1.1  
+**Version:** 1.2  
 **Date:** 2026-11-20  
 **Status:** In progress — `AH-0` (commands, safe session, server-side waits, suite) and `AH-1` (timed agent input, `move_to`, `interact`) are shipped and verified in Play mode 2026-11-20; `AH-2` (Development player serving through `-mc-run agent`) is shipped and verified in an IL2CPP Development build 2026-11-21; `AH-3`/`AH-4` (Master builds, menu/world management) are unscheduled and start only on a concrete need.  
 **Target:** Unity 6.6 (Mono for dev; IL2CPP for production) — agent tooling, Editor today
@@ -381,8 +381,8 @@ remain in `git status` afterwards. This phase also settles `UC-7`.
   its error once. AH-09 pins the reflected members.
 - **Stripping roots** (`Assets/link.xml`): the `AgentHarness` namespace and anonymous types (commands, flags and
   results are reached by reflection), and `Unity.Pipeline` whole with `ignoreIfMissing` — Medium stripping otherwise
-  drops the getters its descriptor serializes, leaving no `pid`. That root roughly doubles the Development build's
-  output size (1.78 → 2.68 GB); a narrower root is untested.
+  drops the getters its descriptor serializes, leaving no `pid`. That root grows the Development build's output by
+  about half (1.78 → 2.68 GB); a narrower root is §8 question 4.
 - **Ending a run:** `voxel-engine quit` (player only) logs `Run finished … exit code 0` through `LaunchSession.EndRun`
   and exits after replying; `run_player.py --no-report` counts that as success.
 - **Build folders:** a build leaves an empty `Assets/settings/Pipeline/` and its `.meta`, both gitignored.
@@ -434,6 +434,21 @@ Agent-world loading would then share the menu's migration path, closing the v1 l
    `AH-3` spike; the file queue is the fallback.
 3. **Runtime start switch.** **Answered in AH-2 (2026-11-21):** the launch action `-mc-run agent`, no `Settings`
    field and no separate flag; `AH-3` reuses it.
+4. **Build size of the `Unity.Pipeline` stripping root.** `<assembly fullname="Unity.Pipeline" preserve="all"
+   ignoreIfMissing="1" />` in `Assets/link.xml` grew the Windows IL2CPP Development build from 1 777 985 592 to
+   2 679 007 473 bytes (build report `totalSizeBytes` of the 2026-11-21 builds just before and just after the
+   entry was added; no other change between them). Production
+   and Master builds are unaffected: they contain no `Unity.Pipeline`.
+   - **Why it grew** — unverified: keeping every member keeps code the linker would otherwise drop, possibly
+     including paths into the bundled Roslyn assemblies (`UnityPipeline.Microsoft.CodeAnalysis*`) that `Unity.Pipeline`
+     references. Compare the `ManagedStripped/` assembly sizes of two builds before choosing a fix.
+   - **What a narrower root must keep:** every type the server serializes through reflection. Known so far: the
+     runtime descriptor model `Unity.Pipeline.Models.RuntimeInstanceDescriptor`, whose stripped getters left the
+     descriptor without `pid`. The rest of the set (request and response models) is unknown, so try a namespace
+     root (`Unity.Pipeline.Models`) first.
+   - **Done when:** a Development build with the narrower root is measurably smaller and still passes the
+     `player-agent` recipe's ON run (descriptor with `pid`, `status`, a Memory session, `set_block`, `capture`,
+     `quit` with exit 0). Building the player is the user's call (`player-runner`).
 
 ---
 
@@ -452,6 +467,7 @@ Agent-world loading would then share the menu's migration path, closing the v1 l
 
 ## Document History
 
+* **v1.2** - §8 question 4: the build size of the `Unity.Pipeline` stripping root (2026-11-21).
 * **v1.1** - `AH-2` shipped: `-mc-run agent`, global dev toggle with `autoStart` off, `AgentDescriptor`, stripping
   roots, `quit`, AH-09/AH-10; §8 A3 and the start switch answered; `WorldRig.cs` deleted (2026-11-21).
 * **v1.0** - Initial design with `AH-0` and `AH-1` shipped and verified in Play mode (2026-11-20).
